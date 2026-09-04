@@ -42,5 +42,57 @@ RSpec.describe TimeTracking::EmployeeMatcher do
 
       expect(match).to include(match_method: "name")
     end
+
+    it "prefers the permanent AIRE UUID when the numeric source ID changes" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      employee = create(:employee, company: company, email: "permanent@example.com")
+      source_uuid = SecureRandom.uuid
+      TimeTrackingEmployeeMapping.create!(
+        company: company,
+        time_tracking_source: source,
+        employee: employee,
+        source_user_id: "old-id",
+        source_user_uuid: source_uuid
+      )
+
+      match = described_class.new(company: company, source: source).match(
+        "source_user_id" => "new-id",
+        "source_user_uuid" => source_uuid,
+        "email" => "changed@example.com"
+      )
+
+      expect(match).to include(employee_id: employee.id, match_method: "saved_mapping", match_score: 1.0)
+    end
+
+    it "blocks a numeric source ID and permanent UUID that resolve to different mappings" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      employee_by_id = create(:employee, company: company)
+      employee_by_uuid = create(:employee, company: company)
+      permanent_uuid = SecureRandom.uuid
+      TimeTrackingEmployeeMapping.create!(
+        company: company,
+        time_tracking_source: source,
+        employee: employee_by_id,
+        source_user_id: "reused-id",
+        source_user_uuid: SecureRandom.uuid
+      )
+      TimeTrackingEmployeeMapping.create!(
+        company: company,
+        time_tracking_source: source,
+        employee: employee_by_uuid,
+        source_user_id: "different-id",
+        source_user_uuid: permanent_uuid
+      )
+
+      expect do
+        described_class.new(company: company, source: source).match(
+          "source_user_id" => "reused-id",
+          "source_user_uuid" => permanent_uuid.upcase,
+          "email" => employee_by_id.email
+        )
+      end.to raise_error(TimeTrackingEmployeeMapping::IdentityConflict, /two saved payroll mappings/)
+    end
   end
 end

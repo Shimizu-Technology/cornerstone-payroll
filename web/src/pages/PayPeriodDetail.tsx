@@ -902,10 +902,11 @@ export function PayPeriodDetail() {
   const canEditPayPeriod = !isCommitted && !isVoided;
   const canImportMosa = isDraft && canEditPayPeriod;
   const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
-  const canImportTimeTracking = isDraft && canEditPayPeriod;
+  const canImportTimeTracking = (isDraft && canEditPayPeriod) || (isCommitted && !isVoided);
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const hasLinkedAireRecord = reportablePayrollItems.some((item) => Boolean(item.time_tracking_provenance));
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
   const totalGross = reportablePayrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
@@ -1242,9 +1243,16 @@ export function PayPeriodDetail() {
               Back to List
             </Button>
             {isCommitted && !isVoided && (
-              <Button variant="outline" onClick={openPayDateCorrection}>
-                Correct Pay Date
-              </Button>
+              <>
+                {canImportTimeTracking && (
+                  <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+                    {hasLinkedAireRecord ? 'View AIRE Record' : 'Link AIRE Record'}
+                  </Button>
+                )}
+                <Button variant="outline" onClick={openPayDateCorrection}>
+                  Correct Pay Date
+                </Button>
+              </>
             )}
             {isDraft && (
               <>
@@ -2406,6 +2414,11 @@ export function PayPeriodDetail() {
                                   {hasMultiRateResults && (
                                     <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
                                       Multi-rate
+                                    </span>
+                                  )}
+                                  {item.time_tracking_provenance && (
+                                    <span className="inline-flex items-center rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800" title={`${item.time_tracking_provenance.entry_count} AIRE entries · ${item.time_tracking_provenance.total_hours.toFixed(2)} hours${item.time_tracking_provenance.carryover_hours ? ` · ${item.time_tracking_provenance.carryover_hours.toFixed(2)} carryover hours` : ''}`}>
+                                      AIRE linked
                                     </span>
                                   )}
                                   {(isManual || (isSalary && item.salary_override)) && !isContractor && (

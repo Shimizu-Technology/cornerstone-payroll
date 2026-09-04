@@ -34,7 +34,7 @@ module Api
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -58,7 +58,8 @@ module Api
             checks: loaded_items.map { |item| check_item_json(item) },
             meta: {
               total: loaded_items.size,
-              printed: loaded_items.count { |i| i.check_printed_at.present? && !i.voided },
+              delivered: loaded_items.count { |i| i.check_status == "delivered" },
+              printed: loaded_items.count { |i| i.check_status == "printed" },
               unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
               voided: loaded_items.count(&:voided),
               check_stock_type: @pay_period.company.check_stock_type
@@ -223,6 +224,29 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
+        end
+
+        # Printing prepares a paper check; delivery is the explicit payment event.
+        def mark_delivered
+          unless @payroll_item.pay_period.committed?
+            message = "Check actions are only available for committed pay periods"
+            return render json: { error: message, details: { base: [ message ] } }, status: :unprocessable_entity
+          end
+
+          user = User.find(current_user_id)
+          result = @payroll_item.mark_delivered!(user: user, ip_address: request.remote_ip)
+
+          render json: {
+            data: { payroll_item: check_item_json(@payroll_item.reload) },
+            meta: { already_delivered: result[:already_delivered] }
+          }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found", details: { user: [ "not found" ] } }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message, details: { base: [ e.message ] } }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          message = "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}"
+          render json: { error: message, details: e.record.errors.messages }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------

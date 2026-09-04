@@ -69,6 +69,7 @@ module TimeTracking
 
     def validate_employees!(employees)
       seen_users = Set.new
+      seen_user_uuids = Set.new
       seen_lines = Set.new
 
       employees.each_with_index do |employee, employee_index|
@@ -76,19 +77,35 @@ module TimeTracking
         object!(employee, path)
         source_user_id = required_string!(employee["source_user_id"], "#{path}.source_user_id")
         raise Error, "Duplicate source employee #{source_user_id}" unless seen_users.add?(source_user_id)
+        if employee["source_user_uuid"].present?
+          source_user_uuid = uuid!(employee["source_user_uuid"], "#{path}.source_user_uuid")
+          raise Error, "Duplicate source employee UUID #{source_user_uuid}" unless seen_user_uuids.add?(source_user_uuid)
+        end
 
         adjustments = array!(employee["adjustments"], "#{path}.adjustments")
         adjustment_totals = adjustments.each_with_index.map do |adjustment, adjustment_index|
-          validate_adjustment!(adjustment, "#{path}.adjustments[#{adjustment_index}]", source_user_id, seen_lines)
+          validate_adjustment!(
+            adjustment,
+            "#{path}.adjustments[#{adjustment_index}]",
+            source_user_id,
+            employee["source_user_uuid"],
+            seen_lines
+          )
         end
         assert_hours!(employee, adjustment_totals, path)
       end
     end
 
-    def validate_adjustment!(adjustment, path, source_user_id, seen_lines)
+    def validate_adjustment!(adjustment, path, source_user_id, source_user_uuid, seen_lines)
       object!(adjustment, path)
       source_entry_id = required_string!(adjustment["source_time_entry_id"], "#{path}.source_time_entry_id")
       line_key = required_string!(adjustment["line_key"], "#{path}.line_key")
+      if adjustment["source_user_uuid"].present?
+        adjustment_uuid = uuid!(adjustment["source_user_uuid"], "#{path}.source_user_uuid")
+        if source_user_uuid.present? && adjustment_uuid != source_user_uuid.to_s.downcase
+          raise Error, "#{path}.source_user_uuid does not match its employee"
+        end
+      end
       line_identity = [ source_user_id, source_entry_id, line_key ]
       raise Error, "Duplicate payroll adjustment line #{line_identity.join(':')}" unless seen_lines.add?(line_identity)
 
@@ -133,6 +150,7 @@ module TimeTracking
         object!(exclusion, path)
         source_entry_id = required_string!(exclusion["source_time_entry_id"], "#{path}.source_time_entry_id")
         source_user_id = required_string!(exclusion["source_user_id"], "#{path}.source_user_id")
+        uuid!(exclusion["source_user_uuid"], "#{path}.source_user_uuid") if exclusion["source_user_uuid"].present?
         reason = required_string!(exclusion["reason"], "#{path}.reason")
         raise Error, "Duplicate payroll exclusion" unless seen.add?([ source_entry_id, source_user_id, reason ])
 
@@ -218,6 +236,15 @@ module TimeTracking
       raise Error, "#{path} is required" if result.blank?
 
       result
+    end
+
+    def uuid!(value, path)
+      normalized = value.to_s.downcase
+      unless normalized.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+        raise Error, "#{path} must be a valid UUID"
+      end
+
+      normalized
     end
 
     def finite_number!(value, path)

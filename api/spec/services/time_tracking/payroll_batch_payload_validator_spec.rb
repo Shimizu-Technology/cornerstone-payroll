@@ -118,4 +118,15 @@ RSpec.describe TimeTracking::PayrollBatchPayloadValidator do
       described_class.new(payload: payload, start_date: "2026-08-16", end_date: "2026-08-31").validate!
     end.to raise_error(described_class::Error, /negative hours but is not a correction/)
   end
+
+  it "rejects an adjustment attributed to a different permanent AIRE user" do
+    payload = valid_payload
+    payload["employees"][0]["source_user_uuid"] = SecureRandom.uuid
+    payload["employees"][0]["adjustments"][0]["source_user_uuid"] = SecureRandom.uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+
+    expect do
+      described_class.new(payload: payload, start_date: "2026-08-16", end_date: "2026-08-31").validate!
+    end.to raise_error(described_class::Error, /does not match its employee/)
+  end
 end

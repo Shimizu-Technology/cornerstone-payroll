@@ -215,7 +215,11 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "overtime_hours" => 0.0
       }
     ]
-    import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+    payload = payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments)
+    source_user_uuid = SecureRandom.uuid
+    payload.fetch("employees").first["source_user_uuid"] = source_user_uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
 
     results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
 
@@ -224,6 +228,175 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       include("employee_wage_rate_id" => rate.id, "regular_hours" => 8.0, "label" => /AIRE current period/),
       include("employee_wage_rate_id" => rate.id, "regular_hours" => 3.5, "label" => /AIRE carryover from Aug 14, 2026/)
     )
+    expect(import.time_tracking_entry_allocations.order(:source_time_entry_id)).to contain_exactly(
+      have_attributes(source_time_entry_id: "101", source_user_uuid: source_user_uuid, source_kind: "current", total_hours: 8.0),
+      have_attributes(source_time_entry_id: "88", source_user_uuid: source_user_uuid, source_kind: "carryover", total_hours: 3.5)
+    )
+    expect(import.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id)).to contain_exactly(
+      [ "imported", "101" ],
+      [ "imported", "88" ]
+    )
+  end
+
+  it "links an exact committed historical payroll without recalculating its amounts" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "historical@example.com")
+    adjustments = [
+      {
+        "source_time_entry_id" => "historic-101",
+        "line_key" => "flight-current",
+        "source_kind" => "current",
+        "original_work_date" => "2026-08-20",
+        "original_week_start" => "2026-08-16",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 8.0,
+        "regular_hours" => 8.0,
+        "overtime_hours" => 0.0
+      }
+    ]
+    payload = payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments, batch_id: "AIRE-PAY-HISTORICAL-001")
+    source_user_uuid = SecureRandom.uuid
+    payload.fetch("employees").first["source_user_uuid"] = source_user_uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    item = create(:payroll_item, pay_period: pay_period, employee: employee, hours_worked: 8.0, overtime_hours: 0.0, gross_pay: 200.0, net_pay: 180.0)
+    committed_at = Time.zone.parse("2026-09-01 09:00:00")
+    pay_period.update!(status: "committed", committed_at: committed_at)
+    employee.update!(status: "terminated")
+    actor = create(:user, company: company)
+
+    result = TimeTracking::ReconcileCommittedImportService.new(
+      import: import,
+      mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+      reconciled_by: actor,
+      reconciliation_note: "Matched against the signed historical payroll register."
+    ).call
+
+    expect(result.fetch(:errors)).to be_empty
+    expect(item.reload).to have_attributes(hours_worked: 8.0, overtime_hours: 0.0, gross_pay: 200.0, net_pay: 180.0)
+    expect(import.reload).to have_attributes(status: "applied", reconciled_by: actor)
+    expect(import.reconciliation_note).to match(/signed historical payroll register/)
+    expect(import.time_tracking_entry_allocations).to contain_exactly(
+      have_attributes(source_time_entry_id: "historic-101", source_user_uuid: source_user_uuid, payroll_item_id: item.id)
+    )
+    expect(import.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id)).to contain_exactly(
+      [ "committed", "historic-101" ]
+    )
+  end
+
+  {
+    "printed" => [ "payment_prepared", "printed" ],
+    "delivered" => [ "payment_issued", "delivered" ],
+    "voided" => [ "payment_voided", "voided" ]
+  }.each do |check_status, (payment_status, event_type)|
+    it "reconciles #{check_status} payment state using the matching check event timestamp" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, company: company, department: create(:department, company: company), email: "#{check_status}@example.com")
+      adjustment = {
+        "source_time_entry_id" => "historic-payment",
+        "line_key" => "flight-current",
+        "source_kind" => "current",
+        "original_work_date" => "2026-08-20",
+        "original_week_start" => "2026-08-16",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 8.0,
+        "regular_hours" => 8.0,
+        "overtime_hours" => 0.0
+      }
+      import = preview_import(
+        pay_period: pay_period,
+        source: source,
+        payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-#{check_status.upcase}")
+      )
+      item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        hours_worked: 8.0,
+        overtime_hours: 0.0,
+        check_number: "7001",
+        check_printed_at: (Time.zone.parse("2026-09-01 08:00:00") unless check_status == "voided"),
+        voided: check_status == "voided",
+        voided_at: (Time.zone.parse("2026-09-01 11:00:00") if check_status == "voided"),
+        void_reason: ("Returned payment was voided" if check_status == "voided")
+      )
+      state_at = item.check_printed_at
+      unless check_status == "printed"
+        state_at = Time.zone.parse("2026-09-01 10:00:00")
+        event = item.check_events.create!(event_type: event_type, check_number: item.check_number)
+        event.update_columns(created_at: state_at, updated_at: state_at)
+        unrelated_event = item.check_events.create!(event_type: "renumbered", check_number: "9999")
+        unrelated_event.update_columns(created_at: state_at + 1.hour, updated_at: state_at + 1.hour)
+      end
+      pay_period.update!(status: "committed", committed_at: Time.zone.parse("2026-09-01 09:00:00"))
+
+      TimeTracking::ReconcileCommittedImportService.new(
+        import: import,
+        mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+        reconciled_by: create(:user, company: company),
+        reconciliation_note: "Matched against the signed historical payroll register."
+      ).call
+
+      acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
+      expect(acknowledgement).to have_attributes(
+        payment_reference: "7001",
+        source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment"
+      )
+      expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
+    end
+  end
+
+  it "refuses to reconcile a voided historical pay period" do
+    company, pay_period, source = setup_records
+    pay_period.update!(status: "committed", correction_status: "voided", committed_at: Time.current)
+    import = create(
+      :time_tracking_import,
+      :finalized_aire_batch,
+      pay_period: pay_period,
+      time_tracking_source: source
+    )
+
+    expect do
+      TimeTracking::ReconcileCommittedImportService.new(
+        import: import,
+        mappings: [],
+        reconciled_by: create(:user, company: company),
+        reconciliation_note: "Compared against the signed historical register."
+      ).call
+    end.to raise_error(ArgumentError, /committed, active pay period/)
+  end
+
+  it "refuses to link a historical payroll when employee hours do not match exactly" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "mismatch@example.com")
+    adjustment = {
+      "source_time_entry_id" => "historic-102",
+      "line_key" => "flight-current",
+      "source_kind" => "current",
+      "original_work_date" => "2026-08-20",
+      "original_week_start" => "2026-08-16",
+      "source_category_id" => "flight",
+      "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+      "total_hours" => 8.0,
+      "regular_hours" => 8.0,
+      "overtime_hours" => 0.0
+    }
+    import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-HISTORICAL-002"))
+    create(:payroll_item, pay_period: pay_period, employee: employee, hours_worked: 7.5, overtime_hours: 0.0)
+    pay_period.update!(status: "committed", committed_at: Time.current)
+
+    expect do
+      TimeTracking::ReconcileCommittedImportService.new(
+        import: import,
+        mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+        reconciled_by: create(:user, company: company),
+        reconciliation_note: "Investigated against historical payroll register."
+      ).call
+    end.to raise_error(ArgumentError, /does not reconcile/)
+    expect(import.reload.status).to eq("previewed")
+    expect(import.time_tracking_entry_allocations).to be_empty
   end
 
   it "preserves distinct wage mappings for the same category by source kind" do

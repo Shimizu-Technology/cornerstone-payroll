@@ -50,7 +50,7 @@ class PayPeriodLifecycleService
   end
 
   def commit!
-    acknowledgement_ids = []
+    acknowledgement_ids = { batch: [], entries: [] }
     pay_period.with_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
@@ -78,10 +78,13 @@ class PayPeriodLifecycleService
       tax_sync_enabled = pay_period.prepare_tax_sync_if_configured!
       record_correction_commit! if pay_period.correction_run?
       enqueue_tax_sync_after_commit if tax_sync_enabled
-      acknowledgement_ids.concat(record_aire_processing_acknowledgements)
+      recorded_acknowledgements = record_aire_processing_acknowledgements
+      acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
+      acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
     end
 
-    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids)
+    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
+    AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
 
     pay_period
   end
@@ -91,15 +94,24 @@ class PayPeriodLifecycleService
   attr_reader :pay_period, :actor, :ip_address
 
   def record_aire_processing_acknowledgements
-    pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").filter_map do |import|
+    result = { batch: [], entries: [] }
+    pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
       next unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
 
-      AirePayrollAcknowledgement.record!(
+      result[:batch] << AirePayrollAcknowledgement.record!(
         time_tracking_import: import,
         status: "committed",
         occurred_at: pay_period.committed_at
       ).id
+      result[:entries].concat(
+        AirePayrollEntryAcknowledgement.record_for_import!(
+          time_tracking_import: import,
+          status: "committed",
+          occurred_at: pay_period.committed_at
+        ).map(&:id)
+      )
     end
+    result
   end
 
   def apply_ytd_and_loan_effects!(committed_items)

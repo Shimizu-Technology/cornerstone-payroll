@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
-import { payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
-import type { TimeTrackingImportData, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
+import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
+import type { TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
 interface Props {
@@ -47,6 +47,40 @@ function exclusionLabel(reason: string): string {
   return reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function withReconciliationErrors(
+  importData: TimeTrackingImportData,
+  errors: TimeTrackingImportResultError[],
+  mappings: Map<string, number | null>
+): TimeTrackingImportData {
+  const errorsBySourceId = new Map<string, string>();
+  errors.forEach((item): void => {
+    const sourceUserId = item.source_user_id || (
+      item.employee_id == null
+        ? undefined
+        : Array.from(mappings.entries()).find(([, employeeId]): boolean => employeeId === item.employee_id)?.[0]
+    );
+    if (sourceUserId) errorsBySourceId.set(sourceUserId, item.error);
+  });
+  return {
+    ...importData,
+    processed_payload: {
+      ...importData.processed_payload,
+      rows: importData.processed_payload.rows.map((row) => {
+        const message = errorsBySourceId.get(row.source_user_id);
+        if (!message) return row;
+
+        return {
+          ...row,
+          warnings: [
+            ...(row.warnings || []).filter((warning) => warning.code !== 'reconciliation_mismatch'),
+            { code: 'reconciliation_mismatch', message },
+          ],
+        };
+      }),
+    },
+  };
+}
+
 export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select');
@@ -60,6 +94,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const [includedRows, setIncludedRows] = useState<Set<string>>(new Set());
   const [negativeAdjustmentsReviewed, setNegativeAdjustmentsReviewed] = useState(false);
   const [negativeAdjustmentNote, setNegativeAdjustmentNote] = useState('');
+  const [reconciliationNote, setReconciliationNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +156,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
 
     setStep('select');
     setPreview(null);
@@ -129,6 +165,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setIncludedRows(new Set());
     setNegativeAdjustmentsReviewed(false);
     setNegativeAdjustmentNote('');
+    setReconciliationNote('');
     setError(null);
     setStartDate(payPeriod.start_date);
     setEndDate(payPeriod.end_date);
@@ -140,19 +177,33 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
     timeTrackingSourcesApi.list()
       .then((res) => {
+        if (cancelled) return;
+
         const active = res.time_tracking_sources.filter((source) => source.active);
-        setSources(active);
-        setSourceId(active[0]?.id || '');
+        const eligible = payPeriod.status === 'committed'
+          ? active.filter((source) => source.source_type === 'aire_services')
+          : active;
+        setSources(eligible);
+        setSourceId(eligible[0]?.id || '');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load time tracking sources'))
-      .finally(() => setSourcesLoading(false));
-  }, [open, payPeriod.start_date, payPeriod.end_date]);
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load time tracking sources');
+      })
+      .finally(() => {
+        if (!cancelled) setSourcesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.id === sourceId) || null,
     [sources, sourceId]
   );
   const selectedSourceIsAire = selectedSource?.source_type === 'aire_services';
+  const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
   const isFinalizedBatch = preview?.processed_payload?.validation_version === 'payroll_batch_v2';
   const exclusions = preview?.processed_payload?.exclusions || [];
@@ -189,6 +240,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   ));
 
   const rowWageRateMappingsComplete = (row: TimeTrackingPreviewRow) => {
+    if (isHistoricalReconciliation) return true;
     const employeeId = mappings.get(row.source_user_id) || null;
     if (!employeeNeedsRateMapping(employeeId)) return true;
     const categories = rowCategories(row);
@@ -204,6 +256,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const effectiveWarningsFor = (row: TimeTrackingPreviewRow) => (row.warnings || []).filter((warning) => {
     if (warning.code === 'unmatched_employee' && mappings.get(row.source_user_id)) return false;
     if (warning.code === 'unmapped_wage_rate' && rowWageRateMappingsComplete(row)) return false;
+    if (isHistoricalReconciliation && ['negative_net_hours', 'negative_net_pay_delta'].includes(warning.code)) return false;
     return true;
   });
 
@@ -224,10 +277,14 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   )).length;
   const negativeReviewComplete = negativeAdjustmentCount === 0 ||
     (negativeAdjustmentsReviewed && negativeAdjustmentNote.trim().length >= 10);
+  const trimmedReconciliationNote = reconciliationNote.trim();
+  const reconciliationNoteTooShort = trimmedReconciliationNote.length > 0 && trimmedReconciliationNote.length < 10;
   const finalizedRowsComplete = includedPreviewRows.length === rows.length &&
     unmappedIncludedCount === 0 &&
     rowsNeedingWageRateMapping.length === 0;
-  const canApply = isFinalizedBatch
+  const canApply = isHistoricalReconciliation
+    ? finalizedRowsComplete && duplicateEmployeeIds.size === 0 && reconciliationNote.trim().length >= 10
+    : isFinalizedBatch
     ? finalizedRowsComplete && warningCount === 0 && duplicateEmployeeIds.size === 0 && negativeReviewComplete
     : mappedIncludedRows.length > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
 
@@ -289,25 +346,48 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           })),
         };
       });
-      const res = await payPeriodsApi.applyTimeTrackingImport(payPeriod.id, {
-        import_id: preview.id,
-        mappings: applyMappings,
-        acknowledge_negative_adjustments: negativeAdjustmentsReviewed,
-        negative_adjustment_note: negativeAdjustmentNote.trim(),
-      });
+      const response = isHistoricalReconciliation
+        ? await payPeriodsApi.reconcileTimeTrackingImport(payPeriod.id, {
+          import_id: preview.id,
+          mappings: applyMappings.map(({ source_user_id, employee_id }) => ({ source_user_id, employee_id })),
+          reconciliation_note: reconciliationNote.trim(),
+        })
+        : await payPeriodsApi.applyTimeTrackingImport(payPeriod.id, {
+          import_id: preview.id,
+          mappings: applyMappings,
+          acknowledge_negative_adjustments: negativeAdjustmentsReviewed,
+          negative_adjustment_note: negativeAdjustmentNote.trim(),
+        });
+      const res = 'data' in response ? response.data : response;
 
       if (res.results.errors.length > 0) {
-        setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
+        if (isHistoricalReconciliation) {
+          setPreview(withReconciliationErrors(res.import, res.results.errors, mappings));
+          setError(`Cornerstone could not link this AIRE record. ${res.results.errors.map((item) => item.error).join(' ')}`);
+        } else {
+          setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
+        }
         return;
       }
 
-      setAppliedCount(res.results.applied.length);
+      setAppliedCount('applied' in res.results ? res.results.applied.length : res.results.reconciled.length);
       setAppliedThisSession(true);
       setPreview(res.import);
       setStep('done');
       onImportComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply time tracking import');
+      const message = err instanceof Error ? err.message : 'Failed to apply time tracking import';
+      if (isHistoricalReconciliation && preview) {
+        const payload = err instanceof ApiError && err.data && typeof err.data === 'object'
+          ? err.data as { data?: { source_user_id?: string; employee_id?: number } }
+          : null;
+        if (payload?.data?.source_user_id || payload?.data?.employee_id != null) {
+          setPreview(withReconciliationErrors(preview, [ { ...payload.data, error: message } ], mappings));
+        }
+        setError(`Cornerstone could not link this AIRE record. ${message}`);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -326,7 +406,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-neutral-600">
               {isFinalizedBatch
-                ? 'Verify the immutable cutoff, employee mappings, and any corrections before adding the batch to this payroll.'
+                ? isHistoricalReconciliation
+                  ? 'Link this committed payroll to its immutable AIRE cutoff without recalculating or changing any pay.'
+                  : 'Verify the immutable cutoff, employee mappings, and any corrections before adding the batch to this payroll.'
                 : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
           </div>
@@ -354,7 +436,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                   <div className="flex items-start gap-2">
                     <Link2 className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <p>No active time tracking source is configured for this client. Add one in Time Tracking Source settings, then return to this pay period.</p>
+                    <p>{isHistoricalReconciliation ? 'No active AIRE time tracking source is configured for this client.' : 'No active time tracking source is configured for this client.'} Add one in Time Tracking Source settings, then return to this pay period.</p>
                   </div>
                   <Button
                     type="button"
@@ -390,7 +472,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                           Finalized-batch import
                         </div>
                         <p className="mt-2 text-sm leading-6 text-primary-800">
-                          Pending, denied, and open entries remain visible as unpaid exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.
+                          {isHistoricalReconciliation
+                            ? 'This is a read-only reconciliation. Cornerstone will verify each employee’s regular and overtime hours before it links the records; payroll values, taxes, deductions, and checks will not change.'
+                            : 'Pending, denied, and open entries remain visible as unpaid exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.'}
                         </p>
                       </div>
                       <div className="rounded-xl border border-neutral-200 p-4">
@@ -488,9 +572,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   const effectiveWarnings = effectiveWarningsFor(row);
                   const activeWageRates = activeWageRatesFor(mappedEmployeeId);
                   const categories = rowCategories(row);
-                  const lacksActiveWageRates = Boolean(isFinalizedBatch && included && mapped &&
+                  const lacksActiveWageRates = Boolean(!isHistoricalReconciliation && isFinalizedBatch && included && mapped &&
                     employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 && activeWageRates.length === 0);
-                  const needsRateMapping = included && mapped && employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 &&
+                  const needsRateMapping = !isHistoricalReconciliation && included && mapped && employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 &&
                     (isFinalizedBatch || activeWageRates.length > 1);
                   const rowRateMappings = wageRateMappings.get(row.source_user_id) || {};
 
@@ -535,7 +619,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                               <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(row.total_hours)}</div>
                             </div>
                           </div>
-                          {isFinalizedBatch && row.estimated_gross_delta != null && (
+                          {isFinalizedBatch && !isHistoricalReconciliation && row.estimated_gross_delta != null && (
                             <div className="mt-2 text-xs font-medium text-neutral-600">
                               Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">${Number(row.estimated_gross_delta).toFixed(2)}</span>
                             </div>
@@ -569,7 +653,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
                       {categories.length > 0 && (
                         <div className="mt-4 border-t border-neutral-200 pt-4">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payable earning dimensions</div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                            {isHistoricalReconciliation ? 'AIRE earning breakdown' : 'Payable earning dimensions'}
+                          </div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
                             {categories.map((category) => {
                               const selectedRateId = rowRateMappings[categoryMappingKey(category)] ?? category.employee_wage_rate_id;
@@ -583,7 +669,10 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div>
                                     <div className="text-sm font-semibold text-neutral-900">{category.name}</div>
-                                    <div className="mt-2 text-xs text-neutral-500">{formatRate(selectedRateCents)} · {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT</div>
+                                    <div className="mt-2 text-xs text-neutral-500">
+                                      {!isHistoricalReconciliation && <>{formatRate(selectedRateCents)} · </>}
+                                      {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT
+                                    </div>
                                   </div>
                                   {(category.source_kinds || []).map((kind) => (
                                     <span key={kind} className="rounded-full bg-white px-2 text-[10px] font-semibold capitalize text-neutral-600">{kind}</span>
@@ -673,7 +762,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 </section>
               )}
 
-              {isFinalizedBatch && negativeAdjustmentCount > 0 && (
+              {isFinalizedBatch && !isHistoricalReconciliation && negativeAdjustmentCount > 0 && (
                 <section className="rounded-2xl border border-warning-300 bg-warning-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2 font-semibold text-warning-950">
                     <History className="h-4 w-4" aria-hidden="true" />
@@ -698,6 +787,32 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   </label>
                 </section>
               )}
+
+              {isHistoricalReconciliation && (
+                <section className="rounded-2xl border border-primary-200 bg-primary-50/50 p-4 sm:p-6">
+                  <div className="flex items-center gap-2 font-semibold text-primary-950">
+                    <History className="h-4 w-4" aria-hidden="true" /> Historical reconciliation note
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from AIRE.</p>
+                  <label htmlFor="reconciliation-note" className="mt-4 block text-sm font-medium text-primary-950">
+                    Audit note
+                  </label>
+                  <textarea
+                    id="reconciliation-note"
+                    value={reconciliationNote}
+                    onChange={(event) => setReconciliationNote(event.target.value)}
+                    rows={3}
+                    minLength={10}
+                    aria-describedby="reconciliation-note-help"
+                    aria-invalid={reconciliationNoteTooShort}
+                    placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff"
+                    className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-4 text-sm text-neutral-900"
+                  />
+                  <p id="reconciliation-note-help" className={`mt-2 text-xs ${reconciliationNoteTooShort ? 'text-danger-700' : 'text-primary-700'}`}>
+                    {reconciliationNoteTooShort ? 'Enter at least 10 characters before linking the records.' : 'Required: briefly explain what records you compared (minimum 10 characters).'}
+                  </p>
+                </section>
+              )}
             </div>
           )}
 
@@ -705,11 +820,13 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             <div className="py-10 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success-600" aria-hidden="true" />
               <h3 className="mt-4 text-lg font-semibold text-neutral-950">
-                {!appliedThisSession && alreadyApplied ? 'This finalized batch was already applied' : isFinalizedBatch ? 'Finalized batch applied' : 'Time tracking imported'}
+                {!appliedThisSession && alreadyApplied ? 'This finalized batch was already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Finalized batch applied' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
                 {!appliedThisSession && alreadyApplied
                   ? `Cornerstone recorded this batch on ${formatTimestamp(preview?.applied_at)}. Its hours were not imported again.`
+                  : isHistoricalReconciliation
+                  ? `${appliedCount} employee record${appliedCount === 1 ? '' : 's'} reconciled. No payroll amounts were changed.`
                   : appliedCount === 0
                   ? isFinalizedBatch
                     ? 'The empty finalized batch and its audit evidence were recorded without adding employee hours.'
@@ -719,7 +836,11 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
               {isFinalizedBatch && (
                 <div className="mx-auto mt-5 max-w-xl rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-left text-sm leading-6 text-primary-900">
                   <div className="font-semibold">What happens next</div>
-                  <p className="mt-1">Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.</p>
+                  <p className="mt-1">
+                    {isHistoricalReconciliation
+                      ? 'Cornerstone recorded the existing payroll link and is delivering the acknowledgement to AIRE. If delivery is interrupted, it will retry automatically until confirmed. Payment is reported separately only when the check is prepared and then delivered.'
+                      : 'Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.'}
+                  </p>
                   {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">AIRE status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
                 </div>
               )}
@@ -737,7 +858,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           {step === 'review' && (
             <>
               <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
-              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Applying…' : isFinalizedBatch ? 'Apply Finalized Batch' : 'Apply Import'}</Button>
+              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link AIRE Record' : isFinalizedBatch ? 'Apply Finalized Batch' : 'Apply Import'}</Button>
             </>
           )}
           {step === 'done' && <Button onClick={onClose}>Close</Button>}

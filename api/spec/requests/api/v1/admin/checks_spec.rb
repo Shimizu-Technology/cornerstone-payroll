@@ -203,6 +203,25 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/payroll_items/:payroll_item_id/check/mark_delivered" do
+    it "returns the delivered item in the standard data and meta envelope" do
+      item_a.mark_printed!(user: admin_user)
+
+      post "/api/v1/admin/payroll_items/#{item_a.id}/check/mark_delivered"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "payroll_item", "check_status")).to eq("delivered")
+      expect(response.parsed_body.dig("meta", "already_delivered")).to be(false)
+    end
+
+    it "returns the standard error envelope when delivery is not allowed" do
+      post "/api/v1/admin/payroll_items/#{draft_item.id}/check/mark_delivered"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body).to include("error" => match(/committed/), "details" => include("base"))
+    end
+  end
+
   # -----------------------------------------------------------------------
   # POST /payroll_items/:id/void
   # -----------------------------------------------------------------------
@@ -326,6 +345,20 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
       }.to change { CheckEvent.where(event_type: "voided", check_number: "3000").count }.by(1)
       expect(CheckEvent.where(event_type: "voided", check_number: "3000").last.reason).to eq("Lost check — stop payment requested")
+    end
+
+    it "does not report the active replacement obligation as payment_voided" do
+      item_a.mark_printed!(user: admin_user)
+      allow(AirePayrollEntryAcknowledgement).to receive(:record_for_check_event!).and_call_original
+
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
+
+      expect(response).to have_http_status(:created)
+      expect(item_a.reload).not_to be_voided
+      expect(AirePayrollEntryAcknowledgement).not_to have_received(:record_for_check_event!).with(
+        check_event: kind_of(CheckEvent),
+        status: "payment_voided"
+      )
     end
 
     it "returns 422 when the reissue reason is blank" do

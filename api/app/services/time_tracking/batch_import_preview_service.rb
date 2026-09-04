@@ -143,6 +143,7 @@ module TimeTracking
 
       {
         source_user_id: source_employee.fetch("source_user_id").to_s,
+        source_user_uuid: source_employee["source_user_uuid"].presence,
         source_email: source_employee["email"],
         source_display_name: source_employee["display_name"].presence || source_employee.fetch("source_user_id").to_s,
         employee_id: match[:employee_id],

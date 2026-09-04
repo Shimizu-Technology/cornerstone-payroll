@@ -5,5 +5,6 @@ class AirePayrollAcknowledgementDispatchJob < ApplicationJob
 
   def perform
     AirePayrollAcknowledgement.dispatch_pending!
+    AirePayrollEntryAcknowledgement.dispatch_pending!
   end
 end
