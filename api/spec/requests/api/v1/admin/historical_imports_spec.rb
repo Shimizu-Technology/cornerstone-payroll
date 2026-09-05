@@ -53,7 +53,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     get "/api/v1/admin/historical_imports"
     expect(response).to have_http_status(:ok)
     index_body = JSON.parse(response.body)
-    expect(index_body.fetch("archive")).to include(
+    expect(index_body.dig("meta", "archive")).to include(
       "applied_batch_count" => 1,
       "paycheck_count" => 2,
       "gross_pay" => "3000.0",

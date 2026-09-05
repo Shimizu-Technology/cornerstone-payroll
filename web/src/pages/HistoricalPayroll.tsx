@@ -85,6 +85,11 @@ interface BreakdownProps {
   unit?: 'currency' | 'hours';
 }
 
+interface LifecycleConfirmation {
+  action: 'apply' | 'lock';
+  batchId: number;
+}
+
 function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactElement | null {
   if (lines.length === 0) return null;
   return (
@@ -126,7 +131,7 @@ export function HistoricalPayroll(): ReactElement {
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
-  const [confirmAction, setConfirmAction] = useState<'apply' | 'lock' | null>(null);
+  const [confirmation, setConfirmation] = useState<LifecycleConfirmation | null>(null);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -145,7 +150,7 @@ export function HistoricalPayroll(): ReactElement {
     if (requestId !== listRequestIdRef.current) return;
 
     setBatches(response.data);
-    setArchive(response.archive);
+    setArchive(response.meta.archive);
     setSelectedBatchId((current) => (
       current && response.data.some((batch) => batch.id === current)
         ? current
@@ -247,21 +252,22 @@ export function HistoricalPayroll(): ReactElement {
   };
 
   const runLifecycleAction = async (): Promise<void> => {
-    if (!selectedBatchId || !confirmAction) return;
-    setAction(confirmAction);
+    if (!confirmation) return;
+    const { action: confirmedAction, batchId } = confirmation;
+    setAction(confirmedAction);
     setError(null);
     setValidationErrors({});
     setNotice(null);
     try {
-      const response = confirmAction === 'apply'
-        ? await historicalImportsApi.apply(selectedBatchId)
-        : await historicalImportsApi.lock(selectedBatchId);
-      setNotice(confirmAction === 'apply'
+      const response = confirmedAction === 'apply'
+        ? await historicalImportsApi.apply(batchId)
+        : await historicalImportsApi.lock(batchId);
+      setNotice(confirmedAction === 'apply'
         ? 'Historical payroll is now available in the archive. No payroll was recalculated.'
         : 'The reconciled QuickBooks batch is locked against ordinary changes.');
-      setConfirmAction(null);
+      setConfirmation(null);
       await loadList();
-      setDetail((current) => current ? { ...current, ...response.data } : current);
+      setDetail((current) => current?.id === response.data.id ? { ...current, ...response.data } : current);
     } catch (err) {
       handleError(err, 'The historical import action failed.');
     } finally {
@@ -364,7 +370,7 @@ export function HistoricalPayroll(): ReactElement {
               {batches.length > 0 && (
                 <div>
                   <label htmlFor="historical-batch" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Review batch</label>
-                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => setSelectedBatchId(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => setSelectedBatchId(Number(event.target.value))} disabled={Boolean(confirmation)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
                 </div>
@@ -390,8 +396,8 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                       <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply makes reconciled rows visible in the archive. Lock makes the batch permanently read-only through ordinary workflows.</p>
                       <div className="flex gap-2">
-                        {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmAction('apply')} disabled={!reconciliationPassed || action !== null}>Apply history</Button>}
-                        {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmAction('lock')} disabled={action !== null}><LockKeyhole className="mr-2 h-4 w-4" />Lock batch</Button>}
+                        {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!reconciliationPassed || action !== null}>Apply history</Button>}
+                        {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={action !== null}><LockKeyhole className="mr-2 h-4 w-4" />Lock batch</Button>}
                         {selectedBatch.status === 'locked' && <Badge variant="success" className="px-4 py-2">Locked and immutable</Badge>}
                       </div>
                     </div>
@@ -463,11 +469,11 @@ export function HistoricalPayroll(): ReactElement {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)}>
+      <Dialog open={Boolean(confirmation)} onOpenChange={(open) => !open && setConfirmation(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{confirmAction === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmAction === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive. It does not run payroll or update live YTD totals.' : 'Locking prevents ordinary edits and mapping changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
-          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmAction === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
-          <DialogFooter><Button variant="outline" onClick={() => setConfirmAction(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmAction === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmAction === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
+          <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive. It does not run payroll or update live YTD totals.' : 'Locking prevents ordinary edits and mapping changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
+          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmation?.action === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
+          <DialogFooter><Button variant="outline" onClick={() => setConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmation?.action === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmation?.action === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

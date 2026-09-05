@@ -12,17 +12,19 @@ module Api
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
-          batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id)).recent_first
+          batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id))
+                    .includes(:applied_by, :locked_by)
+                    .recent_first
           total = batches.count
           archive = archive_summary
           render json: {
             data: batches.offset((page - 1) * per_page).limit(per_page).map { |batch| batch_json(batch) },
-            archive: archive,
             meta: {
               current_page: page,
               per_page: per_page,
               total_count: total,
-              total_pages: (total.to_f / per_page).ceil
+              total_pages: (total.to_f / per_page).ceil,
+              archive: archive
             }
           }
         end

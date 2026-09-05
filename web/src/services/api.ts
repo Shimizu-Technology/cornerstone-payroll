@@ -3760,8 +3760,8 @@ export interface HistoricalArchiveSummary {
 }
 
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number; search?: string; department_id?: number; status?: HistoricalImportBatch['status'] }): Promise<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary; meta: PaginationMeta }> =>
-    api.get<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary; meta: PaginationMeta }>('/admin/historical_imports', params),
+  list: (params?: { page?: number; per_page?: number; search?: string; department_id?: number; status?: HistoricalImportBatch['status'] }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }> =>
+    api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }) =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
   preview: (files: File[]): Promise<{ data: HistoricalImportBatch; idempotent: boolean }> => {
