@@ -72,7 +72,7 @@ Cornerstone must therefore keep the original export bundle in an approved encryp
 
 ## Local operator runbook
 
-The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`. `ACTOR_EMAIL` is optional for preview-only runs but mandatory for apply or lock; that user must be a manager or administrator with access to the company.
+The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`. Every run requires `ACTOR_EMAIL`; that user must be a manager or administrator with access to the company.
 
 ```sh
 DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \

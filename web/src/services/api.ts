@@ -3760,10 +3760,11 @@ export interface HistoricalArchiveSummary {
 }
 
 export const historicalImportsApi = {
-  list: () => api.get<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary }>('/admin/historical_imports'),
+  list: (params?: { page?: number; per_page?: number; search?: string; department_id?: number; status?: HistoricalImportBatch['status'] }): Promise<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary; meta: PaginationMeta }> =>
+    api.get<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary; meta: PaginationMeta }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }) =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
-  preview: (files: File[]) => {
+  preview: (files: File[]): Promise<{ data: HistoricalImportBatch; idempotent: boolean }> => {
     const form = new FormData();
     files.forEach((file) => form.append('files[]', file));
     return api.postForm<{ data: HistoricalImportBatch; idempotent: boolean }>('/admin/historical_imports/preview', form);

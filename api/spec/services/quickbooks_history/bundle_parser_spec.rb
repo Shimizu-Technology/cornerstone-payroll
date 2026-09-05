@@ -100,6 +100,20 @@ RSpec.describe QuickbooksHistory::BundleParser do
     expect(result.reconciliation.fetch("passed")).to be(false)
   end
 
+  it "rejects distinct source workers whose names normalize to the same identity" do
+    expect do
+      described_class.new(files: quickbooks_history_uploads_with_worker_name_collision).call
+    end.to raise_error(ArgumentError, /normalized employee name collision/)
+  end
+
+  it "derives the opening-summary warning range from the source rows" do
+    result = described_class.new(files: quickbooks_history_uploads_with_custom_opening_range).call
+
+    expect(result.warnings).to include(
+      "1 employee opening-balance rows summarize 01/01/2024 through 05/31/2024. They preserve QuickBooks totals but are not original paycheck-level periods."
+    )
+  end
+
   it "rejects unsupported and oversized input before parsing" do
     file = Tempfile.new([ "history", ".txt" ])
     upload = Rack::Test::UploadedFile.new(file.path, "text/plain", true, original_filename: "history.txt")

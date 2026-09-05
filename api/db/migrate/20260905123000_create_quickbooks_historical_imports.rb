@@ -4,9 +4,9 @@ class CreateQuickbooksHistoricalImports < ActiveRecord::Migration[8.1]
   def change
     create_table :historical_import_batches do |t|
       t.references :company, null: false, foreign_key: true
-      t.references :created_by, foreign_key: { to_table: :users }, null: true
-      t.references :applied_by, foreign_key: { to_table: :users }, null: true
-      t.references :locked_by, foreign_key: { to_table: :users }, null: true
+      t.references :created_by, foreign_key: { to_table: :users, on_delete: :nullify }, null: true
+      t.references :applied_by, foreign_key: { to_table: :users, on_delete: :nullify }, null: true
+      t.references :locked_by, foreign_key: { to_table: :users, on_delete: :nullify }, null: true
       t.string :source_system, null: false, default: "quickbooks_online"
       t.string :source_label, null: false
       t.string :bundle_digest, null: false
@@ -16,7 +16,7 @@ class CreateQuickbooksHistoricalImports < ActiveRecord::Migration[8.1]
       t.jsonb :preview_summary, null: false, default: {}
       t.jsonb :reconciliation_summary, null: false, default: {}
       t.jsonb :warnings, null: false, default: []
-      t.jsonb :errors, null: false, default: []
+      t.jsonb :validation_errors, null: false, default: []
       t.text :apply_acknowledgement
       t.datetime :applied_at
       t.datetime :locked_at

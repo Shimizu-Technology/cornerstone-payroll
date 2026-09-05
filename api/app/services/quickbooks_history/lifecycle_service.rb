@@ -12,7 +12,9 @@ module QuickbooksHistory
     def apply!(acknowledgement:)
       ensure_authorized_actor!
 
-      batch.with_lock do
+      HistoricalImportBatch.transaction do
+        Company.lock.find(batch.company_id)
+        batch.lock!
         return batch if batch.applied? || batch.locked?
         raise ArgumentError, "Only a previewed historical import can be applied" unless batch.previewed?
         raise ArgumentError, "Resolve every reconciliation error before applying" if batch.blocking_errors?

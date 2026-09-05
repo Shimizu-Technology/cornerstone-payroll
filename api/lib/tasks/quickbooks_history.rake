@@ -12,10 +12,9 @@ namespace :quickbooks_history do
     raise ArgumentError, "LOCK=1 requires APPLY=1" if lock_import && !apply_import
 
     company = Company.find(company_id)
-    actor = ENV["ACTOR_EMAIL"].present? ? User.find_by!(email: ENV.fetch("ACTOR_EMAIL").downcase) : nil
-    if actor && !actor.can_access_company?(company.id)
-      raise ArgumentError, "ACTOR_EMAIL does not have access to COMPANY_ID"
-    end
+    actor = User.find_by!(email: ENV.fetch("ACTOR_EMAIL").downcase)
+    authorized_actor = actor.can_access_company?(company.id) && StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+    raise ArgumentError, "ACTOR_EMAIL must identify a manager or administrator with access to COMPANY_ID" unless authorized_actor
 
     paths = bundle_dir.glob("**/*", File::FNM_DOTMATCH)
                       .reject(&:symlink?)

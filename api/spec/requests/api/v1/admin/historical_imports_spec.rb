@@ -17,8 +17,9 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
 
     expect(response).to have_http_status(:ok)
-    batch_id = response.parsed_body.dig("data", "id")
-    expect(response.parsed_body.dig("data", "preview_summary")).to include(
+    preview_body = JSON.parse(response.body)
+    batch_id = preview_body.dig("data", "id")
+    expect(preview_body.dig("data", "preview_summary")).to include(
       "paycheck_count" => 2,
       "period_count" => 2
     )
@@ -27,31 +28,74 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
     get "/api/v1/admin/historical_imports/#{batch_id}", params: { per_page: 1, search: "Alice" }
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.dig("data", "paychecks").sole).to include(
+    show_body = JSON.parse(response.body)
+    expect(show_body.dig("data", "paychecks").sole).to include(
       "source_employee_name" => "Worker, Alice",
       "gross_pay" => "1000.0",
       "net_pay" => "725.0"
     )
-    expect(response.parsed_body.dig("meta", "total_count")).to eq(1)
+    expect(show_body.dig("meta", "total_count")).to eq(1)
+
+    post "/api/v1/admin/historical_imports/#{batch_id}/apply", params: { acknowledgement: "not accepted" }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(JSON.parse(response.body)).to include("details" => {})
 
     post "/api/v1/admin/historical_imports/#{batch_id}/apply", params: {
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
     }
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.dig("data", "status")).to eq("applied")
+    expect(JSON.parse(response.body).dig("data", "status")).to eq("applied")
 
     post "/api/v1/admin/historical_imports/#{batch_id}/lock"
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.dig("data", "status")).to eq("locked")
+    expect(JSON.parse(response.body).dig("data", "status")).to eq("locked")
 
     get "/api/v1/admin/historical_imports"
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.fetch("archive")).to include(
+    index_body = JSON.parse(response.body)
+    expect(index_body.fetch("archive")).to include(
       "applied_batch_count" => 1,
       "paycheck_count" => 2,
       "gross_pay" => "3000.0",
       "net_pay" => "2325.0"
     )
+    expect(index_body.fetch("meta")).to include("total_count" => 1, "current_page" => 1)
+  end
+
+  it "filters and paginates historical import batches" do
+    department = create(:department, company: company)
+    create(:employee, company: company, department: department, first_name: "Alice", last_name: "Worker")
+    imported = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    beta = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "Beta archive",
+      bundle_digest: "beta-digest",
+      importer_version: "test",
+      status: "applied"
+    )
+    gamma = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "Gamma archive",
+      bundle_digest: "gamma-digest",
+      importer_version: "test",
+      status: "locked"
+    )
+
+    get "/api/v1/admin/historical_imports", params: { page: 2, per_page: 1 }
+    page_body = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(page_body.dig("meta", "total_count")).to eq(3)
+    expect(page_body.dig("meta", "current_page")).to eq(2)
+    expect(page_body.fetch("data").size).to eq(1)
+
+    get "/api/v1/admin/historical_imports", params: { search: "Beta", status: "applied" }
+    expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(beta.id)
+
+    get "/api/v1/admin/historical_imports", params: { status: "locked" }
+    expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(gamma.id)
+
+    get "/api/v1/admin/historical_imports", params: { department_id: department.id }
+    expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(imported.id)
   end
 
   it "lets accountants review history but not mutate imports" do
@@ -74,7 +118,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(response).to have_http_status(:ok)
     body = response.body
     expect(body).not_to include("000-00-0001")
-    expect(response.parsed_body.dig("data", "workers", 0)).not_to have_key("private_snapshot")
+    expect(JSON.parse(response.body).dig("data", "workers", 0)).not_to have_key("private_snapshot")
   end
 
   it "scopes batch access to the active company" do

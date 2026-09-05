@@ -10,10 +10,20 @@ module Api
         before_action :set_batch, only: %i[show apply lock update_worker]
 
         def index
-          batches = HistoricalImportBatch.where(company_id: current_company_id).recent_first
+          page = [ params.fetch(:page, 1).to_i, 1 ].max
+          per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
+          batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id)).recent_first
+          total = batches.count
+          archive = archive_summary
           render json: {
-            data: batches.map { |batch| batch_json(batch) },
-            archive: archive_summary
+            data: batches.offset((page - 1) * per_page).limit(per_page).map { |batch| batch_json(batch) },
+            archive: archive,
+            meta: {
+              current_page: page,
+              per_page: per_page,
+              total_count: total,
+              total_pages: (total.to_f / per_page).ceil
+            }
           }
         end
 
@@ -52,7 +62,7 @@ module Api
 
           render json: { data: batch_json(result.batch), idempotent: result.idempotent }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         def apply
@@ -61,14 +71,14 @@ module Api
           )
           render json: { data: batch_json(batch) }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         def lock
           batch = QuickbooksHistory::LifecycleService.new(batch: @batch, actor: current_user).lock!
           render json: { data: batch_json(batch) }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         def update_worker
@@ -77,7 +87,7 @@ module Api
           QuickbooksHistory::MappingService.new(worker: worker, employee: employee, actor: current_user).call
           render json: { data: worker_json(worker.reload) }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         private
@@ -96,6 +106,25 @@ module Api
           scope
         rescue Date::Error
           scope.none
+        end
+
+        def filtered_batches(scope)
+          if params[:search].present?
+            query = "%#{HistoricalImportBatch.sanitize_sql_like(params[:search].to_s.strip)}%"
+            scope = scope.where("historical_import_batches.source_label ILIKE ? OR historical_import_batches.bundle_digest ILIKE ?", query, query)
+          end
+          scope = scope.where(status: params[:status]) if params[:status].present?
+          if params[:department_id].present?
+            scope = scope.joins(historical_workers: :employee)
+                         .where(employees: { department_id: params[:department_id] })
+                         .distinct
+          end
+          scope
+        end
+
+        def error_payload(error)
+          details = error.respond_to?(:record) ? error.record.errors.to_hash : {}
+          { error: error.message, details: details }
         end
 
         def archive_summary

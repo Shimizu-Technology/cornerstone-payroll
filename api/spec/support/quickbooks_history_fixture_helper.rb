@@ -53,6 +53,33 @@ module QuickbooksHistoryFixtureHelper
     ]
   end
 
+  def quickbooks_history_uploads_with_worker_name_collision
+    details = payroll_details_rows
+    details.insert(
+      6,
+      [ "Worker Alice", "07/17/2024", "06/28/2024 - 07/11/2024", 40, 40, 1_100, 1_100, 0, 0, 0, 1_100, -220, -110, -88, -22, 0, 0, 880, 110, 88, 22, 0, 0, 1_210 ]
+    )
+    history = paycheck_history_rows
+    history << [ "07/17/2024", "Worker Alice", 1_100, 880, "Check", "1002", "-" ]
+
+    [
+      build_quickbooks_xls("Payroll Details.xls", details),
+      build_quickbooks_xls("Paycheck History.xls", history),
+      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
+    ]
+  end
+
+  def quickbooks_history_uploads_with_custom_opening_range
+    details = payroll_details_rows
+    details[6][2] = "01/01/2024 - 05/31/2024"
+
+    [
+      build_quickbooks_xls("Payroll Details.xls", details),
+      build_quickbooks_xls("Paycheck History.xls", paycheck_history_rows),
+      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
+    ]
+  end
+
   def cleanup_quickbooks_history_uploads
     Array(@quickbooks_history_tempfiles).each do |tempfile|
       tempfile.close

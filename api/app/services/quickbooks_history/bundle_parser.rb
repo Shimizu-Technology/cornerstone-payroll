@@ -49,6 +49,7 @@ module QuickbooksHistory
 
       detail = parse_payroll_details(reports.fetch("payroll_details").fetch(:rows))
       history = parse_paycheck_history(reports.fetch("paycheck_history").fetch(:rows))
+      validate_distinct_worker_names!(detail.fetch(:paychecks))
       reconcile_paycheck_history!(detail, history)
       workers = build_workers(detail.fetch(:paychecks), reports.fetch("employee_details").fetch(:rows))
       periods = build_periods(detail.fetch(:paychecks))
@@ -286,11 +287,16 @@ module QuickbooksHistory
 
       headers = employee_rows.fetch(header_index).map { |header| header.to_s.squish }
       source_names = paychecks.map { |row| row.fetch(:source_employee_name) }.uniq
+      normalized_source_names = source_names.map { |name| [ name, NameNormalizer.call(name) ] }
       details = employee_rows.each_with_index.drop(header_index + 1).filter_map do |row, zero_index|
         personal_info = cell(row, headers, "Personal info").to_s.squish
         next if personal_info.blank?
 
-        source_name = source_names.select { |name| NameNormalizer.call(personal_info).start_with?(NameNormalizer.call(name)) }.max_by(&:length)
+        normalized_personal_info = NameNormalizer.call(personal_info)
+        source_name = normalized_source_names
+                      .select { |_name, normalized| normalized_personal_info.start_with?(normalized) }
+                      .max_by { |name, _normalized| name.length }
+                      &.first
         next unless source_name
 
         snapshot = headers.each_with_index.to_h do |header, index|
@@ -371,11 +377,14 @@ module QuickbooksHistory
     end
 
     def build_warnings(paychecks, history, inventory)
-      opening_count = paychecks.count { |row| row.fetch(:period_type) == "opening_summary" }
+      opening_rows = paychecks.select { |row| row.fetch(:period_type) == "opening_summary" }
+      opening_count = opening_rows.size
       missing_check_numbers = history.count { |row| row[:check_number].blank? }
       warnings = []
       if opening_count.positive?
-        warnings << "#{opening_count} employee opening-balance rows summarize 12/29/2023 through 06/27/2024. They preserve QuickBooks totals but are not original paycheck-level periods."
+        opening_start = opening_rows.map { |row| row.fetch(:period_start) }.min
+        opening_end = opening_rows.map { |row| row.fetch(:period_end) }.max
+        warnings << "#{opening_count} employee opening-balance rows summarize #{opening_start.strftime('%m/%d/%Y')} through #{opening_end.strftime('%m/%d/%Y')}. They preserve QuickBooks totals but are not original paycheck-level periods."
       end
       warnings << "#{missing_check_numbers} QuickBooks paychecks have no accounting check number in Paycheck History." if missing_check_numbers.positive?
       unreadable = inventory.count { |entry| entry[:report_type] == "unreadable_spreadsheet" }
@@ -420,6 +429,14 @@ module QuickbooksHistory
       rows.group_by do |row|
         paycheck_signature(row.fetch(:source_employee_name), row.fetch(:pay_date), row.fetch(:gross_pay), row.fetch(:net_pay))
       end.count { |_signature, grouped| grouped.many? }
+    end
+
+    def validate_distinct_worker_names!(paychecks)
+      collisions = paychecks.group_by { |row| row.fetch(:normalized_name) }
+                           .count { |_normalized, rows| rows.map { |row| row.fetch(:source_employee_name) }.uniq.many? }
+      return if collisions.zero?
+
+      raise ArgumentError, "#{collisions} normalized employee name collision(s) require manual source review"
     end
 
     def opening_summary?(start_date, end_date)

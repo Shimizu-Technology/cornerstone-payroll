@@ -34,5 +34,19 @@ RSpec.describe QuickbooksHistory::MappingService do
       match_confidence: 1
     )
     expect(worker.historical_paychecks.distinct.pluck(:employee_id)).to eq([ employee.id ])
+    expect(employee.destroy).to be(false)
+    expect(employee.errors.full_messages).to include("Cannot delete record because dependent historical workers exist")
+  end
+
+  it "cannot race a locked batch when changing a mapping" do
+    QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
+    QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).lock!
+
+    expect do
+      described_class.new(worker: worker, employee: employee, actor: admin).call
+    end.to raise_error(ArgumentError, /Locked historical worker mappings/)
+    expect(worker.reload.employee_id).to be_nil
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2419,9 +2419,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
   add_foreign_key "historical_import_batches", "companies"
-  add_foreign_key "historical_import_batches", "users", column: "applied_by_id"
-  add_foreign_key "historical_import_batches", "users", column: "created_by_id"
-  add_foreign_key "historical_import_batches", "users", column: "locked_by_id"
+  add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_batches", "users", column: "locked_by_id", on_delete: :nullify
   add_foreign_key "historical_pay_periods", "companies"
   add_foreign_key "historical_pay_periods", "historical_import_batches"
   add_foreign_key "historical_paychecks", "companies"

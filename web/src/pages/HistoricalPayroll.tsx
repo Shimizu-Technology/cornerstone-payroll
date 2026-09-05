@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -27,6 +27,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { formatCurrency, formatDateRange } from '@/lib/utils';
 import {
+  ApiError,
   historicalImportsApi,
   type HistoricalArchiveSummary,
   type HistoricalBreakdownLine,
@@ -38,23 +39,37 @@ import type { PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
 
-function dollars(value?: string | number | null) {
+function dollars(value?: string | number | null): string {
   return formatCurrency(Number(value || 0));
 }
 
-function shortDate(value?: string | null) {
+function shortDate(value?: string | null): string {
   if (!value) return '—';
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function statusBadge(status: HistoricalImportBatch['status']) {
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const detail = Object.values(error.details || {}).flat().join(', ');
+    return detail || error.message;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function statusBadge(status: HistoricalImportBatch['status']): ReactElement {
   if (status === 'locked') return <Badge variant="success"><LockKeyhole className="mr-1 h-3 w-3" />Locked</Badge>;
   if (status === 'applied') return <Badge variant="info"><FileCheck2 className="mr-1 h-3 w-3" />Applied</Badge>;
   if (status === 'failed') return <Badge variant="danger">Failed</Badge>;
   return <Badge variant="warning">Preview</Badge>;
 }
 
-function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
+interface MetricProps {
+  label: string;
+  value: string;
+  note?: string;
+}
+
+function Metric({ label, value, note }: MetricProps): ReactElement {
   return (
     <div className="border-l-2 border-primary-200 pl-4">
       <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-neutral-500">{label}</p>
@@ -64,7 +79,13 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
   );
 }
 
-function Breakdown({ title, lines, unit = 'currency' }: { title: string; lines: HistoricalBreakdownLine[]; unit?: 'currency' | 'hours' }) {
+interface BreakdownProps {
+  title: string;
+  lines: HistoricalBreakdownLine[];
+  unit?: 'currency' | 'hours';
+}
+
+function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactElement | null {
   if (lines.length === 0) return null;
   return (
     <section>
@@ -83,11 +104,13 @@ function Breakdown({ title, lines, unit = 'currency' }: { title: string; lines: 
   );
 }
 
-export function HistoricalPayroll() {
+export function HistoricalPayroll(): ReactElement {
   const { user } = useAuth();
   const { activeCompanyId } = useCompany();
   const canMutate = ['super_admin', 'org_admin', 'admin', 'manager'].includes(user?.role || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
@@ -104,45 +127,74 @@ export function HistoricalPayroll() {
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
   const [confirmAction, setConfirmAction] = useState<'apply' | 'lock' | null>(null);
 
-  const loadList = useCallback(async () => {
+  const loadList = useCallback(async (): Promise<void> => {
+    const requestId = ++listRequestIdRef.current;
     const response = await historicalImportsApi.list();
+    if (requestId !== listRequestIdRef.current) return;
+
     setBatches(response.data);
     setArchive(response.archive);
-    setSelectedBatchId((current) => current ?? response.data[0]?.id ?? null);
+    setSelectedBatchId((current) => (
+      current && response.data.some((batch) => batch.id === current)
+        ? current
+        : response.data[0]?.id ?? null
+    ));
   }, []);
 
-  const loadDetail = useCallback(async () => {
+  const loadDetail = useCallback(async (): Promise<void> => {
+    const requestId = ++detailRequestIdRef.current;
     if (!selectedBatchId) {
       setDetail(null);
       setMeta(EMPTY_META);
       return;
     }
-    const response = await historicalImportsApi.show(selectedBatchId, {
-      page,
-      per_page: 50,
-      period_id: periodId,
-      search: search.trim() || undefined,
-    });
-    setDetail(response.data);
-    setMeta(response.meta);
+    try {
+      const response = await historicalImportsApi.show(selectedBatchId, {
+        page,
+        per_page: 50,
+        period_id: periodId,
+        search: search.trim() || undefined,
+      });
+      if (requestId !== detailRequestIdRef.current) return;
+
+      setDetail(response.data);
+      setMeta(response.meta);
+    } catch (err) {
+      if (requestId === detailRequestIdRef.current) {
+        setError(errorMessage(err, 'Historical paychecks could not be loaded.'));
+      }
+    }
   }, [page, periodId, search, selectedBatchId]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<void> => {
     setError(null);
     try {
       await loadList();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Historical payroll could not be loaded.');
+      setError(errorMessage(err, 'Historical payroll could not be loaded.'));
     }
   }, [loadList]);
 
   useEffect(() => {
+    listRequestIdRef.current += 1;
+    detailRequestIdRef.current += 1;
+    setSelectedBatchId(null);
+    setDetail(null);
+    setMeta(EMPTY_META);
     setLoading(true);
-    refresh().finally(() => setLoading(false));
+    let current = true;
+    void refresh().finally(() => {
+      if (current) setLoading(false);
+    });
+    return () => {
+      current = false;
+      listRequestIdRef.current += 1;
+      detailRequestIdRef.current += 1;
+    };
   }, [activeCompanyId, refresh]);
 
   useEffect(() => {
-    loadDetail().catch((err) => setError(err instanceof Error ? err.message : 'Historical paychecks could not be loaded.'));
+    void loadDetail();
   }, [loadDetail]);
 
   useEffect(() => {
@@ -156,7 +208,7 @@ export function HistoricalPayroll() {
     [batches, detail, selectedBatchId],
   );
 
-  const handlePreview = async () => {
+  const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
       setError('Select the exported QuickBooks files first.');
       return;
@@ -172,13 +224,13 @@ export function HistoricalPayroll() {
       setNotice(response.idempotent ? 'This exact bundle was already staged. The existing preview was opened.' : 'QuickBooks history was staged. Review reconciliation before applying it.');
       await loadList();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'QuickBooks history could not be previewed.');
+      setError(errorMessage(err, 'QuickBooks history could not be previewed.'));
     } finally {
       setAction(null);
     }
   };
 
-  const runLifecycleAction = async () => {
+  const runLifecycleAction = async (): Promise<void> => {
     if (!selectedBatchId || !confirmAction) return;
     setAction(confirmAction);
     setError(null);
@@ -194,7 +246,7 @@ export function HistoricalPayroll() {
       await loadList();
       setDetail((current) => current ? { ...current, ...response.data } : current);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The historical import action failed.');
+      setError(errorMessage(err, 'The historical import action failed.'));
     } finally {
       setAction(null);
     }
@@ -216,7 +268,7 @@ export function HistoricalPayroll() {
         {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
         {notice && <div role="status" className="flex items-start gap-3 rounded-2xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{notice}</span></div>}
 
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.75fr)]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.75fr)]">
           <Card className="overflow-hidden">
             <CardHeader className="bg-[linear-gradient(135deg,rgba(239,246,255,0.94),rgba(255,255,255,0.98)_55%,rgba(240,253,250,0.82))]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -248,7 +300,7 @@ export function HistoricalPayroll() {
             <CardContent className="flex h-full flex-col justify-between gap-6 p-6">
               <div>
                 <ShieldCheck className="h-8 w-8 text-primary-200" />
-                <h2 className="mt-5 font-display text-xl font-extrabold tracking-tight">Source values stay source values</h2>
+                <h2 className="mt-6 font-display text-xl font-extrabold tracking-tight">Source values stay source values</h2>
                 <p className="mt-2 text-sm leading-6 text-primary-100/80">Historical money is written to an isolated ledger. The live payroll calculator and payment workflows cannot touch it.</p>
               </div>
               <div className="space-y-2 text-xs text-primary-100/80">
@@ -260,13 +312,13 @@ export function HistoricalPayroll() {
           </Card>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+        <section className="grid gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
           <Card>
             <CardHeader><CardTitle>Stage a QuickBooks bundle</CardTitle><CardDescription>Select every exported report and supporting PDF/image. Files are hashed and parsed into a preview; the source files are not saved in this application.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
               {canMutate ? (
                 <>
-                  <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-300 bg-primary-50/50 px-5 py-6 text-center transition hover:border-primary-500 hover:bg-primary-50 focus-within:ring-2 focus-within:ring-primary-300">
+                  <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-300 bg-primary-50/50 px-6 py-6 text-center transition hover:border-primary-500 hover:bg-primary-50 focus-within:ring-2 focus-within:ring-primary-300">
                     <UploadCloud className="h-7 w-7 text-primary-700" />
                     <span className="mt-3 text-sm font-semibold text-neutral-900">Select exported files</span>
                     <span className="mt-1 text-xs text-neutral-500">XLS, XLSX, PDF, JPG or PNG · up to 75 files</span>
@@ -304,7 +356,7 @@ export function HistoricalPayroll() {
                   {selectedBatch.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4"><p className="text-sm font-semibold text-danger-800">Resolve before applying</p><ul className="mt-2 space-y-1 text-sm text-danger-700">{selectedBatch.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {selectedBatch.warnings.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4"><p className="text-sm font-semibold text-warning-800">Known source limitations</p><ul className="mt-2 space-y-1 text-sm leading-6 text-warning-700">{selectedBatch.warnings.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {canMutate && (
-                    <div className="flex flex-col gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                       <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply makes reconciled rows visible in the archive. Lock makes the batch permanently read-only through ordinary workflows.</p>
                       <div className="flex gap-2">
                         {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmAction('apply')} disabled={!reconciliationPassed || action !== null}>Apply history</Button>}
@@ -375,7 +427,7 @@ export function HistoricalPayroll() {
       <Dialog open={Boolean(paycheck)} onOpenChange={(open) => !open && setPaycheck(null)}>
         <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
           <DialogHeader><DialogTitle>{paycheck?.source_employee_name}</DialogTitle><DialogDescription>{paycheck ? `${shortDate(paycheck.pay_date)} payday · ${formatDateRange(paycheck.period_start, paycheck.period_end)}` : ''}</DialogDescription></DialogHeader>
-          {paycheck && <div className="space-y-6"><div className="grid gap-4 rounded-2xl bg-neutral-950 p-5 text-white sm:grid-cols-3"><div><p className="text-xs text-neutral-400">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div><div><p className="text-xs text-neutral-400">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(Number(paycheck.employee_taxes) + Number(paycheck.pretax_deductions) + Number(paycheck.after_tax_deductions))}</p></div><div><p className="text-xs text-neutral-400">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div></div><div className="grid gap-5 md:grid-cols-2"><Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" /><Breakdown title="Earnings" lines={paycheck.earnings_breakdown} /><Breakdown title="Pre-tax deductions" lines={paycheck.pretax_deduction_breakdown} /><Breakdown title="Employee taxes" lines={paycheck.employee_tax_breakdown} /><Breakdown title="After-tax deductions" lines={paycheck.after_tax_deduction_breakdown} /><Breakdown title="Employer taxes" lines={paycheck.employer_tax_breakdown} /><Breakdown title="Employer contributions" lines={paycheck.employer_contribution_breakdown} /></div></div>}
+          {paycheck && <div className="space-y-6"><div className="grid gap-4 rounded-2xl bg-neutral-950 p-6 text-white sm:grid-cols-3"><div><p className="text-xs text-neutral-400">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div><div><p className="text-xs text-neutral-400">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(Number(paycheck.employee_taxes) + Number(paycheck.pretax_deductions) + Number(paycheck.after_tax_deductions))}</p></div><div><p className="text-xs text-neutral-400">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div></div><div className="grid gap-6 md:grid-cols-2"><Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" /><Breakdown title="Earnings" lines={paycheck.earnings_breakdown} /><Breakdown title="Pre-tax deductions" lines={paycheck.pretax_deduction_breakdown} /><Breakdown title="Employee taxes" lines={paycheck.employee_tax_breakdown} /><Breakdown title="After-tax deductions" lines={paycheck.after_tax_deduction_breakdown} /><Breakdown title="Employer taxes" lines={paycheck.employer_tax_breakdown} /><Breakdown title="Employer contributions" lines={paycheck.employer_contribution_breakdown} /></div></div>}
           <DialogFooter><Button variant="outline" onClick={() => setPaycheck(null)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
