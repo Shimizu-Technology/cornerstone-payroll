@@ -102,6 +102,16 @@ Rails.application.routes.draw do
             get :export
           end
         end
+        resources :historical_imports, only: %i[index show] do
+          collection do
+            post :preview
+          end
+          member do
+            post :apply
+            post :lock
+            patch "workers/:worker_id", action: :update_worker, as: :worker
+          end
+        end
         resources :employee_change_requests, only: [ :index, :show ] do
           member do
             patch :approve

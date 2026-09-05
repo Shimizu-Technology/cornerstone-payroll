@@ -3614,6 +3614,168 @@ export const dashboardApi = {
   stats: (companyId: number) => api.get<DashboardStats>(`/companies/${companyId}/dashboard`),
 };
 
+export const HISTORICAL_IMPORT_ACKNOWLEDGEMENT =
+  'I understand this imports authoritative QuickBooks snapshots and does not recalculate payroll.';
+
+export interface HistoricalMoneyTotals {
+  gross_pay: string;
+  adjusted_gross: string;
+  pretax_deductions: string;
+  employee_taxes: string;
+  federal_income_tax: string;
+  social_security_tax: string;
+  medicare_tax: string;
+  after_tax_deductions: string;
+  net_pay: string;
+  employer_taxes: string;
+  employer_contributions: string;
+  total_payroll_cost: string;
+}
+
+export interface HistoricalImportBatch {
+  id: number;
+  company_id: number;
+  source_system: 'quickbooks_online';
+  source_label: string;
+  bundle_digest: string;
+  importer_version: string;
+  status: 'previewed' | 'applied' | 'locked' | 'failed';
+  source_file_manifest: Array<{
+    filename: string;
+    sha256: string;
+    byte_size: number;
+    report_type: string;
+    row_count?: number;
+    parse_error?: string;
+  }>;
+  preview_summary: {
+    file_count: number;
+    worker_count: number;
+    period_count: number;
+    paycheck_count: number;
+    first_pay_date?: string;
+    last_pay_date?: string;
+    opening_summary_count?: number;
+    check_number_count?: number;
+    totals: HistoricalMoneyTotals;
+  };
+  reconciliation_summary: {
+    passed: boolean;
+    payroll_detail_rows?: number;
+    native_paycheck_rows?: number;
+    opening_summary_rows?: number;
+    paycheck_history_rows?: number;
+    matched_native_rows?: number;
+    unmatched_detail_rows?: number;
+    unmatched_history_rows?: number;
+    errors: string[];
+  };
+  warnings: string[];
+  errors: string[];
+  applied_at?: string | null;
+  applied_by_name?: string | null;
+  locked_at?: string | null;
+  locked_by_name?: string | null;
+  created_at: string;
+}
+
+export interface HistoricalPayPeriod {
+  id: number;
+  period_type: 'regular' | 'opening_summary';
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  source_label: string;
+  paycheck_count: number;
+  totals: HistoricalMoneyTotals;
+}
+
+export interface HistoricalWorker {
+  id: number;
+  source_name: string;
+  source_status: 'active' | 'inactive' | 'unknown';
+  hire_date?: string | null;
+  employee_id?: number | null;
+  employee_name?: string | null;
+  match_method?: string | null;
+  match_confidence?: number | null;
+}
+
+export interface HistoricalBreakdownLine {
+  label: string;
+  amount: string;
+}
+
+export interface HistoricalPaycheck {
+  id: number;
+  historical_pay_period_id: number;
+  historical_worker_id: number;
+  employee_id?: number | null;
+  employee_name?: string | null;
+  source_employee_name: string;
+  pay_date: string;
+  period_start: string;
+  period_end: string;
+  period_type: 'regular' | 'opening_summary';
+  payment_method?: string | null;
+  check_number?: string | null;
+  source_status: string;
+  reconciliation_status: 'matched' | 'opening_summary' | 'unmatched';
+  hours_total: string;
+  gross_pay: string;
+  adjusted_gross: string;
+  pretax_deductions: string;
+  employee_taxes: string;
+  federal_income_tax: string;
+  social_security_tax: string;
+  medicare_tax: string;
+  after_tax_deductions: string;
+  net_pay: string;
+  employer_taxes: string;
+  employer_contributions: string;
+  total_payroll_cost: string;
+  hours_breakdown: HistoricalBreakdownLine[];
+  earnings_breakdown: HistoricalBreakdownLine[];
+  pretax_deduction_breakdown: HistoricalBreakdownLine[];
+  after_tax_deduction_breakdown: HistoricalBreakdownLine[];
+  employee_tax_breakdown: HistoricalBreakdownLine[];
+  employer_tax_breakdown: HistoricalBreakdownLine[];
+  employer_contribution_breakdown: HistoricalBreakdownLine[];
+}
+
+export interface HistoricalImportDetail extends HistoricalImportBatch {
+  periods: HistoricalPayPeriod[];
+  workers: HistoricalWorker[];
+  paychecks: HistoricalPaycheck[];
+}
+
+export interface HistoricalArchiveSummary {
+  applied_batch_count: number;
+  paycheck_count: number;
+  worker_count: number;
+  first_pay_date?: string | null;
+  last_pay_date?: string | null;
+  gross_pay: string;
+  net_pay: string;
+}
+
+export const historicalImportsApi = {
+  list: () => api.get<{ data: HistoricalImportBatch[]; archive: HistoricalArchiveSummary }>('/admin/historical_imports'),
+  show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }) =>
+    api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
+  preview: (files: File[]) => {
+    const form = new FormData();
+    files.forEach((file) => form.append('files[]', file));
+    return api.postForm<{ data: HistoricalImportBatch; idempotent: boolean }>('/admin/historical_imports/preview', form);
+  },
+  apply: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/apply`, {
+    acknowledgement: HISTORICAL_IMPORT_ACKNOWLEDGEMENT,
+  }),
+  lock: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
+  mapWorker: (batchId: number, workerId: number, employeeId: number) =>
+    api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
+};
+
 // Auth
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),

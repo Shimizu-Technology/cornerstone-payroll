@@ -89,6 +89,8 @@ class Employee < ApplicationRecord
   has_many :daily_time_records, dependent: :restrict_with_error
   has_many :payroll_time_allocations, dependent: :restrict_with_error
   has_many :employee_change_requests, dependent: :restrict_with_error
+  has_many :historical_workers, dependent: :nullify
+  has_many :historical_paychecks, dependent: :nullify
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value

@@ -40,6 +40,10 @@ class Company < ApplicationRecord
   has_many :payroll_liability_postings, dependent: :restrict_with_error
   has_many :payroll_liability_entries, dependent: :restrict_with_error
   has_many :quarterly_compliance_packets, dependent: :destroy
+  has_many :historical_import_batches, dependent: :restrict_with_error
+  has_many :historical_workers, dependent: :restrict_with_error
+  has_many :historical_pay_periods, dependent: :restrict_with_error
+  has_many :historical_paychecks, dependent: :restrict_with_error
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
   # Printer profiles are organization-scoped so every operator in the same
