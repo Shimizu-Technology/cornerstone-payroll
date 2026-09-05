@@ -110,6 +110,22 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(HistoricalImportBatch.count).to eq(0)
   end
 
+  it "returns structured validation details when preview persistence fails" do
+    invalid_batch = HistoricalImportBatch.new
+    invalid_batch.errors.add(:source_label, "can't be blank")
+    persistence_error = ActiveRecord::RecordInvalid.new(invalid_batch)
+    result = QuickbooksHistory::ImportService::Result.new(idempotent: false, error: persistence_error)
+    allow_any_instance_of(QuickbooksHistory::ImportService).to receive(:call).and_return(result)
+
+    post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(JSON.parse(response.body)).to include(
+      "error" => persistence_error.message,
+      "details" => { "source_label" => [ "can't be blank" ] }
+    )
+  end
+
   it "does not expose encrypted employee setup snapshots in API responses" do
     batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
 

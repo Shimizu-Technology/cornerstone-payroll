@@ -59,6 +59,10 @@ module Api
             files: files,
             actor: current_user
           ).call
+          unless result.success?
+            render json: error_payload(result.error), status: :unprocessable_entity
+            return
+          end
 
           render json: { data: batch_json(result.batch), idempotent: result.idempotent }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e

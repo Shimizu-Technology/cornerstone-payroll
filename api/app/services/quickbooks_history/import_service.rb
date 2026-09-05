@@ -8,7 +8,11 @@ module QuickbooksHistory
       employer_contributions total_payroll_cost
     ].freeze
 
-    Result = Struct.new(:batch, :idempotent, keyword_init: true)
+    Result = Struct.new(:batch, :idempotent, :error, keyword_init: true) do
+      def success?
+        error.nil?
+      end
+    end
 
     def initialize(company:, files:, actor: nil)
       @company = company
@@ -59,6 +63,8 @@ module QuickbooksHistory
         bundle_digest: parsed.bundle_digest
       )
       Result.new(batch: existing, idempotent: true)
+    rescue ActiveRecord::RecordInvalid => e
+      Result.new(idempotent: false, error: e)
     end
 
     private

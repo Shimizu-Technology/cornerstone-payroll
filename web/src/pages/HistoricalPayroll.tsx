@@ -49,11 +49,11 @@ function shortDate(value?: string | null): string {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    const detail = Object.values(error.details || {}).flat().join(', ');
-    return detail || error.message;
-  }
   return error instanceof Error ? error.message : fallback;
+}
+
+function fieldLabel(field: string): string {
+  return field.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function statusBadge(status: HistoricalImportBatch['status']): ReactElement {
@@ -123,9 +123,21 @@ export function HistoricalPayroll(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<'preview' | 'apply' | 'lock' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
   const [confirmAction, setConfirmAction] = useState<'apply' | 'lock' | null>(null);
+
+  const handleError = useCallback((err: unknown, fallback: string): void => {
+    if (err instanceof ApiError) {
+      setValidationErrors(err.details || {});
+      setError(err.message);
+      return;
+    }
+
+    setValidationErrors({});
+    setError(errorMessage(err, fallback));
+  }, []);
 
   const loadList = useCallback(async (): Promise<void> => {
     const requestId = ++listRequestIdRef.current;
@@ -161,19 +173,20 @@ export function HistoricalPayroll(): ReactElement {
       setMeta(response.meta);
     } catch (err) {
       if (requestId === detailRequestIdRef.current) {
-        setError(errorMessage(err, 'Historical paychecks could not be loaded.'));
+        handleError(err, 'Historical paychecks could not be loaded.');
       }
     }
-  }, [page, periodId, search, selectedBatchId]);
+  }, [handleError, page, periodId, search, selectedBatchId]);
 
   const refresh = useCallback(async (): Promise<void> => {
     setError(null);
+    setValidationErrors({});
     try {
       await loadList();
     } catch (err) {
-      setError(errorMessage(err, 'Historical payroll could not be loaded.'));
+      handleError(err, 'Historical payroll could not be loaded.');
     }
-  }, [loadList]);
+  }, [handleError, loadList]);
 
   useEffect(() => {
     listRequestIdRef.current += 1;
@@ -181,6 +194,7 @@ export function HistoricalPayroll(): ReactElement {
     setSelectedBatchId(null);
     setDetail(null);
     setMeta(EMPTY_META);
+    setValidationErrors({});
     setLoading(true);
     let current = true;
     void refresh().finally(() => {
@@ -210,11 +224,13 @@ export function HistoricalPayroll(): ReactElement {
 
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
+      setValidationErrors({});
       setError('Select the exported QuickBooks files first.');
       return;
     }
     setAction('preview');
     setError(null);
+    setValidationErrors({});
     setNotice(null);
     try {
       const response = await historicalImportsApi.preview(files);
@@ -224,7 +240,7 @@ export function HistoricalPayroll(): ReactElement {
       setNotice(response.idempotent ? 'This exact bundle was already staged. The existing preview was opened.' : 'QuickBooks history was staged. Review reconciliation before applying it.');
       await loadList();
     } catch (err) {
-      setError(errorMessage(err, 'QuickBooks history could not be previewed.'));
+      handleError(err, 'QuickBooks history could not be previewed.');
     } finally {
       setAction(null);
     }
@@ -234,6 +250,7 @@ export function HistoricalPayroll(): ReactElement {
     if (!selectedBatchId || !confirmAction) return;
     setAction(confirmAction);
     setError(null);
+    setValidationErrors({});
     setNotice(null);
     try {
       const response = confirmAction === 'apply'
@@ -246,7 +263,7 @@ export function HistoricalPayroll(): ReactElement {
       await loadList();
       setDetail((current) => current ? { ...current, ...response.data } : current);
     } catch (err) {
-      setError(errorMessage(err, 'The historical import action failed.'));
+      handleError(err, 'The historical import action failed.');
     } finally {
       setAction(null);
     }
@@ -265,7 +282,21 @@ export function HistoricalPayroll(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
+        {error && (
+          <div role="alert" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p>{error}</p>
+              {Object.keys(validationErrors).length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {Object.entries(validationErrors).flatMap(([field, messages]) => (
+                    messages.map((message) => <li key={`${field}-${message}`}>{fieldLabel(field)}: {message}</li>)
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
         {notice && <div role="status" className="flex items-start gap-3 rounded-2xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{notice}</span></div>}
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.75fr)]">

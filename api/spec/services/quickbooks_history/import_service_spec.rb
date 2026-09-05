@@ -53,4 +53,19 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(second.batch.validation_errors).to include("2 paycheck snapshot(s) already exist in applied QuickBooks history")
     expect(second.batch).to be_previewed
   end
+
+  it "returns a failure result after rolling back an invalid persistence operation" do
+    invalid_batch = HistoricalImportBatch.new
+    invalid_batch.errors.add(:source_label, "can't be blank")
+    persistence_error = ActiveRecord::RecordInvalid.new(invalid_batch)
+    allow(HistoricalImportBatch).to receive(:create!).and_raise(persistence_error)
+
+    result = described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call
+
+    expect(result).not_to be_success
+    expect(result.error).to eq(persistence_error)
+    expect(result.batch).to be_nil
+    expect(HistoricalWorker.count).to eq(0)
+    expect(HistoricalPaycheck.count).to eq(0)
+  end
 end

@@ -32,6 +32,8 @@ namespace :quickbooks_history do
     end
 
     result = QuickbooksHistory::ImportService.new(company: company, files: files, actor: actor).call
+    raise result.error unless result.success?
+
     batch = result.batch
 
     if apply_import
