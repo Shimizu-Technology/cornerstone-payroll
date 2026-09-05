@@ -58,14 +58,16 @@ RSpec.describe QuickbooksHistory::ImportService do
     invalid_batch = HistoricalImportBatch.new
     invalid_batch.errors.add(:source_label, "can't be blank")
     persistence_error = ActiveRecord::RecordInvalid.new(invalid_batch)
-    allow(HistoricalImportBatch).to receive(:create!).and_raise(persistence_error)
+    allow(HistoricalPaycheck).to receive(:insert_all!).and_raise(persistence_error)
 
     result = described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call
 
     expect(result).not_to be_success
     expect(result.error).to eq(persistence_error)
     expect(result.batch).to be_nil
+    expect(HistoricalImportBatch.count).to eq(0)
     expect(HistoricalWorker.count).to eq(0)
+    expect(HistoricalPayPeriod.count).to eq(0)
     expect(HistoricalPaycheck.count).to eq(0)
   end
 end
