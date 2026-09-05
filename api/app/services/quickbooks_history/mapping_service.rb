@@ -9,6 +9,7 @@ module QuickbooksHistory
     end
 
     def call
+      ensure_authorized_actor!
       raise ArgumentError, "Locked historical worker mappings cannot be changed" if worker.historical_import_batch.locked?
       raise ArgumentError, "Employee must belong to the same company" unless employee.company_id == worker.company_id
 
@@ -22,5 +23,14 @@ module QuickbooksHistory
     private
 
     attr_reader :worker, :employee, :actor
+
+    def ensure_authorized_actor!
+      authorized = actor.present? &&
+        actor.can_access_company?(worker.company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+      return if authorized
+
+      raise ArgumentError, "An attributed manager or administrator with company access is required"
+    end
   end
 end

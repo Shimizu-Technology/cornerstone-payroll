@@ -10,6 +10,8 @@ module QuickbooksHistory
     end
 
     def apply!(acknowledgement:)
+      ensure_authorized_actor!
+
       batch.with_lock do
         return batch if batch.applied? || batch.locked?
         raise ArgumentError, "Only a previewed historical import can be applied" unless batch.previewed?
@@ -29,6 +31,8 @@ module QuickbooksHistory
     end
 
     def lock!
+      ensure_authorized_actor!
+
       batch.with_lock do
         return batch if batch.locked?
         raise ArgumentError, "Apply the historical import before locking it" unless batch.applied?
@@ -44,6 +48,15 @@ module QuickbooksHistory
     private
 
     attr_reader :batch, :actor
+
+    def ensure_authorized_actor!
+      authorized = actor.present? &&
+        actor.can_access_company?(batch.company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+      return if authorized
+
+      raise ArgumentError, "An attributed manager or administrator with company access is required"
+    end
 
     def verify_preview_totals!
       expected = batch.preview_summary.to_h

@@ -21,6 +21,22 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     expect(batch.locked_at).to be_present
   end
 
+  it "requires an attributed manager or administrator for apply and lock" do
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+
+    expect do
+      described_class.new(batch: batch, actor: nil).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    end.to raise_error(ArgumentError, /attributed manager or administrator/)
+    expect do
+      described_class.new(batch: batch, actor: accountant).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    end.to raise_error(ArgumentError, /attributed manager or administrator/)
+
+    described_class.new(batch: batch, actor: actor).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    expect do
+      described_class.new(batch: batch, actor: nil).lock!
+    end.to raise_error(ArgumentError, /attributed manager or administrator/)
+  end
+
   it "refuses apply if staged totals no longer equal the preview" do
     batch.historical_paychecks.first.update_column(:net_pay, 1)
 

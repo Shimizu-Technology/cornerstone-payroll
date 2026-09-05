@@ -15,6 +15,7 @@ The historical import lane now:
 - preserves QuickBooks' final paycheck values and itemized breakdowns without running Cornerstone's payroll calculators;
 - encrypts the private Employee Details snapshot at rest;
 - stages the bundle as a preview, requires an explicit acknowledgement before apply, and locks a reconciled import against later edits;
+- requires an attributed manager or administrator with access to the company for every apply, lock, and manual worker mapping, including command-line operations;
 - detects an identical bundle and reuses the prior batch instead of importing it twice;
 - blocks missing or duplicate required reports, mixed-company bundles, unmatched native paychecks, ambiguous duplicate paycheck signatures, altered staged totals, and overlap with already-applied history;
 - lets accountants browse the archive while limiting preview, apply, lock, and employee mapping to managers and administrators;
@@ -71,7 +72,7 @@ Cornerstone must therefore keep the original export bundle in an approved encryp
 
 ## Local operator runbook
 
-The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`.
+The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`. `ACTOR_EMAIL` is optional for preview-only runs but mandatory for apply or lock; that user must be a manager or administrator with access to the company.
 
 ```sh
 DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \
