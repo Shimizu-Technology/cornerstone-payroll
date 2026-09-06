@@ -68,12 +68,13 @@ module QuickbooksHistoryFixtureHelper
   end
 
   def approve_historical_cutover(batch, actor:)
+    evidence = { "passed" => true, "exceptions" => [] }
     HistoricalImportCutoverReview.create!(
       company: batch.company,
       historical_import_batch: batch,
       status: "approved",
-      evidence: { "passed" => true, "exceptions" => [] },
-      evidence_digest: Digest::SHA256.hexdigest("test-cutover-#{batch.id}"),
+      evidence: evidence,
+      evidence_digest: Digest::SHA256.hexdigest(JSON.generate(evidence)),
       verified_at: Time.current,
       verified_by: actor,
       exception_dispositions: {},

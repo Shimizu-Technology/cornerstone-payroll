@@ -238,6 +238,39 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(AuditLog.where(action: "historical_imports#download_source_file", record_id: source_file.id)).to exist
   end
 
+  it "lets accountants download approved cutover evidence without granting source-file access" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    review_historical_workers_as_archive_only(batch, actor: admin)
+    QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
+    review = QuickbooksHistory::CutoverVerificationService.new(batch: batch, actor: admin).call.review
+    dispositions = review.evidence.fetch("exceptions").to_h do |exception|
+      [ exception.fetch("key"), "Accepted after reviewing the reconciled source evidence." ]
+    end
+    review_service = QuickbooksHistory::CutoverReviewService.new(review: review, actor: admin)
+    review_service.save!(
+      exception_dispositions: dispositions,
+      attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+      approval_notes: "No remaining limitations."
+    )
+    review_service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
+
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)
+
+    get "/api/v1/admin/historical_imports/#{batch.id}/download_cutover_evidence"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq(SpreadsheetReportExporter::CONTENT_TYPE)
+    expect(response.body.byteslice(0, 2)).to eq("PK")
+    expect(AuditLog.where(
+      user: accountant,
+      action: "historical_imports#download_cutover_evidence",
+      record_id: review.id
+    )).to exist
+  end
+
   it "marks altered retained evidence as failed and blocks apply" do
     batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
     review_historical_workers_as_archive_only(batch, actor: admin)

@@ -76,6 +76,7 @@ class StaffRolePolicy
     "api/v1/admin/historical_imports#verify_cutover" => :manage_client_configuration,
     "api/v1/admin/historical_imports#update_cutover_review" => :manage_client_configuration,
     "api/v1/admin/historical_imports#approve_cutover" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#download_cutover_evidence" => :payroll_operations,
     "api/v1/admin/historical_imports#archive_unlinked_workers" => :manage_client_configuration,
     "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration
   }.freeze

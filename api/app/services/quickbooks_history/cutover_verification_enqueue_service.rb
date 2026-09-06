@@ -51,7 +51,6 @@ module QuickbooksHistory
           verification_error: nil,
           verified_at: nil,
           verified_by: nil,
-          exception_dispositions: {},
           attestations: {},
           approval_notes: nil,
           approval_acknowledgement: nil,

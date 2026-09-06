@@ -63,6 +63,33 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
     )
   end
 
+  it "retains reviewed decisions for unchanged source exceptions when verification is repeated" do
+    review = described_class.new(batch: batch, actor: actor).call.review
+    exception_key = review.evidence.fetch("exceptions").sole.fetch("key")
+    review.update!(
+      exception_dispositions: {
+        exception_key => "Accepted after reviewing the reconciled opening summary.",
+        "removed-exception" => "This decision must not survive fresh evidence."
+      },
+      attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+      approval_notes: "Ready before re-verification."
+    )
+
+    pending = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+    expect(pending.exception_dispositions).to include(exception_key => "Accepted after reviewing the reconciled opening summary.")
+    expect(pending.attestations).to eq({})
+    expect(pending.approval_notes).to be_nil
+
+    repeated = described_class.new(
+      batch: batch,
+      actor: actor,
+      expected_verification_started_at: pending.verification_started_at.iso8601(6)
+    ).call.review
+    expect(repeated.exception_dispositions).to eq(
+      exception_key => "Accepted after reviewing the reconciled opening summary."
+    )
+  end
+
   it "fails closed when the accepted ledger no longer matches the retained source" do
     batch.historical_paychecks.first.update_column(:net_pay, 1)
 

@@ -393,6 +393,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
     cutover_review: null,
   };
   let listRequestCount = 0;
+  let fulfilledListResponseCount = 0;
   let releasePoll: (() => void) | undefined;
   let markPollStarted: (() => void) | undefined;
   const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
@@ -408,6 +409,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
       data: [pendingBatch, otherBatch],
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
     });
+    fulfilledListResponseCount += 1;
   });
   await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
@@ -426,7 +428,10 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
   releasePoll?.();
 
-  await expect.poll(() => listRequestCount).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => fulfilledListResponseCount).toBeGreaterThanOrEqual(2);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
   await expect(batchSelector).toHaveValue('2');
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
 });
