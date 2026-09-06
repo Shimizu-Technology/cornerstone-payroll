@@ -615,8 +615,8 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs text-neutral-500">Batch page {batchPage} of {Math.max(batchMeta.total_pages, 1)} · {batchMeta.total_count.toLocaleString()} total</p>
                     <div className="flex gap-2">
-                      <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={batchListLoading || batchPage <= 1 || action !== null || mappingWorkerId !== null}><ChevronLeft className="h-4 w-4" /></Button>
-                      <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={batchListLoading || batchPage >= batchMeta.total_pages || action !== null || mappingWorkerId !== null}><ChevronRight className="h-4 w-4" /></Button>
+                      <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={Boolean(batchListLoading || batchPage <= 1 || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)}><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={Boolean(batchListLoading || batchPage >= batchMeta.total_pages || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)}><ChevronRight className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 </div>

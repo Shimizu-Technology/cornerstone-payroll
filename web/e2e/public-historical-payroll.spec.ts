@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import type { HistoricalImportBatch, HistoricalImportDetail } from '@/services/api';
 
 interface MockWorker {
   id: number;
@@ -22,7 +23,7 @@ const archive = {
   net_pay: '0.0',
 };
 
-function batch(id: number, workers: MockWorker[] = []) {
+function batch(id: number, workers: MockWorker[] = []): HistoricalImportBatch {
   return {
     id,
     company_id: 1,
@@ -67,7 +68,7 @@ function batch(id: number, workers: MockWorker[] = []) {
   };
 }
 
-function detail(id: number, workers: MockWorker[] = []) {
+function detail(id: number, workers: MockWorker[] = []): HistoricalImportDetail {
   return { ...batch(id, workers), periods: [], workers, paychecks: [] };
 }
 
@@ -186,6 +187,8 @@ test('never lets a completed worker mapping replace a newly selected batch', asy
   await workerDisposition.selectOption('900');
   await expect(batchSelector).toBeDisabled();
 
+  // Mapping intentionally disables this control. Bypass it only to simulate an
+  // external company/context selection change while the request is still pending.
   await batchSelector.evaluate((node) => {
     const select = node as HTMLSelectElement;
     select.disabled = false;
