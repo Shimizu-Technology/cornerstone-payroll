@@ -180,6 +180,7 @@ export function HistoricalPayroll(): ReactElement {
   const reportRequestIdRef = useRef(0);
   const selectedBatchIdRef = useRef<number | null>(null);
   const batchPageRef = useRef(1);
+  const detailQueryRef = useRef<{ page: number; periodId?: number; search: string }>({ page: 1, search: '' });
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
@@ -220,6 +221,7 @@ export function HistoricalPayroll(): ReactElement {
   const [cutoverNotes, setCutoverNotes] = useState('');
   const [cutoverApprovalOpen, setCutoverApprovalOpen] = useState(false);
   const [cutoverPollingError, setCutoverPollingError] = useState<string | null>(null);
+  detailQueryRef.current = { page, periodId, search };
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -453,11 +455,12 @@ export function HistoricalPayroll(): ReactElement {
       let shouldContinue = true;
       try {
         const requestId = ++detailRequestIdRef.current;
+        const detailQuery = detailQueryRef.current;
         const response = await historicalImportsApi.show(selectedBatchId, {
-          page,
+          page: detailQuery.page,
           per_page: 50,
-          period_id: periodId,
-          search: search.trim() || undefined,
+          period_id: detailQuery.periodId,
+          search: detailQuery.search.trim() || undefined,
         });
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
 
@@ -485,7 +488,7 @@ export function HistoricalPayroll(): ReactElement {
       listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [loadList, page, periodId, search, selectedBatch?.cutover_review?.status, selectedBatchId]);
+  }, [loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
 
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {

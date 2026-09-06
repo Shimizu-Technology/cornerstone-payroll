@@ -42,6 +42,17 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
     expect(AuditLog.where(action: "historical_imports#cutover_verification_failed", record_id: review.id)).to exist
   end
 
+  it "logs a failure even when the referenced batch no longer exists" do
+    missing_batch_id = HistoricalImportBatch.maximum(:id).to_i + 10_000
+    allow(Rails.logger).to receive(:error)
+
+    described_class.perform_now(missing_batch_id, actor.id, Time.current.iso8601(6))
+
+    expect(Rails.logger).to have_received(:error).with(
+      include("Historical cutover verification failed for batch #{missing_batch_id}", "ActiveRecord::RecordNotFound")
+    )
+  end
+
   it "does not let a superseded job overwrite a newer verification attempt" do
     review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
     superseded_token = review.verification_started_at.iso8601(6)
