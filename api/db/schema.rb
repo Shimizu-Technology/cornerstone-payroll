@@ -871,6 +871,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
     t.string "source_status", default: "recorded", null: false
     t.decimal "total_payroll_cost", precision: 15, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
+    t.index ["company_id", "external_key"], name: "index_historical_paychecks_on_company_id_and_external_key"
     t.index ["company_id", "pay_date"], name: "index_historical_paychecks_on_company_id_and_pay_date"
     t.index ["company_id"], name: "index_historical_paychecks_on_company_id"
     t.index ["employee_id"], name: "index_historical_paychecks_on_employee_id"

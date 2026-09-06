@@ -95,4 +95,15 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     expect(batch.update(source_label: "Changed after lock")).to be(false)
     expect(batch.errors.full_messages).to include("Locked historical imports cannot be changed")
   end
+
+  it "checks large applied-history key sets in bounded database queries" do
+    keys = (1..(QuickbooksHistory::ImportService::EXTERNAL_KEY_QUERY_BATCH_SIZE + 1)).map do |index|
+      "source-key-#{index}"
+    end
+    association = instance_double(ActiveRecord::Associations::CollectionProxy, pluck: keys)
+    allow(batch).to receive(:historical_paychecks).and_return(association)
+    expect(HistoricalPaycheck).to receive(:joins).twice.and_call_original
+
+    expect(described_class.new(batch: batch, actor: actor).send(:ensure_no_applied_duplicates!)).to be_nil
+  end
 end

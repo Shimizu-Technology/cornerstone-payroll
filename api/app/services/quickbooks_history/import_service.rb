@@ -2,6 +2,7 @@
 
 module QuickbooksHistory
   class ImportService
+    EXTERNAL_KEY_QUERY_BATCH_SIZE = 5_000
     MONEY_FIELDS = %i[
       gross_pay adjusted_gross pretax_deductions employee_taxes federal_income_tax
       social_security_tax medicare_tax after_tax_deductions net_pay employer_taxes
@@ -56,12 +57,14 @@ module QuickbooksHistory
       end
 
       Result.new(batch: batch, idempotent: false)
-    rescue ActiveRecord::RecordNotUnique
-      existing = HistoricalImportBatch.find_by!(
+    rescue ActiveRecord::RecordNotUnique => e
+      existing = HistoricalImportBatch.find_by(
         company: company,
         source_system: "quickbooks_online",
         bundle_digest: parsed.bundle_digest
       )
+      raise e unless existing
+
       Result.new(batch: existing, idempotent: true)
     rescue ArgumentError, ActiveRecord::RecordInvalid => e
       Result.new(idempotent: false, error: e)
@@ -72,12 +75,15 @@ module QuickbooksHistory
     attr_reader :company, :files, :actor
 
     def duplicate_source_count(paychecks)
-      keys = paychecks.map { |row| row.fetch(:external_key) }
-      HistoricalPaycheck.joins(:historical_import_batch)
-                        .where(company: company, external_key: keys)
-                        .merge(HistoricalImportBatch.visible_history)
-                        .distinct
-                        .count
+      paychecks.map { |row| row.fetch(:external_key) }
+               .each_slice(EXTERNAL_KEY_QUERY_BATCH_SIZE)
+               .sum do |keys|
+        HistoricalPaycheck.joins(:historical_import_batch)
+                           .where(company: company, external_key: keys)
+                           .merge(HistoricalImportBatch.visible_history)
+                           .distinct
+                           .count
+      end
     end
 
     def create_workers!(batch, worker_rows)

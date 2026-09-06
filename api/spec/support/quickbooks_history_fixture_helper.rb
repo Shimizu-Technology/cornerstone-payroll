@@ -47,7 +47,8 @@ module QuickbooksHistoryFixtureHelper
 
   def quickbooks_history_uploads_with_custom_opening_range
     details = payroll_details_rows
-    details[6][2] = "01/01/2024 - 05/31/2024"
+    opening_row = details.find { |row| row[0] == "*Worker, Bob" }
+    opening_row[2] = "01/01/2024 - 05/31/2024"
 
     authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
   end
@@ -56,13 +57,8 @@ module QuickbooksHistoryFixtureHelper
     details = payroll_details_rows
     summary = payroll_summary_rows(details)
     summary[5][6] = -199
-    [
-      build_quickbooks_xls("Payroll Details.xls", details),
-      build_quickbooks_xls("Paycheck History.xls", paycheck_history_rows),
-      build_quickbooks_xls("Employee Details.xls", employee_details_rows),
-      build_quickbooks_xls("Employee Directory.xls", employee_directory_rows),
-      build_quickbooks_xls("Payroll Summary.xls", summary)
-    ]
+
+    authoritative_quickbooks_files(details: details, history: paycheck_history_rows, summary: summary)
   end
 
   def review_historical_workers_as_archive_only(batch, actor:)
@@ -81,20 +77,22 @@ module QuickbooksHistoryFixtureHelper
 
   private
 
-  def authoritative_quickbooks_files(details:, history:, employee_details: nil, suffix: nil)
+  def authoritative_quickbooks_files(details:, history:, employee_details: nil, summary: nil, suffix: nil)
     employee_details ||= employee_details_rows
+    summary ||= payroll_summary_rows(details)
     [
       build_quickbooks_xls("Payroll Details#{suffix}.xls", details),
       build_quickbooks_xls("Paycheck History.xls", history),
       build_quickbooks_xls("Employee Details.xls", employee_details),
       build_quickbooks_xls("Employee Directory.xls", employee_directory_rows),
-      build_quickbooks_xls("Payroll Summary.xls", payroll_summary_rows(details))
+      build_quickbooks_xls("Payroll Summary.xls", summary)
     ]
   end
 
   def build_quickbooks_xls(filename, rows)
     @quickbooks_history_tempfiles ||= []
     tempfile = Tempfile.new([ "quickbooks-history", ".xls" ])
+    tempfile.close
     workbook = Spreadsheet::Workbook.new
     sheet = workbook.create_worksheet
     rows.each_with_index do |row, row_index|
@@ -184,4 +182,7 @@ end
 
 RSpec.configure do |config|
   config.include QuickbooksHistoryFixtureHelper
+  config.after do
+    cleanup_quickbooks_history_uploads if defined?(@quickbooks_history_tempfiles)
+  end
 end

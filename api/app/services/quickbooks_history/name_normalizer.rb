@@ -4,13 +4,15 @@ module QuickbooksHistory
   class NameNormalizer
     class << self
       def call(value)
-        value.to_s
-             .scrub("")
-             .unicode_normalize(:nfkd)
-             .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
-             .downcase
-             .gsub(/[^a-z0-9]+/, " ")
-             .squish
+        normalized = value.to_s.scrub("").unicode_normalize(:nfkd)
+        ascii = normalized
+                .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
+                .downcase
+                .gsub(/[^a-z0-9]+/, " ")
+                .squish
+        return ascii if ascii.present?
+
+        normalized.downcase.gsub(/[^\p{L}\p{N}]+/, " ").squish
       end
 
       def employee(employee)

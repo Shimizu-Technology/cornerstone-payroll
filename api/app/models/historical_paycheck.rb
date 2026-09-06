@@ -41,6 +41,8 @@ class HistoricalPaycheck < ApplicationRecord
   end
 
   def prevent_snapshot_mutation
+    # Employee linkage is changed only by MappingService's locked, preview-only
+    # bulk write. Ordinary model updates remain fully immutable.
     errors.add(:base, "Historical paycheck snapshots are immutable")
     throw(:abort)
   end

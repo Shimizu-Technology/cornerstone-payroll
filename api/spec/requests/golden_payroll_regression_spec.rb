@@ -201,6 +201,8 @@ RSpec.describe "Golden payroll regression", type: :request do
     lifecycle.apply!(acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT)
     lifecycle.lock!
 
+    expect(batch.reload).to be_locked
+    expect(batch.historical_paychecks.count).to eq(2)
     expect(live_payroll_snapshot).to eq(before_snapshot)
   end
 

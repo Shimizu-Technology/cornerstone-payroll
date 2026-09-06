@@ -30,6 +30,8 @@ module QuickbooksHistory
 
         if archive_only
           worker.update!(employee: nil, mapping_status: "archive_only", match_method: "archive_only", match_confidence: nil)
+          # The batch and worker locks plus preview guard above are the only
+          # authorized path around HistoricalPaycheck's ordinary immutability.
           worker.historical_paychecks.update_all(employee_id: nil, updated_at: Time.current)
         else
           worker.update!(employee: employee, mapping_status: "manual_match", match_method: "manual", match_confidence: 1)

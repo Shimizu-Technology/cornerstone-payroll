@@ -40,6 +40,7 @@ import {
 import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
+const MAX_BUNDLE_FILES = 75;
 
 function dollars(value?: string | number | null): string {
   return formatCurrency(Number(value || 0));
@@ -118,6 +119,31 @@ function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactEl
         ))}
       </div>
     </section>
+  );
+}
+
+function PaycheckDetail({ paycheck }: { paycheck: HistoricalPaycheck }): ReactElement {
+  const taxesAndDeductions = Number(paycheck.employee_taxes)
+    + Number(paycheck.pretax_deductions)
+    + Number(paycheck.after_tax_deductions);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 rounded-2xl bg-neutral-950 p-6 text-white sm:grid-cols-3">
+        <div><p className="text-xs text-neutral-400">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div>
+        <div><p className="text-xs text-neutral-400">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(taxesAndDeductions)}</p></div>
+        <div><p className="text-xs text-neutral-400">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div>
+      </div>
+      <div className="grid gap-6 md:grid-cols-2">
+        <Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" />
+        <Breakdown title="Earnings" lines={paycheck.earnings_breakdown} />
+        <Breakdown title="Pre-tax deductions" lines={paycheck.pretax_deduction_breakdown} />
+        <Breakdown title="Employee taxes" lines={paycheck.employee_tax_breakdown} />
+        <Breakdown title="After-tax deductions" lines={paycheck.after_tax_deduction_breakdown} />
+        <Breakdown title="Employer taxes" lines={paycheck.employer_tax_breakdown} />
+        <Breakdown title="Employer contributions" lines={paycheck.employer_contribution_breakdown} />
+      </div>
+    </div>
   );
 }
 
@@ -323,6 +349,21 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
+  const handleFileSelection = (fileList: FileList | null): void => {
+    const selected = Array.from(fileList || []);
+    if (selected.length > MAX_BUNDLE_FILES) {
+      setFiles([]);
+      setValidationErrors({});
+      setError(`Select at most ${MAX_BUNDLE_FILES} files.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setError(null);
+    setValidationErrors({});
+    setFiles(selected);
+  };
+
   const runLifecycleAction = async (): Promise<void> => {
     if (!confirmation) return;
     const { action: confirmedAction, batchId } = confirmation;
@@ -341,9 +382,6 @@ export function HistoricalPayroll(): ReactElement {
           : 'The reconciled QuickBooks batch is locked against ordinary changes.',
       });
       setConfirmation(null);
-      setBatches((current) => current.map((batch) => (
-        batch.id === response.data.id ? { ...batch, ...response.data } : batch
-      )));
       await loadList();
       setDetail((current) => current?.id === response.data.id ? { ...current, ...response.data } : current);
     } catch (err) {
@@ -496,8 +534,8 @@ export function HistoricalPayroll(): ReactElement {
                   <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-300 bg-primary-50/50 px-6 py-6 text-center transition hover:border-primary-500 hover:bg-primary-50 focus-within:ring-2 focus-within:ring-primary-300">
                     <UploadCloud className="h-7 w-7 text-primary-700" />
                     <span className="mt-3 text-sm font-semibold text-neutral-900">Select exported files</span>
-                    <span className="mt-1 text-xs text-neutral-500">XLS, XLSX, PDF, JPG or PNG · up to 75 files</span>
-                    <input ref={fileInputRef} type="file" multiple accept=".xls,.xlsx,.pdf,.jpg,.jpeg,.png" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+                    <span className="mt-1 text-xs text-neutral-500">XLS, XLSX, PDF, JPG or PNG · up to {MAX_BUNDLE_FILES} files</span>
+                    <input ref={fileInputRef} type="file" multiple accept=".xls,.xlsx,.pdf,.jpg,.jpeg,.png" className="sr-only" onChange={(event) => handleFileSelection(event.target.files)} />
                   </label>
                   <div className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0 truncate text-neutral-600">{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'No files selected'}</span><Button onClick={() => void handlePreview()} disabled={!files.length || action !== null}>{action === 'preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}Build preview</Button></div>
                 </>
@@ -584,7 +622,7 @@ export function HistoricalPayroll(): ReactElement {
                                 disabled={mappingWorkerId === worker.id}
                                 className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
                               >
-                                <option value="">Needs review</option>
+                                <option value="" disabled>Needs review</option>
                                 <option value="archive_only">Keep as archive-only</option>
                                 {worker.employee_id && !employees.some((employee) => employee.id === worker.employee_id) && <option value={worker.employee_id}>{worker.employee_name || 'Currently linked employee'}</option>}
                                 <optgroup label="Link to live employee">
@@ -651,7 +689,15 @@ export function HistoricalPayroll(): ReactElement {
           <Card>
             <CardHeader><CardTitle>Source inventory</CardTitle><CardDescription>{selectedBatch.source_file_manifest.length} files fingerprinted. Private source content and employee tax details are never returned by this screen.</CardDescription></CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {selectedBatch.source_file_manifest.map((file) => <div key={`${file.filename}-${file.sha256}`} className="flex min-w-0 items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3"><FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" /><div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-900" title={file.filename}>{file.filename}</p><p className="mt-1 text-xs text-neutral-500">{file.report_type.replaceAll('_', ' ')} · {(file.byte_size / 1024).toFixed(0)} KB</p></div></div>)}
+              {selectedBatch.source_file_manifest.map((file) => (
+                <div key={`${file.filename}-${file.sha256}`} className="flex min-w-0 items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+                  <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-neutral-900" title={file.filename}>{file.filename}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{file.report_type.replaceAll('_', ' ')} · {(file.byte_size / 1024).toFixed(0)} KB</p>
+                  </div>
+                </div>
+              ))}
             </CardContent>
           </Card>
         )}
@@ -662,7 +708,7 @@ export function HistoricalPayroll(): ReactElement {
       <Dialog open={Boolean(paycheck)} onOpenChange={(open) => !open && setPaycheck(null)}>
         <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
           <DialogHeader><DialogTitle>{paycheck?.source_employee_name}</DialogTitle><DialogDescription>{paycheck ? `${shortDate(paycheck.pay_date)} payday · ${formatDateRange(paycheck.period_start, paycheck.period_end)}` : ''}</DialogDescription></DialogHeader>
-          {paycheck && <div className="space-y-6"><div className="grid gap-4 rounded-2xl bg-neutral-950 p-6 text-white sm:grid-cols-3"><div><p className="text-xs text-neutral-400">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div><div><p className="text-xs text-neutral-400">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(Number(paycheck.employee_taxes) + Number(paycheck.pretax_deductions) + Number(paycheck.after_tax_deductions))}</p></div><div><p className="text-xs text-neutral-400">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div></div><div className="grid gap-6 md:grid-cols-2"><Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" /><Breakdown title="Earnings" lines={paycheck.earnings_breakdown} /><Breakdown title="Pre-tax deductions" lines={paycheck.pretax_deduction_breakdown} /><Breakdown title="Employee taxes" lines={paycheck.employee_tax_breakdown} /><Breakdown title="After-tax deductions" lines={paycheck.after_tax_deduction_breakdown} /><Breakdown title="Employer taxes" lines={paycheck.employer_tax_breakdown} /><Breakdown title="Employer contributions" lines={paycheck.employer_contribution_breakdown} /></div></div>}
+          {paycheck && <PaycheckDetail paycheck={paycheck} />}
           <DialogFooter><Button variant="outline" onClick={() => setPaycheck(null)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>

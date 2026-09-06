@@ -125,6 +125,16 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(second.batch).to be_previewed
   end
 
+  it "checks large external-key sets in bounded database queries" do
+    rows = (1..(described_class::EXTERNAL_KEY_QUERY_BATCH_SIZE + 1)).map do |index|
+      { external_key: "source-key-#{index}" }
+    end
+    service = described_class.new(company: company, files: [], actor: actor)
+    expect(HistoricalPaycheck).to receive(:joins).twice.and_call_original
+
+    expect(service.send(:duplicate_source_count, rows)).to eq(0)
+  end
+
   it "returns a failure result after rolling back an invalid persistence operation" do
     invalid_batch = HistoricalImportBatch.new
     invalid_batch.errors.add(:source_label, "can't be blank")
@@ -156,5 +166,14 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(result.error).to be_a(ArgumentError)
     expect(result.error.message).to match(/Gross pay - total is not a valid number/)
     expect(HistoricalImportBatch.count).to eq(0)
+  end
+
+  it "re-raises an unrelated unique-index violation instead of misreporting an idempotent race" do
+    database_error = ActiveRecord::RecordNotUnique.new("different unique index")
+    allow(HistoricalPaycheck).to receive(:insert_all!).and_raise(database_error)
+
+    expect do
+      described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call
+    end.to raise_error(database_error)
   end
 end

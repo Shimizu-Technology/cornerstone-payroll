@@ -129,6 +129,7 @@ class CreateQuickbooksHistoricalImports < ActiveRecord::Migration[8.1]
               unique: true,
               name: "idx_historical_paychecks_unique_source"
     add_index :historical_paychecks, %i[company_id pay_date]
+    add_index :historical_paychecks, %i[company_id external_key]
     add_index :historical_paychecks, %i[historical_worker_id pay_date]
     add_check_constraint :historical_paychecks,
                          "period_end >= period_start AND pay_date >= period_end",

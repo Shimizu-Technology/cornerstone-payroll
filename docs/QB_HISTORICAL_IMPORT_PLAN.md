@@ -93,7 +93,7 @@ APPLY=1 LOCK=1 \
 bundle exec rails quickbooks_history:import
 ```
 
-The command prints only aggregate counts, state, and a shortened digest. It does not print employee names, tax identifiers, addresses, or banking data.
+The command prints the import outcome, batch and company IDs, aggregate counts, state, warning and error counts, and a shortened digest. It does not print employee names, tax identifiers, addresses, or banking data.
 
 ## Promotion gate
 

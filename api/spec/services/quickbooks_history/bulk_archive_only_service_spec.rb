@@ -16,15 +16,27 @@ RSpec.describe QuickbooksHistory::BulkArchiveOnlyService do
     employee = create(:employee, company: company)
     QuickbooksHistory::MappingService.new(worker: worker, employee: employee, actor: admin).call
 
-    expect do
-      result = described_class.new(batch: batch, actor: admin).call
-      expect(result).to be_success
-      expect(result.reviewed_count).to eq(2)
-    end.not_to change(Employee, :count)
+    employee_count = Employee.count
+    audit_count = AuditLog.count
+    result = described_class.new(batch: batch, actor: admin).call
+
+    expect(result).to be_success
+    expect(result.reviewed_count).to eq(2)
+    expect(Employee.count).to eq(employee_count)
+    expect(AuditLog.count).to eq(audit_count + 1)
 
     expect(worker.reload.mapping_status).to eq("manual_match")
     expect(batch.historical_workers.where(mapping_status: "archive_only").count).to eq(2)
     expect(batch.unresolved_worker_count).to eq(0)
+    expect(AuditLog.last).to have_attributes(
+      user: admin,
+      company_id: company.id,
+      action: "historical_imports#archive_unlinked_workers",
+      record_type: "historical_import_batches",
+      record_id: batch.id,
+      subject_name: batch.source_label,
+      metadata: { "reviewed_count" => 2 }
+    )
   end
 
   it "refuses bulk review after the batch is applied" do

@@ -233,9 +233,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const historicalPayrollEnabled = activeCompany?.historical_payroll_enabled === true;
   const primaryNavigation = isClient
     ? portalNavigation
-    : clientNavigation.filter((item) => item.href !== '/historical-payroll' || activeCompany?.historical_payroll_enabled);
+    : clientNavigation.filter((item) => (
+        item.href === '/historical-payroll' ? historicalPayrollEnabled : true
+      ));
 
   useEffect(() => {
     if (!userMenuOpen) return;

@@ -28,6 +28,16 @@ module QuickbooksHistory
           match_confidence: nil,
           updated_at: Time.current
         )
+        AuditLog.record!(
+          user: actor,
+          organization_id: batch.company.organization_id,
+          company_id: batch.company_id,
+          action: "historical_imports#archive_unlinked_workers",
+          record_type: "historical_import_batches",
+          record_id: batch.id,
+          subject_name: batch.source_label,
+          metadata: { reviewed_count: count }
+        )
         Result.new(reviewed_count: count)
       end
     rescue ArgumentError => e

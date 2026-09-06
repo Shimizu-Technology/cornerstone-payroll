@@ -128,7 +128,7 @@ module Api
         private
 
         def require_historical_payroll_enabled!
-          return if current_company.historical_payroll_enabled?
+          return if current_company&.historical_payroll_enabled?
 
           render json: {
             error: "Historical payroll is not enabled for this client",

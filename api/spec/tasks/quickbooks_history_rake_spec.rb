@@ -15,6 +15,7 @@ RSpec.describe "quickbooks_history:import" do
     Rails.application.load_tasks unless Rake::Task.task_defined?("quickbooks_history:import")
     task.reenable
     @previous_env = managed_env_keys.index_with { |key| ENV[key] }
+    managed_env_keys.each { |key| ENV.delete(key) }
     ENV["BUNDLE_DIR"] = bundle_dir
     ENV["COMPANY_ID"] = company.id.to_s
   end
@@ -30,6 +31,7 @@ RSpec.describe "quickbooks_history:import" do
 
   it "rejects an accountant before reading or staging source files" do
     ENV["ACTOR_EMAIL"] = accountant.email
+    expect(QuickbooksHistory::BundleParser).not_to receive(:new)
 
     expect do
       task.invoke

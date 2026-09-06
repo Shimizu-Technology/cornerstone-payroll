@@ -70,10 +70,12 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/historical_imports",
         action_name: "index"
       )).to eq(:payroll_operations)
-      expect(described_class.capability_for(
-        controller_path: "api/v1/admin/historical_imports",
-        action_name: "apply"
-      )).to eq(:manage_client_configuration)
+      %w[preview apply lock archive_unlinked_workers update_worker].each do |action_name|
+        expect(described_class.capability_for(
+          controller_path: "api/v1/admin/historical_imports",
+          action_name: action_name
+        )).to eq(:manage_client_configuration)
+      end
       %w[create update destroy apply apply_to_all_companies clear_active].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",

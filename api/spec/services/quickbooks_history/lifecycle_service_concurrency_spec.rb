@@ -54,7 +54,7 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     first = apply_thread(first_batch.id, results, after_duplicate_check: pause_after_duplicate_check)
     pop_with_timeout(first_checked)
     second = apply_thread(second_batch.id, results)
-    expect { Timeout.timeout(0.2) { results.pop } }.to raise_error(Timeout::Error)
+    expect { pop_with_timeout(results, seconds: 0.2) }.to raise_error(Timeout::Error)
     release_first << true
     [ first, second ].each { |thread| Timeout.timeout(10) { thread.join } }
 
@@ -90,8 +90,10 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
 
   private
 
-  def pop_with_timeout(queue)
-    Timeout.timeout(10) { queue.pop }
+  def pop_with_timeout(queue, seconds: 10)
+    queue.pop(timeout: seconds) || raise(Timeout::Error, "Timed out waiting for a queue value")
+  rescue ThreadError
+    raise Timeout::Error, "Timed out waiting for a queue value"
   end
 
   def apply_thread(batch_id, results, after_duplicate_check: nil)

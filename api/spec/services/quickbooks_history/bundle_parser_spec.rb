@@ -108,7 +108,8 @@ RSpec.describe QuickbooksHistory::BundleParser do
     files = quickbooks_history_uploads
     rows = employee_details_rows
     rows[0] = [ "Different Company" ]
-    files[2] = build_quickbooks_xls("Employee Details.xls", rows)
+    index = files.index { |file| file.original_filename == "Employee Details.xls" }
+    files[index] = build_quickbooks_xls("Employee Details.xls", rows)
 
     result = described_class.new(files: files).call
 
@@ -120,7 +121,8 @@ RSpec.describe QuickbooksHistory::BundleParser do
     files = quickbooks_history_uploads
     rows = employee_details_rows
     rows[0] = [ "" ]
-    files[2] = build_quickbooks_xls("Employee Details.xls", rows)
+    index = files.index { |file| file.original_filename == "Employee Details.xls" }
+    files[index] = build_quickbooks_xls("Employee Details.xls", rows)
 
     result = described_class.new(files: files).call
 
@@ -137,7 +139,8 @@ RSpec.describe QuickbooksHistory::BundleParser do
     result = described_class.new(files: [ upload ]).call
 
     expect(result.errors).to include("Broken Payroll Details.xls could not be read as a spreadsheet")
-    expect(result.manifest.first.fetch(:parse_error)).to eq("Spreadsheet could not be read")
+    expect(result.manifest.first.fetch(:parse_error)).to match(/FormatError:/)
+    expect(result.manifest.first.fetch(:parse_error)).not_to include(file.path)
   ensure
     file&.close!
   end

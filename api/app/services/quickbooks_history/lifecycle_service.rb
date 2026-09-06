@@ -78,11 +78,13 @@ module QuickbooksHistory
 
     def ensure_no_applied_duplicates!
       keys = batch.historical_paychecks.pluck(:external_key)
-      duplicate = HistoricalPaycheck.joins(:historical_import_batch)
-                                    .where(company_id: batch.company_id, external_key: keys)
-                                    .where.not(historical_import_batch_id: batch.id)
-                                    .merge(HistoricalImportBatch.visible_history)
-                                    .exists?
+      duplicate = keys.each_slice(ImportService::EXTERNAL_KEY_QUERY_BATCH_SIZE).any? do |key_slice|
+        HistoricalPaycheck.joins(:historical_import_batch)
+                           .where(company_id: batch.company_id, external_key: key_slice)
+                           .where.not(historical_import_batch_id: batch.id)
+                           .merge(HistoricalImportBatch.visible_history)
+                           .exists?
+      end
       raise ArgumentError, "One or more paycheck snapshots already exist in applied QuickBooks history" if duplicate
     end
   end

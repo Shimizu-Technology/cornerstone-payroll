@@ -28,7 +28,7 @@ RSpec.describe QuickbooksHistory::SpreadsheetReader do
   end
 
 
-  it "closes an xls workbook after materializing its rows" do
+  it "materializes rows from a legacy xls workbook through the block form" do
     worksheet = [ [ "legacy value" ] ]
     workbook = instance_double(Spreadsheet::Workbook, worksheet: worksheet)
     allow(Spreadsheet).to receive(:open).with("/tmp/example.xls").and_yield(workbook)

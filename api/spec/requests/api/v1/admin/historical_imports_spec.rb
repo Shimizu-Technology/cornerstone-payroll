@@ -196,6 +196,34 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     )
   end
 
+  it "returns a parser error envelope for a malformed upload bundle" do
+    details = payroll_details_rows
+    details[5][5] = "not money"
+
+    post "/api/v1/admin/historical_imports/preview", params: {
+      files: authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include(
+      "error" => a_string_matching(/Gross pay - total is not a valid number/),
+      "details" => {}
+    )
+    expect(HistoricalImportBatch.count).to eq(0)
+  end
+
+  it "fails safely when no active company is selected" do
+    super_admin = create(:user, company: company, organization: company.organization, role: "super_admin")
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(super_admin)
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_company_id).and_return(nil)
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_company).and_return(nil)
+
+    get "/api/v1/admin/historical_imports"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Historical payroll is not enabled for this client")
+  end
+
   it "does not expose encrypted employee setup snapshots in API responses" do
     batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
 

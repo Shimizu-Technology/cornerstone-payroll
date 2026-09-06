@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactElement } from 'react';
+import { useState, useEffect, useCallback, useId, type ReactElement } from 'react';
 import { Plus, Building2, Check, X, Pencil } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -57,21 +57,24 @@ function formatEIN(value: string): string {
 interface SettingToggleProps {
   checked: boolean;
   label: string;
-  ariaLabel: string;
-  description: string;
+  description?: string;
   onToggle: () => void;
 }
 
-function SettingToggle({ checked, label, ariaLabel, description, onToggle }: SettingToggleProps): ReactElement {
+function SettingToggle({ checked, label, description, onToggle }: SettingToggleProps): ReactElement {
+  const switchId = useId();
+  const labelId = `${switchId}-label`;
+
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+    <div className="flex items-start gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
       <button
+        id={switchId}
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={ariaLabel}
+        aria-labelledby={labelId}
         onClick={onToggle}
-        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 ${
           checked ? 'bg-blue-600' : 'bg-gray-300'
         }`}
       >
@@ -82,8 +85,8 @@ function SettingToggle({ checked, label, ariaLabel, description, onToggle }: Set
         />
       </button>
       <div>
-        <p className="text-sm font-medium text-gray-800">{label}</p>
-        <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>
+        <label id={labelId} htmlFor={switchId} className="cursor-pointer text-sm font-medium text-gray-800">{label}</label>
+        {description && <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>}
       </div>
     </div>
   );
@@ -375,7 +378,6 @@ export function Clients() {
                   <SettingToggle
                     checked={form.simple_payroll_register_enabled === true}
                     label="Simple payroll register Excel format"
-                    ariaLabel="Use simple payroll register Excel format"
                     description="Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
                     onToggle={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
                   />
@@ -383,7 +385,6 @@ export function Clients() {
                   <SettingToggle
                     checked={form.historical_payroll_enabled === true}
                     label="Historical payroll workspace"
-                    ariaLabel="Enable historical payroll workspace"
                     description="Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review."
                     onToggle={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
                   />
@@ -417,24 +418,11 @@ export function Clients() {
 
               {/* Active toggle (edit only) */}
               {editingId && canManageClients && (
-                <div className="flex items-center gap-3 pt-2">
-                  <label className="text-sm font-medium text-gray-700">Active</label>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={form.active !== false}
-                    onClick={() => updateField('active', form.active === false)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      form.active !== false ? 'bg-blue-600' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        form.active !== false ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
+                <SettingToggle
+                  checked={form.active !== false}
+                  label="Active client"
+                  onToggle={() => updateField('active', form.active === false)}
+                />
               )}
             </div>
 

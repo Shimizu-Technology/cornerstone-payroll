@@ -154,16 +154,21 @@ module QuickbooksHistory
       }
       return entry unless extension.in?(%w[.xls .xlsx])
 
+      parse_error = nil
       rows = begin
         SpreadsheetReader.read(path: file.path, extension: extension)
-      rescue StandardError
+      rescue StandardError => e
+        Rails.logger.warn(
+          "QuickbooksHistory::BundleParser failed to read #{entry.fetch(:filename)}: #{e.class}: #{e.message}"
+        )
+        parse_error = "#{e.class}: #{sanitized_parse_error_message(e, file)}"
         nil
       end
-      unless rows
+      if rows.nil?
         return entry.merge(
           report_type: "unreadable_spreadsheet",
           expected_report_type: classify_report("", file.original_filename),
-          parse_error: "Spreadsheet could not be read"
+          parse_error: parse_error
         )
       end
 
@@ -179,6 +184,16 @@ module QuickbooksHistory
 
     def safe_filename(file)
       File.basename(file.original_filename.to_s).gsub(/[\u0000-\u001f]/, "").truncate(240)
+    end
+
+    def sanitized_parse_error_message(error, file)
+      error.message.to_s
+           .scrub("")
+           .gsub(file.path.to_s, safe_filename(file))
+           .gsub(Rails.root.to_s, "[application]")
+           .gsub(/[\u0000-\u001f]/, " ")
+           .squish
+           .truncate(500)
     end
 
     def supplemental_report_type(extension)

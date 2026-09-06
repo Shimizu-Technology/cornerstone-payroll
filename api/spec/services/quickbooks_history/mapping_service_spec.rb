@@ -39,6 +39,16 @@ RSpec.describe QuickbooksHistory::MappingService do
     expect(employee.errors.full_messages).to include("Cannot delete record because dependent historical workers exist")
   end
 
+  it "allows multiple historical source identities to link to one live employee" do
+    other_worker = batch.historical_workers.find_by!(normalized_name: "worker bob")
+
+    described_class.new(worker: worker, employee: employee, actor: admin).call
+    described_class.new(worker: other_worker, employee: employee, actor: admin).call
+
+    expect(batch.historical_workers.where(employee_id: employee.id).count).to eq(2)
+    expect(batch.historical_paychecks.where(employee_id: employee.id).count).to eq(2)
+  end
+
   it "records an explicit archive-only disposition without changing live employees" do
     expect do
       described_class.new(worker: worker, employee: nil, actor: admin, archive_only: true).call
