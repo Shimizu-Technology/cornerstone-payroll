@@ -51,9 +51,7 @@ async function expectBusyDialogCannotDismiss(page: Page, dialogName: RegExp | st
   const dialog = page.getByRole('dialog', { name: dialogName });
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
-  await page.locator('[data-dialog-portal]').last().evaluate((portal: HTMLElement): void => {
-    (portal.firstElementChild as HTMLElement).click();
-  });
+  await page.mouse.click(8, 8);
   await expect(dialog).toBeVisible();
 }
 

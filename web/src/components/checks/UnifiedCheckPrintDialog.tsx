@@ -173,7 +173,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     }
   };
 
-  const requestClose = () => {
+  const requestClose = (): void => {
     if (loading || action || savingNumbers) return;
     if (hasUnsavedNumbers && !window.confirm('Discard the unsaved check-number changes?')) return;
     discardNumberChanges();
@@ -267,7 +267,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     <>
       <Dialog
         open={open}
-        onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()}
+        onOpenChange={(nextOpen): void => nextOpen ? onOpenChange(true) : requestClose()}
         dismissOnEscape={!loading && !action && !savingNumbers}
       >
         <DialogContent className="dialog-wide flex max-h-[92vh] flex-col overflow-hidden p-0">
@@ -398,7 +398,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     <Button className="mt-3" size="sm" variant="outline" onClick={() => void loadPreview(run)} disabled={Boolean(action)}>Retry preview</Button>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={() => void download()} disabled={Boolean(action)}>Download</Button></div>
+                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={(): void => void download()} disabled={Boolean(action)}>Download</Button></div>
               </div>
             )}
             {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -445,12 +445,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
           )}
 
           <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
-            <Button variant="outline" onClick={() => setPreviewExpanded(false)} disabled={Boolean(action)}>Return to package</Button>
+            <Button variant="outline" onClick={(): void => setPreviewExpanded(false)} disabled={Boolean(action)}>Return to package</Button>
             <Button variant="outline" onClick={print} disabled={!previewUrl} className="gap-2">
               <Printer className="h-4 w-4" />
               Print
             </Button>
-            <Button variant="outline" onClick={() => void download()} disabled={Boolean(action)} className="gap-2">
+            <Button variant="outline" onClick={(): void => void download()} disabled={Boolean(action)} className="gap-2">
               <Download className="h-4 w-4" />
               Download
             </Button>
