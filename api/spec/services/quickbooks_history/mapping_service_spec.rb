@@ -93,4 +93,20 @@ RSpec.describe QuickbooksHistory::MappingService do
     end.to raise_error(ArgumentError, /only be changed while the batch is a preview/)
     expect(worker.reload.employee_id).to be_nil
   end
+
+  it "never permits a staged worker to move to another import batch" do
+    other_batch = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "Other preview",
+      bundle_digest: "other-preview-digest",
+      importer_version: "test",
+      status: "previewed"
+    )
+
+    expect(worker.update(historical_import_batch: other_batch)).to be(false)
+    expect(worker.errors.full_messages).to include(
+      "Historical import batch cannot be changed after the worker is staged"
+    )
+    expect(worker.reload.historical_import_batch_id).to eq(batch.id)
+  end
 end

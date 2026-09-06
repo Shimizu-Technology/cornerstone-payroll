@@ -18,6 +18,7 @@ class HistoricalWorker < ApplicationRecord
   validates :employee, presence: true, if: -> { mapping_status.in?(%w[exact_match manual_match]) }
   validates :employee, absence: true, if: -> { mapping_status.in?(%w[needs_review archive_only]) }
   validate :company_consistency
+  validate :historical_import_batch_immutable, on: :update
 
   before_update :prevent_non_preview_update
   before_destroy :prevent_non_preview_destroy
@@ -40,6 +41,12 @@ class HistoricalWorker < ApplicationRecord
     return if historical_import_batch.blank? || historical_import_batch.company_id == company_id
 
     errors.add(:company_id, "must match the historical import batch")
+  end
+
+  def historical_import_batch_immutable
+    return unless will_save_change_to_historical_import_batch_id?
+
+    errors.add(:historical_import_batch_id, "cannot be changed after the worker is staged")
   end
 
   def prevent_non_preview_update

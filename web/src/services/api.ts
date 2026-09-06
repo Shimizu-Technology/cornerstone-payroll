@@ -364,7 +364,7 @@ export const employeesApi = {
     page?: number;
     per_page?: number;
     group_by?: string;
-  }, signal?: AbortSignal) =>
+  }, signal?: AbortSignal): Promise<{ data: Employee[]; meta: PaginationMeta }> =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`),
