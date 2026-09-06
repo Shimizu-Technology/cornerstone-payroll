@@ -3782,11 +3782,11 @@ export interface HistoricalImportBatch {
   locked_at?: string | null;
   locked_by_name?: string | null;
   cutover_review?: HistoricalCutoverReview | null;
-  client_bootstrap?: HistoricalClientBootstrap | null;
+  client_bootstrap?: HistoricalClientBootstrapSummary | null;
   created_at: string;
 }
 
-export interface HistoricalClientBootstrap {
+export interface HistoricalClientBootstrapSummary {
   id: number;
   status: 'previewed' | 'pending' | 'applied' | 'failed';
   plan_digest: string;
@@ -3802,14 +3802,6 @@ export interface HistoricalClientBootstrap {
     employees_needing_review_count: number;
     error_count: number;
   };
-  warnings: Array<{ message: string; worker_count: number }>;
-  errors: string[];
-  review_items: Array<{
-    code: string;
-    message: string;
-    worker_count: number;
-    historical_worker_ids: number[];
-  }>;
   ready_to_apply: boolean;
   apply_started_at?: string | null;
   apply_error?: string | null;
@@ -3818,6 +3810,17 @@ export interface HistoricalClientBootstrap {
   acknowledgement: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface HistoricalClientBootstrap extends HistoricalClientBootstrapSummary {
+  warnings: Array<{ message: string; worker_count: number }>;
+  errors: string[];
+  review_items: Array<{
+    code: string;
+    message: string;
+    worker_count: number;
+    historical_worker_ids: number[];
+  }>;
 }
 
 export interface HistoricalImportSourceFile {
@@ -3899,6 +3902,7 @@ export interface HistoricalPaycheck {
 }
 
 export interface HistoricalImportDetail extends HistoricalImportBatch {
+  client_bootstrap?: HistoricalClientBootstrap | null;
   periods: HistoricalPayPeriod[];
   workers: HistoricalWorker[];
   paychecks: HistoricalPaycheck[];

@@ -8,6 +8,6 @@ class ValidateEmployeeConfigurationConstraints < ActiveRecord::Migration[8.0]
   end
 
   def down
-    # Validation is intentionally not undone; the constraints remain valid.
+    raise ActiveRecord::IrreversibleMigration, "Validated employee configuration constraints cannot be made unvalidated safely"
   end
 end

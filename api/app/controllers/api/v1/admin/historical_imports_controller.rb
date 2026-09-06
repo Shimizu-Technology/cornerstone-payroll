@@ -31,7 +31,13 @@ module Api
           page_batches = batches.offset((page - 1) * per_page).limit(per_page).to_a
           mapping_counts = worker_mapping_counts(page_batches)
           render json: {
-            data: page_batches.map { |batch| batch_json(batch, mapping_counts: mapping_counts.fetch(batch.id, {})) },
+            data: page_batches.map do |batch|
+              batch_json(
+                batch,
+                mapping_counts: mapping_counts.fetch(batch.id, {}),
+                include_client_bootstrap_details: false
+              )
+            end,
             meta: {
               current_page: page,
               per_page: per_page,
@@ -162,7 +168,7 @@ module Api
             batch: @batch,
             actor: current_user
           ).call
-          render json: { data: client_bootstrap_json(bootstrap) }
+          render json: { data: client_bootstrap_json(bootstrap, include_details: true) }
         rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
           render json: error_payload(e), status: :forbidden
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
@@ -342,7 +348,13 @@ module Api
           }
         end
 
-        def batch_json(batch, mapping_counts: nil, include_source_files: false, include_cutover_evidence: false)
+        def batch_json(
+          batch,
+          mapping_counts: nil,
+          include_source_files: false,
+          include_cutover_evidence: false,
+          include_client_bootstrap_details: true
+        )
           mapping_counts ||= batch.historical_workers.group(:mapping_status).count
           source_files = if batch.association(:historical_import_source_files).loaded?
             batch.historical_import_source_files.target.sort_by { |file| [ file.position, file.id ] }
@@ -384,7 +396,10 @@ module Api
               batch.historical_import_cutover_review,
               include_evidence: include_cutover_evidence
             ),
-            client_bootstrap: client_bootstrap_json(batch.historical_client_bootstrap),
+            client_bootstrap: client_bootstrap_json(
+              batch.historical_client_bootstrap,
+              include_details: include_client_bootstrap_details
+            ),
             created_at: batch.created_at
           }
           payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
@@ -431,17 +446,14 @@ module Api
           }
         end
 
-        def client_bootstrap_json(bootstrap)
+        def client_bootstrap_json(bootstrap, include_details:)
           return nil unless bootstrap
 
-          {
+          payload = {
             id: bootstrap.id,
             status: bootstrap.status,
             plan_digest: bootstrap.plan_digest,
             preview_summary: bootstrap.preview_summary,
-            warnings: bootstrap.warnings,
-            errors: bootstrap.validation_errors,
-            review_items: bootstrap.review_items,
             ready_to_apply: bootstrap.ready_to_apply?,
             apply_started_at: bootstrap.apply_started_at,
             apply_error: bootstrap.apply_error,
@@ -451,6 +463,14 @@ module Api
             created_at: bootstrap.created_at,
             updated_at: bootstrap.updated_at
           }
+          if include_details
+            payload.merge!(
+              warnings: bootstrap.warnings,
+              errors: bootstrap.validation_errors,
+              review_items: bootstrap.review_items
+            )
+          end
+          payload
         end
 
         def worker_mapping_counts(batches)

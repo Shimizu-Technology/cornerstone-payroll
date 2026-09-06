@@ -43,11 +43,13 @@ module QuickbooksHistory
       @errors = []
       snapshot = worker.private_snapshot_data
       snapshot = {} unless snapshot.is_a?(Hash)
-      directory = snapshot.fetch("_employee_directory", {})
-      directory = {} unless directory.is_a?(Hash)
+      directory_value = snapshot["_employee_directory"]
+      directory = directory_value.is_a?(Hash) ? directory_value : {}
       details = snapshot.except("_employee_directory")
-      if directory.blank?
+      if directory_value.nil? || (directory_value.is_a?(Hash) && directory_value.empty?)
         errors << "QuickBooks employee directory setup is missing from the retained snapshot; import the source with the current importer before creating live employees"
+      elsif !directory_value.is_a?(Hash)
+        errors << "QuickBooks employee directory setup is malformed in the retained snapshot; import the source with the current importer before creating live employees"
       end
       first_name, middle_name, last_name = parse_name(worker.source_name)
       tax = parse_tax(snapshot_section(details, "Tax info"))

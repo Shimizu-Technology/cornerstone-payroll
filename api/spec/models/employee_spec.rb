@@ -84,6 +84,26 @@ RSpec.describe Employee, type: :model do
       expect(employee.configuration_review_status).to eq("complete")
     end
 
+    it "preserves a reviewer's completed status when an unrelated edit resolves nothing" do
+      employee = create(
+        :employee,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "complete",
+        configuration_review_items: [
+          {
+            "code" => "tax_setup_confirmation",
+            "message" => "Reviewer completed this manual check",
+            "fields" => %w[filing_status]
+          }
+        ]
+      )
+
+      employee.update!(middle_name: "Reviewed")
+
+      expect(employee.reload.configuration_review_status).to eq("complete")
+      expect(employee.configuration_review_items.pluck("code")).to eq([ "tax_setup_confirmation" ])
+    end
+
     it "keeps malformed review items and invalid field names on the validation path without executing them" do
       employee = build(
         :employee,

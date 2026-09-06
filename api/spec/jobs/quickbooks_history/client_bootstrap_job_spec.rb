@@ -47,6 +47,10 @@ RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
     expect(pending_bootstrap.reload).to be_failed
     expect(pending_bootstrap.apply_error).to eq("Employee preparation could not be completed. Review the current setup preview and try again.")
     expect(pending_bootstrap.apply_error).not_to include("private adapter detail")
+    expect(pending_bootstrap.historical_client_bootstrap_dispatches.sole).to have_attributes(
+      completed_at: be_present,
+      last_error: "StandardError"
+    )
     expect(AuditLog.where(action: "historical_imports#client_bootstrap_failed", record_id: pending_bootstrap.id)).to exist
   end
 

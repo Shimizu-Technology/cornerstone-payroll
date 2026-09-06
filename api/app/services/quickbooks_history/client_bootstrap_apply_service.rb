@@ -19,6 +19,8 @@ module QuickbooksHistory
       return bootstrap if bootstrap.applied?
 
       HistoricalClientBootstrap.transaction do
+        # Keep the bounded roster write atomic: a partial employee roster is less safe than
+        # briefly holding this per-company lock while at most the reviewed import limit is applied.
         bootstrap.company.lock!
         bootstrap.historical_import_batch.lock!
         bootstrap.lock!
@@ -76,16 +78,18 @@ module QuickbooksHistory
 
     def create_payroll_fields!(employee, payroll_fields, definition_cache)
       payroll_fields.each do |field|
-        definition = definition_cache[field.fetch(:name)] ||= bootstrap.company.payroll_field_definitions.create!(
-          name: field.fetch(:name),
-          kind: field.fetch(:kind),
-          tax_treatment: field.fetch(:tax_treatment),
-          category: field.fetch(:category),
-          amount_type: field.fetch(:amount_type),
-          reporting_group: field.fetch(:reporting_group),
-          show_in_payroll_grid: true,
-          sort_order: definition_cache.size
-        )
+        name = field.fetch(:name)
+        definition = definition_cache[name] ||= bootstrap.company.payroll_field_definitions.find_by(name: name) ||
+          bootstrap.company.payroll_field_definitions.create!(
+            name: name,
+            kind: field.fetch(:kind),
+            tax_treatment: field.fetch(:tax_treatment),
+            category: field.fetch(:category),
+            amount_type: field.fetch(:amount_type),
+            reporting_group: field.fetch(:reporting_group),
+            show_in_payroll_grid: true,
+            sort_order: bootstrap.company.payroll_field_definitions.maximum(:sort_order).to_i + 1
+          )
         ensure_definition_matches!(definition, field)
         employee.employee_payroll_fields.create!(
           payroll_field_definition: definition,

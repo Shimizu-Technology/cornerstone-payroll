@@ -427,7 +427,7 @@ class Employee < ApplicationRecord
   def clear_resolved_import_review_items
     return unless configuration_source == "quickbooks_history" && configuration_review_items.is_a?(Array)
 
-    self.configuration_review_items = configuration_review_items.reject do |item|
+    remaining = configuration_review_items.reject do |item|
       next false unless item.is_a?(Hash)
       next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
 
@@ -439,7 +439,10 @@ class Employee < ApplicationRecord
         self.class.column_names.include?(field) && read_attribute(field).present?
       end
     end
-    self.configuration_review_status = configuration_review_items.empty? ? "complete" : "needs_review"
+    return if remaining.size == configuration_review_items.size
+
+    self.configuration_review_items = remaining
+    self.configuration_review_status = remaining.empty? ? "complete" : "needs_review"
   end
 
   def configuration_review_items_are_valid

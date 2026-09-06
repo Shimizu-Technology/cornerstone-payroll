@@ -2,7 +2,9 @@
 
 class HistoricalClientBootstrapDispatch < ApplicationRecord
   REDISPATCH_AFTER = 30.minutes
+  MAX_DISPATCH_ATTEMPTS = 5
   MISSING_REQUESTER_ERROR = "The requesting payroll user is no longer available"
+  RETRIES_EXHAUSTED_ERROR = "Employee preparation could not be queued after #{MAX_DISPATCH_ATTEMPTS} attempts"
 
   belongs_to :historical_client_bootstrap
   belongs_to :requested_by, class_name: "User", optional: true
@@ -25,33 +27,40 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   end
 
   def dispatch!
-    with_lock do
-      bootstrap = historical_client_bootstrap.reload
-      unless current_attempt?(bootstrap)
-        update!(completed_at: Time.current, last_error: nil)
-        next false
-      end
-      next false if enqueued_at.present? && enqueued_at >= REDISPATCH_AFTER.ago
+    bootstrap = historical_client_bootstrap
+    bootstrap.with_lock do
+      with_lock do
+        bootstrap.reload
+        unless current_attempt?(bootstrap)
+          update!(completed_at: Time.current, last_error: nil)
+          next false
+        end
+        next false if enqueued_at.present? && enqueued_at >= REDISPATCH_AFTER.ago
+        if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
+          fail_attempt!(bootstrap, RETRIES_EXHAUSTED_ERROR)
+          next false
+        end
 
-      self.dispatch_attempts += 1
-      save!
-      unless requested_by
-        bootstrap.update!(status: "failed", apply_error: MISSING_REQUESTER_ERROR)
-        update!(
-          completed_at: Time.current,
-          last_error: MISSING_REQUESTER_ERROR
-        )
-        next false
-      end
+        self.dispatch_attempts += 1
+        save!
+        unless requested_by
+          fail_attempt!(bootstrap, MISSING_REQUESTER_ERROR)
+          next false
+        end
 
-      begin
-        QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
-        update!(enqueued_at: Time.current, last_error: nil)
-        true
-      rescue StandardError => e
-        update!(last_error: e.message)
-        Rails.logger.error("Historical client bootstrap dispatch #{id} could not be enqueued: #{e.class}: #{e.message}")
-        false
+        begin
+          QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
+          update!(enqueued_at: Time.current, last_error: nil, dispatch_attempts: 0)
+          true
+        rescue StandardError => e
+          if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
+            fail_attempt!(bootstrap, RETRIES_EXHAUSTED_ERROR)
+          else
+            update!(last_error: e.message)
+          end
+          Rails.logger.error("Historical client bootstrap dispatch #{id} could not be enqueued: #{e.class}: #{e.message}")
+          false
+        end
       end
     end
   rescue StandardError => e
@@ -64,6 +73,19 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
 
   def current_attempt?(bootstrap)
     bootstrap.pending? && bootstrap.apply_started_at&.iso8601(6) == attempt_token
+  end
+
+  def fail_attempt!(bootstrap, message)
+    bootstrap.with_lock do
+      unless current_attempt?(bootstrap.reload)
+        update!(completed_at: Time.current, last_error: nil)
+        next false
+      end
+
+      bootstrap.update!(status: "failed", apply_error: message)
+      update!(completed_at: Time.current, last_error: message)
+      true
+    end
   end
 
   def prevent_destroy

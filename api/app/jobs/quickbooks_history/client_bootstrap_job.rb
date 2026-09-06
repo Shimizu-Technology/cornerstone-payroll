@@ -45,6 +45,9 @@ module QuickbooksHistory
           status: "failed",
           apply_error: "Employee preparation could not be completed. Review the current setup preview and try again."
         )
+        bootstrap.historical_client_bootstrap_dispatches
+                 .where(attempt_token: apply_started_at, completed_at: nil)
+                 .update_all(completed_at: Time.current, last_error: error.class.name, updated_at: Time.current)
         actor = User.find_by(id: actor_id)
         AuditLog.record!(
           user: actor,

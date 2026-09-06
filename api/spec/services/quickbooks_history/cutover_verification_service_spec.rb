@@ -119,33 +119,37 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
       .to raise_error(ArgumentError, /manager or administrator/)
   end
 
-  it "verifies a batch genuinely recorded by the unchanged v2 parser contract" do
-    v2_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
-    v2_actor = create(:user, company: v2_company, organization: company.organization, role: "admin")
-    v2_batch = nil
-    RSpec::Mocks.with_temporary_scope do
-      stub_const("QuickbooksHistory::BundleParser::IMPORTER_VERSION", "quickbooks-online-payroll-v2")
-      v2_batch = QuickbooksHistory::ImportService.new(
-        company: v2_company,
-        files: quickbooks_history_uploads(suffix: " v2"),
-        actor: v2_actor
-      ).call.batch
-    end
-    v2_batch.historical_workers.find_each do |worker|
-      worker.update!(private_snapshot: JSON.generate(worker.private_snapshot_data.except("_employee_directory")))
-    end
-    review_historical_workers_as_archive_only(v2_batch, actor: v2_actor)
-    QuickbooksHistory::LifecycleService.new(batch: v2_batch, actor: v2_actor).apply!(
-      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
-    )
+  %w[quickbooks-online-payroll-v2 quickbooks-online-payroll-v3].each do |recorded_version|
+    it "verifies a batch genuinely recorded by the unchanged #{recorded_version} parser contract" do
+      compatible_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
+      compatible_actor = create(:user, company: compatible_company, organization: company.organization, role: "admin")
+      compatible_batch = nil
+      RSpec::Mocks.with_temporary_scope do
+        stub_const("QuickbooksHistory::BundleParser::IMPORTER_VERSION", recorded_version)
+        compatible_batch = QuickbooksHistory::ImportService.new(
+          company: compatible_company,
+          files: quickbooks_history_uploads(suffix: " #{recorded_version}"),
+          actor: compatible_actor
+        ).call.batch
+      end
+      if recorded_version.in?(described_class::LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS)
+        compatible_batch.historical_workers.find_each do |worker|
+          worker.update!(private_snapshot: JSON.generate(worker.private_snapshot_data.except("_employee_directory")))
+        end
+      end
+      review_historical_workers_as_archive_only(compatible_batch, actor: compatible_actor)
+      QuickbooksHistory::LifecycleService.new(batch: compatible_batch, actor: compatible_actor).apply!(
+        acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+      )
 
-    result = described_class.new(batch: v2_batch, actor: v2_actor).call
+      result = described_class.new(batch: compatible_batch, actor: compatible_actor).call
 
-    expect(result.passed).to be(true)
-    expect(result.review.evidence).to include(
-      "importer_version" => "quickbooks-online-payroll-v2",
-      "verification_parser_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION
-    )
+      expect(result.passed).to be(true)
+      expect(result.review.evidence).to include(
+        "importer_version" => recorded_version,
+        "verification_parser_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION
+      )
+    end
   end
 
   it "rejects an importer version outside the explicit compatibility set" do

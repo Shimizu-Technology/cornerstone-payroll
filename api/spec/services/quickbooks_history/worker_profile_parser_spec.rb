@@ -59,6 +59,52 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     )
   end
 
+  it "distinguishes a malformed employee directory snapshot from a missing one" do
+    [ [ "not", "an", "object" ], "", false ].each do |malformed_directory|
+      malformed_worker = HistoricalWorker.new(
+        id: 42,
+        source_name: "Worker, Alice",
+        source_status: "active",
+        private_snapshot: JSON.generate(
+          "Pay info" => "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+          "Tax info" => "SSN: 000-00-0001 Fed: Single or Married Filing Separately",
+          "_employee_directory" => malformed_directory
+        )
+      )
+
+      parsed = described_class.new(worker: malformed_worker, pay_frequency: "biweekly").call
+
+      expect(parsed.errors).to include(/employee directory setup is malformed/)
+      expect(parsed.errors).not_to include(/employee directory setup is missing/)
+    end
+  end
+
+  it "reports missing setup for an absent or empty employee directory snapshot" do
+    [
+      {
+        "Pay info" => "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        "Tax info" => "SSN: 000-00-0001 Fed: Single or Married Filing Separately"
+      },
+      {
+        "Pay info" => "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        "Tax info" => "SSN: 000-00-0001 Fed: Single or Married Filing Separately",
+        "_employee_directory" => {}
+      }
+    ].each do |snapshot|
+      missing_worker = HistoricalWorker.new(
+        id: 43,
+        source_name: "Worker, Alice",
+        source_status: "active",
+        private_snapshot: JSON.generate(snapshot)
+      )
+
+      parsed = described_class.new(worker: missing_worker, pay_frequency: "biweekly").call
+
+      expect(parsed.errors).to include(/employee directory setup is missing/)
+      expect(parsed.errors).not_to include(/employee directory setup is malformed/)
+    end
+  end
+
   it "keeps comma-separated street details while parsing the city from the right" do
     parsed = described_class.new(
       worker: worker(

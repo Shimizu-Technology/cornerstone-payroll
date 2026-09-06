@@ -203,6 +203,11 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "wage_rate_count" => 3
     )
     expect(response.parsed_body.dig("data", "ready_to_apply")).to be(true)
+    expect(response.parsed_body.fetch("data")).to include("warnings", "errors", "review_items")
+
+    get "/api/v1/admin/historical_imports"
+    compact_bootstrap = response.parsed_body.dig("data", 0, "client_bootstrap")
+    expect(compact_bootstrap).not_to include("warnings", "errors", "review_items")
     acknowledgement = QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT
 
     expect do
@@ -219,12 +224,16 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     get "/api/v1/admin/historical_imports/#{batch.id}"
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("applied")
+    expect(response.parsed_body.dig("data", "client_bootstrap")).to include("warnings", "errors", "review_items")
     expect(response.parsed_body.dig("data", "worker_review_summary")).to include(
       "needs_review" => 0,
       "linked" => 3
     )
     expect(Employee.where(company: company).count).to eq(3)
     expect(PayPeriod.where(company: company)).to be_empty
+    expect(PayrollItem.where(company: company)).to be_empty
+    expect(EmployeeYtdTotal.joins(:employee).where(employees: { company_id: company.id })).to be_empty
+    expect(CompanyYtdTotal.where(company_id: company.id)).to be_empty
     expect(batch.reload).to be_previewed
     expect(AuditLog.where(action: "historical_imports#apply_client_bootstrap", company: company)).to exist
   end

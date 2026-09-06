@@ -528,7 +528,7 @@ function EmployeeMobileCard({
               <p className="truncate font-semibold text-neutral-950">{employee.first_name} {employee.last_name}</p>
               {employee.email && <p className="truncate text-sm text-neutral-500">{employee.email}</p>}
             </div>
-            <div className="flex flex-col items-end gap-1.5">
+            <div className="flex flex-col items-end gap-2">
               <Badge
                 variant={employee.status === 'active' ? 'success' : employee.status === 'inactive' ? 'default' : 'danger'}
               >
@@ -636,7 +636,7 @@ function EmployeeTableRow({
         </div>
       </TableCell>
       <TableCell>
-        <div className="flex flex-col items-start gap-1.5">
+        <div className="flex flex-col items-start gap-2">
           <Badge
             variant={
               employee.status === 'active' ? 'success' :

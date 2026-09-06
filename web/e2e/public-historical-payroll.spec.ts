@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
+import type { Employee } from '@/types';
 
 interface MockWorker {
   id: number;
@@ -280,6 +281,15 @@ function clientBootstrap(
 
 function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImportBatch {
   const { periods: _periods, workers: _workers, paychecks: _paychecks, ...payload } = value;
+  if (payload.client_bootstrap) {
+    const {
+      warnings: _warnings,
+      errors: _errors,
+      review_items: _reviewItems,
+      ...bootstrapSummary
+    } = payload.client_bootstrap;
+    payload.client_bootstrap = bootstrapSummary;
+  }
   return payload;
 }
 
@@ -332,7 +342,7 @@ async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = '
   }));
 }
 
-function migratedEmployee(reviewStatus: 'needs_review' | 'complete' = 'needs_review') {
+function migratedEmployee(reviewStatus: 'needs_review' | 'complete' = 'needs_review'): Employee {
   return {
     id: 900,
     company_id: 1,
@@ -510,15 +520,98 @@ test('uses today without an invented minimum when terminating a migrated employe
 
   await page.goto('/employees/900');
   const today = await browserToday(page);
-  await page.getByRole('button', { name: 'Terminate Employee' }).click();
-  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Terminate Migrated' });
+  const terminationTrigger = page.getByRole('button', { name: 'Terminate Employee' });
+  await terminationTrigger.click();
+  const dialog = page.getByRole('dialog', { name: /Terminate Migrated/ });
   const dateInputs = dialog.locator('input[type="date"]');
   await expect(dateInputs.nth(0)).toHaveValue(today);
   await expect(dateInputs.nth(0)).not.toHaveAttribute('min');
   await expect(dateInputs.nth(1)).not.toHaveAttribute('min');
+  await expect(dateInputs.nth(0)).toBeFocused();
+  await expect(page.locator('#root')).toHaveAttribute('inert', '');
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Terminate employee' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dateInputs.nth(0)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('#root')).not.toHaveAttribute('inert');
+  await expect(terminationTrigger).toBeFocused();
+
+  await terminationTrigger.click();
   await dialog.getByRole('button', { name: 'Terminate employee' }).click();
 
   await expect.poll(() => submittedTermination).toEqual({ effective_date: today });
+});
+
+test('keeps the page inert until the final overlapping dialog closes', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee: Employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    current_work_profile: null,
+  };
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+
+  await page.goto('/employees/900');
+  const terminationTrigger = page.getByRole('button', { name: 'Terminate Employee' });
+  await terminationTrigger.click();
+  const terminationDialog = page.locator('[role="dialog"]').filter({ hasText: 'Terminate Migrated' });
+  await expect(terminationDialog).toBeVisible();
+
+  await page.locator('button').filter({ hasText: 'Set up profile' }).evaluate((button: HTMLButtonElement) => button.click());
+  const profileDialog = page.getByRole('dialog', { name: 'Confirm a new salary work profile' });
+  await expect(profileDialog).toBeVisible();
+  await expect.poll(() => terminationDialog.evaluate((dialog) => dialog.closest('[data-dialog-portal]')?.hasAttribute('inert'))).toBe(true);
+  await expect(page.locator('#root')).toHaveAttribute('inert', '');
+
+  await terminationDialog.getByRole('button', { name: 'Cancel', includeHidden: true }).evaluate((button: HTMLButtonElement) => button.click());
+  await expect(terminationDialog).toHaveCount(0);
+  await expect(profileDialog).toBeVisible();
+  await expect(page.locator('#root')).toHaveAttribute('inert', '');
+
+  await profileDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(profileDialog).not.toBeVisible();
+  await expect(page.locator('#root')).not.toHaveAttribute('inert');
+  await expect(terminationTrigger).toBeFocused();
+});
+
+test('returns focus to a lower dialog when its child dialog closes', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee: Employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    current_work_profile: null,
+  };
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+
+  await page.goto('/employees/900');
+  await page.getByRole('button', { name: 'Terminate Employee' }).click();
+  const terminationDialog = page.getByRole('dialog', { name: /Terminate Migrated/ });
+  await expect(terminationDialog).toBeVisible();
+  await page.evaluate(() => {
+    const realTrigger = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Set up profile'));
+    const lowerDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!realTrigger || !lowerDialog) throw new Error('Nested dialog test controls were not found');
+    const nestedTrigger = document.createElement('button');
+    nestedTrigger.id = 'nested-profile-trigger';
+    nestedTrigger.textContent = 'Open work profile';
+    nestedTrigger.addEventListener('click', () => realTrigger.click());
+    lowerDialog.appendChild(nestedTrigger);
+    nestedTrigger.focus();
+    nestedTrigger.click();
+  });
+
+  const profileDialog = page.getByRole('dialog', { name: 'Confirm a new salary work profile' });
+  await expect(profileDialog).toBeVisible();
+  await profileDialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await expect(profileDialog).not.toBeVisible();
+  await expect(terminationDialog).toBeVisible();
+  await expect(page.locator('#nested-profile-trigger')).toBeFocused();
+  await terminationDialog.getByRole('button', { name: 'Cancel' }).click();
 });
 
 test('uses today without an invented minimum when reactivating a migrated employee with no known dates', async ({ page }) => {
@@ -540,7 +633,7 @@ test('uses today without an invented minimum when reactivating a migrated employ
   await page.goto('/employees/900');
   const today = await browserToday(page);
   await page.getByRole('button', { name: 'Reactivate' }).click();
-  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Reactivate Migrated' });
+  const dialog = page.getByRole('dialog', { name: /Reactivate Migrated/ });
   const effectiveDate = dialog.locator('input[type="date"]');
   await expect(effectiveDate).toHaveValue(today);
   await expect(effectiveDate).not.toHaveAttribute('min');
@@ -567,7 +660,7 @@ test('initializes a migrated salary work profile today without inventing a hire-
   await page.goto('/employees/900');
   const today = await browserToday(page);
   await page.getByRole('button', { name: 'Set up profile' }).click();
-  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Confirm a new salary work profile' });
+  const dialog = page.getByRole('dialog', { name: 'Confirm a new salary work profile' });
   const effectiveDate = dialog.locator('input[type="date"]').first();
   await expect(effectiveDate).toHaveValue(today);
   await expect(effectiveDate).not.toHaveAttribute('min');
@@ -612,6 +705,47 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   await expect(page.locator('#historical-batch')).toHaveValue('1');
   await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
   await expect(page.getByText('No source inventory is attached')).toBeVisible();
+});
+
+test('hides the previous batch while a newly selected batch detail is delayed', async ({ page }) => {
+  await mockApplicationShell(page);
+  const sourceWorker: MockWorker = {
+    id: 200,
+    source_name: 'Previous Batch Worker',
+    source_status: 'inactive',
+    hire_date: '2024-01-01',
+    employee_id: null,
+    employee_name: null,
+    mapping_status: 'needs_review',
+    match_method: null,
+    match_confidence: null,
+  };
+  let releaseNextDetail: (() => void) | undefined;
+  const nextDetailGate = new Promise<void>((resolve) => { releaseNextDetail = resolve; });
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [batch(2, [sourceWorker]), batch(1)],
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    if (id === 1) await nextDetailGate;
+    await fulfillJson(route, {
+      data: detail(id, id === 2 ? [sourceWorker] : []),
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('Previous Batch Worker')).toBeVisible();
+  await page.locator('#historical-batch').selectOption('1');
+
+  await expect(page.getByText('Previous Batch Worker')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Batch 2' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Loading selected QuickBooks history…' })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Loading selected batch details…');
+  releaseNextDetail?.();
+  await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
 });
 
 test('never lets a completed worker mapping replace a newly selected batch', async ({ page }) => {
@@ -954,6 +1088,7 @@ test('previews and creates a clean current-payroll roster without running payrol
   let rosterApplied = false;
   let employeeListRequests = 0;
   let bootstrapPolls = 0;
+  let submittedAcknowledgement: unknown;
 
   await page.unroute('**/api/v1/companies');
   await page.unroute('**/api/v1/admin/employees**');
@@ -998,7 +1133,7 @@ test('previews and creates a clean current-payroll roster without running payrol
     await fulfillJson(route, { data: current.client_bootstrap });
   });
   await page.route('**/api/v1/admin/historical_imports/1/apply_client_bootstrap', async (route) => {
-    expect(route.request().postDataJSON()).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
+    submittedAcknowledgement = route.request().postDataJSON();
     current = { ...current, client_bootstrap: clientBootstrap('pending') };
     await fulfillJson(route, { data: withoutDetailCollections(current), meta: { enqueued: true } }, 202);
   });
@@ -1043,6 +1178,38 @@ test('previews and creates a clean current-payroll roster without running payrol
   await expect(page.getByRole('button', { name: /Historical Payroll Company 57 employees/ })).toBeVisible();
   expect(bootstrapPolls).toBeGreaterThanOrEqual(1);
   expect(employeeListRequests).toBeGreaterThanOrEqual(2);
+  expect(submittedAcknowledgement).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
+});
+
+test('keeps a failed employee-preparation request visible in its confirmation dialog', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const current: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    client_bootstrap: clientBootstrap(),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1/apply_client_bootstrap', (route) => fulfillJson(route, {
+    error: 'The clean-client preview changed. Refresh and review it again.',
+    details: {},
+  }, 422));
+
+  await page.goto('/historical-payroll');
+  await page.getByRole('button', { name: 'Create employee records' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create this client’s employee records?' });
+  await expect(dialog).toHaveAttribute('aria-labelledby', 'client-bootstrap-confirmation-title');
+  await dialog.getByLabel('Type the confirmation exactly').fill('PREPARE CLEAN CLIENT EMPLOYEES');
+  await dialog.getByRole('button', { name: 'Create employees' }).click();
+
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('The clean-client preview changed. Refresh and review it again.');
 });
 
 test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {
