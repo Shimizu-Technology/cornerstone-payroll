@@ -453,6 +453,7 @@ export function HistoricalPayroll(): ReactElement {
 
     return () => {
       cancelled = true;
+      listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadDetail, loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
@@ -987,7 +988,7 @@ export function HistoricalPayroll(): ReactElement {
 
                   <div className="grid gap-2 md:grid-cols-2">
                     {cutoverChecks.map((check) => (
-                      <div key={check.key} className={`flex items-start gap-3 rounded-xl border p-3 text-sm ${check.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
+                      <div key={check.key} className={`flex items-start gap-4 rounded-xl border p-4 text-sm ${check.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
                         {check.passed ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
                         <span>{check.label}</span>
                       </div>

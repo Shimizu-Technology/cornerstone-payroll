@@ -380,6 +380,57 @@ test('never lets a completed worker mapping replace a newly selected batch', asy
   await expect.poll(() => detailRequests.filter((id) => id === 2).length).toBe(1);
 });
 
+test('never lets a cancelled verification poll restore the previous batch', async ({ page }) => {
+  await mockApplicationShell(page);
+  const pendingBatch: HistoricalImportDetail = {
+    ...detail(1),
+    status: 'applied',
+    cutover_review: pendingCutoverReview(),
+  };
+  const otherBatch: HistoricalImportDetail = {
+    ...detail(2),
+    status: 'applied',
+    cutover_review: null,
+  };
+  let listRequestCount = 0;
+  let releasePoll: (() => void) | undefined;
+  let markPollStarted: (() => void) | undefined;
+  const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
+  const pollStarted = new Promise<void>((resolve) => { markPollStarted = resolve; });
+
+  await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
+    listRequestCount += 1;
+    if (listRequestCount === 2) {
+      markPollStarted?.();
+      await pollGate;
+    }
+    await fulfillJson(route, {
+      data: [pendingBatch, otherBatch],
+      meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    await fulfillJson(route, {
+      data: id === 1 ? pendingBatch : otherBatch,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  const batchSelector = page.locator('#historical-batch');
+  await expect(batchSelector).toHaveValue('1');
+  await pollStarted;
+
+  await batchSelector.selectOption('2');
+  await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
+  releasePoll?.();
+
+  await expect.poll(() => listRequestCount).toBeGreaterThanOrEqual(2);
+  await expect(batchSelector).toHaveValue('2');
+  await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
+});
+
 test('makes retained source verification and exact download clear to an administrator', async ({ page }) => {
   await mockApplicationShell(page);
   const retainedDetail = detailWithVerifiedSource(1);
