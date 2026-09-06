@@ -34,20 +34,22 @@ module QuickbooksHistory
       values << "Every retained source file must pass integrity verification" unless batch.source_files_complete_and_verified?
       values << "QuickBooks paycheck reconciliation must pass" unless batch.reconciliation_summary.to_h["passed"] && Array(batch.validation_errors).empty?
 
-      company = batch.company
-      unless clean_company?(company)
-        values << "Current payroll can only be prepared in a clean client with no employees, payroll runs, YTD balances, or payroll-field setup"
+      blockers = clean_company_blockers(batch.company)
+      if blockers.any?
+        values << "Current payroll can only be prepared in a clean client. Remove or use another client for: #{blockers.join(', ')}"
       end
       values
     end
 
-    def clean_company?(company)
-      Employee.where(company_id: company.id).none? &&
-        PayPeriod.where(company_id: company.id).none? &&
-        EmployeeYtdTotal.joins(:employee).where(employees: { company_id: company.id }).none? &&
-        CompanyYtdTotal.where(company_id: company.id).none? &&
-        PayrollFieldDefinition.where(company_id: company.id).none? &&
-        DeductionType.where(company_id: company.id).none?
+    def clean_company_blockers(company)
+      {
+        "employees" => Employee.where(company_id: company.id).exists?,
+        "payroll runs" => PayPeriod.where(company_id: company.id).exists?,
+        "employee YTD balances" => EmployeeYtdTotal.joins(:employee).where(employees: { company_id: company.id }).exists?,
+        "company YTD balances" => CompanyYtdTotal.where(company_id: company.id).exists?,
+        "payroll-field definitions" => PayrollFieldDefinition.where(company_id: company.id).exists?,
+        "deduction types" => DeductionType.where(company_id: company.id).exists?
+      }.filter_map { |label, present| label if present }
     end
 
     def profile_errors
@@ -75,7 +77,7 @@ module QuickbooksHistory
             "worker_count" => items.size,
             "historical_worker_ids" => items.map { |item| item.fetch("historical_worker_id") }.sort
           }
-        end.sort_by { |item| item.fetch("code") }
+        end.sort_by { |item| [ item.fetch("code"), item.fetch("message") ] }
     end
 
     def build_summary

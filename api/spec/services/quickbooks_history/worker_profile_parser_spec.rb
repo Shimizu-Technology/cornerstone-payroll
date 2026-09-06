@@ -152,6 +152,18 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     expect(parsed.review_items.pluck("code")).to include("obligation_terms_missing")
   end
 
+  it "shows one obligation review item when a worker has multiple obligations" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $9.25/hr Pay method: Check Deductions: Loan: $25.00 Allotment: $10.00 Contributions: None Time off: None"
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.payroll_fields.pluck(:category)).to contain_exactly("loan", "allotment")
+    expect(parsed.review_items.pluck("code").count("obligation_terms_missing")).to eq(1)
+  end
+
   it "treats non-object retained snapshots as missing setup instead of crashing" do
     malformed_worker = HistoricalWorker.new(
       id: 42,

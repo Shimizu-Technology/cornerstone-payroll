@@ -245,6 +245,19 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(Employee.where(company: company)).to be_empty
   end
 
+  it "returns forbidden when bootstrap authorization changes during a request" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    allow(QuickbooksHistory::ClientBootstrapAuthorization).to receive(:ensure_authorized!).and_raise(
+      QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized,
+      QuickbooksHistory::ClientBootstrapAuthorization::ERROR_MESSAGE
+    )
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+
+    expect(response).to have_http_status(:forbidden), response.body
+    expect(batch.reload.historical_client_bootstrap).to be_nil
+  end
+
   it "lets accountants review history but not mutate imports" do
     accountant = create(:user, company: company, organization: company.organization, role: "accountant")
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)

@@ -44,18 +44,20 @@ module QuickbooksHistory
         end
 
         bootstrap.update!(status: "pending", apply_started_at: Time.current, apply_error: nil)
-        record_audit!("historical_imports#queue_client_bootstrap")
+        record_audit!("historical_imports#queue_client_bootstrap", record: bootstrap)
         [ bootstrap, true ]
       end
     end
 
     def enqueue!(prepared)
       token = prepared.apply_started_at.iso8601(6)
-      ClientBootstrapJob.perform_later(prepared.id, actor.id, token)
-    rescue StandardError => e
-      mark_enqueue_failed!(prepared, token)
-      Rails.logger.error("Historical client bootstrap enqueue failed for bootstrap #{prepared.id}: #{e.class}: #{e.message}")
-      raise ArgumentError, "Clean-client employee preparation could not be queued"
+      begin
+        ClientBootstrapJob.perform_later(prepared.id, actor.id, token)
+      rescue StandardError => e
+        mark_enqueue_failed_safely!(prepared, token)
+        Rails.logger.error("Historical client bootstrap enqueue failed for bootstrap #{prepared.id}: #{e.class}: #{e.message}")
+        raise ArgumentError, "Clean-client employee preparation could not be queued"
+      end
     end
 
     def mark_enqueue_failed!(prepared, token)
@@ -63,23 +65,31 @@ module QuickbooksHistory
         return unless prepared.pending? && prepared.apply_started_at&.iso8601(6) == token
 
         prepared.update!(status: "failed", apply_error: "Employee preparation could not be queued. Try again.")
-        record_audit!("historical_imports#client_bootstrap_failed")
+        record_audit!("historical_imports#client_bootstrap_failed", record: prepared)
       end
     end
 
-    def record_audit!(action)
+    def mark_enqueue_failed_safely!(prepared, token)
+      mark_enqueue_failed!(prepared, token)
+    rescue StandardError => e
+      Rails.logger.error(
+        "Historical client bootstrap enqueue failure could not be persisted for bootstrap #{prepared.id}: #{e.class}: #{e.message}"
+      )
+    end
+
+    def record_audit!(action, record:)
       AuditLog.record!(
         user: actor,
-        organization_id: bootstrap.company.organization_id,
-        company_id: bootstrap.company_id,
+        organization_id: record.company.organization_id,
+        company_id: record.company_id,
         action: action,
         record_type: "historical_client_bootstraps",
-        record_id: bootstrap.id,
-        subject_name: bootstrap.historical_import_batch.source_label,
+        record_id: record.id,
+        subject_name: record.historical_import_batch.source_label,
         metadata: {
-          historical_import_batch_id: bootstrap.historical_import_batch_id,
-          status: bootstrap.status,
-          plan_digest: bootstrap.plan_digest
+          historical_import_batch_id: record.historical_import_batch_id,
+          status: record.status,
+          plan_digest: record.plan_digest
         }
       )
     end

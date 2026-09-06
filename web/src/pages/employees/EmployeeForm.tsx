@@ -897,7 +897,7 @@ export function EmployeeForm() {
           </div>
         )}
 
-        {isEditing && loadedEmployee?.configuration_review_status === 'needs_review' && (
+        {isEditing && !isClient && loadedEmployee?.configuration_review_status === 'needs_review' && (
           <div className="mb-6 rounded-2xl border border-warning-200 bg-warning-50 p-5 text-warning-900">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
@@ -1956,10 +1956,11 @@ export function EmployeeForm() {
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="employer-retirement-match-rate" className="block text-sm font-medium text-gray-700 mb-1">
                       Employer Pre-Tax Match (%)
                     </label>
                     <NumericInput
+                      id="employer-retirement-match-rate"
                       value={(form.employer_retirement_match_rate || 0) * 100}
                       onValueChange={(value) => handleChange('employer_retirement_match_rate', (value ?? 0) / 100)}
                       min={0}
@@ -1968,10 +1969,11 @@ export function EmployeeForm() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="employer-roth-match-rate" className="block text-sm font-medium text-gray-700 mb-1">
                       Employer Roth Match (%)
                     </label>
                     <NumericInput
+                      id="employer-roth-match-rate"
                       value={(form.employer_roth_match_rate || 0) * 100}
                       onValueChange={(value) => handleChange('employer_roth_match_rate', (value ?? 0) / 100)}
                       min={0}

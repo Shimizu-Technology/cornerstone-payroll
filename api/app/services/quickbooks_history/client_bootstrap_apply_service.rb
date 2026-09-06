@@ -18,11 +18,11 @@ module QuickbooksHistory
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
       return bootstrap if bootstrap.applied?
 
-      result = nil
       HistoricalClientBootstrap.transaction do
+        bootstrap.company.lock!
         bootstrap.historical_import_batch.lock!
         bootstrap.lock!
-        return bootstrap if bootstrap.applied?
+        next bootstrap if bootstrap.applied?
         ensure_current_attempt! if expected_apply_started_at
         unless bootstrap.previewed? || bootstrap.pending? || bootstrap.failed?
           raise ArgumentError, "The clean-client employee setup is not ready to apply"
@@ -51,9 +51,8 @@ module QuickbooksHistory
           applied_by: actor
         )
         record_audit!(plan, created_employee_count)
-        result = bootstrap
+        bootstrap
       end
-      result
     end
 
     private

@@ -94,7 +94,7 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
 
     expect do
       described_class.new(bootstrap: bootstrap, actor: accountant, acknowledgement: described_class::ACKNOWLEDGEMENT).call
-    end.to raise_error(ArgumentError, /manager or administrator/)
+    end.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized, /manager or administrator/)
     expect do
       described_class.new(bootstrap: bootstrap, actor: actor, acknowledgement: "yes").call
     end.to raise_error(ArgumentError, /Type PREPARE CLEAN CLIENT EMPLOYEES/)
@@ -106,21 +106,21 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
 
     expect do
       QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor.reload).call
-    end.to raise_error(ArgumentError, /manager or administrator/)
+    end.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized, /manager or administrator/)
     expect do
       QuickbooksHistory::ClientBootstrapEnqueueService.new(
         bootstrap: bootstrap,
         actor: actor,
         acknowledgement: described_class::ACKNOWLEDGEMENT
       ).call
-    end.to raise_error(ArgumentError, /manager or administrator/)
+    end.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized, /manager or administrator/)
     expect do
       described_class.new(
         bootstrap: bootstrap,
         actor: actor,
         acknowledgement: described_class::ACKNOWLEDGEMENT
       ).call
-    end.to raise_error(ArgumentError, /manager or administrator/)
+    end.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized, /manager or administrator/)
     expect(company.employees).to be_empty
   end
 
@@ -136,6 +136,38 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
 
     expect(result.reload).to be_applied
     expect(QuickbooksHistory::ClientBootstrapPlan).not_to have_received(:new)
+  end
+
+  it "persists a safe retry state when the job adapter cannot enqueue preparation" do
+    bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "private adapter failure")
+
+    expect do
+      QuickbooksHistory::ClientBootstrapEnqueueService.new(
+        bootstrap: bootstrap,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      ).call
+    end.to raise_error(ArgumentError, "Clean-client employee preparation could not be queued")
+
+    expect(bootstrap.reload).to be_failed
+    expect(bootstrap.apply_error).to eq("Employee preparation could not be queued. Try again.")
+  end
+
+  it "preserves the enqueue error even if persisting the safe failure state also fails" do
+    bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    service = QuickbooksHistory::ClientBootstrapEnqueueService.new(
+      bootstrap: bootstrap,
+      actor: actor,
+      acknowledgement: described_class::ACKNOWLEDGEMENT
+    )
+    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "private adapter failure")
+    allow(service).to receive(:mark_enqueue_failed!).and_raise(StandardError, "private persistence failure")
+    allow(Rails.logger).to receive(:error)
+
+    expect { service.call }.to raise_error(ArgumentError, "Clean-client employee preparation could not be queued")
+    expect(Rails.logger).to have_received(:error).with(/could not be persisted/)
+    expect(bootstrap.reload).to be_pending
   end
 
   it "rejects plan drift between preview and apply" do

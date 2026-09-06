@@ -12,6 +12,10 @@ module QuickbooksHistory
       quickbooks-online-payroll-v3
       quickbooks-online-payroll-v4
     ].freeze
+    LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS = %w[
+      quickbooks-online-payroll-v2
+      quickbooks-online-payroll-v3
+    ].freeze
     WORKER_FIELDS = %i[external_key source_name normalized_name source_status hire_date].freeze
     PERIOD_FIELDS = %i[external_key period_type start_date end_date pay_date source_label paycheck_count totals].freeze
     PAYCHECK_FIELDS = %i[
@@ -284,7 +288,7 @@ module QuickbooksHistory
     end
 
     def legacy_worker_snapshot?
-      batch.importer_version.in?(%w[quickbooks-online-payroll-v2 quickbooks-online-payroll-v3])
+      batch.importer_version.in?(LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS)
     end
 
     def stored_paycheck_payload(row)

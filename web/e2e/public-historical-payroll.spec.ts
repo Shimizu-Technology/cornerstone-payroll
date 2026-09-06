@@ -239,7 +239,10 @@ function pendingCutoverReview(): HistoricalCutoverReview {
   };
 }
 
-function clientBootstrap(status: 'previewed' | 'pending' | 'applied' = 'previewed'): HistoricalClientBootstrap {
+function clientBootstrap(
+  status: 'previewed' | 'pending' | 'applied' | 'failed' = 'previewed',
+  readyToApply: boolean = status === 'previewed',
+): HistoricalClientBootstrap {
   return {
     id: 90,
     status,
@@ -264,9 +267,9 @@ function clientBootstrap(status: 'previewed' | 'pending' | 'applied' = 'previewe
       worker_count: 114,
       historical_worker_ids: [1],
     }],
-    ready_to_apply: status === 'previewed',
+    ready_to_apply: readyToApply,
     apply_started_at: status === 'pending' ? '2026-09-07T02:30:00Z' : null,
-    apply_error: null,
+    apply_error: status === 'failed' ? 'Employee preparation could not be completed. Review the current setup preview and try again.' : null,
     applied_at: status === 'applied' ? '2026-09-07T03:00:00Z' : null,
     applied_by_name: status === 'applied' ? 'History Admin' : null,
     acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES',
@@ -402,8 +405,8 @@ test('preserves decimal employer matches and explains every migrated setup revie
   await expect(page.getByText('QuickBooks setup needs review')).toBeVisible();
   await expect(page.getByText('Confirm the effective hire date.')).toBeVisible();
   await expect(page.getByText('Confirm a current W-4.')).toBeVisible();
-  const pretaxMatch = page.getByText('Employer Pre-Tax Match (%)').locator('..').locator('input');
-  const rothMatch = page.getByText('Employer Roth Match (%)').locator('..').locator('input');
+  const pretaxMatch = page.getByLabel('Employer Pre-Tax Match (%)');
+  const rothMatch = page.getByLabel('Employer Roth Match (%)');
   await expect(pretaxMatch).toHaveValue('4.25');
   await expect(rothMatch).toHaveValue('3.50');
 
@@ -628,6 +631,40 @@ test('never lets a completed employee-preparation poll restore a batch the user 
 
   await expect(batchSelector).toHaveValue('2');
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
+});
+
+test('makes failed and interrupted employee preparation safe to understand and retry', async ({ page }) => {
+  await mockApplicationShell(page);
+  const failed: HistoricalImportDetail = {
+    ...detail(1),
+    client_bootstrap: clientBootstrap('failed', true),
+  };
+  const interrupted: HistoricalImportDetail = {
+    ...detail(2),
+    client_bootstrap: clientBootstrap('pending', true),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(failed), withoutDetailCollections(interrupted)],
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/*?**', (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    return fulfillJson(route, {
+      data: id === 1 ? failed : interrupted,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('Employee preparation could not be completed. Review the current setup preview and try again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh preview' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+
+  await page.locator('#historical-batch').selectOption('2');
+  await expect(page.getByText('Employee preparation appears to have been interrupted. No partial setup was kept. Try again to safely restart it.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByText('Creating employee records…')).toHaveCount(0);
 });
 
 test('keeps checking verification status after a temporary refresh failure', async ({ page }) => {

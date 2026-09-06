@@ -431,7 +431,10 @@ class Employee < ApplicationRecord
       next false unless item.is_a?(Hash)
       next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
 
-      Array(item["fields"]).all? do |field|
+      fields = Array(item["fields"])
+      next false if fields.empty?
+
+      fields.all? do |field|
         field = field.to_s
         self.class.column_names.include?(field) && read_attribute(field).present?
       end
@@ -506,6 +509,7 @@ class Employee < ApplicationRecord
 
     Array(configuration_review_items).any? do |item|
       next false unless item.is_a?(Hash)
+      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
 
       Array(item["fields"]).include?(field.to_s)
     end

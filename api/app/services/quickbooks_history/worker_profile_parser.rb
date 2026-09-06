@@ -412,6 +412,8 @@ module QuickbooksHistory
     end
 
     def review(code:, message:, fields:)
+      return if review_items.any? { |item| item.fetch("code") == code }
+
       review_items << { "code" => code, "message" => message, "fields" => fields }
     end
 

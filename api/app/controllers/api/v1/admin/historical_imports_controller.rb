@@ -163,6 +163,8 @@ module Api
             actor: current_user
           ).call
           render json: { data: client_bootstrap_json(bootstrap) }
+        rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
+          render json: error_payload(e), status: :forbidden
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -178,6 +180,8 @@ module Api
             data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
             meta: { enqueued: result.enqueued }
           }, status: result.enqueued ? :accepted : :ok
+        rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
+          render json: error_payload(e), status: :forbidden
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end

@@ -3,6 +3,11 @@
 module QuickbooksHistory
   class ClientBootstrapJob < ApplicationJob
     queue_as :default
+    TRANSIENT_ERRORS = [ ActiveRecord::Deadlocked, ActiveRecord::LockWaitTimeout, ActiveRecord::SerializationFailure ].freeze
+
+    retry_on(*TRANSIENT_ERRORS, wait: :polynomially_longer, attempts: 3) do |job, error|
+      job.send(:persist_failure, *job.arguments, error)
+    end
 
     def perform(bootstrap_id, actor_id, apply_started_at)
       bootstrap = HistoricalClientBootstrap.find(bootstrap_id)
@@ -17,6 +22,8 @@ module QuickbooksHistory
       ).call
     rescue ClientBootstrapApplyService::StaleBootstrapAttempt
       nil
+    rescue *TRANSIENT_ERRORS
+      raise
     rescue StandardError => e
       persist_failure(bootstrap_id, actor_id, apply_started_at, e)
     end

@@ -14,9 +14,14 @@ RSpec.describe Employee, type: :model do
         configuration_review_status: "needs_review",
         configuration_review_items: [
           {
-            "code" => "source_fields_need_review",
-            "message" => "Confirm source fields",
-            "fields" => %w[hire_date address_line1 city state zip]
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "employee_address_missing",
+            "message" => "Confirm employee address",
+            "fields" => %w[address_line1 city state zip]
           }
         ]
       )
@@ -102,6 +107,33 @@ RSpec.describe Employee, type: :model do
       )
       expect(employee.errors[:configuration_review_items]).to include("contains an invalid review item")
       expect(employee.errors[:hire_date]).to include("can't be blank")
+    end
+
+    it "does not let an unknown or empty-field review item waive required filing data" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        address_line1: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "unknown_review",
+            "message" => "Unknown review",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "employee_address_missing",
+            "message" => "Address review with no fields",
+            "fields" => []
+          }
+        ]
+      )
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+      expect(employee.errors[:address_line1]).to include("can't be blank")
+      expect(employee.configuration_review_items.pluck("code")).to contain_exactly("unknown_review", "employee_address_missing")
     end
   end
 

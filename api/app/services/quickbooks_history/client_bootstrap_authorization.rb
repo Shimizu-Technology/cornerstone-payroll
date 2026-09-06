@@ -2,6 +2,8 @@
 
 module QuickbooksHistory
   module ClientBootstrapAuthorization
+    class NotAuthorized < StandardError; end
+
     ERROR_MESSAGE = "An attributed manager or administrator with client access is required"
 
     module_function
@@ -10,7 +12,7 @@ module QuickbooksHistory
       return if actor&.payroll_access_allowed? && actor.can_access_company?(company_id) &&
         StaffRolePolicy.allowed?(actor, :manage_client_configuration)
 
-      raise ArgumentError, ERROR_MESSAGE
+      raise NotAuthorized, ERROR_MESSAGE
     end
   end
 end

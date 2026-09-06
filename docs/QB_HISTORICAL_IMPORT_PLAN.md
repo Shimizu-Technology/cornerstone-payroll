@@ -50,7 +50,7 @@ Apply requires an attributed manager or administrator and the exact confirmation
 
 The parser uses QuickBooks Employee Details and Employee Directory as the source of current setup. It deliberately:
 
-- creates 57 active and 57 inactive employees;
+- uses the retained QuickBooks status for each employee;
 - prepares the two commission-only owners as variable-pay salary employees, so a period amount must be entered explicitly;
 - imports supported hourly rates, employee retirement rates, employer retirement-match rates, health insurance, rent, phone, loans/advances, child support/garnishments, and allotments;
 - suppresses the incorrect Nevada addresses instead of copying them to live payroll;
@@ -59,7 +59,7 @@ The parser uses QuickBooks Employee Details and Employee Directory as the source
 - flags obligation terms that QuickBooks did not provide, including balance, priority, limits, recipient instructions, and stop condition; and
 - refuses unknown deduction or contribution types rather than guessing their tax treatment.
 
-The real local MoSa rehearsal produced 114 employees, 244 wage-rate records, 32 recurring payroll-field assignments, 114 linked historical workers, and 2,881 linked historical paychecks. The historical batch remained a preview. The step created zero live pay periods, payroll items, YTD rows, payments, checks, or filings. All 114 employee records remain visibly marked for setup review because at least their hire date must be confirmed. Employer retirement matches are visible and editable on the employee screen alongside employee retirement deductions.
+The real local MoSa rehearsal produced 114 employees—57 active and 57 inactive—244 wage-rate records, 32 recurring payroll-field assignments, 114 linked historical workers, and 2,881 linked historical paychecks. The historical batch remained a preview. The step created zero live pay periods, payroll items, YTD rows, payments, checks, or filings. All 114 employee records remain visibly marked for setup review because at least their hire date must be confirmed. Employer retirement matches are visible and editable on the employee screen alongside employee retirement deductions.
 
 This release does **not** make the client ready for a midyear live payroll by itself. The current-year historical balances still need the controlled YTD bridge below, and the first draft pay period must not be created until that bridge is reconciled and protected against double counting.
 
@@ -190,7 +190,7 @@ No production preview, apply, or lock has been performed as part of the local im
 
 ## Production completion sequence
 
-The QuickBooks exit is deliberately split into four reviewable releases. Finishing the first release does not authorize a production import.
+The QuickBooks exit is deliberately split into eight reviewable releases. Finishing the first release does not authorize a production import.
 
 1. **Importer safety and reconciliation (PR #150, deployed):** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
 2. **Protected source retention (PR #151, deployed):** application-managed private source-file storage, access controls, hashes, retention status, and integrity-checked downloads so the original evidence is not lost when QuickBooks access ends. Provider durability/backup and restore evidence remain operational cutover gates.

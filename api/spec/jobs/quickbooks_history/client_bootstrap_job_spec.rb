@@ -50,6 +50,18 @@ RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
     expect(AuditLog.where(action: "historical_imports#client_bootstrap_failed", record_id: pending_bootstrap.id)).to exist
   end
 
+  it "keeps the attempt pending and retries transient database contention" do
+    pending_bootstrap = enqueue_bootstrap
+    allow(QuickbooksHistory::ClientBootstrapApplyService).to receive(:new).and_raise(ActiveRecord::Deadlocked, "retryable")
+
+    expect do
+      described_class.perform_now(pending_bootstrap.id, actor.id, pending_bootstrap.apply_started_at.iso8601(6))
+    end.to have_enqueued_job(described_class).with(pending_bootstrap.id, actor.id, pending_bootstrap.apply_started_at.iso8601(6))
+
+    expect(pending_bootstrap.reload).to be_pending
+    expect(pending_bootstrap.apply_error).to be_nil
+  end
+
   it "does not let a superseded job mutate a newer attempt" do
     pending_bootstrap = enqueue_bootstrap
     superseded_token = pending_bootstrap.apply_started_at.iso8601(6)

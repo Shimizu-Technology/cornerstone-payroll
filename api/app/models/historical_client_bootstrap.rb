@@ -38,6 +38,8 @@ class HistoricalClientBootstrap < ApplicationRecord
   end
 
   def stale_pending?
+    # The job must finish within this recovery window. A retry uses a new token,
+    # so a delayed job can never apply after an operator starts another attempt.
     pending? && apply_started_at.present? && apply_started_at <= PENDING_STALE_AFTER.ago
   end
 
