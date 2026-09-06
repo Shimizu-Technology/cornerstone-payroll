@@ -23,7 +23,7 @@ function LivePropHarness(): ReactNode {
     <Dialog
       open
       dismissOnEscape={dismissOnEscape}
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen): void => {
         if (!nextOpen) setResult(dismissOnEscape ? 'Latest handler called' : 'Locked handler called');
       }}
     >
@@ -40,7 +40,12 @@ function DefaultHarness(): ReactNode {
   const [result, setResult] = useState('No close requested');
 
   return (
-    <Dialog open onOpenChange={(nextOpen) => !nextOpen && setResult('Default handler called')}>
+    <Dialog
+      open
+      onOpenChange={(nextOpen): void => {
+        if (!nextOpen) setResult('Default handler called');
+      }}
+    >
       <DialogContent>
         <DialogTitle>Shared dialog default test</DialogTitle>
         <p data-testid="dialog-result">{result}</p>
