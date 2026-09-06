@@ -344,7 +344,7 @@ test('makes retained source verification and exact download clear to an administ
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
 });
 
-test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }) => {
+test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {
   await mockApplicationShell(page);
   const accepted = { ...detailWithVerifiedSource(1), status: 'locked' as const };
   const reportRequests: URL[] = [];
@@ -357,7 +357,7 @@ test('makes accepted QuickBooks history easy to filter, understand, and export',
     data: accepted,
     meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
   }));
-  await page.route('**/api/v1/admin/historical_reports/**', async (route) => {
+  await page.route('**/api/v1/admin/historical_reports/**', async (route): Promise<void> => {
     const url = new URL(route.request().url());
     const parts = url.pathname.split('/');
     const reportType = parts.at(-1) as HistoricalReportType;
@@ -378,7 +378,7 @@ test('makes accepted QuickBooks history easy to filter, understand, and export',
       report.summary.row_count = 13_830;
     }
     await fulfillJson(route, {
-      report,
+      data: report,
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
     });
   });

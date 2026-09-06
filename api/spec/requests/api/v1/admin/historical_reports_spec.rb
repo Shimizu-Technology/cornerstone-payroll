@@ -27,12 +27,12 @@ RSpec.describe "Api::V1::Admin::HistoricalReports", type: :request do
     body = response.parsed_body
     expect(body.dig("meta", "total_count")).to eq(2)
     expect(body.dig("meta", "total_pages")).to eq(2)
-    expect(body.dig("report", "rows").size).to eq(1)
-    expect(body.dig("report", "summary")).to include(
+    expect(body.dig("data", "rows").size).to eq(1)
+    expect(body.dig("data", "summary")).to include(
       "detailed_paycheck_count" => 1,
       "opening_summary_count" => 1
     )
-    expect(body.dig("report", "provenance").sole.fetch("batch_id")).to eq(batch.id)
+    expect(body.dig("data", "provenance").sole.fetch("batch_id")).to eq(batch.id)
     expect(body.to_json).not_to include("000-00-0001", "private_snapshot", "storage_key")
   end
 
@@ -76,8 +76,8 @@ RSpec.describe "Api::V1::Admin::HistoricalReports", type: :request do
     get "/api/v1/admin/historical_reports/register"
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.dig("report", "rows")).to eq([])
-    expect(response.parsed_body.dig("report", "provenance")).to eq([])
+    expect(response.parsed_body.dig("data", "rows")).to eq([])
+    expect(response.parsed_body.dig("data", "provenance")).to eq([])
   end
 
   it "requires the company feature and validates report filters" do

@@ -10,18 +10,18 @@ module Api
         before_action :require_historical_payroll_enabled!
 
         def show
-          report = report_builder.call
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
-          rows = report.fetch(:rows)
+          report = report_builder.call(page: page, per_page: per_page)
+          total_count = report.dig(:summary, :row_count)
 
           render json: {
-            report: report.merge(rows: rows.slice((page - 1) * per_page, per_page) || []),
+            data: report,
             meta: {
               current_page: page,
               per_page: per_page,
-              total_count: rows.size,
-              total_pages: (rows.size.to_f / per_page).ceil
+              total_count: total_count,
+              total_pages: (total_count.to_f / per_page).ceil
             }
           }
         rescue ArgumentError => e

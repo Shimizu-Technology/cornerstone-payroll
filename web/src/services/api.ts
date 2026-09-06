@@ -3861,7 +3861,7 @@ export interface HistoricalReport {
 }
 
 export interface HistoricalReportResponse {
-  report: HistoricalReport;
+  data: HistoricalReport;
   meta: PaginationMeta;
 }
 

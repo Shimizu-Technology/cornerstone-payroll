@@ -89,6 +89,22 @@ RSpec.describe QuickbooksHistory::ReportBuilder do
     expect(builder.filename(:xlsx)).to eq("historical_checks_company_#{company.id}_2024_all-workers.xlsx")
   end
 
+  it "pages expanded component reports while keeping full filtered totals" do
+    batch = imported_batch
+    apply_batch(batch)
+    builder = described_class.new(company: company, report_type: "taxes", year: 2024)
+
+    first_page = builder.call(page: 1, per_page: 1)
+    second_page = builder.call(page: 2, per_page: 1)
+
+    expect(first_page.fetch(:rows).size).to eq(1)
+    expect(second_page.fetch(:rows).size).to eq(1)
+    expect(first_page.dig(:summary, :row_count)).to be > 1
+    expect(second_page.dig(:summary, :row_count)).to eq(first_page.dig(:summary, :row_count))
+    expect(second_page.fetch(:rows)).not_to eq(first_page.fetch(:rows))
+    expect(first_page.dig(:summary, :totals, :gross_pay)).to eq(3_000.to_d)
+  end
+
   it "rejects unknown reports and invalid years" do
     expect do
       described_class.new(company: company, report_type: "made_up")

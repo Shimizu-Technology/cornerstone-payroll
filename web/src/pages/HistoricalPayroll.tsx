@@ -329,8 +329,10 @@ export function HistoricalPayroll(): ReactElement {
 
   useEffect(() => {
     if (!archive?.applied_batch_count) {
+      reportRequestIdRef.current += 1;
       setReport(null);
       setReportMeta(EMPTY_META);
+      setReportLoading(false);
       return;
     }
 
@@ -345,7 +347,7 @@ export function HistoricalPayroll(): ReactElement {
       worker_key: reportWorker,
     }, controller.signal).then((response) => {
       if (requestId !== reportRequestIdRef.current) return;
-      setReport(response.report);
+      setReport(response.data);
       setReportMeta(response.meta);
     }).catch((err: unknown) => {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -356,7 +358,7 @@ export function HistoricalPayroll(): ReactElement {
     });
 
     return () => controller.abort();
-  }, [archive?.applied_batch_count, reportPage, reportType, reportWorker, reportYear]);
+  }, [activeCompanyId, archive?.applied_batch_count, reportPage, reportType, reportWorker, reportYear]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

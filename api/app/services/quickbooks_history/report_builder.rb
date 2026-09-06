@@ -77,9 +77,12 @@ module QuickbooksHistory
       raise ArgumentError, "Unknown historical report" unless REPORTS.key?(@report_type)
     end
 
-    def call
-      paychecks = report_scope.to_a
-      rows = build_rows(paychecks)
+    def call(page: nil, per_page: nil)
+      rows, row_count = if page && per_page
+        paginated_rows(page: page, per_page: per_page)
+      else
+        export_rows
+      end
       definition = REPORTS.fetch(report_type)
 
       {
@@ -93,10 +96,10 @@ module QuickbooksHistory
         available_workers: available_workers,
         columns: definition.fetch(:columns).map { |key, label, format| { key: key, label: label, format: format } },
         rows: rows,
-        summary: summary(paychecks, rows),
-        coverage: coverage(paychecks),
-        warnings: warnings(paychecks),
-        provenance: provenance(paychecks)
+        summary: summary(row_count: row_count),
+        coverage: coverage,
+        warnings: warnings,
+        provenance: provenance
       }
     end
 
@@ -157,6 +160,94 @@ module QuickbooksHistory
       scope = scope.where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) if year
       scope = scope.where(historical_workers: { normalized_name: worker_key }) if worker_key
       scope.order(:pay_date, :source_employee_name, :id)
+    end
+
+    def export_rows
+      rows = build_rows(report_scope.to_a)
+      [ rows, rows.size ]
+    end
+
+    def paginated_rows(page:, per_page:)
+      offset = (page - 1) * per_page
+      return paginated_paycheck_rows(offset: offset, per_page: per_page) if report_type.in?(%w[register checks])
+
+      rows = if report_type == "employee_summary"
+        employee_summary_rows_streamed(offset: offset, per_page: per_page)
+      else
+        expanded_rows_page(offset: offset, per_page: per_page)
+      end
+      [ rows.fetch(:page), rows.fetch(:total) ]
+    end
+
+    def paginated_paycheck_rows(offset:, per_page:)
+      page_paychecks = report_scope.offset(offset).limit(per_page).to_a
+      [ build_rows(page_paychecks), report_scope.except(:includes, :order).count ]
+    end
+
+    def expanded_rows_page(offset:, per_page:)
+      selected = []
+      total = 0
+      each_paycheck_in_report_order do |paycheck|
+        expanded_rows_for(paycheck).each do |row|
+          selected << row if total >= offset && selected.size < per_page
+          total += 1
+        end
+      end
+      { page: selected, total: total }
+    end
+
+    def employee_summary_rows_streamed(offset:, per_page:)
+      groups = {}
+      each_paycheck_in_report_order do |paycheck|
+        key = paycheck.historical_worker.normalized_name
+        group = groups[key] ||= empty_employee_summary(paycheck)
+        group[:detailed_paychecks] += 1 if regular?(paycheck)
+        group[:opening_summaries] += 1 unless regular?(paycheck)
+        group[:hours] += paycheck.hours_total.to_d
+        TOTAL_FIELDS.each { |field| group[field] += paycheck.public_send(field).to_d }
+      end
+      rows = groups.values.sort_by { |row| row.fetch(:employee).downcase }
+      { page: rows.slice(offset, per_page) || [], total: rows.size }
+    end
+
+    def empty_employee_summary(paycheck)
+      {
+        employee: display_employee(paycheck),
+        detailed_paychecks: 0,
+        opening_summaries: 0,
+        hours: 0.to_d,
+        **TOTAL_FIELDS.to_h { |field| [ field, 0.to_d ] }
+      }
+    end
+
+    def expanded_rows_for(paycheck)
+      case report_type
+      when "taxes"
+        tax_rows([ paycheck ])
+      when "deductions"
+        deduction_rows([ paycheck ])
+      else
+        []
+      end
+    end
+
+    def each_paycheck_in_report_order(batch_size: 1_000)
+      cursor = nil
+      loop do
+        scope = report_scope.reorder(:pay_date, :source_employee_name, :id).limit(batch_size)
+        if cursor
+          scope = scope.where(
+            "(historical_paychecks.pay_date, historical_paychecks.source_employee_name, historical_paychecks.id) > (?, ?, ?)",
+            *cursor
+          )
+        end
+        batch = scope.to_a
+        break if batch.empty?
+
+        batch.each { |paycheck| yield paycheck }
+        last = batch.last
+        cursor = [ last.pay_date, last.source_employee_name, last.id ]
+      end
     end
 
     def available_years
@@ -289,18 +380,19 @@ module QuickbooksHistory
       paycheck.historical_pay_period.period_type == "regular"
     end
 
-    def summary(paychecks, rows)
-      regular = paychecks.select { |paycheck| regular?(paycheck) }
-      opening = paychecks - regular
+    def summary(row_count:)
+      scope = report_scope.except(:includes, :order)
+      regular = scope.where(historical_pay_periods: { period_type: "regular" })
+      opening = scope.where(historical_pay_periods: { period_type: "opening_summary" })
       {
-        row_count: rows.size,
-        paycheck_count: paychecks.size,
-        detailed_paycheck_count: regular.size,
-        opening_summary_count: opening.size,
-        totals: money_totals(paychecks),
-        detailed_paycheck_totals: money_totals(regular),
-        opening_summary_totals: money_totals(opening),
-        missing_check_number_count: paychecks.count { |paycheck| paycheck.check_number.blank? }
+        row_count: row_count,
+        paycheck_count: scope.count,
+        detailed_paycheck_count: regular.count,
+        opening_summary_count: opening.count,
+        totals: relation_money_totals(scope),
+        detailed_paycheck_totals: relation_money_totals(regular),
+        opening_summary_totals: relation_money_totals(opening),
+        missing_check_number_count: scope.where(check_number: [ nil, "" ]).count
       }
     end
 
@@ -308,30 +400,43 @@ module QuickbooksHistory
       TOTAL_FIELDS.to_h { |field| [ field, paychecks.sum { |paycheck| paycheck.public_send(field).to_d } ] }
     end
 
-    def coverage(paychecks)
-      regular = paychecks.select { |paycheck| regular?(paycheck) }
-      opening = paychecks - regular
+    def relation_money_totals(scope)
+      expressions = TOTAL_FIELDS.map do |field|
+        Arel.sql("COALESCE(SUM(historical_paychecks.#{field}), 0)")
+      end
+      values = scope.pick(*expressions) || Array.new(TOTAL_FIELDS.size, 0)
+      TOTAL_FIELDS.zip(Array(values)).to_h.transform_values(&:to_d)
+    end
+
+    def coverage
+      scope = report_scope.except(:includes, :order)
+      regular = scope.where(historical_pay_periods: { period_type: "regular" })
+      opening = scope.where(historical_pay_periods: { period_type: "opening_summary" })
       {
-        first_detailed_pay_date: regular.map(&:pay_date).min,
-        last_detailed_pay_date: regular.map(&:pay_date).max,
-        opening_summary_start: opening.map(&:period_start).min,
-        opening_summary_end: opening.map(&:period_end).max
+        first_detailed_pay_date: regular.minimum(:pay_date),
+        last_detailed_pay_date: regular.maximum(:pay_date),
+        opening_summary_start: opening.minimum(:period_start),
+        opening_summary_end: opening.maximum(:period_end)
       }
     end
 
-    def warnings(paychecks)
+    def warnings
+      scope = report_scope.except(:includes, :order)
       result = []
-      opening = paychecks.reject { |paycheck| regular?(paycheck) }
-      if opening.any?
-        result << "#{opening.size} opening summary record(s) cover #{opening.map(&:period_start).min} through #{opening.map(&:period_end).max}. They are shown separately and are not individual pay periods."
+      opening = scope.where(historical_pay_periods: { period_type: "opening_summary" })
+      opening_count = opening.count
+      if opening_count.positive?
+        result << "#{opening_count} opening summary record(s) cover #{opening.minimum(:period_start)} through #{opening.maximum(:period_end)}. They are shown separately and are not individual pay periods."
       end
-      missing_checks = paychecks.count { |paycheck| paycheck.check_number.blank? }
+      missing_checks = scope.where(check_number: [ nil, "" ]).count
       result << "QuickBooks did not provide a check number for #{missing_checks} record(s)." if missing_checks.positive?
       result
     end
 
-    def provenance(paychecks)
-      paychecks.map(&:historical_import_batch).uniq(&:id).sort_by(&:id).map do |batch|
+    def provenance
+      scope = report_scope.except(:includes, :order)
+      batch_ids = scope.distinct.pluck(:historical_import_batch_id)
+      HistoricalImportBatch.where(id: batch_ids).includes(:historical_import_source_files).order(:id).map do |batch|
         sources = batch.historical_import_source_files.to_a
         {
           batch_id: batch.id,
