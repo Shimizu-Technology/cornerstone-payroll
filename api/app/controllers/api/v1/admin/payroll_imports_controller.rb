@@ -23,6 +23,8 @@ module Api
           begin
             service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
             preview_data = service.preview(pdf_file: pdf_file, excel_file: excel_file)
+            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+            preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
 
             # Persist preview for later apply
             import_record = PayrollImportRecord.create!(
@@ -33,6 +35,7 @@ module Api
               raw_data: {
                 pdf_count: preview_data[:pdf_count],
                 excel_count: preview_data[:excel_count],
+                tips_paid_out_from_tips: tips_paid_out_from_tips,
                 unmatched_excel_names: preview_data[:unmatched_excel_names],
                 duplicate_employee_matches: preview_data[:duplicate_employee_matches],
                 low_confidence_matches: preview_data[:low_confidence_matches]
@@ -71,7 +74,11 @@ module Api
 
             if unresolved_names.any? || duplicate_matches.any?
               return render json: {
-                error: "Resolve every unmatched or duplicate source row, then preview the files again before applying."
+                error: "Resolve every unmatched or duplicate source row, then preview the files again before applying.",
+                details: {
+                  unmatched_names: unresolved_names,
+                  duplicate_matches: duplicate_matches
+                }
               }, status: :unprocessable_entity
             end
 
@@ -79,7 +86,8 @@ module Api
             acknowledged_low_confidence = ActiveModel::Type::Boolean.new.cast(params[:acknowledge_low_confidence_matches])
             if low_confidence_matches.any? && !acknowledged_low_confidence
               return render json: {
-                error: "Review and confirm the suggested employee name matches before applying."
+                error: "Review and confirm the suggested employee name matches before applying.",
+                details: { low_confidence_matches: low_confidence_matches }
               }, status: :unprocessable_entity
             end
 
@@ -93,11 +101,16 @@ module Api
               .reject { |row| excluded_employee_ids.include?(row[:employee_id].to_i) }
 
             if matched_data.empty?
-              return render json: { error: "Keep at least one matched employee in the import." }, status: :unprocessable_entity
+              return render json: {
+                error: "Keep at least one matched employee in the import.",
+                details: { remaining_matched_rows: matched_data.length }
+              }, status: :unprocessable_entity
             end
 
             force_overwrite = params[:force_overwrite].to_s == "true"
-            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(
+              import_record.raw_data.to_h.fetch("tips_paid_out_from_tips", false)
+            )
             results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
 
             final_status = results[:errors].any? ? "partially_applied" : "applied"

@@ -1038,13 +1038,14 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>
     api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
-  previewImport: async (id: number, pdfFile: File, excelFile?: File) => {
+  previewImport: async (id: number, pdfFile: File, excelFile?: File, tipsPaidOutFromTips = false) => {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);
     if (excelFile) formData.append('excel_file', excelFile);
+    formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
-  applyImport: (id: number, data: { import_id: number; excluded_employee_ids?: number[]; tips_paid_out_from_tips?: boolean; acknowledge_low_confidence_matches?: boolean }) =>
+  applyImport: (id: number, data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean }) =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
 
   // CPR-71: Payroll correction workflow
@@ -1462,6 +1463,7 @@ export interface ImportPreviewResponse {
     excel_count: number;
     matched_count: number;
     can_apply: boolean;
+    tips_paid_out_from_tips: boolean;
   };
 }
 

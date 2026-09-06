@@ -68,7 +68,14 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     try {
       setLoading(true);
       setError(null);
-      const data = await payPeriodsApi.previewImport(payPeriodId, pdfFile, excelFile || undefined);
+      setReviewedSuggestedMatches(false);
+      setExcludedIds(new Set());
+      const data = await payPeriodsApi.previewImport(
+        payPeriodId,
+        pdfFile,
+        excelFile || undefined,
+        tipsPaidOutFromTips,
+      );
       setPreviewData(data);
       setStep('preview');
     } catch (err) {
@@ -86,7 +93,6 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
         excluded_employee_ids: Array.from(excludedIds),
-        tips_paid_out_from_tips: tipsPaidOutFromTips,
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
       });
       setResults({
@@ -176,11 +182,28 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 ref={excelInputRef}
                 type="file"
                 accept=".xlsx,.xls"
-                onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setExcelFile(e.target.files?.[0] || null);
+                  setTipsPaidOutFromTips(false);
+                }}
                 className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
               {excelFile && <p className="text-xs text-gray-500 mt-1">{excelFile.name}</p>}
             </div>
+
+            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <input
+                type="checkbox"
+                checked={tipsPaidOutFromTips}
+                onChange={(event) => setTipsPaidOutFromTips(event.target.checked)}
+                className="mt-0.5 rounded border-amber-300"
+                disabled={!excelFile}
+              />
+              <span>
+                <span className="font-medium">Tips in this workbook were already paid out daily.</span>{' '}
+                Report them as taxable tips and offset them from employee checks.
+              </span>
+            </label>
           </div>
         )}
 
@@ -333,19 +356,12 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
             </div>
 
             <div className="space-y-3 text-sm text-gray-500">
-              <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                <input
-                  type="checkbox"
-                  checked={tipsPaidOutFromTips}
-                  onChange={(event) => setTipsPaidOutFromTips(event.target.checked)}
-                  className="mt-0.5 rounded border-amber-300"
-                  disabled={previewData.preview.excel_count === 0}
-                />
-                <span>
-                  <span className="font-medium">Tips in this Excel file were already paid out daily.</span>{' '}
-                  Import them as reported taxable tips and also offset them from employee checks.
-                </span>
-              </label>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-gray-700">
+                <span className="font-medium">Tip treatment reviewed with these files:</span>{' '}
+                {previewData.preview.tips_paid_out_from_tips
+                  ? 'Tips were already paid daily and will offset employee checks.'
+                  : 'Tips were not already paid daily and will remain in employee checks.'}
+              </div>
               <p>
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
               </p>
@@ -396,7 +412,12 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
           )}
           {step === 'preview' && (
             <>
-              <Button variant="outline" onClick={() => { setStep('upload'); setPreviewData(null); }}>
+              <Button variant="outline" onClick={() => {
+                setStep('upload');
+                setPreviewData(null);
+                setReviewedSuggestedMatches(false);
+                setExcludedIds(new Set());
+              }}>
                 Back
               </Button>
               <Button onClick={handleApply} disabled={!canApply}>

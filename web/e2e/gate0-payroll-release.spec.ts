@@ -316,13 +316,19 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(safeDialog.getByText('Revel pay rates and pay amounts are ignored.', { exact: false })).toBeVisible();
     await safeDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.safe_payroll_import_pdf_path);
     await safeDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.safe_payroll_import_workbook_path);
+    await safeDialog.getByLabel(/Tips in this workbook were already paid out daily/).check();
     await safeDialog.getByRole('button', { name: 'Preview Import' }).click();
 
     await expect(safeDialog.getByText(/Review 2 suggested name matches/)).toBeVisible();
     await expect(safeDialog.getByText(/Petrius, Rosie.*Rosie Petirus/)).toBeVisible();
+    await expect(safeDialog.getByText(/Tips were already paid daily and will offset employee checks/)).toBeVisible();
     await expect(safeDialog.getByText('$19.25')).toBeVisible();
     await expect(safeDialog.getByText('$8,888.88')).toHaveCount(0);
-    const applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
+    let applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
+    await expect(applySafeImport).toBeDisabled();
+    await safeDialog.getByRole('button', { name: 'Back' }).click();
+    await safeDialog.getByRole('button', { name: 'Preview Import' }).click();
+    applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
     await expect(applySafeImport).toBeDisabled();
     await safeDialog.getByLabel(/I reviewed these suggestions/).check();
     await expect(applySafeImport).toBeEnabled();
@@ -336,6 +342,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(Number(typoEmployeeItem?.pay_rate)).toBe(fixture.import_typo_employee_rate);
     expect(Number(typoEmployeeItem?.hours_worked)).toBe(37.5);
     expect(Number(typoEmployeeItem?.reported_tips)).toBe(117.5);
+    expect(Number(typoEmployeeItem?.tips_paid_out)).toBe(117.5);
     expect(Number(typoEmployeeItem?.loan_deduction)).toBe(123.5);
     expect(Number(typoEmployeeItem?.gross_pay)).not.toBe(8_888.88);
 
