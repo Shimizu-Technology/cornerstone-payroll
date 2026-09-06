@@ -19,6 +19,7 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
+import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,17 +32,28 @@ import { formatCurrency, formatDateRange } from '@/lib/utils';
 import {
   ApiError,
   historicalImportsApi,
+  historicalReportsApi,
   employeesApi,
   type HistoricalArchiveSummary,
   type HistoricalBreakdownLine,
   type HistoricalImportBatch,
   type HistoricalImportDetail,
   type HistoricalPaycheck,
+  type HistoricalReport,
+  type HistoricalReportColumn,
+  type HistoricalReportType,
 } from '@/services/api';
 import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
 const MAX_BUNDLE_FILES = 75;
+const HISTORICAL_REPORTS: Array<{ value: HistoricalReportType; label: string }> = [
+  { value: 'register', label: 'Payroll register' },
+  { value: 'employee_summary', label: 'Employee summary' },
+  { value: 'taxes', label: 'Tax detail' },
+  { value: 'deductions', label: 'Deductions & contributions' },
+  { value: 'checks', label: 'Checks & payments' },
+];
 
 function dollars(value?: string | number | null): string {
   return formatCurrency(Number(value || 0));
@@ -58,6 +70,14 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function fieldLabel(field: string): string {
   return field.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function reportCell(value: string | number | null, column: HistoricalReportColumn): string {
+  if (value === null || value === '') return '—';
+  if (column.format === 'money') return dollars(value);
+  if (column.format === 'date') return shortDate(String(value));
+  if (column.format === 'number') return Number(value).toLocaleString('en-US', { maximumFractionDigits: 4 });
+  return String(value);
 }
 
 function statusBadge(status: HistoricalImportBatch['status']): ReactElement {
@@ -155,6 +175,7 @@ export function HistoricalPayroll(): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+  const reportRequestIdRef = useRef(0);
   const selectedBatchIdRef = useRef<number | null>(null);
   const batchPageRef = useRef(1);
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
@@ -183,6 +204,15 @@ export function HistoricalPayroll(): ReactElement {
   const [employeeHasMore, setEmployeeHasMore] = useState(false);
   const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
   const [archiveWorkersConfirmation, setArchiveWorkersConfirmation] = useState<ArchiveWorkersConfirmation | null>(null);
+  const [reportType, setReportType] = useState<HistoricalReportType>('register');
+  const [reportYear, setReportYear] = useState<number | undefined>();
+  const [reportWorker, setReportWorker] = useState<string | undefined>();
+  const [reportPage, setReportPage] = useState(1);
+  const [report, setReport] = useState<HistoricalReport | null>(null);
+  const [reportMeta, setReportMeta] = useState<PaginationMeta>(EMPTY_META);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportExporting, setReportExporting] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -275,6 +305,13 @@ export function HistoricalPayroll(): ReactElement {
     setValidationErrors({});
     setPaycheckSearchDraft('');
     setSearch('');
+    setReportType('register');
+    setReportYear(undefined);
+    setReportWorker(undefined);
+    setReportPage(1);
+    setReport(null);
+    setReportMeta(EMPTY_META);
+    setReportError(null);
     setEmployeeSearchDraft('');
     setEmployeeSearch('');
     setLoading(true);
@@ -286,8 +323,42 @@ export function HistoricalPayroll(): ReactElement {
       current = false;
       listRequestIdRef.current += 1;
       detailRequestIdRef.current += 1;
+      reportRequestIdRef.current += 1;
     };
   }, [activeCompanyId, refresh, selectBatch, selectBatchPage]);
+
+  useEffect(() => {
+    if (!archive?.applied_batch_count) {
+      reportRequestIdRef.current += 1;
+      setReport(null);
+      setReportMeta(EMPTY_META);
+      setReportLoading(false);
+      return;
+    }
+
+    const requestId = ++reportRequestIdRef.current;
+    const controller = new AbortController();
+    setReportLoading(true);
+    setReportError(null);
+    void historicalReportsApi.show(reportType, {
+      page: reportPage,
+      per_page: 50,
+      year: reportYear,
+      worker_key: reportWorker,
+    }, controller.signal).then((response) => {
+      if (requestId !== reportRequestIdRef.current) return;
+      setReport(response.data);
+      setReportMeta(response.meta);
+    }).catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (requestId !== reportRequestIdRef.current) return;
+      setReportError(errorMessage(err, 'Historical report could not be loaded.'));
+    }).finally(() => {
+      if (requestId === reportRequestIdRef.current) setReportLoading(false);
+    });
+
+    return () => controller.abort();
+  }, [activeCompanyId, archive?.applied_batch_count, reportPage, reportType, reportWorker, reportYear]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -548,12 +619,42 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
+  const downloadHistoricalReport = async (format: 'csv' | 'xlsx' | 'pdf'): Promise<void> => {
+    setReportExporting(format);
+    setReportError(null);
+    try {
+      const download = await historicalReportsApi.download(reportType, format, {
+        year: reportYear,
+        worker_key: reportWorker,
+      });
+      const url = URL.createObjectURL(download.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = download.filename || `historical-${reportType}.${format}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setReportError(errorMessage(err, 'Historical report could not be exported.'));
+    } finally {
+      setReportExporting(null);
+    }
+  };
+
   const reconciliationPassed = Boolean(selectedBatch?.reconciliation_summary.passed && selectedBatch.errors.length === 0);
   const workersReviewed = (selectedBatch?.worker_review_summary.needs_review || 0) === 0;
   const sourcesReady = Boolean(selectedBatch?.source_retention_summary.ready);
   const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
+  const historicalReportFormats: ReportDownloadFormat[] = [
+    ...(report && report.summary.row_count <= 10_000 ? [
+      { key: 'pdf', label: 'PDF', description: 'Readable report with source notes', kind: 'pdf' as const, loading: reportExporting === 'pdf', onSelect: () => downloadHistoricalReport('pdf') },
+    ] : []),
+    { key: 'xlsx', label: 'Excel workbook', description: 'Report, explanation, and source batches', kind: 'spreadsheet', loading: reportExporting === 'xlsx', onSelect: () => downloadHistoricalReport('xlsx') },
+    { key: 'csv', label: 'CSV data', description: 'Flat rows for analysis or transfer', kind: 'data', loading: reportExporting === 'csv', onSelect: () => downloadHistoricalReport('csv') },
+  ];
 
   return (
     <div className="min-h-full bg-neutral-50/70">
@@ -758,6 +859,104 @@ export function HistoricalPayroll(): ReactElement {
                 </Table>
               </div>
               <div className="px-4 py-4 text-xs leading-5 text-neutral-500 sm:px-6">Reviewing a worker does not create, edit, activate, terminate, or change pay settings on any live employee.</div>
+            </CardContent>
+          </Card>
+        )}
+
+        {archive && archive.applied_batch_count > 0 && (
+          <Card>
+            <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.7),rgba(255,255,255,0.96)_55%,rgba(239,246,255,0.7))]">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><FileSpreadsheet className="h-4 w-4" />Accepted history</div>
+                  <CardTitle className="mt-2">Historical reports</CardTitle>
+                  <CardDescription className="mt-2">Browse and export the final values recorded by QuickBooks. These reports never recalculate payroll and never mix preview batches into official history.</CardDescription>
+                </div>
+                <ReportDownloadMenu
+                  formats={historicalReportFormats}
+                  disabled={!report || reportLoading || reportExporting !== null}
+                  buttonLabel="Export report"
+                  ariaLabel="Export historical report"
+                />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 p-4 sm:p-6">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label htmlFor="historical-report-type" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Report</label>
+                  <select id="historical-report-type" value={reportType} onChange={(event) => { setReportType(event.target.value as HistoricalReportType); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                    {HISTORICAL_REPORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="historical-report-year" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Source pay year</label>
+                  <select id="historical-report-year" value={reportYear || ''} onChange={(event) => { setReportYear(event.target.value ? Number(event.target.value) : undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                    <option value="">All years</option>
+                    {report?.available_years.map((yearOption) => <option key={yearOption} value={yearOption}>{yearOption}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="historical-report-worker" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Worker</label>
+                  <select id="historical-report-worker" value={reportWorker || ''} onChange={(event) => { setReportWorker(event.target.value || undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                    <option value="">All workers</option>
+                    {report?.available_workers.map((worker) => <option key={worker.key} value={worker.key}>{worker.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {reportError && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{reportError}</div>}
+
+              {reportLoading && !report ? (
+                <div className="grid animate-pulse gap-4 sm:grid-cols-2 xl:grid-cols-4"><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /></div>
+              ) : report ? (
+                <>
+                  <div>
+                    <h3 className="font-display text-xl font-extrabold tracking-tight text-neutral-950">{report.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">{report.description}</p>
+                    <p className="mt-2 text-xs font-semibold text-primary-800">{report.source_statement}</p>
+                  </div>
+
+                  <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+                    <Metric label="Detailed paychecks" value={report.summary.detailed_paycheck_count.toLocaleString()} note={`${shortDate(report.coverage.first_detailed_pay_date)} – ${shortDate(report.coverage.last_detailed_pay_date)}`} />
+                    <Metric label="Opening summaries" value={report.summary.opening_summary_count.toLocaleString()} note={report.summary.opening_summary_count ? 'Kept separate from detailed checks' : 'None in these filters'} />
+                    <Metric label="Total gross" value={dollars(report.summary.totals.gross_pay)} note={`${dollars(report.summary.detailed_paycheck_totals.gross_pay)} detailed`} />
+                    <Metric label="Total net" value={dollars(report.summary.totals.net_pay)} note={`${dollars(report.summary.opening_summary_totals.net_pay)} opening summary`} />
+                  </div>
+
+                  {report.warnings.length > 0 && (
+                    <div className="rounded-xl border border-warning-200 bg-warning-50 p-4">
+                      <p className="text-sm font-semibold text-warning-900">How to read this history</p>
+                      <ul className="mt-2 space-y-2 text-sm leading-6 text-warning-800">{report.warnings.map((warning) => <li key={warning}>• {warning}</li>)}</ul>
+                    </div>
+                  )}
+
+                  {report.summary.row_count > 10_000 && (
+                    <div className="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-6 text-primary-900">Excel and CSV are ready for this full report. Select a year or worker to make a readable PDF available.</div>
+                  )}
+
+                  <div className={`overflow-x-auto rounded-xl border border-neutral-200 transition-opacity ${reportLoading ? 'opacity-60' : ''}`} aria-busy={reportLoading}>
+                    <Table>
+                      <TableHeader><TableRow>{report.columns.map((column) => <TableHead key={column.key} className={column.format === 'money' || column.format === 'number' ? 'text-right' : undefined}>{column.label}</TableHead>)}</TableRow></TableHeader>
+                      <TableBody>
+                        {report.rows.map((row, rowIndex) => (
+                          <TableRow key={`${report.report_type}-${reportPage}-${rowIndex}`}>
+                            {report.columns.map((column) => <TableCell key={column.key} className={`${column.format === 'money' || column.format === 'number' ? 'text-right font-mono tabular-nums' : ''} ${column.format === 'date' ? 'whitespace-nowrap' : ''}`}>{reportCell(row[column.key] ?? null, column)}</TableCell>)}
+                          </TableRow>
+                        ))}
+                        {report.rows.length === 0 && <TableRow><TableCell colSpan={report.columns.length} className="py-12 text-center text-sm text-neutral-500">No accepted historical records match these filters.</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs text-neutral-500">Showing page {reportMeta.current_page} of {Math.max(reportMeta.total_pages, 1)} · {reportMeta.total_count.toLocaleString()} rows</p>
+                      <p className="mt-2 text-xs text-neutral-500">Evidence: {report.provenance.length} accepted source batch{report.provenance.length === 1 ? '' : 'es'} · {report.provenance.reduce((total, source) => total + source.verified_file_count, 0)} verified original files</p>
+                    </div>
+                    <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setReportPage((value) => Math.max(1, value - 1))} disabled={reportLoading || reportPage <= 1}><ChevronLeft className="mr-1 h-4 w-4" />Previous</Button><Button size="sm" variant="outline" onClick={() => setReportPage((value) => value + 1)} disabled={reportLoading || reportPage >= reportMeta.total_pages}>Next<ChevronRight className="ml-1 h-4 w-4" /></Button></div>
+                  </div>
+                </>
+              ) : null}
             </CardContent>
           </Card>
         )}

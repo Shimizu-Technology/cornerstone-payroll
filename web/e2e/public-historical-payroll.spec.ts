@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalImportBatch, HistoricalImportDetail } from '@/services/api';
+import type { HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
 
 interface MockWorker {
   id: number;
@@ -22,6 +22,67 @@ const archive = {
   gross_pay: '0.0',
   net_pay: '0.0',
 };
+
+const acceptedArchive = {
+  applied_batch_count: 1,
+  paycheck_count: 2,
+  worker_count: 1,
+  first_pay_date: '2024-01-15',
+  last_pay_date: '2024-12-31',
+  gross_pay: '3000.0',
+  net_pay: '2325.0',
+};
+
+function historicalReport(reportType: HistoricalReportType): HistoricalReport {
+  return {
+    report_type: reportType,
+    title: reportType === 'taxes' ? 'Historical Tax Detail' : 'Historical Payroll Register',
+    description: 'Final payroll facts preserved from QuickBooks.',
+    generated_at: '2026-09-06T01:00:00Z',
+    source_statement: 'Authoritative QuickBooks snapshots — never recalculated by Cornerstone Payroll',
+    filters: { year: null, worker_key: null },
+    available_years: [2025, 2024],
+    available_workers: [{ key: 'worker alice', name: 'Worker, Alice' }],
+    columns: [
+      { key: 'pay_date', label: 'Pay date', format: 'date' },
+      { key: 'record_kind', label: 'Record type', format: 'text' },
+      { key: 'employee', label: 'Employee', format: 'text' },
+      { key: 'gross_pay', label: 'Gross pay', format: 'money' },
+    ],
+    rows: [
+      { pay_date: '2024-01-15', record_kind: 'Detailed paycheck', employee: 'Worker, Alice', gross_pay: '1000.0' },
+      { pay_date: '2024-12-31', record_kind: 'Opening summary', employee: 'Worker, Alice', gross_pay: '2000.0' },
+    ],
+    summary: {
+      row_count: 2,
+      paycheck_count: 2,
+      detailed_paycheck_count: 1,
+      opening_summary_count: 1,
+      totals: { gross_pay: '3000.0', pretax_deductions: '50.0', employee_taxes: '600.0', after_tax_deductions: '25.0', net_pay: '2325.0', employer_taxes: '300.0', employer_contributions: '50.0', total_payroll_cost: '3350.0' },
+      detailed_paycheck_totals: { gross_pay: '1000.0', pretax_deductions: '50.0', employee_taxes: '200.0', after_tax_deductions: '25.0', net_pay: '725.0', employer_taxes: '100.0', employer_contributions: '50.0', total_payroll_cost: '1150.0' },
+      opening_summary_totals: { gross_pay: '2000.0', pretax_deductions: '0.0', employee_taxes: '400.0', after_tax_deductions: '0.0', net_pay: '1600.0', employer_taxes: '200.0', employer_contributions: '0.0', total_payroll_cost: '2200.0' },
+      missing_check_number_count: 2,
+    },
+    coverage: {
+      first_detailed_pay_date: '2024-01-15',
+      last_detailed_pay_date: '2024-01-15',
+      opening_summary_start: '2024-01-01',
+      opening_summary_end: '2024-12-31',
+    },
+    warnings: ['1 opening summary record covers 2024-01-01 through 2024-12-31. It is shown separately and is not an individual pay period.'],
+    provenance: [{
+      batch_id: 1,
+      source_label: 'MoSa 2024 history',
+      status: 'locked',
+      bundle_digest: 'a'.repeat(64),
+      importer_version: 'test',
+      applied_at: '2026-09-06T01:00:00Z',
+      locked_at: '2026-09-06T01:05:00Z',
+      retained_file_count: 5,
+      verified_file_count: 5,
+    }],
+  };
+}
 
 function batch(id: number, workers: MockWorker[] = []): HistoricalImportBatch {
   return {
@@ -281,4 +342,68 @@ test('makes retained source verification and exact download clear to an administ
   await page.getByRole('button', { name: 'Download original' }).click();
   await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
+});
+
+test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const accepted = { ...detailWithVerifiedSource(1), status: 'locked' as const };
+  const reportRequests: URL[] = [];
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [accepted],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: accepted,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', async (route): Promise<void> => {
+    const url = new URL(route.request().url());
+    const parts = url.pathname.split('/');
+    const reportType = parts.at(-1) as HistoricalReportType;
+    const extension = parts.at(-1);
+    if (extension === 'csv' || extension === 'xlsx' || extension === 'pdf') {
+      await route.fulfill({
+        status: 200,
+        contentType: extension === 'pdf' ? 'application/pdf' : extension === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers: { 'Content-Disposition': `attachment; filename="historical_register.${extension}"` },
+        body: extension === 'pdf' ? '%PDF-test' : extension === 'xlsx' ? 'PK-test' : 'Pay date,Employee',
+      });
+      return;
+    }
+
+    reportRequests.push(url);
+    const report = historicalReport(reportType);
+    if (reportType === 'taxes' && !url.searchParams.has('year') && !url.searchParams.has('worker_key')) {
+      report.summary.row_count = 13_830;
+    }
+    await fulfillJson(route, {
+      data: report,
+      meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByRole('heading', { name: 'Historical reports' })).toBeVisible();
+  await expect(page.getByText('Authoritative QuickBooks snapshots — never recalculated by Cornerstone Payroll')).toBeVisible();
+  await expect(page.getByText('Opening summary', { exact: true })).toBeVisible();
+  await expect(page.getByText(/not an individual pay period/)).toBeVisible();
+  await expect(page.getByText('Evidence: 1 accepted source batch · 5 verified original files')).toBeVisible();
+
+  await page.locator('#historical-report-type').selectOption('taxes');
+  await expect(page.getByRole('heading', { name: 'Historical Tax Detail' })).toBeVisible();
+  await expect(page.getByText('Excel and CSV are ready for this full report. Select a year or worker to make a readable PDF available.')).toBeVisible();
+  await page.getByRole('button', { name: 'Export historical report' }).click();
+  await expect(page.getByRole('menuitem', { name: /PDF/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await page.locator('#historical-report-year').selectOption('2024');
+  await page.locator('#historical-report-worker').selectOption('worker alice');
+  await expect.poll(() => reportRequests.some((url) => url.searchParams.get('year') === '2024' && url.searchParams.get('worker_key') === 'worker alice')).toBe(true);
+  await expect(page.getByText('Excel and CSV are ready for this full report.')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Export historical report' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: /Excel workbook/ }).click();
+  await expect((await download).suggestedFilename()).toBe('historical-taxes.xlsx');
 });

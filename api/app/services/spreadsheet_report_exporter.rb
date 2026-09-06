@@ -4,6 +4,7 @@ require "caxlsx"
 
 class SpreadsheetReportExporter
   CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  FORMULA_PREFIXES = [ "=", "+", "-", "@", "\t", "\r" ].freeze
 
   attr_reader :filename
 
@@ -79,8 +80,16 @@ class SpreadsheetReportExporter
       value.to_f
     when Date, Time, DateTime
       value.to_s
+    when String
+      neutralize_formula(value)
     else
       value
     end
+  end
+
+  def neutralize_formula(value)
+    return value unless value.start_with?(*FORMULA_PREFIXES)
+
+    "'#{value.sub(/\A[\t\r]+/, "")}"
   end
 end

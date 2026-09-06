@@ -49,4 +49,18 @@ RSpec.describe SpreadsheetReportExporter do
       expect(sheet_xml).to match(/<row[^>]+customHeight="1"[^>]+ht="24"[^>]+r="1"/)
     end
   end
+
+  it "stores formula-like source text as inert spreadsheet values" do
+    workbook_bytes = described_class.new(
+      filename: "safe.xlsx",
+      sheets: [ { name: "Source data", rows: [ [ "=HYPERLINK(\"https://example.test\")", "+1", "@name" ] ] } ]
+    ).generate
+
+    Zip::File.open_buffer(StringIO.new(workbook_bytes)) do |archive|
+      sheet_xml = archive.read("xl/worksheets/sheet1.xml")
+
+      expect(sheet_xml).not_to include("<f>")
+      expect(sheet_xml).to include("&#39;=HYPERLINK", "&#39;+1", "&#39;@name")
+    end
+  end
 end

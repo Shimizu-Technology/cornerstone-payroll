@@ -115,6 +115,13 @@ Rails.application.routes.draw do
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
         end
+        resources :historical_reports, param: :report_type, only: [ :show ] do
+          member do
+            get :csv
+            get :xlsx
+            get :pdf
+          end
+        end
         resources :employee_change_requests, only: [ :index, :show ] do
           member do
             patch :approve
