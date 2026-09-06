@@ -60,7 +60,7 @@ module QuickbooksHistory
       end
       ensure_current_attempt!(batch.historical_import_cutover_review) if expected_verification_started_at
 
-      authorized = actor.present? && actor.can_access_company?(batch.company_id) &&
+      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
         StaffRolePolicy.allowed?(actor, :manage_client_configuration)
       raise ArgumentError, "A manager or administrator with company access is required" unless authorized
     end

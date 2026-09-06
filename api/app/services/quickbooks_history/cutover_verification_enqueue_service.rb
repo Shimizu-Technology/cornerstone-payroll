@@ -25,7 +25,7 @@ module QuickbooksHistory
     attr_reader :batch, :actor
 
     def ensure_authorized!
-      authorized = actor.present? && actor.can_access_company?(batch.company_id) &&
+      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
         StaffRolePolicy.allowed?(actor, :manage_client_configuration)
       raise ArgumentError, "A manager or administrator with company access is required" unless authorized
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.reload.applied?
@@ -65,16 +65,17 @@ module QuickbooksHistory
     end
 
     def enqueue!(review)
-      CutoverVerificationJob.perform_later(batch.id, actor.id, review.verification_started_at.iso8601(6))
+      verification_token = review.verification_started_at.iso8601(6)
+      CutoverVerificationJob.perform_later(batch.id, actor.id, verification_token)
     rescue StandardError => e
-      mark_enqueue_failed!(review)
+      mark_enqueue_failed!(review, verification_token)
       Rails.logger.error("Historical cutover verification enqueue failed for batch #{batch.id}: #{e.class}: #{e.message}")
       raise ArgumentError, "Cutover verification could not be queued"
     end
 
-    def mark_enqueue_failed!(review)
+    def mark_enqueue_failed!(review, verification_token)
       review.with_lock do
-        return unless review.pending?
+        return unless review.pending? && review.verification_started_at&.iso8601(6) == verification_token
 
         review.update!(status: "failed", verification_error: "Cutover verification could not be queued. Try again.")
         record_audit!(review, "historical_imports#cutover_verification_failed")

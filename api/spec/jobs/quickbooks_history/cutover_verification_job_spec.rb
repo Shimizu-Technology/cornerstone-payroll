@@ -54,4 +54,15 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
     expect(review).to be_pending
     expect(AuditLog.where(action: "historical_imports#verify_cutover", record_id: review.id)).not_to exist
   end
+
+  it "fails safely if the initiating operator loses access before execution" do
+    review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+    actor.update!(active: false)
+
+    described_class.perform_now(batch.id, actor.id, review.verification_started_at.iso8601(6))
+
+    expect(review.reload.status).to eq("failed")
+    expect(review.verification_error).to eq("Cutover verification could not be completed. Review the source files and try again.")
+    expect(AuditLog.where(action: "historical_imports#verify_cutover", record_id: review.id)).not_to exist
+  end
 end

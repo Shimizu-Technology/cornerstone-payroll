@@ -83,6 +83,13 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
       .to raise_error(ArgumentError, /manager or administrator/)
   end
 
+  it "requires the attributed operator to retain payroll access" do
+    actor.update!(active: false)
+
+    expect { described_class.new(batch: batch, actor: actor).call }
+      .to raise_error(ArgumentError, /manager or administrator/)
+  end
+
   it "supports v2 evidence only when the current parser reproduces it exactly" do
     batch.update_column(:importer_version, "quickbooks-online-payroll-v2")
 

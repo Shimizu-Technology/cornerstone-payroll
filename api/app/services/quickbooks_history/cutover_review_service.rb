@@ -51,7 +51,7 @@ module QuickbooksHistory
 
     def ensure_authorized!
       batch = review.historical_import_batch
-      authorized = actor.present? && actor.can_access_company?(batch.company_id) &&
+      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
         StaffRolePolicy.allowed?(actor, :manage_client_configuration)
       return if authorized
 
