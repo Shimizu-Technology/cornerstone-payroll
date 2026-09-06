@@ -185,6 +185,7 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   await expect(page.locator('#historical-batch option')).toHaveCount(1);
   await expect(page.locator('#historical-batch')).toHaveValue('1');
   await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
+  await expect(page.getByText('No source inventory is attached')).toBeVisible();
 });
 
 test('never lets a completed worker mapping replace a newly selected batch', async ({ page }) => {

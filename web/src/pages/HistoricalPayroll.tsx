@@ -812,6 +812,15 @@ export function HistoricalPayroll(): ReactElement {
               </div>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {selectedBatch.source_file_manifest.length === 0 && (
+                <div className="flex items-start gap-3 rounded-xl border border-dashed border-warning-300 bg-warning-50 p-4 sm:col-span-2 xl:col-span-3">
+                  <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-warning-900">No source inventory is attached</p>
+                    <p className="mt-1 text-sm leading-6 text-warning-800">Upload the same QuickBooks bundle again to retain and verify its original files before applying this preview.</p>
+                  </div>
+                </div>
+              )}
               {selectedBatch.source_file_manifest.map((file, index) => {
                 const retained = selectedBatch.source_files?.find((source) => source.position === (file.position ?? index));
                 const verified = retained?.verification_status === 'verified';
