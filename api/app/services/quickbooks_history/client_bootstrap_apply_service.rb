@@ -2,12 +2,15 @@
 
 module QuickbooksHistory
   class ClientBootstrapApplyService
+    class StaleBootstrapAttempt < StandardError; end
+
     ACKNOWLEDGEMENT = "PREPARE CLEAN CLIENT EMPLOYEES"
 
-    def initialize(bootstrap:, actor:, acknowledgement:)
+    def initialize(bootstrap:, actor:, acknowledgement:, expected_apply_started_at: nil)
       @bootstrap = bootstrap
       @actor = actor
       @acknowledgement = acknowledgement
+      @expected_apply_started_at = expected_apply_started_at
     end
 
     def call
@@ -18,9 +21,12 @@ module QuickbooksHistory
       result = nil
       HistoricalClientBootstrap.transaction do
         bootstrap.historical_import_batch.lock!
-        bootstrap.company.lock!
         bootstrap.lock!
         return bootstrap if bootstrap.applied?
+        ensure_current_attempt! if expected_apply_started_at
+        unless bootstrap.previewed? || bootstrap.pending? || bootstrap.failed?
+          raise ArgumentError, "The clean-client employee setup is not ready to apply"
+        end
 
         plan = ClientBootstrapPlan.new(batch: bootstrap.historical_import_batch).call
         raise ArgumentError, plan.errors.join("; ") unless plan.ready?
@@ -40,6 +46,7 @@ module QuickbooksHistory
 
         bootstrap.update!(
           status: "applied",
+          apply_error: nil,
           applied_at: Time.current,
           applied_by: actor
         )
@@ -51,7 +58,14 @@ module QuickbooksHistory
 
     private
 
-    attr_reader :bootstrap, :actor, :acknowledgement
+    attr_reader :bootstrap, :actor, :acknowledgement, :expected_apply_started_at
+
+    def ensure_current_attempt!
+      current_token = bootstrap.apply_started_at&.iso8601(6)
+      return if bootstrap.pending? && current_token == expected_apply_started_at
+
+      raise StaleBootstrapAttempt, "A newer clean-client preparation attempt superseded this job"
+    end
 
     def ensure_authorized_actor!
       return if actor&.can_access_company?(bootstrap.company_id) && StaffRolePolicy.allowed?(actor, :manage_client_configuration)

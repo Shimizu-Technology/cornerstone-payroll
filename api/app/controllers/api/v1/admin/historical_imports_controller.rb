@@ -169,14 +169,15 @@ module Api
 
         def apply_client_bootstrap
           bootstrap = @batch.historical_client_bootstrap || raise(ArgumentError, "Build and review the current-payroll preview first")
-          QuickbooksHistory::ClientBootstrapApplyService.new(
+          result = QuickbooksHistory::ClientBootstrapEnqueueService.new(
             bootstrap: bootstrap,
             actor: current_user,
             acknowledgement: params[:acknowledgement]
           ).call
           render json: {
-            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true)
-          }
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
+            meta: { enqueued: result.enqueued }
+          }, status: result.enqueued ? :accepted : :ok
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -438,6 +439,8 @@ module Api
             errors: bootstrap.validation_errors,
             review_items: bootstrap.review_items,
             ready_to_apply: bootstrap.ready_to_apply?,
+            apply_started_at: bootstrap.apply_started_at,
+            apply_error: bootstrap.apply_error,
             applied_at: bootstrap.applied_at,
             applied_by_name: bootstrap.applied_by&.name,
             acknowledgement: QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT,

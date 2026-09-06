@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 class HistoricalClientBootstrap < ApplicationRecord
-  STATUSES = %w[previewed applied].freeze
+  STATUSES = %w[previewed pending applied failed].freeze
+  PENDING_STALE_AFTER = 30.minutes
 
   belongs_to :company
   belongs_to :historical_import_batch
@@ -24,8 +25,20 @@ class HistoricalClientBootstrap < ApplicationRecord
     status == "applied"
   end
 
+  def pending?
+    status == "pending"
+  end
+
+  def failed?
+    status == "failed"
+  end
+
   def ready_to_apply?
-    previewed? && Array(validation_errors).empty?
+    (previewed? || failed? || stale_pending?) && Array(validation_errors).empty?
+  end
+
+  def stale_pending?
+    pending? && apply_started_at.present? && apply_started_at <= PENDING_STALE_AFTER.ago
   end
 
   private

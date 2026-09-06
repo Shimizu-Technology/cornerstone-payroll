@@ -27,6 +27,8 @@ class CreateHistoricalClientBootstraps < ActiveRecord::Migration[8.0]
       t.jsonb :warnings, null: false, default: []
       t.jsonb :validation_errors, null: false, default: []
       t.jsonb :review_items, null: false, default: []
+      t.datetime :apply_started_at
+      t.text :apply_error
       t.datetime :applied_at
       t.timestamps
     end
@@ -38,7 +40,7 @@ class CreateHistoricalClientBootstraps < ActiveRecord::Migration[8.0]
                     primary_key: [ :id, :company_id ],
                     name: "fk_historical_client_bootstraps_batch_tenant"
     add_check_constraint :historical_client_bootstraps,
-                         "status IN ('previewed', 'applied')",
+                         "status IN ('previewed', 'pending', 'applied', 'failed')",
                          name: "historical_client_bootstraps_status_check"
     add_check_constraint :historical_client_bootstraps,
                          "jsonb_typeof(preview_summary) = 'object'",

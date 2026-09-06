@@ -428,8 +428,13 @@ class Employee < ApplicationRecord
     return unless configuration_source == "quickbooks_history" && configuration_review_items.is_a?(Array)
 
     self.configuration_review_items = configuration_review_items.reject do |item|
-      AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"]) &&
-        Array(item["fields"]).all? { |field| public_send(field).present? }
+      next false unless item.is_a?(Hash)
+      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
+
+      Array(item["fields"]).all? do |field|
+        field = field.to_s
+        self.class.column_names.include?(field) && read_attribute(field).present?
+      end
     end
     self.configuration_review_status = configuration_review_items.empty? ? "complete" : "needs_review"
   end

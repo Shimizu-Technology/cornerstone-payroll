@@ -504,6 +504,61 @@ export function HistoricalPayroll(): ReactElement {
     };
   }, [loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
 
+  useEffect(() => {
+    if (!selectedBatchId || selectedBatch?.client_bootstrap?.status !== 'pending') return;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    let pollAttempt = 1;
+    const poll = async (): Promise<void> => {
+      let shouldContinue = true;
+      try {
+        const requestId = ++detailRequestIdRef.current;
+        const detailQuery = detailQueryRef.current;
+        const response = await historicalImportsApi.show(selectedBatchId, {
+          page: detailQuery.page,
+          per_page: 50,
+          period_id: detailQuery.periodId,
+          search: detailQuery.search.trim() || undefined,
+        });
+        if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
+
+        const status = response.data.client_bootstrap?.status;
+        shouldContinue = status === 'pending';
+        setDetail(response.data);
+        setMeta(response.meta);
+
+        if (!shouldContinue) {
+          if (status === 'applied') {
+            setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.' });
+            setEmployeeReloadToken((current) => current + 1);
+            await Promise.all([
+              loadList(batchPageRef.current, selectedBatchId),
+              refreshCompanies(),
+            ]);
+          } else if (status === 'failed') {
+            setNotice({ tone: 'warning', message: 'Employee preparation did not finish. No partial employee setup was kept; review the message below and try again.' });
+            await loadList(batchPageRef.current, selectedBatchId);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(errorMessage(err, 'Employee preparation status could not be refreshed.'));
+      } finally {
+        if (!cancelled && shouldContinue) {
+          const delay = CUTOVER_POLL_DELAYS_MS[Math.min(pollAttempt, CUTOVER_POLL_DELAYS_MS.length - 1)];
+          pollAttempt += 1;
+          timeoutId = window.setTimeout(() => void poll(), delay);
+        }
+      }
+    };
+    timeoutId = window.setTimeout(() => void poll(), CUTOVER_POLL_DELAYS_MS[0]);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [loadList, refreshCompanies, selectedBatch?.client_bootstrap?.status, selectedBatchId]);
+
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
       setValidationErrors({});
@@ -746,13 +801,13 @@ export function HistoricalPayroll(): ReactElement {
       setBootstrapApplyOpen(false);
       setBootstrapAcknowledgement('');
       setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
-      setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.' });
-      setEmployeeReloadToken((current) => current + 1);
-      await Promise.all([
-        loadList(batchPageRef.current, batchId),
-        loadDetail(batchId),
-        refreshCompanies(),
-      ]);
+      setNotice({
+        tone: 'success',
+        message: response.meta.enqueued
+          ? 'Employee preparation started. This page will update automatically when every record is ready.'
+          : 'Employee preparation is already running. This page will update automatically.',
+      });
+      await loadList(batchPageRef.current, batchId);
     } catch (err) {
       if (selectedBatchIdRef.current === batchId) handleError(err, 'The clean-client employee setup could not be created.');
     } finally {
@@ -1056,6 +1111,8 @@ export function HistoricalPayroll(): ReactElement {
                 </div>
                 {clientBootstrap?.status === 'applied'
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
+                  : clientBootstrap?.status === 'pending'
+                    ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Preparing employees</Badge>
                   : clientBootstrap?.ready_to_apply
                     ? <Badge variant="info">Preview ready</Badge>
                     : clientBootstrap
@@ -1114,11 +1171,14 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
                     <div className="flex flex-wrap gap-2">
-                      {canMutate && clientBootstrap.status === 'previewed' && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
-                      {canMutate && clientBootstrap.status === 'previewed' && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyOpen(true); }} disabled={!clientBootstrap.ready_to_apply || action !== null}><UsersRound className="mr-2 h-4 w-4" />Create employee records</Button>}
+                      {canMutate && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
+                      {canMutate && clientBootstrap.status !== 'applied' && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
+                      {clientBootstrap.status === 'pending' && !clientBootstrap.ready_to_apply && <p className="flex items-center text-sm font-semibold text-neutral-700"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Creating employee records…</p>}
                       {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {shortDate(clientBootstrap.applied_at?.slice(0, 10))}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
                     </div>
                   </div>
+                  {clientBootstrap.status === 'failed' && clientBootstrap.apply_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{clientBootstrap.apply_error}</div>}
+                  {clientBootstrap.status === 'pending' && clientBootstrap.ready_to_apply && <div role="alert" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">Employee preparation appears to have been interrupted. No partial setup was kept. Try again to safely restart it.</div>}
                 </>
               )}
             </CardContent>

@@ -35,6 +35,7 @@ RSpec.describe Employee, type: :model do
     it "clears source-field review items when the missing values are supplied" do
       employee = create(
         :employee,
+        hire_date: nil,
         configuration_source: "quickbooks_history",
         configuration_review_status: "needs_review",
         configuration_review_items: [
@@ -50,6 +51,8 @@ RSpec.describe Employee, type: :model do
           }
         ]
       )
+
+      employee.update!(hire_date: Date.new(2024, 1, 15))
 
       expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "legacy_w4_allowances" ])
       expect(employee.configuration_review_status).to eq("needs_review")

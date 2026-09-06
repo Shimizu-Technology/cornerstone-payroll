@@ -205,9 +205,18 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(response.parsed_body.dig("data", "ready_to_apply")).to be(true)
     acknowledgement = response.parsed_body.dig("data", "acknowledgement")
 
-    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
-      acknowledgement: acknowledgement
-    }
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+        acknowledgement: acknowledgement
+      }
+    end.to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).with(batch.historical_client_bootstrap.id, admin.id, kind_of(String))
+    expect(response).to have_http_status(:accepted), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("pending")
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(true)
+
+    bootstrap = batch.historical_client_bootstrap.reload
+    QuickbooksHistory::ClientBootstrapJob.perform_now(bootstrap.id, admin.id, bootstrap.apply_started_at.iso8601(6))
+    get "/api/v1/admin/historical_imports/#{batch.id}"
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("applied")
     expect(response.parsed_body.dig("data", "worker_review_summary")).to include(

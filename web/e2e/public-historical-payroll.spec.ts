@@ -239,7 +239,7 @@ function pendingCutoverReview(): HistoricalCutoverReview {
   };
 }
 
-function clientBootstrap(status: 'previewed' | 'applied' = 'previewed'): HistoricalClientBootstrap {
+function clientBootstrap(status: 'previewed' | 'pending' | 'applied' = 'previewed'): HistoricalClientBootstrap {
   return {
     id: 90,
     status,
@@ -265,9 +265,13 @@ function clientBootstrap(status: 'previewed' | 'applied' = 'previewed'): Histori
       historical_worker_ids: [1],
     }],
     ready_to_apply: status === 'previewed',
+    apply_started_at: status === 'pending' ? '2026-09-07T02:30:00Z' : null,
+    apply_error: null,
     applied_at: status === 'applied' ? '2026-09-07T03:00:00Z' : null,
     applied_by_name: status === 'applied' ? 'History Admin' : null,
     acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES',
+    created_at: '2026-09-07T02:00:00Z',
+    updated_at: status === 'applied' ? '2026-09-07T03:00:00Z' : '2026-09-07T02:00:00Z',
   };
 }
 
@@ -617,6 +621,7 @@ test('previews and creates a clean current-payroll roster without running payrol
   let current: HistoricalImportDetail = detailWithVerifiedSource(1);
   let rosterApplied = false;
   let employeeListRequests = 0;
+  let bootstrapPolls = 0;
 
   await page.unroute('**/api/v1/companies');
   await page.unroute('**/api/v1/admin/employees**');
@@ -662,18 +667,24 @@ test('previews and creates a clean current-payroll roster without running payrol
   });
   await page.route('**/api/v1/admin/historical_imports/1/apply_client_bootstrap', async (route) => {
     expect(route.request().postDataJSON()).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
-    rosterApplied = true;
-    current = { ...current, client_bootstrap: clientBootstrap('applied') };
-    await fulfillJson(route, { data: withoutDetailCollections(current) });
+    current = { ...current, client_bootstrap: clientBootstrap('pending') };
+    await fulfillJson(route, { data: withoutDetailCollections(current), meta: { enqueued: true } }, 202);
   });
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [withoutDetailCollections(current)],
     meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
   }));
-  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
-    data: current,
-    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
-  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    if (current.client_bootstrap?.status === 'pending') {
+      bootstrapPolls += 1;
+      rosterApplied = true;
+      current = { ...current, client_bootstrap: clientBootstrap('applied') };
+    }
+    await fulfillJson(route, {
+      data: current,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
 
   await page.goto('/historical-payroll');
   await expect(page.getByRole('heading', { name: 'Prepare this clean client for its next payroll' })).toBeVisible();
@@ -693,10 +704,12 @@ test('previews and creates a clean current-payroll roster without running payrol
   await expect(confirm).toBeEnabled();
   await confirm.click();
 
+  await expect(page.getByText('Employee preparation started. This page will update automatically when every record is ready.')).toBeVisible();
   await expect(page.getByText('Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.')).toBeVisible();
   await expect(page.getByText('Employees prepared')).toBeVisible();
   await expect(page.getByText(/Prepared .* by History Admin/)).toBeVisible();
   await expect(page.getByRole('button', { name: /Historical Payroll Company 57 employees/ })).toBeVisible();
+  expect(bootstrapPolls).toBeGreaterThanOrEqual(1);
   expect(employeeListRequests).toBeGreaterThanOrEqual(2);
 });
 

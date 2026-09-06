@@ -361,18 +361,23 @@ module QuickbooksHistory
       text = value.to_s.squish
       return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false } if text.blank?
 
-      street, city, region_and_zip = text.split(",", 3).map(&:strip)
+      parts = text.split(",").map(&:strip).reject(&:blank?)
+      region_and_zip = parts.pop.to_s
       region_match = region_and_zip.to_s.match(/\A(?<state>.+?)\s+(?<zip>\d{5}(?:-\d{4})?)\z/)
       state = region_match&.[](:state)
       if state.to_s.match?(/\A(?:NV|Nevada)\z/i)
         return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: true }
       end
+      return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false } unless region_match
+
+      city = parts.pop
+      street = parts.join(", ")
 
       {
         address_line1: street.presence,
         city: city.presence,
         state: state.presence,
-        zip: region_match&.[](:zip),
+        zip: region_match[:zip],
         suppressed: false
       }
     end

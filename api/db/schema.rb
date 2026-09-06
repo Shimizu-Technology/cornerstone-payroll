@@ -789,6 +789,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010000) do
   end
 
   create_table "historical_client_bootstraps", force: :cascade do |t|
+    t.text "apply_error"
+    t.datetime "apply_started_at"
     t.datetime "applied_at"
     t.bigint "applied_by_id"
     t.bigint "company_id", null: false
@@ -809,7 +811,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010000) do
     t.index ["historical_import_batch_id"], name: "idx_on_historical_import_batch_id_e2c1f62422", unique: true
     t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text", name: "historical_client_bootstraps_summary_object"
     t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text AND jsonb_typeof(review_items) = 'array'::text", name: "historical_client_bootstraps_arrays"
-    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'applied'::character varying]::text[])", name: "historical_client_bootstraps_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'pending'::character varying, 'applied'::character varying, 'failed'::character varying]::text[])", name: "historical_client_bootstraps_status_check"
   end
 
   create_table "historical_import_batches", force: :cascade do |t|

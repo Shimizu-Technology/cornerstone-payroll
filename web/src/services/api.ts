@@ -3788,7 +3788,7 @@ export interface HistoricalImportBatch {
 
 export interface HistoricalClientBootstrap {
   id: number;
-  status: 'previewed' | 'applied';
+  status: 'previewed' | 'pending' | 'applied' | 'failed';
   plan_digest: string;
   preview_summary: {
     worker_count: number;
@@ -3811,6 +3811,8 @@ export interface HistoricalClientBootstrap {
     historical_worker_ids: number[];
   }>;
   ready_to_apply: boolean;
+  apply_started_at?: string | null;
+  apply_error?: string | null;
   applied_at?: string | null;
   applied_by_name?: string | null;
   acknowledgement: string;
@@ -4003,8 +4005,8 @@ export const historicalImportsApi = {
     api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
   previewClientBootstrap: (batchId: number): Promise<{ data: HistoricalClientBootstrap }> =>
     api.post<{ data: HistoricalClientBootstrap }>(`/admin/historical_imports/${batchId}/preview_client_bootstrap`),
-  applyClientBootstrap: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch }> =>
-    api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/apply_client_bootstrap`, { acknowledgement }),
+  applyClientBootstrap: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean } }> =>
+    api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean } }>(`/admin/historical_imports/${batchId}/apply_client_bootstrap`, { acknowledgement }),
   verifyCutover: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
   updateCutoverReview: (

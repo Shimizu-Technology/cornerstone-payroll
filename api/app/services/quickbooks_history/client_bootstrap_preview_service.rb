@@ -10,7 +10,7 @@ module QuickbooksHistory
     def call
       ensure_authorized_actor!
       existing = batch.historical_client_bootstrap
-      return existing if existing&.applied?
+      return existing if existing&.applied? || existing&.pending?
 
       plan = ClientBootstrapPlan.new(batch: batch).call
       HistoricalClientBootstrap.transaction do
@@ -22,11 +22,14 @@ module QuickbooksHistory
           created_by: actor
         )
         bootstrap.assign_attributes(
+          status: "previewed",
           plan_digest: plan.digest,
           preview_summary: plan.summary,
           warnings: plan.warnings,
           validation_errors: plan.errors,
-          review_items: plan.review_items
+          review_items: plan.review_items,
+          apply_started_at: nil,
+          apply_error: nil
         )
         bootstrap.save!
         record_audit!(bootstrap, plan)

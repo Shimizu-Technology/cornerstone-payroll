@@ -59,6 +59,36 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     )
   end
 
+  it "keeps comma-separated street details while parsing the city from the right" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, Apt 4B, Hagatna, GU 96910" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes).to include(
+      address_line1: "123 Main Street, Apt 4B",
+      city: "Hagatna",
+      state: "GU",
+      zip: "96910"
+    )
+  end
+
+  it "does not copy a partially parsed address when the state and ZIP are invalid" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, Hagatna, Guam" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
+  end
+
   it "uses variable salary for commission-only workers and flags legacy withholding allowances" do
     parsed = described_class.new(
       worker: worker(
