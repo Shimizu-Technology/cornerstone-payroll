@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
-  let!(:company) { create(:company) }
+  let!(:company) { create(:company, historical_payroll_enabled: true) }
   let!(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
 
   before do
@@ -25,6 +25,11 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     )
     expect(PayPeriod.count).to eq(0)
     expect(PayrollItem.count).to eq(0)
+
+    post "/api/v1/admin/historical_imports/#{batch_id}/archive_unlinked_workers"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("reviewed_count")).to eq(3)
+    expect(response.parsed_body.dig("data", "worker_review_summary", "needs_review")).to eq(0)
 
     get "/api/v1/admin/historical_imports/#{batch_id}", params: { per_page: 1, search: "Alice" }
     expect(response).to have_http_status(:ok)
@@ -64,7 +69,14 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
   it "filters and paginates historical import batches" do
     department = create(:department, company: company)
-    create(:employee, company: company, department: department, first_name: "Alice", last_name: "Worker")
+    create(
+      :employee,
+      company: company,
+      department: department,
+      first_name: "Alice",
+      last_name: "Worker",
+      ssn_encrypted: "000-00-0001"
+    )
     imported = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
     beta = HistoricalImportBatch.create!(
       company: company,
@@ -108,6 +120,26 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
     expect(response).to have_http_status(:forbidden)
     expect(HistoricalImportBatch.count).to eq(0)
+  end
+
+  it "lets managers review and mutate imports for enabled clients" do
+    manager = create(:user, company: company, organization: company.organization, role: "manager")
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(manager)
+
+    get "/api/v1/admin/historical_imports"
+    expect(response).to have_http_status(:ok)
+
+    post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
+    expect(response).to have_http_status(:ok)
+  end
+
+  it "keeps the workspace unavailable until the client feature is enabled" do
+    company.update!(historical_payroll_enabled: false)
+
+    get "/api/v1/admin/historical_imports"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Historical payroll is not enabled for this client")
   end
 
   it "returns structured validation details when preview persistence fails" do

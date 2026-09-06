@@ -2490,6 +2490,7 @@ export interface CompanyListItem {
   active_employees: number;
   total_employees: number;
   pay_frequency: string;
+  historical_payroll_enabled: boolean;
 }
 
 export interface CompanyDetail extends CompanyListItem {
@@ -2531,6 +2532,7 @@ export interface CompanyFormData {
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
   simple_payroll_register_enabled?: boolean;
+  historical_payroll_enabled?: boolean;
 }
 
 interface CompanyListResponse {
@@ -3665,10 +3667,21 @@ export interface HistoricalImportBatch {
     native_paycheck_rows?: number;
     opening_summary_rows?: number;
     paycheck_history_rows?: number;
+    payroll_summary_rows?: number;
     matched_native_rows?: number;
+    matched_summary_rows?: number;
     unmatched_detail_rows?: number;
     unmatched_history_rows?: number;
+    unmatched_summary_detail_rows?: number;
+    unmatched_summary_rows?: number;
+    mismatched_summary_rows?: number;
     errors: string[];
+  };
+  worker_review_summary: {
+    total: number;
+    needs_review: number;
+    linked: number;
+    archive_only: number;
   };
   warnings: string[];
   errors: string[];
@@ -3697,6 +3710,7 @@ export interface HistoricalWorker {
   hire_date?: string | null;
   employee_id?: number | null;
   employee_name?: string | null;
+  mapping_status: 'needs_review' | 'exact_match' | 'manual_match' | 'archive_only';
   match_method?: string | null;
   match_confidence?: number | null;
 }
@@ -3775,6 +3789,10 @@ export const historicalImportsApi = {
   lock: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
   mapWorker: (batchId: number, workerId: number, employeeId: number) =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
+  keepWorkerArchiveOnly: (batchId: number, workerId: number) =>
+    api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
+  archiveUnlinkedWorkers: (batchId: number) =>
+    api.post<{ data: HistoricalImportBatch; reviewed_count: number }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
 };
 
 // Auth

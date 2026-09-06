@@ -16,6 +16,11 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads(suffix: "changed"), actor: actor).call.batch
   end
 
+  before do
+    review_historical_workers_as_archive_only(first_batch, actor: actor)
+    review_historical_workers_as_archive_only(second_batch, actor: actor)
+  end
+
   after do
     HistoricalPaycheck.where(company_id: company.id).delete_all
     HistoricalPayPeriod.where(company_id: company.id).delete_all

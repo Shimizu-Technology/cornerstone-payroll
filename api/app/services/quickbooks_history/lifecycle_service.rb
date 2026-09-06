@@ -18,6 +18,7 @@ module QuickbooksHistory
         return batch if batch.applied? || batch.locked?
         raise ArgumentError, "Only a previewed historical import can be applied" unless batch.previewed?
         raise ArgumentError, "Resolve every reconciliation error before applying" if batch.blocking_errors?
+        raise ArgumentError, "Review every QuickBooks worker before applying" if batch.unresolved_worker_count.positive?
         raise ArgumentError, "Confirm the authoritative snapshot acknowledgement" unless acknowledgement.to_s == ACKNOWLEDGEMENT
 
         verify_preview_totals!
@@ -40,6 +41,7 @@ module QuickbooksHistory
         raise ArgumentError, "Apply the historical import before locking it" unless batch.applied?
         raise ArgumentError, "Reconciliation must pass before the historical import can be locked" unless batch.reconciliation_summary.to_h["passed"] == true
         raise ArgumentError, "Every non-summary paycheck must reconcile before locking" if batch.historical_paychecks.where(reconciliation_status: "unmatched").exists?
+        raise ArgumentError, "Review every QuickBooks worker before locking" if batch.unresolved_worker_count.positive?
 
         verify_preview_totals!
         batch.update!(status: "locked", locked_by: actor, locked_at: Time.current)

@@ -45,6 +45,7 @@ const emptyForm: CompanyFormData = {
   check_stock_type: 'top_check',
   next_check_number: 1001,
   simple_payroll_register_enabled: false,
+  historical_payroll_enabled: false,
 };
 
 function formatEIN(value: string): string {
@@ -112,6 +113,7 @@ export function Clients() {
         check_stock_type: c.check_stock_type || 'bottom_check',
         next_check_number: c.next_check_number ?? 1001,
         simple_payroll_register_enabled: c.simple_payroll_register_enabled === true,
+        historical_payroll_enabled: c.historical_payroll_enabled === true,
       });
       setEditingId(id);
       setFormError(null);
@@ -357,6 +359,31 @@ export function Clients() {
                       <p className="mt-1 text-xs text-gray-600">
                         Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets.
                         Leave this off for clients that require a different register format.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={form.historical_payroll_enabled === true}
+                      aria-label="Enable historical payroll workspace"
+                      onClick={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
+                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                        form.historical_payroll_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          form.historical_payroll_enabled === true ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">Historical payroll workspace</p>
+                      <p className="mt-1 text-xs leading-5 text-gray-600">
+                        Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review.
                       </p>
                     </div>
                   </div>

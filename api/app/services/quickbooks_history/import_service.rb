@@ -81,10 +81,13 @@ module QuickbooksHistory
     end
 
     def create_workers!(batch, worker_rows)
-      employees_by_name = company.employees.to_a.group_by { |employee| NameNormalizer.employee(employee) }
+      employees_by_identity = company.employees.to_a.group_by do |employee|
+        [ NameNormalizer.employee(employee), employee.ssn_digits ]
+      end
 
       worker_rows.index_by { |row| row.fetch(:normalized_name) }.transform_values do |row|
-        candidates = employees_by_name.fetch(row.fetch(:normalized_name), [])
+        source_ssn = source_ssn_digits(row)
+        candidates = source_ssn.present? ? employees_by_identity.fetch([ row.fetch(:normalized_name), source_ssn ], []) : []
         employee = candidates.one? ? candidates.first : nil
         batch.historical_workers.create!(
           company: company,
@@ -94,11 +97,17 @@ module QuickbooksHistory
           normalized_name: row.fetch(:normalized_name),
           source_status: row.fetch(:source_status),
           hire_date: row[:hire_date],
-          match_method: employee ? "exact_normalized_name" : nil,
+          match_method: employee ? "exact_normalized_name_and_ssn" : nil,
+          mapping_status: employee ? "exact_match" : "needs_review",
           match_confidence: employee ? 1 : nil,
           private_snapshot: row[:private_snapshot].present? ? JSON.generate(row.fetch(:private_snapshot)) : nil
         )
       end
+    end
+
+    def source_ssn_digits(row)
+      tax_info = row.fetch(:private_snapshot, {}).fetch("Tax info", "").to_s
+      tax_info.match(/\b\d{3}-?\d{2}-?\d{4}\b/)&.to_s&.gsub(/\D/, "")
     end
 
     def create_periods!(batch, period_rows)

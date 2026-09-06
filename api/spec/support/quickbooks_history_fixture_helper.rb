@@ -5,23 +5,11 @@ require "tempfile"
 
 module QuickbooksHistoryFixtureHelper
   def quickbooks_history_uploads(suffix: nil)
-    @quickbooks_history_tempfiles ||= []
-    files = [
-      build_quickbooks_xls(
-        "Payroll Details#{suffix}.xls",
-        payroll_details_rows
-      ),
-      build_quickbooks_xls(
-        "Paycheck History.xls",
-        paycheck_history_rows
-      ),
-      build_quickbooks_xls(
-        "Employee Details.xls",
-        employee_details_rows
-      )
-    ]
-    files << build_quickbooks_xls("Supplemental #{suffix}.xls", [ [ "Example Company" ], [ "Payroll summary report" ] ]) if suffix
-    files
+    authoritative_quickbooks_files(
+      details: payroll_details_rows,
+      history: paycheck_history_rows,
+      suffix: suffix
+    )
   end
 
   def quickbooks_history_uploads_with_reversal
@@ -33,11 +21,7 @@ module QuickbooksHistoryFixtureHelper
     history = paycheck_history_rows
     history << [ "07/03/2024", "Worker, Alice", -1_000, -725, "Check", "1002", "Void" ]
 
-    [
-      build_quickbooks_xls("Payroll Details.xls", details),
-      build_quickbooks_xls("Paycheck History.xls", history),
-      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
-    ]
+    authoritative_quickbooks_files(details: details, history: history)
   end
 
   def quickbooks_history_uploads_with_duplicate_signature
@@ -46,11 +30,7 @@ module QuickbooksHistoryFixtureHelper
     history = paycheck_history_rows
     history << history.fetch(5).dup.tap { |row| row[5] = "1002" }
 
-    [
-      build_quickbooks_xls("Payroll Details.xls", details),
-      build_quickbooks_xls("Paycheck History.xls", history),
-      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
-    ]
+    authoritative_quickbooks_files(details: details, history: history)
   end
 
   def quickbooks_history_uploads_with_worker_name_collision
@@ -62,22 +42,33 @@ module QuickbooksHistoryFixtureHelper
     history = paycheck_history_rows
     history << [ "07/17/2024", "Worker Alice", 1_100, 880, "Check", "1002", "-" ]
 
-    [
-      build_quickbooks_xls("Payroll Details.xls", details),
-      build_quickbooks_xls("Paycheck History.xls", history),
-      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
-    ]
+    authoritative_quickbooks_files(details: details, history: history)
   end
 
   def quickbooks_history_uploads_with_custom_opening_range
     details = payroll_details_rows
     details[6][2] = "01/01/2024 - 05/31/2024"
 
+    authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
+  end
+
+  def quickbooks_history_uploads_with_summary_mismatch
+    details = payroll_details_rows
+    summary = payroll_summary_rows(details)
+    summary[5][6] = -199
     [
       build_quickbooks_xls("Payroll Details.xls", details),
       build_quickbooks_xls("Paycheck History.xls", paycheck_history_rows),
-      build_quickbooks_xls("Employee Details.xls", employee_details_rows)
+      build_quickbooks_xls("Employee Details.xls", employee_details_rows),
+      build_quickbooks_xls("Employee Directory.xls", employee_directory_rows),
+      build_quickbooks_xls("Payroll Summary.xls", summary)
     ]
+  end
+
+  def review_historical_workers_as_archive_only(batch, actor:)
+    batch.historical_workers.find_each do |worker|
+      QuickbooksHistory::MappingService.new(worker: worker, employee: nil, actor: actor, archive_only: true).call
+    end
   end
 
   def cleanup_quickbooks_history_uploads
@@ -89,6 +80,17 @@ module QuickbooksHistoryFixtureHelper
   end
 
   private
+
+  def authoritative_quickbooks_files(details:, history:, employee_details: nil, suffix: nil)
+    employee_details ||= employee_details_rows
+    [
+      build_quickbooks_xls("Payroll Details#{suffix}.xls", details),
+      build_quickbooks_xls("Paycheck History.xls", history),
+      build_quickbooks_xls("Employee Details.xls", employee_details),
+      build_quickbooks_xls("Employee Directory.xls", employee_directory_rows),
+      build_quickbooks_xls("Payroll Summary.xls", payroll_summary_rows(details))
+    ]
+  end
 
   def build_quickbooks_xls(filename, rows)
     @quickbooks_history_tempfiles ||= []
@@ -144,7 +146,38 @@ module QuickbooksHistoryFixtureHelper
       [ "For all employees" ],
       [ "Personal info", "Hire date", "Work location", "Pay info", "Tax info", "Notes" ],
       [ "Worker, Alice DOB: 01/01/1990", "01/01/2024", "Test location", "Hourly rate: $25.00/hr", "SSN: 000-00-0001", "Synthetic fixture" ],
-      [ "*Worker, Bob DOB: 01/01/1980", "01/01/2024", "Test location", "Hourly rate: $25.00/hr", "SSN: 000-00-0002", "Synthetic fixture" ]
+      [ "*Worker, Bob DOB: 01/01/1980", "01/01/2024", "Test location", "Hourly rate: $25.00/hr", "SSN: 000-00-0002", "Synthetic fixture" ],
+      [ "Worker, Charlie DOB: 01/01/1985", "02/01/2024", "Test location", "Hourly rate: $20.00/hr", "SSN: 000-00-0003", "No paycheck in export window" ]
+    ]
+  end
+
+  def employee_directory_rows
+    [
+      [ "Example Company" ],
+      [ "Employee directory report" ],
+      [],
+      [ "For all employees from all locations" ],
+      [ "Name", "Birth date", "Email", "Work phone", "Home phone", "Mobile", "Home address", "Work location", "Hire date" ],
+      [ "Worker, Alice", "01/01/1990", "alice@example.test", "", "", "", "", "Test location", "01/01/2024" ],
+      [ "*Worker, Bob", "01/01/1980", "", "", "", "", "", "Test location", "01/01/2024" ],
+      [ "Worker, Charlie", "01/01/1985", "charlie@example.test", "", "", "", "", "Test location", "02/01/2024" ]
+    ]
+  end
+
+  def payroll_summary_rows(details)
+    summary_rows = details.drop(5).filter_map do |row|
+      name = row[0].to_s
+      next if name.blank? || name.in?([ "Historical Checks", "Total" ])
+
+      [ row[1], row[0], row[3], row[5], row[8], 0, row[11], row[15], row[17], row[18], row[21], row[23], "" ]
+    end
+    [
+      [ "Example Company" ],
+      [ "Payroll summary report" ],
+      [],
+      [ "From Jan 01, 2024 to Dec 31, 2024 for all employees from all locations" ],
+      [ "Pay date", "Name", "Hours", "Gross pay", "Pretax deductions", "Other pay", "Employee taxes", "Aftertax deduction", "Net pay", "Employer taxes", "Company contributions", "Total payroll cost", "Pay method" ],
+      *summary_rows
     ]
   end
 end

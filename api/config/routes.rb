@@ -109,6 +109,7 @@ Rails.application.routes.draw do
           member do
             post :apply
             post :lock
+            post :archive_unlinked_workers
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
         end

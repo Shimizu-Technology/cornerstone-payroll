@@ -22,6 +22,7 @@ class HistoricalImportBatch < ApplicationRecord
   scope :visible_history, -> { where(status: %w[applied locked]) }
 
   before_destroy :prevent_visible_history_destroy, prepend: true
+  before_update :prevent_locked_batch_update
 
   def previewed?
     status == "previewed"
@@ -39,7 +40,18 @@ class HistoricalImportBatch < ApplicationRecord
     Array(validation_errors).any?
   end
 
+  def unresolved_worker_count
+    historical_workers.where(mapping_status: "needs_review").count
+  end
+
   private
+
+  def prevent_locked_batch_update
+    return unless status_in_database == "locked"
+
+    errors.add(:base, "Locked historical imports cannot be changed")
+    throw(:abort)
+  end
 
   def prevent_visible_history_destroy
     return unless applied? || locked?

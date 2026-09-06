@@ -14,6 +14,8 @@ RSpec.describe QuickbooksHistory::LifecycleService do
   it "requires the exact authoritative-snapshot acknowledgement and then locks reconciled history" do
     service = described_class.new(batch: batch, actor: actor)
 
+    expect { service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT) }.to raise_error(ArgumentError, /Review every QuickBooks worker/)
+    review_historical_workers_as_archive_only(batch, actor: actor)
     expect { service.apply!(acknowledgement: "yes") }.to raise_error(ArgumentError, /acknowledgement/)
     expect { service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT) }.to change { batch.reload.status }.from("previewed").to("applied")
     expect { service.lock! }.to change { batch.reload.status }.from("applied").to("locked")
@@ -31,6 +33,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
       described_class.new(batch: batch, actor: accountant).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
     end.to raise_error(ArgumentError, /attributed manager or administrator/)
 
+    review_historical_workers_as_archive_only(batch, actor: actor)
     described_class.new(batch: batch, actor: actor).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
     expect do
       described_class.new(batch: batch, actor: nil).lock!
@@ -38,6 +41,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
   end
 
   it "refuses apply if staged totals no longer equal the preview" do
+    review_historical_workers_as_archive_only(batch, actor: actor)
     batch.historical_paychecks.first.update_column(:net_pay, 1)
 
     expect do
@@ -48,6 +52,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
 
   it "prevents ordinary edits and deletes after lock" do
     service = described_class.new(batch: batch, actor: actor)
+    review_historical_workers_as_archive_only(batch, actor: actor)
     service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
     service.lock!
     paycheck = batch.historical_paychecks.first
@@ -63,13 +68,24 @@ RSpec.describe QuickbooksHistory::LifecycleService do
       .to change(HistoricalImportBatch, :count).by(-1)
       .and change(HistoricalPaycheck, :count).by(-2)
       .and change(HistoricalPayPeriod, :count).by(-2)
-      .and change(HistoricalWorker, :count).by(-2)
+      .and change(HistoricalWorker, :count).by(-3)
   end
 
   it "prevents deleting an applied import batch" do
+    review_historical_workers_as_archive_only(batch, actor: actor)
     described_class.new(batch: batch, actor: actor).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
 
     expect(batch.destroy).to be(false)
     expect(batch.errors.full_messages).to include("Applied historical imports cannot be deleted")
+  end
+
+  it "prevents batch metadata changes after lock" do
+    review_historical_workers_as_archive_only(batch, actor: actor)
+    service = described_class.new(batch: batch, actor: actor)
+    service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    service.lock!
+
+    expect(batch.update(source_label: "Changed after lock")).to be(false)
+    expect(batch.errors.full_messages).to include("Locked historical imports cannot be changed")
   end
 end

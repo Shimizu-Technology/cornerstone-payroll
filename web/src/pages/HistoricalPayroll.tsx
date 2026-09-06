@@ -10,6 +10,7 @@ import {
   FileArchive,
   FileCheck2,
   FileSpreadsheet,
+  Link2,
   LockKeyhole,
   RefreshCw,
   Search,
@@ -29,13 +30,14 @@ import { formatCurrency, formatDateRange } from '@/lib/utils';
 import {
   ApiError,
   historicalImportsApi,
+  employeesApi,
   type HistoricalArchiveSummary,
   type HistoricalBreakdownLine,
   type HistoricalImportBatch,
   type HistoricalImportDetail,
   type HistoricalPaycheck,
 } from '@/services/api';
-import type { PaginationMeta } from '@/types';
+import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
 
@@ -90,6 +92,11 @@ interface LifecycleConfirmation {
   batchId: number;
 }
 
+interface Notice {
+  message: string;
+  tone: 'success' | 'warning';
+}
+
 function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactElement | null {
   if (lines.length === 0) return null;
   return (
@@ -126,12 +133,15 @@ export function HistoricalPayroll(): ReactElement {
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | null>(null);
+  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'worker_review' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
   const [confirmation, setConfirmation] = useState<LifecycleConfirmation | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
+  const [confirmArchiveUnlinked, setConfirmArchiveUnlinked] = useState(false);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -217,6 +227,21 @@ export function HistoricalPayroll(): ReactElement {
   }, [loadDetail]);
 
   useEffect(() => {
+    if (!canMutate || !activeCompanyId) {
+      setEmployees([]);
+      return;
+    }
+
+    let current = true;
+    void employeesApi.list({ per_page: 200 }).then((response) => {
+      if (current) setEmployees(response.data);
+    }).catch((err: unknown) => {
+      if (current) handleError(err, 'Live employees could not be loaded for worker review.');
+    });
+    return () => { current = false; };
+  }, [activeCompanyId, canMutate, handleError]);
+
+  useEffect(() => {
     setPage(1);
     setPeriodId(undefined);
     setSearch('');
@@ -242,7 +267,15 @@ export function HistoricalPayroll(): ReactElement {
       setSelectedBatchId(response.data.id);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setNotice(response.idempotent ? 'This exact bundle was already staged. The existing preview was opened.' : 'QuickBooks history was staged. Review reconciliation before applying it.');
+      const hasImportErrors = response.data.errors.length > 0;
+      setNotice({
+        tone: hasImportErrors ? 'warning' : 'success',
+        message: hasImportErrors
+          ? 'The preview was created, but it is blocked. Add the missing reports or resolve the reconciliation issues shown below.'
+          : response.idempotent
+            ? 'This exact bundle was already staged. The existing preview was opened.'
+            : 'QuickBooks history was staged. Review reconciliation and worker matches before applying it.',
+      });
       await loadList();
     } catch (err) {
       handleError(err, 'QuickBooks history could not be previewed.');
@@ -262,10 +295,16 @@ export function HistoricalPayroll(): ReactElement {
       const response = confirmedAction === 'apply'
         ? await historicalImportsApi.apply(batchId)
         : await historicalImportsApi.lock(batchId);
-      setNotice(confirmedAction === 'apply'
-        ? 'Historical payroll is now available in the archive. No payroll was recalculated.'
-        : 'The reconciled QuickBooks batch is locked against ordinary changes.');
+      setNotice({
+        tone: 'success',
+        message: confirmedAction === 'apply'
+          ? 'Historical payroll is now available in the archive. No payroll was recalculated.'
+          : 'The reconciled QuickBooks batch is locked against ordinary changes.',
+      });
       setConfirmation(null);
+      setBatches((current) => current.map((batch) => (
+        batch.id === response.data.id ? { ...batch, ...response.data } : batch
+      )));
       await loadList();
       setDetail((current) => current?.id === response.data.id ? { ...current, ...response.data } : current);
     } catch (err) {
@@ -275,7 +314,56 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
-  const reconciliationPassed = selectedBatch?.reconciliation_summary.passed && selectedBatch.errors.length === 0;
+  const updateWorkerDisposition = async (workerId: number, value: string): Promise<void> => {
+    if (!selectedBatchId || !value) return;
+
+    setMappingWorkerId(workerId);
+    setError(null);
+    setNotice(null);
+    try {
+      if (value === 'archive_only') {
+        await historicalImportsApi.keepWorkerArchiveOnly(selectedBatchId, workerId);
+      } else {
+        await historicalImportsApi.mapWorker(selectedBatchId, workerId, Number(value));
+      }
+      setNotice({
+        tone: 'success',
+        message: value === 'archive_only'
+          ? 'Worker kept as archive-only history.'
+          : 'QuickBooks worker linked to the selected live employee.',
+      });
+      await Promise.all([loadDetail(), loadList()]);
+    } catch (err) {
+      handleError(err, 'The worker review choice could not be saved.');
+    } finally {
+      setMappingWorkerId(null);
+    }
+  };
+
+  const archiveUnlinkedWorkers = async (): Promise<void> => {
+    if (!selectedBatchId) return;
+
+    setAction('worker_review');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.archiveUnlinkedWorkers(selectedBatchId);
+      setConfirmArchiveUnlinked(false);
+      setNotice({
+        tone: 'success',
+        message: `${response.reviewed_count} unlinked QuickBooks worker${response.reviewed_count === 1 ? '' : 's'} marked archive-only.`,
+      });
+      await Promise.all([loadDetail(), loadList()]);
+    } catch (err) {
+      handleError(err, 'Unlinked workers could not be marked archive-only.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const reconciliationPassed = Boolean(selectedBatch?.reconciliation_summary.passed && selectedBatch.errors.length === 0);
+  const workersReviewed = (selectedBatch?.worker_review_summary.needs_review || 0) === 0;
+  const readyToApply = reconciliationPassed && workersReviewed;
   const summary = selectedBatch?.preview_summary;
   const linkedWorkers = detail?.workers.filter((worker) => worker.employee_id).length || 0;
 
@@ -303,7 +391,17 @@ export function HistoricalPayroll(): ReactElement {
             </div>
           </div>
         )}
-        {notice && <div role="status" className="flex items-start gap-3 rounded-2xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>{notice}</span></div>}
+        {notice && (
+          <div
+            role="status"
+            className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${notice.tone === 'warning' ? 'border-warning-200 bg-warning-50 text-warning-800' : 'border-success-200 bg-success-50 text-success-700'}`}
+          >
+            {notice.tone === 'warning'
+              ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>{notice.message}</span>
+          </div>
+        )}
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.75fr)]">
           <Card className="overflow-hidden">
@@ -323,7 +421,7 @@ export function HistoricalPayroll(): ReactElement {
               ) : summary ? (
                 <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
                   <Metric label="Paychecks" value={summary.paycheck_count.toLocaleString()} note={`${summary.period_count} period records`} />
-                  <Metric label="Workers" value={summary.worker_count.toLocaleString()} note={`${linkedWorkers} linked to live profiles`} />
+                  <Metric label="Workers" value={summary.worker_count.toLocaleString()} note={`${linkedWorkers} linked · ${selectedBatch?.worker_review_summary.archive_only || 0} archive-only`} />
                   <Metric label="Gross payroll" value={dollars(summary.totals.gross_pay)} note={`${shortDate(summary.first_pay_date)} – ${shortDate(summary.last_pay_date)}`} />
                   <Metric label="Net payroll" value={dollars(summary.totals.net_pay)} note={`${summary.check_number_count || 0} recorded check numbers`} />
                 </div>
@@ -333,7 +431,7 @@ export function HistoricalPayroll(): ReactElement {
             </CardContent>
           </Card>
 
-          <Card className="border-primary-200 bg-primary-950 text-white ring-primary-900/20">
+          <Card className="border-primary-800 !bg-primary-950 text-white ring-primary-900/20">
             <CardContent className="flex h-full flex-col justify-between gap-6 p-6">
               <div>
                 <ShieldCheck className="h-8 w-8 text-primary-200" />
@@ -380,15 +478,16 @@ export function HistoricalPayroll(): ReactElement {
 
           <Card>
             <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Reconciliation gate</CardTitle><CardDescription>QuickBooks Payroll Details must agree with Paycheck History before history can be applied.</CardDescription></div>{selectedBatch && (reconciliationPassed ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Passed</Badge> : <Badge variant="danger">Blocked</Badge>)}</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Import readiness</CardTitle><CardDescription>Payroll Details must agree with both Paycheck History and Payroll Summary, and every worker needs a clear disposition.</CardDescription></div>{selectedBatch && (readyToApply ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Ready</Badge> : <Badge variant="danger">Blocked</Badge>)}</div>
             </CardHeader>
             <CardContent className="space-y-5">
               {selectedBatch ? (
                 <>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Native rows</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.native_paycheck_rows?.toLocaleString() || 0}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Matched exactly</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_native_rows?.toLocaleString() || 0}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Opening summaries</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.opening_summary_rows?.toLocaleString() || 0}</p></div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Payroll rows</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.payroll_detail_rows?.toLocaleString() || 0}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">History matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_native_rows?.toLocaleString() || 0}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Summary matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_summary_rows?.toLocaleString() || 0}</p></div>
+                    <div className={`rounded-xl p-4 ${workersReviewed ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Workers to review</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.worker_review_summary.needs_review.toLocaleString()}</p></div>
                   </div>
                   {selectedBatch.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4"><p className="text-sm font-semibold text-danger-800">Resolve before applying</p><ul className="mt-2 space-y-1 text-sm text-danger-700">{selectedBatch.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {selectedBatch.warnings.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4"><p className="text-sm font-semibold text-warning-800">Known source limitations</p><ul className="mt-2 space-y-1 text-sm leading-6 text-warning-700">{selectedBatch.warnings.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
@@ -396,7 +495,7 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                       <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply makes reconciled rows visible in the archive. Lock makes the batch permanently read-only through ordinary workflows.</p>
                       <div className="flex gap-2">
-                        {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!reconciliationPassed || action !== null}>Apply history</Button>}
+                        {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!readyToApply || action !== null}>Apply history</Button>}
                         {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={action !== null}><LockKeyhole className="mr-2 h-4 w-4" />Lock batch</Button>}
                         {selectedBatch.status === 'locked' && <Badge variant="success" className="px-4 py-2">Locked and immutable</Badge>}
                       </div>
@@ -407,6 +506,58 @@ export function HistoricalPayroll(): ReactElement {
             </CardContent>
           </Card>
         </section>
+
+        {detail && (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div><CardTitle>Worker review</CardTitle><CardDescription>Link a QuickBooks name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canMutate && detail.status === 'previewed' && detail.worker_review_summary.needs_review > 0 && <Button size="sm" variant="outline" onClick={() => setConfirmArchiveUnlinked(true)}>Keep all unlinked archive-only</Button>}
+                  {workersReviewed ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />All reviewed</Badge> : <Badge variant="warning">{detail.worker_review_summary.needs_review} remaining</Badge>}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-[34rem] overflow-auto border-y border-neutral-200">
+                <Table>
+                  <TableHeader><TableRow><TableHead>QuickBooks worker</TableHead><TableHead>Source status</TableHead><TableHead>Disposition</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {detail.workers.map((worker) => (
+                      <TableRow key={worker.id}>
+                        <TableCell><p className="font-semibold text-neutral-950">{worker.source_name}</p><p className="mt-0.5 text-xs text-neutral-500">Hired {shortDate(worker.hire_date)}</p></TableCell>
+                        <TableCell><Badge variant={worker.source_status === 'active' ? 'success' : 'default'}>{worker.source_status}</Badge></TableCell>
+                        <TableCell className="min-w-[280px]">
+                          {canMutate && detail.status !== 'locked' ? (
+                            <div className="flex items-center gap-2">
+                              <Link2 className="h-4 w-4 shrink-0 text-neutral-400" />
+                              <select
+                                aria-label={`Disposition for ${worker.source_name}`}
+                                value={worker.employee_id ? String(worker.employee_id) : worker.mapping_status === 'archive_only' ? 'archive_only' : ''}
+                                onChange={(event) => void updateWorkerDisposition(worker.id, event.target.value)}
+                                disabled={mappingWorkerId === worker.id}
+                                className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
+                              >
+                                <option value="">Needs review</option>
+                                <option value="archive_only">Keep as archive-only</option>
+                                <optgroup label="Link to live employee">
+                                  {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.last_name}, {employee.first_name}{employee.status === 'active' ? '' : ` · ${employee.status}`}</option>)}
+                                </optgroup>
+                              </select>
+                            </div>
+                          ) : (
+                            <div><p className="text-sm font-medium text-neutral-900">{worker.employee_name || 'Archive-only'}</p><p className="text-xs text-neutral-500">{worker.mapping_status.replaceAll('_', ' ')}</p></div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="px-4 py-4 text-xs leading-5 text-neutral-500 sm:px-6">Reviewing a worker does not create, edit, activate, terminate, or change pay settings on any live employee.</div>
+            </CardContent>
+          </Card>
+        )}
 
         {detail && (
           <Card>
@@ -474,6 +625,14 @@ export function HistoricalPayroll(): ReactElement {
           <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive. It does not run payroll or update live YTD totals.' : 'Locking prevents ordinary edits and mapping changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmation?.action === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
           <DialogFooter><Button variant="outline" onClick={() => setConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmation?.action === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmation?.action === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmArchiveUnlinked} onOpenChange={setConfirmArchiveUnlinked}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Keep every unlinked worker archive-only?</DialogTitle><DialogDescription>This applies only to workers still marked “Needs review.” Existing exact or manual links will stay unchanged.</DialogDescription></DialogHeader>
+          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">Use this after confirming the remaining QuickBooks names should not attach to any live employee profile. You can still change individual choices until the batch is locked.</div>
+          <DialogFooter><Button variant="outline" onClick={() => setConfirmArchiveUnlinked(false)} disabled={action !== null}>Cancel</Button><Button onClick={() => void archiveUnlinkedWorkers()} disabled={action !== null}>{action === 'worker_review' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Keep unlinked archive-only</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

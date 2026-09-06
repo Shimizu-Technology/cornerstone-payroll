@@ -2,6 +2,7 @@
 
 class HistoricalWorker < ApplicationRecord
   SOURCE_STATUSES = %w[active inactive unknown].freeze
+  MAPPING_STATUSES = %w[needs_review exact_match manual_match archive_only].freeze
 
   belongs_to :historical_import_batch
   belongs_to :company
@@ -13,6 +14,9 @@ class HistoricalWorker < ApplicationRecord
   validates :external_key, :source_name, :normalized_name, presence: true
   validates :external_key, uniqueness: { scope: :historical_import_batch_id }
   validates :source_status, inclusion: { in: SOURCE_STATUSES }
+  validates :mapping_status, inclusion: { in: MAPPING_STATUSES }
+  validates :employee, presence: true, if: -> { mapping_status.in?(%w[exact_match manual_match]) }
+  validates :employee, absence: true, if: -> { mapping_status.in?(%w[needs_review archive_only]) }
   validate :company_consistency
 
   before_update :prevent_locked_batch_update
@@ -24,6 +28,10 @@ class HistoricalWorker < ApplicationRecord
     JSON.parse(private_snapshot)
   rescue JSON::ParserError
     {}
+  end
+
+  def reviewed?
+    mapping_status != "needs_review"
   end
 
   private

@@ -66,6 +66,14 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/pay_component_tax_rules",
         action_name: "create"
       )).to eq(:manage_organization)
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/historical_imports",
+        action_name: "index"
+      )).to eq(:payroll_operations)
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/historical_imports",
+        action_name: "apply"
+      )).to eq(:manage_client_configuration)
       %w[create update destroy apply apply_to_all_companies clear_active].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",

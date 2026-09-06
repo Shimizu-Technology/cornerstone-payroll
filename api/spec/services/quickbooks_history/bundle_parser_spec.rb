@@ -10,7 +10,7 @@ RSpec.describe QuickbooksHistory::BundleParser do
 
     expect(result.errors).to be_empty
     expect(result.summary).to include(
-      "worker_count" => 2,
+      "worker_count" => 3,
       "period_count" => 2,
       "paycheck_count" => 2,
       "opening_summary_count" => 1,
@@ -22,8 +22,12 @@ RSpec.describe QuickbooksHistory::BundleParser do
       "passed" => true,
       "native_paycheck_rows" => 1,
       "matched_native_rows" => 1,
-      "opening_summary_rows" => 1
+      "opening_summary_rows" => 1,
+      "payroll_summary_rows" => 2,
+      "matched_summary_rows" => 2
     )
+    expect(result.workers.map { |worker| worker.fetch(:source_status) }.tally).to eq("active" => 2, "inactive" => 1)
+    expect(result.workers.map { |worker| worker.fetch(:source_name) }).to include("Worker, Charlie")
 
     paycheck = result.paychecks.find { |row| row[:source_employee_name] == "Worker, Alice" }
     expect(paycheck).to include(
@@ -41,11 +45,27 @@ RSpec.describe QuickbooksHistory::BundleParser do
     )
   end
 
-  it "requires all three authoritative source reports" do
+  it "requires all five authoritative source reports" do
     result = described_class.new(files: quickbooks_history_uploads.first(2)).call
 
-    expect(result.errors).to include("Missing required QuickBooks report: Employee details")
+    expect(result.errors).to include(
+      "Missing required QuickBooks report: Employee details",
+      "Missing required QuickBooks report: Employee directory",
+      "Missing required QuickBooks report: Payroll summary"
+    )
     expect(result.paychecks).to be_empty
+  end
+
+  it "keeps uploaded tempfiles alive for the full parse" do
+    files = quickbooks_history_uploads
+    parser = described_class.new(files: files)
+    files.clear
+    GC.start
+
+    result = parser.call
+
+    expect(result.reconciliation.fetch("passed")).to be(true)
+    expect(result.paychecks.size).to eq(2)
   end
 
   it "blocks ambiguous bundles with more than one required report" do
@@ -59,15 +79,66 @@ RSpec.describe QuickbooksHistory::BundleParser do
   end
 
   it "blocks required reports exported from different companies" do
-    files = quickbooks_history_uploads.first(2)
+    files = quickbooks_history_uploads
     rows = employee_details_rows
     rows[0] = [ "Different Company" ]
-    files << build_quickbooks_xls("Employee Details.xls", rows)
+    files[2] = build_quickbooks_xls("Employee Details.xls", rows)
 
     result = described_class.new(files: files).call
 
     expect(result.errors).to include("Required QuickBooks reports name more than one company")
     expect(result.paychecks).to be_empty
+  end
+
+  it "blocks required reports that do not identify their company" do
+    files = quickbooks_history_uploads
+    rows = employee_details_rows
+    rows[0] = [ "" ]
+    files[2] = build_quickbooks_xls("Employee Details.xls", rows)
+
+    result = described_class.new(files: files).call
+
+    expect(result.errors).to include("Every required QuickBooks report must identify its company")
+    expect(result.paychecks).to be_empty
+  end
+
+  it "reports unreadable spreadsheets without exposing parser internals" do
+    file = Tempfile.new([ "broken-history", ".xls" ])
+    file.write("not a spreadsheet")
+    file.rewind
+    upload = Rack::Test::UploadedFile.new(file.path, "application/vnd.ms-excel", true, original_filename: "Broken Payroll Details.xls")
+
+    result = described_class.new(files: [ upload ]).call
+
+    expect(result.errors).to include("Broken Payroll Details.xls could not be read as a spreadsheet")
+    expect(result.manifest.first.fetch(:parse_error)).to eq("Spreadsheet could not be read")
+  ensure
+    file&.close!
+  end
+
+  it "blocks a Payroll Summary value that disagrees with Payroll Details" do
+    result = described_class.new(files: quickbooks_history_uploads_with_summary_mismatch).call
+
+    expect(result.errors).to include("1 matched Payroll Summary rows disagree with Payroll Details")
+    expect(result.reconciliation.fetch("passed")).to be(false)
+  end
+
+  it "fails closed instead of converting malformed source money to zero" do
+    details = payroll_details_rows
+    details[5][5] = "not money"
+
+    expect do
+      described_class.new(files: authoritative_quickbooks_files(details: details, history: paycheck_history_rows)).call
+    end.to raise_error(ArgumentError, /Payroll Details row 6 Gross pay - total is not a valid number/)
+  end
+
+  it "fails closed instead of skipping a named row with an invalid pay date" do
+    details = payroll_details_rows
+    details[5][1] = "not a date"
+
+    expect do
+      described_class.new(files: authoritative_quickbooks_files(details: details, history: paycheck_history_rows)).call
+    end.to raise_error(ArgumentError, /Payroll Details row 6 Pay date is missing or invalid/)
   end
 
   it "preserves the direction of void and reversal amounts" do
@@ -104,6 +175,19 @@ RSpec.describe QuickbooksHistory::BundleParser do
     expect do
       described_class.new(files: quickbooks_history_uploads_with_worker_name_collision).call
     end.to raise_error(ArgumentError, /normalized employee name collision/)
+  end
+
+  it "rejects duplicate Employee Details identities instead of silently keeping one" do
+    details = employee_details_rows
+    details << details.fetch(5).dup
+
+    expect do
+      described_class.new(files: authoritative_quickbooks_files(
+        details: payroll_details_rows,
+        history: paycheck_history_rows,
+        employee_details: details
+      )).call
+    end.to raise_error(ArgumentError, /normalized Employee Details name collision/)
   end
 
   it "derives the opening-summary warning range from the source rows" do

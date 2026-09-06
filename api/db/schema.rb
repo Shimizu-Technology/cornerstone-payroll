@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_05_123000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -254,6 +254,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123000) do
     t.datetime "created_at", null: false
     t.string "ein"
     t.string "email"
+    t.boolean "historical_payroll_enabled", default: false, null: false
     t.string "name", null: false
     t.integer "next_check_number", default: 1001, null: false
     t.bigint "organization_id", null: false
@@ -889,6 +890,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123000) do
     t.string "external_key", null: false
     t.date "hire_date"
     t.bigint "historical_import_batch_id", null: false
+    t.string "mapping_status", default: "needs_review", null: false
     t.decimal "match_confidence", precision: 5, scale: 4
     t.string "match_method"
     t.string "normalized_name", null: false
@@ -901,6 +903,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123000) do
     t.index ["employee_id"], name: "index_historical_workers_on_employee_id"
     t.index ["historical_import_batch_id", "external_key"], name: "idx_historical_workers_unique_source", unique: true
     t.index ["historical_import_batch_id"], name: "index_historical_workers_on_historical_import_batch_id"
+    t.check_constraint "mapping_status::text = ANY (ARRAY['needs_review'::character varying, 'exact_match'::character varying, 'manual_match'::character varying, 'archive_only'::character varying]::text[])", name: "historical_workers_mapping_status"
     t.check_constraint "source_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'unknown'::character varying::text])", name: "historical_workers_source_status"
   end
 

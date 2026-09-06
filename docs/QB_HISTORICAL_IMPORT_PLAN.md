@@ -1,8 +1,8 @@
 # QuickBooks Historical Import Plan
 
-**Status:** implemented and locally validated; not deployed
+**Status:** core importer hardened and locally validated; source retention, unified reporting, and cutover evidence remain before a production import
 **Owner:** Leon / Shimizu Technology  
-**Last reviewed:** 2026-09-05
+**Last reviewed:** 2026-09-06
 
 ## Decision and implementation record
 
@@ -10,7 +10,7 @@ QuickBooks history now has a separate, immutable archive instead of using the li
 
 The historical import lane now:
 
-- accepts one authoritative Payroll Details report, one Paycheck History report, and one Employee Details report, plus supporting XLS, XLSX, PDF, JPEG, and PNG files;
+- requires one authoritative Payroll Details, Paycheck History, Payroll Summary, Employee Details, and Employee Directory report, plus optional supporting XLS, XLSX, PDF, JPEG, and PNG files;
 - inventories every supplied file with its filename, size, report classification, and SHA-256 digest;
 - preserves QuickBooks' final paycheck values and itemized breakdowns without running Cornerstone's payroll calculators;
 - encrypts the private Employee Details snapshot at rest;
@@ -34,7 +34,7 @@ This is intentionally an archive and reconciliation feature. It does not recreat
 
 The read-only QuickBooks export collected on 2026-09-05 contains 45 files. The parser currently produces:
 
-- 113 historical workers;
+- 114 historical workers, including workers with no paycheck in the exported range;
 - 59 historical period groups;
 - 2,881 paycheck snapshots from 2024-06-30 through 2026-08-27;
 - 2,833 native paycheck rows that match Payroll Details to Paycheck History exactly;
@@ -108,6 +108,17 @@ Before any production import:
 7. Apply and lock only after written approval from the responsible Cornerstone operator.
 
 No production preview, apply, or lock has been performed as part of the local implementation.
+
+## Production completion sequence
+
+The QuickBooks exit is deliberately split into four reviewable releases. Finishing the first release does not authorize a production import.
+
+1. **Importer safety and reconciliation:** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
+2. **Protected source retention:** application-managed encrypted source-file storage, access controls, hashes, retention status, and restore verification so the original evidence is not lost when QuickBooks access ends.
+3. **Unified read-only history and reports:** payroll register, employee history, tax, deduction, retirement, loan, and check views read historical snapshots without writing to live YTD or recalculating historical values. Reports must label source, completeness, and opening-summary limitations.
+4. **Cutover evidence and signoff:** repeatable reconciliation artifacts, exception disposition, independent aggregate checks, operator approval, rollback rehearsal, and a final no-QuickBooks dependency checklist.
+
+The production feature flag remains off until these releases are deployed and the cutover gate is signed. The first production action is a preview; apply and lock require separate operator approval.
 
 ## Purpose
 

@@ -4,8 +4,10 @@ require "digest"
 
 module QuickbooksHistory
   class BundleParser
-    IMPORTER_VERSION = "quickbooks-online-payroll-v1"
-    REQUIRED_REPORTS = %w[payroll_details paycheck_history employee_details].freeze
+    IMPORTER_VERSION = "quickbooks-online-payroll-v2"
+    REQUIRED_REPORTS = %w[
+      payroll_details paycheck_history payroll_summary employee_details employee_directory
+    ].freeze
     MAX_FILE_COUNT = 75
     MAX_FILE_BYTES = 30.megabytes
     MAX_BUNDLE_BYTES = 150.megabytes
@@ -26,7 +28,7 @@ module QuickbooksHistory
       keyword_init: true
     )
 
-    SourceFile = Struct.new(:original_filename, :path, :size, keyword_init: true)
+    SourceFile = Struct.new(:original_filename, :path, :size, :source, keyword_init: true)
 
     def initialize(files:)
       @files = Array(files).map { |file| normalize_file(file) }
@@ -43,17 +45,28 @@ module QuickbooksHistory
       duplicate_required_reports(report_entries).each do |type|
         errors << "Multiple #{type.humanize} reports were supplied; upload one authoritative report of each required type"
       end
+      required_entries = report_entries.select { |entry| REQUIRED_REPORTS.include?(entry.fetch(:report_type)) }
+      errors << "Every required QuickBooks report must identify its company" if required_entries.any? { |entry| entry[:company_name].blank? }
       errors << "Required QuickBooks reports name more than one company" if multiple_source_companies?(report_entries)
+      inventory.select { |entry| entry[:report_type] == "unreadable_spreadsheet" }.each do |entry|
+        errors << "#{entry.fetch(:filename)} could not be read as a spreadsheet"
+      end
 
       return empty_result(bundle_digest, inventory, errors) if errors.any?
 
       detail = parse_payroll_details(reports.fetch("payroll_details").fetch(:rows))
       history = parse_paycheck_history(reports.fetch("paycheck_history").fetch(:rows))
+      payroll_summary = parse_payroll_summary(reports.fetch("payroll_summary").fetch(:rows))
       validate_distinct_worker_names!(detail.fetch(:paychecks))
       reconcile_paycheck_history!(detail, history)
-      workers = build_workers(detail.fetch(:paychecks), reports.fetch("employee_details").fetch(:rows))
+      reconcile_payroll_summary!(detail, payroll_summary)
+      workers = build_workers(
+        detail.fetch(:paychecks),
+        reports.fetch("employee_directory").fetch(:rows),
+        reports.fetch("employee_details").fetch(:rows)
+      )
       periods = build_periods(detail.fetch(:paychecks))
-      reconciliation = build_reconciliation(detail.fetch(:paychecks), history)
+      reconciliation = build_reconciliation(detail.fetch(:paychecks), history, payroll_summary)
       warnings = build_warnings(detail.fetch(:paychecks), history, inventory)
       company_name = inventory.find { |entry| entry[:report_type] == "payroll_details" }.fetch(:company_name)
       max_pay_date = detail.fetch(:paychecks).map { |row| row.fetch(:pay_date) }.max
@@ -102,7 +115,9 @@ module QuickbooksHistory
         file.to_s
       end
       size = file.respond_to?(:size) ? file.size : File.size(path)
-      SourceFile.new(original_filename: filename, path: path, size: size)
+      # Keep the upload object alive while parsing. Rack may unlink its tempfile
+      # when the uploaded-file wrapper is garbage collected.
+      SourceFile.new(original_filename: filename, path: path, size: size, source: file)
     end
 
     def validate_bundle!
@@ -128,17 +143,19 @@ module QuickbooksHistory
       }
       return entry unless extension.in?(%w[.xls .xlsx])
 
-      rows = SpreadsheetReader.read(path: file.path, extension: extension)
-      title = rows.first(6).flatten.compact.map(&:to_s).find { |value| value.downcase.include?("report") }.to_s
-      report_type = classify_report(title, file.original_filename)
-      entry.merge(
-        report_type: report_type,
-        company_name: rows.dig(0, 0).to_s.strip,
-        row_count: rows.size,
-        rows: parseable_report?(report_type) ? rows : nil
-      )
-    rescue StandardError => e
-      entry.merge(report_type: "unreadable_spreadsheet", parse_error: e.message.to_s.truncate(300))
+      begin
+        rows = SpreadsheetReader.read(path: file.path, extension: extension)
+        title = rows.first(6).flatten.compact.map(&:to_s).find { |value| value.downcase.include?("report") }.to_s
+        report_type = classify_report(title, file.original_filename)
+        entry.merge(
+          report_type: report_type,
+          company_name: rows.dig(0, 0).to_s.strip,
+          row_count: rows.size,
+          rows: parseable_report?(report_type) ? rows : nil
+        )
+      rescue StandardError
+        entry.merge(report_type: "unreadable_spreadsheet", parse_error: "Spreadsheet could not be read")
+      end
     end
 
     def safe_filename(file)
@@ -178,18 +195,19 @@ module QuickbooksHistory
       raise ArgumentError, "Payroll Details headers were not found" unless header_index
 
       headers = rows.fetch(header_index).map { |header| header.to_s.squish }
+      require_headers!(headers, "Payroll Details", [ "Name", "Pay date", "Time period", "Gross pay - total", "Net pay" ])
       paychecks = []
       signature_counts = Hash.new(0)
       rows.each_with_index.drop(header_index + 1).each do |row, zero_index|
         name = cell(row, headers, "Name").to_s.strip
         next if name.blank? || name.in?([ "Historical Checks", "Total" ])
 
-        pay_date = parse_date(cell(row, headers, "Pay date"))
-        period_start, period_end = parse_period(cell(row, headers, "Time period"))
-        next if pay_date.blank? || period_start.blank? || period_end.blank?
+        row_number = zero_index + 1
+        pay_date = required_date(cell(row, headers, "Pay date"), "Payroll Details row #{row_number} Pay date")
+        period_start, period_end = required_period(cell(row, headers, "Time period"), "Payroll Details row #{row_number} Time period")
 
-        gross = money(cell(row, headers, "Gross pay - total"))
-        net = money(cell(row, headers, "Net pay"))
+        gross = money_cell(row, headers, "Gross pay - total", "Payroll Details", row_number)
+        net = money_cell(row, headers, "Net pay", "Payroll Details", row_number)
         signature = paycheck_signature(name, pay_date, gross, net)
         signature_counts[signature] += 1
         paychecks << {
@@ -205,26 +223,26 @@ module QuickbooksHistory
           check_number: nil,
           source_status: opening_summary?(period_start, period_end) ? "historical_summary" : "recorded",
           reconciliation_status: opening_summary?(period_start, period_end) ? "opening_summary" : "unmatched",
-          hours_total: quantity(cell(row, headers, "Hours - total")),
+          hours_total: quantity_cell(row, headers, "Hours - total", "Payroll Details", row_number),
           gross_pay: gross,
-          adjusted_gross: money(cell(row, headers, "Adjusted gross")),
-          pretax_deductions: -money(cell(row, headers, "Pretax deductions - total")),
-          employee_taxes: -money(cell(row, headers, "Employee taxes - total")),
-          federal_income_tax: -summed_money(row, headers, [ "Employee taxes - FIT", "Employee taxes - Federal Income Tax" ]),
-          social_security_tax: -summed_money(row, headers, [ "Employee taxes - SS", "Employee taxes - Social Security" ]),
-          medicare_tax: -summed_money(row, headers, [ "Employee taxes - Med", "Employee taxes - Medicare" ]),
-          after_tax_deductions: -money(cell(row, headers, "Employee Aftertax deductions - total")),
+          adjusted_gross: money_cell(row, headers, "Adjusted gross", "Payroll Details", row_number),
+          pretax_deductions: -money_cell(row, headers, "Pretax deductions - total", "Payroll Details", row_number),
+          employee_taxes: -money_cell(row, headers, "Employee taxes - total", "Payroll Details", row_number),
+          federal_income_tax: -summed_money(row, headers, [ "Employee taxes - FIT", "Employee taxes - Federal Income Tax" ], "Payroll Details", row_number),
+          social_security_tax: -summed_money(row, headers, [ "Employee taxes - SS", "Employee taxes - Social Security" ], "Payroll Details", row_number),
+          medicare_tax: -summed_money(row, headers, [ "Employee taxes - Med", "Employee taxes - Medicare" ], "Payroll Details", row_number),
+          after_tax_deductions: -money_cell(row, headers, "Employee Aftertax deductions - total", "Payroll Details", row_number),
           net_pay: net,
-          employer_taxes: money(cell(row, headers, "Employer taxes - total")),
-          employer_contributions: money(cell(row, headers, "Company contributions - total")),
-          total_payroll_cost: money(cell(row, headers, "Total payroll cost")),
-          hours_breakdown: breakdown(row, headers, "Hours - ", exclude: [ "Hours - total" ], scale: 4),
-          earnings_breakdown: breakdown(row, headers, "Gross pay - ", exclude: [ "Gross pay - total" ]),
-          pretax_deduction_breakdown: breakdown(row, headers, "Pretax deductions - ", exclude: [ "Pretax deductions - total" ], negate: true),
-          after_tax_deduction_breakdown: breakdown(row, headers, "Employee Aftertax deductions - ", exclude: [ "Employee Aftertax deductions - total" ], negate: true),
-          employee_tax_breakdown: breakdown(row, headers, "Employee taxes - ", exclude: [ "Employee taxes - total" ], negate: true),
-          employer_tax_breakdown: breakdown(row, headers, "Employer taxes - ", exclude: [ "Employer taxes - total" ]),
-          employer_contribution_breakdown: breakdown(row, headers, "Company contributions - ", exclude: [ "Company contributions - total" ]),
+          employer_taxes: money_cell(row, headers, "Employer taxes - total", "Payroll Details", row_number),
+          employer_contributions: money_cell(row, headers, "Company contributions - total", "Payroll Details", row_number),
+          total_payroll_cost: money_cell(row, headers, "Total payroll cost", "Payroll Details", row_number),
+          hours_breakdown: breakdown(row, headers, "Hours - ", exclude: [ "Hours - total" ], scale: 4, report: "Payroll Details", row_number: row_number),
+          earnings_breakdown: breakdown(row, headers, "Gross pay - ", exclude: [ "Gross pay - total" ], report: "Payroll Details", row_number: row_number),
+          pretax_deduction_breakdown: breakdown(row, headers, "Pretax deductions - ", exclude: [ "Pretax deductions - total" ], negate: true, report: "Payroll Details", row_number: row_number),
+          after_tax_deduction_breakdown: breakdown(row, headers, "Employee Aftertax deductions - ", exclude: [ "Employee Aftertax deductions - total" ], negate: true, report: "Payroll Details", row_number: row_number),
+          employee_tax_breakdown: breakdown(row, headers, "Employee taxes - ", exclude: [ "Employee taxes - total" ], negate: true, report: "Payroll Details", row_number: row_number),
+          employer_tax_breakdown: breakdown(row, headers, "Employer taxes - ", exclude: [ "Employer taxes - total" ], report: "Payroll Details", row_number: row_number),
+          employer_contribution_breakdown: breakdown(row, headers, "Company contributions - ", exclude: [ "Company contributions - total" ], report: "Payroll Details", row_number: row_number),
           source_metadata: {
             "time_period" => cell(row, headers, "Time period").to_s,
             "signature_occurrence" => signature_counts.fetch(signature)
@@ -241,14 +259,16 @@ module QuickbooksHistory
       raise ArgumentError, "Paycheck History headers were not found" unless header_index
 
       headers = rows.fetch(header_index).map { |header| header.to_s.squish }
+      require_headers!(headers, "Paycheck History", [ "Pay date", "Name", "Total pay", "Net pay", "Check Number" ])
       signature_counts = Hash.new(0)
       rows.each_with_index.drop(header_index + 1).filter_map do |row, zero_index|
         name = cell(row, headers, "Name").to_s.strip
-        pay_date = parse_date(cell(row, headers, "Pay date"))
-        next if name.blank? || pay_date.blank?
+        next if name.blank? || name.in?([ "Historical Checks", "Total" ])
 
-        gross = money(cell(row, headers, "Total pay"))
-        net = money(cell(row, headers, "Net pay"))
+        row_number = zero_index + 1
+        pay_date = required_date(cell(row, headers, "Pay date"), "Paycheck History row #{row_number} Pay date")
+        gross = money_cell(row, headers, "Total pay", "Paycheck History", row_number)
+        net = money_cell(row, headers, "Net pay", "Paycheck History", row_number)
         signature = paycheck_signature(name, pay_date, gross, net)
         signature_counts[signature] += 1
         {
@@ -261,6 +281,41 @@ module QuickbooksHistory
           payment_method: normalized_optional(cell(row, headers, "Pay method")),
           check_number: normalized_optional(cell(row, headers, "Check Number")),
           source_status: normalized_optional(cell(row, headers, "Status")) || "recorded"
+        }
+      end
+    end
+
+    def parse_payroll_summary(rows)
+      header_index = rows.index { |row| row.map(&:to_s).include?("Total payroll cost") && row.map(&:to_s).include?("Net pay") }
+      raise ArgumentError, "Payroll Summary headers were not found" unless header_index
+
+      headers = rows.fetch(header_index).map { |header| header.to_s.squish }
+      required = [ "Pay date", "Name", "Gross pay", "Pretax deductions", "Employee taxes", "Aftertax deduction", "Net pay", "Employer taxes", "Company contributions", "Total payroll cost" ]
+      require_headers!(headers, "Payroll Summary", required)
+      signature_counts = Hash.new(0)
+      rows.each_with_index.drop(header_index + 1).filter_map do |row, zero_index|
+        name = cell(row, headers, "Name").to_s.strip
+        next if name.blank? || name.in?([ "Historical Checks", "Total" ])
+
+        row_number = zero_index + 1
+        pay_date = required_date(cell(row, headers, "Pay date"), "Payroll Summary row #{row_number} Pay date")
+        gross = money_cell(row, headers, "Gross pay", "Payroll Summary", row_number)
+        net = money_cell(row, headers, "Net pay", "Payroll Summary", row_number)
+        signature = paycheck_signature(name, pay_date, gross, net)
+        signature_counts[signature] += 1
+        {
+          external_key: paycheck_key(signature, signature_counts.fetch(signature)),
+          source_row_number: row_number,
+          source_employee_name: name,
+          pay_date: pay_date,
+          gross_pay: gross,
+          pretax_deductions: -money_cell(row, headers, "Pretax deductions", "Payroll Summary", row_number),
+          employee_taxes: -money_cell(row, headers, "Employee taxes", "Payroll Summary", row_number),
+          after_tax_deductions: -money_cell(row, headers, "Aftertax deduction", "Payroll Summary", row_number),
+          net_pay: net,
+          employer_taxes: money_cell(row, headers, "Employer taxes", "Payroll Summary", row_number),
+          employer_contributions: money_cell(row, headers, "Company contributions", "Payroll Summary", row_number),
+          total_payroll_cost: money_cell(row, headers, "Total payroll cost", "Payroll Summary", row_number)
         }
       end
     end
@@ -281,14 +336,53 @@ module QuickbooksHistory
       end
     end
 
-    def build_workers(paychecks, employee_rows)
+    def reconcile_payroll_summary!(detail, summary_rows)
+      summary_by_key = summary_rows.index_by { |row| row.fetch(:external_key) }
+      detail.fetch(:paychecks).each do |paycheck|
+        match = summary_by_key[paycheck.fetch(:external_key)]
+        paycheck[:source_metadata]["payroll_summary_row"] = match.fetch(:source_row_number) if match
+      end
+    end
+
+    def build_workers(paychecks, directory_rows, employee_rows)
+      directory_header_index = directory_rows.index { |row| row.map(&:to_s).include?("Name") && row.map(&:to_s).include?("Hire date") }
+      raise ArgumentError, "Employee Directory headers were not found" unless directory_header_index
+
+      directory_headers = directory_rows.fetch(directory_header_index).map { |header| header.to_s.squish }
+      require_headers!(directory_headers, "Employee Directory", [ "Name", "Hire date" ])
+      source_workers = directory_rows.each_with_index.drop(directory_header_index + 1).filter_map do |row, zero_index|
+        name = cell(row, directory_headers, "Name").to_s.strip
+        next if name.blank? || name == "Total"
+
+        normalized = NameNormalizer.call(name)
+        raise ArgumentError, "Employee Directory row #{zero_index + 1} has an unusable employee name" if normalized.blank?
+
+        [ normalized, {
+          external_key: Digest::SHA256.hexdigest(normalized),
+          source_name: name,
+          normalized_name: normalized,
+          source_status: name.start_with?("*") ? "inactive" : "active",
+          hire_date: optional_date(cell(row, directory_headers, "Hire date"), "Employee Directory row #{zero_index + 1} Hire date"),
+          source_row_number: zero_index + 1
+        } ]
+      end
+      duplicate_directory_names = source_workers.group_by(&:first).count { |_normalized, grouped| grouped.many? }
+      raise ArgumentError, "#{duplicate_directory_names} normalized Employee Directory name collision(s) require manual source review" if duplicate_directory_names.positive?
+
+      directory_by_name = source_workers.to_h
+      missing_directory_workers = paychecks.map { |row| row.fetch(:normalized_name) }.uniq - directory_by_name.keys
+      if missing_directory_workers.any?
+        raise ArgumentError, "#{missing_directory_workers.size} Payroll Details worker(s) are missing from Employee Directory"
+      end
+
       header_index = employee_rows.index { |row| row.map(&:to_s).include?("Personal info") }
       raise ArgumentError, "Employee Details headers were not found" unless header_index
 
       headers = employee_rows.fetch(header_index).map { |header| header.to_s.squish }
-      source_names = paychecks.map { |row| row.fetch(:source_employee_name) }.uniq
+      require_headers!(headers, "Employee Details", [ "Personal info", "Hire date" ])
+      source_names = source_workers.map { |_normalized, worker| worker.fetch(:source_name) }
       normalized_source_names = source_names.map { |name| [ name, NameNormalizer.call(name) ] }
-      details = employee_rows.each_with_index.drop(header_index + 1).filter_map do |row, zero_index|
+      detail_rows = employee_rows.each_with_index.drop(header_index + 1).filter_map do |row, zero_index|
         personal_info = cell(row, headers, "Personal info").to_s.squish
         next if personal_info.blank?
 
@@ -304,23 +398,27 @@ module QuickbooksHistory
         end
         [ NameNormalizer.call(source_name), {
           source_row_number: zero_index + 1,
-          hire_date: parse_date(cell(row, headers, "Hire date")),
+          hire_date: optional_date(cell(row, headers, "Hire date"), "Employee Details row #{zero_index + 1} Hire date"),
           private_snapshot: snapshot
         } ]
-      end.to_h
+      end
+      duplicate_detail_names = detail_rows.group_by(&:first).count { |_normalized, grouped| grouped.many? }
+      raise ArgumentError, "#{duplicate_detail_names} normalized Employee Details name collision(s) require manual source review" if duplicate_detail_names.positive?
 
-      source_names.sort_by { |name| NameNormalizer.call(name) }.map do |name|
-        normalized = NameNormalizer.call(name)
-        detail = details[normalized] || {}
-        {
-          external_key: Digest::SHA256.hexdigest(normalized),
-          source_name: name,
-          normalized_name: normalized,
-          source_status: name.start_with?("*") ? "inactive" : "unknown",
-          hire_date: detail[:hire_date],
-          private_snapshot: detail[:private_snapshot],
-          source_row_number: detail[:source_row_number]
-        }
+      details = detail_rows.to_h
+
+      missing_details = directory_by_name.keys - details.keys
+      extra_details = details.keys - directory_by_name.keys
+      raise ArgumentError, "#{missing_details.size} Employee Directory worker(s) are missing from Employee Details" if missing_details.any?
+      raise ArgumentError, "#{extra_details.size} Employee Details worker(s) are missing from Employee Directory" if extra_details.any?
+
+      source_workers.sort_by(&:first).map do |normalized, worker|
+        detail = details.fetch(normalized)
+        worker.merge(
+          hire_date: detail[:hire_date] || worker[:hire_date],
+          private_snapshot: detail.fetch(:private_snapshot),
+          details_source_row_number: detail.fetch(:source_row_number)
+        )
       end
     end
 
@@ -340,7 +438,7 @@ module QuickbooksHistory
       end.sort_by { |period| [ period.fetch(:pay_date), period.fetch(:start_date) ] }
     end
 
-    def build_reconciliation(paychecks, history)
+    def build_reconciliation(paychecks, history, payroll_summary)
       native = paychecks.reject { |row| row.fetch(:period_type) == "opening_summary" }
       matched = native.select { |row| row.fetch(:reconciliation_status) == "matched" }
       unmatched_details = native.reject { |row| row.fetch(:reconciliation_status) == "matched" }
@@ -351,6 +449,17 @@ module QuickbooksHistory
         "gross_pay" => sum(history, :gross_pay).to_s("F"),
         "net_pay" => sum(history, :net_pay).to_s("F")
       }
+      summary_fields = %i[gross_pay pretax_deductions employee_taxes after_tax_deductions net_pay employer_taxes employer_contributions total_payroll_cost]
+      all_detail_totals = money_totals(paychecks)
+      summary_totals = summary_fields.to_h { |field| [ field.to_s, sum(payroll_summary, field).to_s("F") ] }
+      all_detail_by_key = paychecks.index_by { |row| row.fetch(:external_key) }
+      summary_by_key = payroll_summary.index_by { |row| row.fetch(:external_key) }
+      unmatched_summary_details = paychecks.reject { |row| summary_by_key.key?(row.fetch(:external_key)) }
+      unmatched_summary_rows = payroll_summary.reject { |row| all_detail_by_key.key?(row.fetch(:external_key)) }
+      mismatched_summary_rows = paychecks.count do |row|
+        match = summary_by_key[row.fetch(:external_key)]
+        match && summary_fields.any? { |field| money(row.fetch(field)) != money(match.fetch(field)) }
+      end
       errors = []
       duplicate_signature_groups = duplicate_signature_count(native) + duplicate_signature_count(history)
       if duplicate_signature_groups.positive?
@@ -360,6 +469,14 @@ module QuickbooksHistory
       errors << "#{unmatched_history.size} Paycheck History rows do not match Payroll Details" if unmatched_history.any?
       errors << "Native gross pay does not reconcile between Payroll Details and Paycheck History" unless money(detail_totals.fetch("gross_pay")) == money(history_totals.fetch("gross_pay"))
       errors << "Native net pay does not reconcile between Payroll Details and Paycheck History" unless money(detail_totals.fetch("net_pay")) == money(history_totals.fetch("net_pay"))
+      errors << "#{unmatched_summary_details.size} Payroll Details rows do not match Payroll Summary" if unmatched_summary_details.any?
+      errors << "#{unmatched_summary_rows.size} Payroll Summary rows do not match Payroll Details" if unmatched_summary_rows.any?
+      errors << "#{mismatched_summary_rows} matched Payroll Summary rows disagree with Payroll Details" if mismatched_summary_rows.positive?
+      summary_fields.each do |field|
+        next if all_detail_totals.fetch(field.to_s) == summary_totals.fetch(field.to_s)
+
+        errors << "#{field.to_s.humanize} does not reconcile between Payroll Details and Payroll Summary"
+      end
 
       {
         "passed" => errors.empty?,
@@ -367,11 +484,17 @@ module QuickbooksHistory
         "native_paycheck_rows" => native.size,
         "opening_summary_rows" => paychecks.size - native.size,
         "paycheck_history_rows" => history.size,
+        "payroll_summary_rows" => payroll_summary.size,
         "matched_native_rows" => matched.size,
+        "matched_summary_rows" => paychecks.size - unmatched_summary_details.size,
         "unmatched_detail_rows" => unmatched_details.size,
         "unmatched_history_rows" => unmatched_history.size,
+        "unmatched_summary_detail_rows" => unmatched_summary_details.size,
+        "unmatched_summary_rows" => unmatched_summary_rows.size,
+        "mismatched_summary_rows" => mismatched_summary_rows,
         "native_detail_totals" => detail_totals,
         "paycheck_history_totals" => history_totals,
+        "payroll_summary_totals" => summary_totals,
         "errors" => errors
       }
     end
@@ -443,12 +566,12 @@ module QuickbooksHistory
       (end_date - start_date).to_i > 45
     end
 
-    def breakdown(row, headers, prefix, exclude:, negate: false, scale: 2)
+    def breakdown(row, headers, prefix, exclude:, report:, row_number:, negate: false, scale: 2)
       headers.each_with_index.filter_map do |header, index|
         next unless header.start_with?(prefix)
         next if exclude.include?(header)
 
-        amount = scale == 4 ? quantity(row[index]) : money(row[index])
+        amount = decimal(row[index], scale: scale, context: "#{report} row #{row_number} #{header}")
         amount = -amount if negate
         next if amount.zero?
 
@@ -456,8 +579,8 @@ module QuickbooksHistory
       end
     end
 
-    def summed_money(row, headers, names)
-      names.sum(0.to_d) { |name| money(cell(row, headers, name)) }
+    def summed_money(row, headers, names, report, row_number)
+      names.sum(0.to_d) { |name| money(cell(row, headers, name), context: "#{report} row #{row_number} #{name}") }
     end
 
     def cell(row, headers, name)
@@ -465,15 +588,15 @@ module QuickbooksHistory
       index ? row[index] : nil
     end
 
-    def money(value)
-      decimal(value, scale: 2)
+    def money(value, context: nil)
+      decimal(value, scale: 2, context: context)
     end
 
-    def quantity(value)
-      decimal(value, scale: 4)
+    def quantity(value, context: nil)
+      decimal(value, scale: 4, context: context)
     end
 
-    def decimal(value, scale:)
+    def decimal(value, scale:, context: nil)
       return value.to_d.round(scale) if value.respond_to?(:to_d) && !value.is_a?(String)
 
       normalized = value.to_s.strip.gsub(/[,$]/, "")
@@ -482,7 +605,15 @@ module QuickbooksHistory
 
       BigDecimal(normalized).round(scale)
     rescue ArgumentError
-      0.to_d
+      raise ArgumentError, "#{context || 'QuickBooks numeric value'} is not a valid number"
+    end
+
+    def money_cell(row, headers, name, report, row_number)
+      money(cell(row, headers, name), context: "#{report} row #{row_number} #{name}")
+    end
+
+    def quantity_cell(row, headers, name, report, row_number)
+      quantity(cell(row, headers, name), context: "#{report} row #{row_number} #{name}")
     end
 
     def sum(rows, field)
@@ -495,6 +626,28 @@ module QuickbooksHistory
       Date.strptime(value.to_s.strip, "%m/%d/%Y")
     rescue ArgumentError
       nil
+    end
+
+    def required_date(value, context)
+      parse_date(value) || raise(ArgumentError, "#{context} is missing or invalid")
+    end
+
+    def optional_date(value, context)
+      return nil if value.to_s.strip.blank? || value.to_s.strip == "-"
+
+      parse_date(value) || raise(ArgumentError, "#{context} is invalid")
+    end
+
+    def required_period(value, context)
+      start_date, end_date = parse_period(value)
+      raise ArgumentError, "#{context} is missing or invalid" unless start_date && end_date
+
+      [ start_date, end_date ]
+    end
+
+    def require_headers!(headers, report, required)
+      missing = required - headers
+      raise ArgumentError, "#{report} is missing required column(s): #{missing.join(', ')}" if missing.any?
     end
 
     def parse_period(value)

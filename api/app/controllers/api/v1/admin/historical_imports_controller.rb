@@ -7,7 +7,8 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 200
 
-        before_action :set_batch, only: %i[show apply lock update_worker]
+        before_action :set_batch, only: %i[show apply lock archive_unlinked_workers update_worker]
+        before_action :require_historical_payroll_enabled!
 
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
@@ -87,16 +88,35 @@ module Api
           render json: error_payload(e), status: :unprocessable_entity
         end
 
+        def archive_unlinked_workers
+          reviewed_count = QuickbooksHistory::BulkArchiveOnlyService.new(batch: @batch, actor: current_user).call
+          render json: { data: batch_json(@batch.reload), reviewed_count: reviewed_count }
+        rescue ArgumentError => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
         def update_worker
           worker = @batch.historical_workers.find(params[:worker_id])
-          employee = Employee.find_by!(id: params[:employee_id], company_id: current_company_id)
-          QuickbooksHistory::MappingService.new(worker: worker, employee: employee, actor: current_user).call
+          archive_only = ActiveModel::Type::Boolean.new.cast(params[:archive_only])
+          employee = Employee.find_by(id: params[:employee_id], company_id: current_company_id) if params[:employee_id].present?
+          QuickbooksHistory::MappingService.new(
+            worker: worker,
+            employee: employee,
+            actor: current_user,
+            archive_only: archive_only
+          ).call
           render json: { data: worker_json(worker.reload) }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
 
         private
+
+        def require_historical_payroll_enabled!
+          return if current_company.historical_payroll_enabled?
+
+          render json: { error: "Historical payroll is not enabled for this client" }, status: :forbidden
+        end
 
         def set_batch
           @batch = HistoricalImportBatch.where(company_id: current_company_id).find(params[:id])
@@ -148,6 +168,7 @@ module Api
         end
 
         def batch_json(batch)
+          mapping_counts = batch.historical_workers.group(:mapping_status).count
           {
             id: batch.id,
             company_id: batch.company_id,
@@ -161,6 +182,12 @@ module Api
             reconciliation_summary: batch.reconciliation_summary,
             warnings: batch.warnings,
             errors: batch.validation_errors,
+            worker_review_summary: {
+              total: mapping_counts.values.sum,
+              needs_review: mapping_counts.fetch("needs_review", 0),
+              linked: mapping_counts.fetch("exact_match", 0) + mapping_counts.fetch("manual_match", 0),
+              archive_only: mapping_counts.fetch("archive_only", 0)
+            },
             applied_at: batch.applied_at,
             applied_by_name: batch.applied_by&.name,
             locked_at: batch.locked_at,
@@ -190,6 +217,7 @@ module Api
             hire_date: worker.hire_date,
             employee_id: worker.employee_id,
             employee_name: worker.employee&.full_name,
+            mapping_status: worker.mapping_status,
             match_method: worker.match_method,
             match_confidence: worker.match_confidence&.to_f
           }
