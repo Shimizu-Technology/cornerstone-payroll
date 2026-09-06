@@ -85,8 +85,8 @@ export function Departments() {
       setIsAddingNew(false);
       fetchDepartments();
     } catch (err) {
-      if (err instanceof ApiError && err.details?.name) {
-        setNewDeptError(err.details.name[0]);
+      if (err instanceof ApiError && err.fieldErrors.name) {
+        setNewDeptError(err.fieldErrors.name[0]);
       } else {
         setNewDeptError(err instanceof Error ? err.message : 'Failed to create department');
       }
@@ -126,8 +126,8 @@ export function Departments() {
       setEditName('');
       fetchDepartments();
     } catch (err) {
-      if (err instanceof ApiError && err.details?.name) {
-        setEditError(err.details.name[0]);
+      if (err instanceof ApiError && err.fieldErrors.name) {
+        setEditError(err.fieldErrors.name[0]);
       } else {
         setEditError(err instanceof Error ? err.message : 'Failed to update department');
       }
