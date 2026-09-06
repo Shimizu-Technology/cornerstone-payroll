@@ -33,7 +33,7 @@ module QuickbooksHistory
     def persist_failure(bootstrap_id, actor_id, apply_started_at, error)
       Rails.logger.error(
         "Historical client bootstrap failed for bootstrap #{bootstrap_id}: " \
-        "#{error.class} job_id=#{job_id}"
+        "#{error.class}: #{error.message} job_id=#{job_id}"
       )
       bootstrap = HistoricalClientBootstrap.find_by(id: bootstrap_id)
       return unless bootstrap

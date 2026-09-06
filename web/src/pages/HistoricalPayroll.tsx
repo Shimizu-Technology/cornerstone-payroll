@@ -1126,8 +1126,10 @@ export function HistoricalPayroll(): ReactElement {
                 </div>
                 {clientBootstrap?.status === 'applied'
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
-                  : clientBootstrap?.status === 'pending'
+                  : clientBootstrap?.status === 'pending' && !clientBootstrap.ready_to_apply
                     ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Preparing employees</Badge>
+                  : clientBootstrap?.status === 'pending'
+                    ? <Badge variant="warning">Preparation interrupted</Badge>
                   : clientBootstrap?.ready_to_apply
                     ? <Badge variant="info">Preview ready</Badge>
                     : clientBootstrap

@@ -668,6 +668,12 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
+    if (!Number.isFinite(form.employer_retirement_match_rate) || form.employer_retirement_match_rate < 0 || form.employer_retirement_match_rate > 1) {
+      newErrors.employer_retirement_match_rate = ['Employer pre-tax match must be between 0% and 100%'];
+    }
+    if (!Number.isFinite(form.employer_roth_match_rate) || form.employer_roth_match_rate < 0 || form.employer_roth_match_rate > 1) {
+      newErrors.employer_roth_match_rate = ['Employer Roth match must be between 0% and 100%'];
+    }
     const defaultAdjustments = normalizeDefaultPayrollAdjustments();
     const adjustmentKeys = defaultAdjustments.map((adjustment) => `${adjustment.treatment}:${adjustment.label.toLowerCase()}`);
     if (new Set(adjustmentKeys).size !== adjustmentKeys.length) {
@@ -1961,12 +1967,16 @@ export function EmployeeForm() {
                     </label>
                     <NumericInput
                       id="employer-retirement-match-rate"
+                      name="employer_retirement_match_rate"
                       value={(form.employer_retirement_match_rate || 0) * 100}
                       onValueChange={(value) => handleChange('employer_retirement_match_rate', (value ?? 0) / 100)}
                       min={0}
                       max={100}
                       fixedDecimalsOnBlur={2}
+                      aria-invalid={Boolean(getFieldError('employer_retirement_match_rate'))}
+                      className={getFieldError('employer_retirement_match_rate') ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200' : undefined}
                     />
+                    {getFieldError('employer_retirement_match_rate') && <p className="mt-1 text-sm text-red-600">{getFieldError('employer_retirement_match_rate')}</p>}
                   </div>
                   <div>
                     <label htmlFor="employer-roth-match-rate" className="block text-sm font-medium text-gray-700 mb-1">
@@ -1974,12 +1984,16 @@ export function EmployeeForm() {
                     </label>
                     <NumericInput
                       id="employer-roth-match-rate"
+                      name="employer_roth_match_rate"
                       value={(form.employer_roth_match_rate || 0) * 100}
                       onValueChange={(value) => handleChange('employer_roth_match_rate', (value ?? 0) / 100)}
                       min={0}
                       max={100}
                       fixedDecimalsOnBlur={2}
+                      aria-invalid={Boolean(getFieldError('employer_roth_match_rate'))}
+                      className={getFieldError('employer_roth_match_rate') ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200' : undefined}
                     />
+                    {getFieldError('employer_roth_match_rate') && <p className="mt-1 text-sm text-red-600">{getFieldError('employer_roth_match_rate')}</p>}
                   </div>
                 </div>
               </div>

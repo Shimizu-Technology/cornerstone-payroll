@@ -432,6 +432,29 @@ test('hides QuickBooks setup review outside a migrated employee needing review',
   await expect(page.getByText('QuickBooks setup needs review')).toHaveCount(0);
 });
 
+test('blocks an out-of-range imported employer match before employee submission', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  let submitted = false;
+  await page.route('**/api/v1/admin/employees/900', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      submitted = true;
+      await fulfillJson(route, { data: migratedEmployee() });
+      return;
+    }
+
+    await fulfillJson(route, {
+      data: { ...migratedEmployee(), employer_retirement_match_rate: 1.25 },
+    });
+  });
+
+  await page.goto('/employees/900');
+  await page.getByRole('button', { name: 'Update Employee' }).click();
+
+  await expect(page.getByText('Employer pre-tax match must be between 0% and 100%')).toBeVisible();
+  expect(submitted).toBe(false);
+});
+
 test('keeps every historical batch reachable with simple pagination', async ({ page }) => {
   await mockApplicationShell(page);
   const allBatches = Array.from({ length: 51 }, (_, index) => batch(51 - index));
@@ -662,6 +685,7 @@ test('makes failed and interrupted employee preparation safe to understand and r
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
 
   await page.locator('#historical-batch').selectOption('2');
+  await expect(page.getByText('Preparation interrupted')).toBeVisible();
   await expect(page.getByText('Employee preparation appears to have been interrupted. No partial setup was kept. Try again to safely restart it.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   await expect(page.getByText('Creating employee records…')).toHaveCount(0);
