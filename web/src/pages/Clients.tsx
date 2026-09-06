@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactElement } from 'react';
 import { Plus, Building2, Check, X, Pencil } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -62,7 +62,7 @@ interface SettingToggleProps {
   onToggle: () => void;
 }
 
-function SettingToggle({ checked, label, ariaLabel, description, onToggle }: SettingToggleProps) {
+function SettingToggle({ checked, label, ariaLabel, description, onToggle }: SettingToggleProps): ReactElement {
   return (
     <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
       <button

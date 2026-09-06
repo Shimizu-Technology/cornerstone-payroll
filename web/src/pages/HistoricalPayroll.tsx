@@ -134,6 +134,7 @@ export function HistoricalPayroll(): ReactElement {
   const [detail, setDetail] = useState<HistoricalImportDetail | null>(null);
   const [meta, setMeta] = useState<PaginationMeta>(EMPTY_META);
   const [files, setFiles] = useState<File[]>([]);
+  const [paycheckSearchDraft, setPaycheckSearchDraft] = useState('');
   const [search, setSearch] = useState('');
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
@@ -145,6 +146,9 @@ export function HistoricalPayroll(): ReactElement {
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
   const [confirmation, setConfirmation] = useState<LifecycleConfirmation | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeSearchDraft, setEmployeeSearchDraft] = useState('');
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeHasMore, setEmployeeHasMore] = useState(false);
   const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
   const [archiveWorkersConfirmation, setArchiveWorkersConfirmation] = useState<ArchiveWorkersConfirmation | null>(null);
 
@@ -215,6 +219,10 @@ export function HistoricalPayroll(): ReactElement {
     setDetail(null);
     setMeta(EMPTY_META);
     setValidationErrors({});
+    setPaycheckSearchDraft('');
+    setSearch('');
+    setEmployeeSearchDraft('');
+    setEmployeeSearch('');
     setLoading(true);
     let current = true;
     void refresh().finally(() => {
@@ -228,35 +236,53 @@ export function HistoricalPayroll(): ReactElement {
   }, [activeCompanyId, refresh]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSearch(paycheckSearchDraft);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [paycheckSearchDraft]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setEmployeeSearch(employeeSearchDraft), 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [employeeSearchDraft]);
+
+  useEffect(() => {
     void loadDetail();
   }, [loadDetail]);
 
   useEffect(() => {
     if (!canMutate || !activeCompanyId) {
       setEmployees([]);
+      setEmployeeHasMore(false);
       return;
     }
 
-    let current = true;
-    const loadAllEmployees = async (): Promise<void> => {
-      const perPage = 200;
-      const first = await employeesApi.list({ page: 1, per_page: perPage });
-      const collected = [...first.data];
-      for (let pageNumber = 2; pageNumber <= first.meta.total_pages; pageNumber += 1) {
-        const page = await employeesApi.list({ page: pageNumber, per_page: perPage });
-        collected.push(...page.data);
-      }
-      if (current) setEmployees(collected);
+    const controller = new AbortController();
+    const loadEmployees = async (): Promise<void> => {
+      const response = await employeesApi.list({
+        page: 1,
+        per_page: 200,
+        search: employeeSearch.trim() || undefined,
+        sort_by: 'name',
+        sort_direction: 'asc',
+      }, controller.signal);
+      setEmployees(response.data);
+      setEmployeeHasMore(response.meta.total_pages > 1);
     };
-    void loadAllEmployees().catch((err: unknown) => {
-      if (current) handleError(err, 'Live employees could not be loaded for worker review.');
+    void loadEmployees().catch((err: unknown) => {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        handleError(err, 'Live employees could not be loaded for worker review.');
+      }
     });
-    return () => { current = false; };
-  }, [activeCompanyId, canMutate, handleError]);
+    return () => controller.abort();
+  }, [activeCompanyId, canMutate, employeeSearch, handleError]);
 
   useEffect(() => {
     setPage(1);
     setPeriodId(undefined);
+    setPaycheckSearchDraft('');
     setSearch('');
   }, [selectedBatchId]);
 
@@ -285,7 +311,7 @@ export function HistoricalPayroll(): ReactElement {
         tone: hasImportErrors ? 'warning' : 'success',
         message: hasImportErrors
           ? 'The preview was created, but it is blocked. Add the missing reports or resolve the reconciliation issues shown below.'
-          : response.idempotent
+          : response.meta.idempotent
             ? 'This exact bundle was already staged. The existing preview was opened.'
             : 'QuickBooks history was staged. Review reconciliation and worker matches before applying it.',
       });
@@ -525,12 +551,18 @@ export function HistoricalPayroll(): ReactElement {
           <Card>
             <CardHeader>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div><CardTitle>Worker review</CardTitle><CardDescription>Link a QuickBooks name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
+                <div className="max-w-2xl"><CardTitle>Worker review</CardTitle><CardDescription>Link a QuickBooks name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
                 <div className="flex flex-wrap items-center gap-2">
                   {canMutate && detail.status === 'previewed' && detail.worker_review_summary.needs_review > 0 && <Button size="sm" variant="outline" onClick={() => setArchiveWorkersConfirmation({ batchId: detail.id, batchLabel: detail.source_label })}>Keep all unlinked archive-only</Button>}
                   {workersReviewed ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />All reviewed</Badge> : <Badge variant="warning">{detail.worker_review_summary.needs_review} remaining</Badge>}
                 </div>
               </div>
+              {canMutate && detail.status === 'previewed' && (
+                <div className="mt-4 max-w-sm">
+                  <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search live employees for worker linking" value={employeeSearchDraft} onChange={(event) => setEmployeeSearchDraft(event.target.value)} placeholder="Search live employees to link" className="pl-9" /></div>
+                  {employeeHasMore && <p className="mt-1.5 text-xs text-neutral-500">Showing the first 200 matches. Search by name to narrow the list.</p>}
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[34rem] overflow-auto border-y border-neutral-200">
@@ -542,7 +574,7 @@ export function HistoricalPayroll(): ReactElement {
                         <TableCell><p className="font-semibold text-neutral-950">{worker.source_name}</p><p className="mt-0.5 text-xs text-neutral-500">Hired {shortDate(worker.hire_date)}</p></TableCell>
                         <TableCell><Badge variant={worker.source_status === 'active' ? 'success' : 'default'}>{worker.source_status}</Badge></TableCell>
                         <TableCell className="min-w-[280px]">
-                          {canMutate && detail.status !== 'locked' ? (
+                          {canMutate && detail.status === 'previewed' ? (
                             <div className="flex items-center gap-2">
                               <Link2 className="h-4 w-4 shrink-0 text-neutral-400" />
                               <select
@@ -554,6 +586,7 @@ export function HistoricalPayroll(): ReactElement {
                               >
                                 <option value="">Needs review</option>
                                 <option value="archive_only">Keep as archive-only</option>
+                                {worker.employee_id && !employees.some((employee) => employee.id === worker.employee_id) && <option value={worker.employee_id}>{worker.employee_name || 'Currently linked employee'}</option>}
                                 <optgroup label="Link to live employee">
                                   {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.last_name}, {employee.first_name}{employee.status === 'active' ? '' : ` · ${employee.status}`}</option>)}
                                 </optgroup>
@@ -579,7 +612,7 @@ export function HistoricalPayroll(): ReactElement {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div><CardTitle>Paycheck ledger</CardTitle><CardDescription>Final QuickBooks values, searchable by employee or check number. Open a row to inspect its itemized source lines.</CardDescription></div>
                 <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)]">
-                  <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search historical paychecks" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Employee or check number" className="pl-9" /></div>
+                  <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search historical paychecks" value={paycheckSearchDraft} onChange={(event) => setPaycheckSearchDraft(event.target.value)} placeholder="Employee or check number" className="pl-9" /></div>
                   <select aria-label="Filter historical period" value={periodId || ''} onChange={(event) => { setPeriodId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }} className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"><option value="">All {detail.periods.length} periods</option>{detail.periods.map((period) => <option key={period.id} value={period.id}>{shortDate(period.pay_date)} · {period.source_label}{period.period_type === 'opening_summary' ? ' · summary' : ''}</option>)}</select>
                 </div>
               </div>
@@ -636,7 +669,7 @@ export function HistoricalPayroll(): ReactElement {
 
       <Dialog open={Boolean(confirmation)} onOpenChange={(open) => !open && setConfirmation(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive. It does not run payroll or update live YTD totals.' : 'Locking prevents ordinary edits and mapping changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive and fixes the worker links as reviewed. It does not run payroll or update live YTD totals.' : 'Locking seals the applied batch metadata against ordinary changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmation?.action === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
           <DialogFooter><Button variant="outline" onClick={() => setConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmation?.action === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmation?.action === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
         </DialogContent>
@@ -645,7 +678,7 @@ export function HistoricalPayroll(): ReactElement {
       <Dialog open={archiveWorkersConfirmation !== null} onOpenChange={(open) => { if (!open) setArchiveWorkersConfirmation(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Keep every unlinked worker archive-only?</DialogTitle><DialogDescription>This applies to “Needs review” workers in {archiveWorkersConfirmation?.batchLabel}. Existing exact or manual links will stay unchanged.</DialogDescription></DialogHeader>
-          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">Use this after confirming the remaining QuickBooks names should not attach to any live employee profile. You can still change individual choices until the batch is locked.</div>
+          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">Use this after confirming the remaining QuickBooks names should not attach to any live employee profile. You can still change individual choices until the batch is applied.</div>
           <DialogFooter><Button variant="outline" onClick={() => setArchiveWorkersConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void archiveUnlinkedWorkers()} disabled={action !== null}>{action === 'worker_review' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Keep unlinked archive-only</Button></DialogFooter>
         </DialogContent>
       </Dialog>

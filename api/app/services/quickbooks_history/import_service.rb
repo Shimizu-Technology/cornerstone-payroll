@@ -63,7 +63,7 @@ module QuickbooksHistory
         bundle_digest: parsed.bundle_digest
       )
       Result.new(batch: existing, idempotent: true)
-    rescue ActiveRecord::RecordInvalid => e
+    rescue ArgumentError, ActiveRecord::RecordInvalid => e
       Result.new(idempotent: false, error: e)
     end
 
@@ -130,7 +130,7 @@ module QuickbooksHistory
       timestamp = Time.current
       rows = paycheck_rows.map do |row|
         worker = workers_by_name.fetch(row.fetch(:normalized_name))
-        period = periods_by_key.fetch(period_key(row))
+        period = periods_by_key.fetch(PeriodKey.call(row))
         {
           historical_import_batch_id: batch.id,
           historical_pay_period_id: period.id,
@@ -162,10 +162,6 @@ module QuickbooksHistory
       end
 
       rows.each_slice(500) { |slice| HistoricalPaycheck.insert_all!(slice) }
-    end
-
-    def period_key(row)
-      Digest::SHA256.hexdigest([ row.fetch(:period_start), row.fetch(:period_end), row.fetch(:pay_date), row.fetch(:period_type) ].join("|"))
     end
   end
 end

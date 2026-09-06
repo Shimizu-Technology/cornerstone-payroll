@@ -24,7 +24,9 @@ module QuickbooksHistory
       HistoricalWorker.transaction do
         worker.historical_import_batch.lock!
         worker.lock!
-        raise ArgumentError, "Locked historical worker mappings cannot be changed" if worker.historical_import_batch.locked?
+        unless worker.historical_import_batch.previewed?
+          raise ArgumentError, "Historical worker mappings can only be changed while the batch is a preview"
+        end
 
         if archive_only
           worker.update!(employee: nil, mapping_status: "archive_only", match_method: "archive_only", match_confidence: nil)

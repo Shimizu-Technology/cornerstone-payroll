@@ -141,4 +141,20 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(HistoricalPayPeriod.count).to eq(0)
     expect(HistoricalPaycheck.count).to eq(0)
   end
+
+  it "returns parser validation failures through the service result contract" do
+    details = payroll_details_rows
+    details[5][5] = "not money"
+
+    result = described_class.new(
+      company: company,
+      files: authoritative_quickbooks_files(details: details, history: paycheck_history_rows),
+      actor: actor
+    ).call
+
+    expect(result).not_to be_success
+    expect(result.error).to be_a(ArgumentError)
+    expect(result.error.message).to match(/Gross pay - total is not a valid number/)
+    expect(HistoricalImportBatch.count).to eq(0)
+  end
 end

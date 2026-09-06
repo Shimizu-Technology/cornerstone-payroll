@@ -23,6 +23,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "paycheck_count" => 2,
       "period_count" => 2
     )
+    expect(preview_body.fetch("meta")).to eq("idempotent" => false)
     expect(PayPeriod.count).to eq(0)
     expect(PayrollItem.count).to eq(0)
 

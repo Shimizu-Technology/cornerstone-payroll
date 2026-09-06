@@ -72,16 +72,15 @@ RSpec.describe QuickbooksHistory::MappingService do
     expect(worker.historical_paychecks.distinct.pluck(:employee_id)).to eq([ nil ])
   end
 
-  it "cannot race a locked batch when changing a mapping" do
+  it "rejects mapping changes after a batch has been applied" do
     review_historical_workers_as_archive_only(batch, actor: admin)
     QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
     )
-    QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).lock!
 
     expect do
       described_class.new(worker: worker, employee: employee, actor: admin).call
-    end.to raise_error(ArgumentError, /Locked historical worker mappings/)
+    end.to raise_error(ArgumentError, /only be changed while the batch is a preview/)
     expect(worker.reload.employee_id).to be_nil
   end
 end

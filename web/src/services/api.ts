@@ -128,8 +128,12 @@ class ApiClient {
     return response.json();
   }
 
-  async get<T>(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
-    return this.request<T>(endpoint, { method: 'GET', params });
+  async get<T>(
+    endpoint: string,
+    params?: Record<string, string | number | boolean | undefined>,
+    options: Pick<RequestOptions, 'signal'> = {},
+  ): Promise<T> {
+    return this.request<T>(endpoint, { method: 'GET', params, ...options });
   }
 
   async post<T>(endpoint: string, data?: unknown): Promise<T> {
@@ -360,8 +364,8 @@ export const employeesApi = {
     page?: number;
     per_page?: number;
     group_by?: string;
-  }) =>
-    api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params),
+  }, signal?: AbortSignal) =>
+    api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`),
   create: (data: EmployeeFormData & { company_id: number }) =>
@@ -3776,18 +3780,18 @@ export interface HistoricalArchiveSummary {
 export const historicalImportsApi = {
   list: (params?: { page?: number; per_page?: number; search?: string; department_id?: number; status?: HistoricalImportBatch['status'] }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }>('/admin/historical_imports', params),
-  show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }) =>
+  show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
-  preview: (files: File[]): Promise<{ data: HistoricalImportBatch; idempotent: boolean }> => {
+  preview: (files: File[]): Promise<{ data: HistoricalImportBatch; meta: { idempotent: boolean } }> => {
     const form = new FormData();
     files.forEach((file) => form.append('files[]', file));
-    return api.postForm<{ data: HistoricalImportBatch; idempotent: boolean }>('/admin/historical_imports/preview', form);
+    return api.postForm<{ data: HistoricalImportBatch; meta: { idempotent: boolean } }>('/admin/historical_imports/preview', form);
   },
-  apply: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/apply`, {
+  apply: (id: number): Promise<{ data: HistoricalImportBatch }> => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/apply`, {
     acknowledgement: HISTORICAL_IMPORT_ACKNOWLEDGEMENT,
   }),
-  lock: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
-  mapWorker: (batchId: number, workerId: number, employeeId: number) =>
+  lock: (id: number): Promise<{ data: HistoricalImportBatch }> => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
+  mapWorker: (batchId: number, workerId: number, employeeId: number): Promise<{ data: HistoricalWorker }> =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
   keepWorkerArchiveOnly: (batchId: number, workerId: number): Promise<{ data: HistoricalWorker }> =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),

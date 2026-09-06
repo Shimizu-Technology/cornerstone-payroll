@@ -40,7 +40,8 @@ module QuickbooksHistory
     def call
       validate_bundle!
       inventory = files.map { |file| inventory_file(file) }
-      bundle_digest = Digest::SHA256.hexdigest(inventory.sort_by { |entry| entry.fetch(:filename) }.map { |entry| "#{entry.fetch(:filename)}:#{entry.fetch(:sha256)}" }.join("\n"))
+      digest_entries = inventory.map { |entry| "#{entry.fetch(:filename)}:#{entry.fetch(:sha256)}" }.sort
+      bundle_digest = Digest::SHA256.hexdigest(digest_entries.join("\n"))
       report_entries = inventory.select { |entry| entry[:rows].present? }
       reports = report_entries.index_by { |entry| entry.fetch(:report_type) }
       missing = REQUIRED_REPORTS - reports.keys
@@ -442,7 +443,7 @@ module QuickbooksHistory
     end
 
     def build_periods(paychecks)
-      paychecks.group_by { |row| period_key(row) }.map do |key, rows|
+      paychecks.group_by { |row| PeriodKey.call(row) }.map do |key, rows|
         first = rows.first
         {
           external_key: key,
@@ -555,10 +556,6 @@ module QuickbooksHistory
       %i[gross_pay adjusted_gross pretax_deductions employee_taxes federal_income_tax social_security_tax medicare_tax after_tax_deductions net_pay employer_taxes employer_contributions total_payroll_cost].to_h do |field|
         [ field.to_s, sum(rows, field).to_s("F") ]
       end
-    end
-
-    def period_key(row)
-      Digest::SHA256.hexdigest([ row.fetch(:period_start), row.fetch(:period_end), row.fetch(:pay_date), row.fetch(:period_type) ].join("|"))
     end
 
     def paycheck_signature(name, pay_date, gross, net)

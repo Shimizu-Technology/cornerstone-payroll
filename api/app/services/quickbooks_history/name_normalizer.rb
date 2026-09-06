@@ -9,7 +9,6 @@ module QuickbooksHistory
              .unicode_normalize(:nfkd)
              .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
              .downcase
-             .sub(/\A\*+/, "")
              .gsub(/[^a-z0-9]+/, " ")
              .squish
       end

@@ -68,6 +68,32 @@ RSpec.describe QuickbooksHistory::BundleParser do
     expect(result.paychecks.size).to eq(2)
   end
 
+  it "derives the same bundle digest regardless of input order, including duplicate filenames" do
+    first = Tempfile.new([ "source-evidence-a", ".pdf" ])
+    second = Tempfile.new([ "source-evidence-b", ".pdf" ])
+    first.write("first evidence")
+    second.write("second evidence")
+    first.flush
+    second.flush
+    source_files = [ first, second ].map do |file|
+      described_class::SourceFile.new(
+        original_filename: "Source Evidence.pdf",
+        path: file.path,
+        size: file.size,
+        source: file
+      )
+    end
+    authoritative = quickbooks_history_uploads
+
+    forward = described_class.new(files: authoritative + source_files).call
+    reverse = described_class.new(files: authoritative + source_files.reverse).call
+
+    expect(forward.bundle_digest).to eq(reverse.bundle_digest)
+  ensure
+    first&.close!
+    second&.close!
+  end
+
   it "blocks ambiguous bundles with more than one required report" do
     files = quickbooks_history_uploads
     files << build_quickbooks_xls("Second Payroll Details.xls", payroll_details_rows)

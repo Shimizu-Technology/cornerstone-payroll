@@ -19,7 +19,7 @@ class HistoricalWorker < ApplicationRecord
   validates :employee, absence: true, if: -> { mapping_status.in?(%w[needs_review archive_only]) }
   validate :company_consistency
 
-  before_update :prevent_locked_batch_update
+  before_update :prevent_non_preview_update
   before_destroy :prevent_non_preview_destroy
 
   def private_snapshot_data
@@ -42,13 +42,13 @@ class HistoricalWorker < ApplicationRecord
     errors.add(:company_id, "must match the historical import batch")
   end
 
-  def prevent_locked_batch_update
+  def prevent_non_preview_update
     # Bulk updates bypass callbacks; callers must lock the batch row and verify
     # it is still previewed before changing historical worker mappings.
     current_batch = HistoricalImportBatch.lock.find(historical_import_batch_id)
-    return unless current_batch.locked?
+    return if current_batch.previewed?
 
-    errors.add(:base, "Locked historical workers cannot be changed")
+    errors.add(:base, "Historical workers can only be changed while the batch is a preview")
     throw(:abort)
   end
 

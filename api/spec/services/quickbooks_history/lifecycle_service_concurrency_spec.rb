@@ -48,17 +48,17 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     results = Queue.new
     pause_after_duplicate_check = lambda do
       first_checked << true
-      release_first.pop
+      pop_with_timeout(release_first)
     end
 
     first = apply_thread(first_batch.id, results, after_duplicate_check: pause_after_duplicate_check)
-    first_checked.pop
+    pop_with_timeout(first_checked)
     second = apply_thread(second_batch.id, results)
     expect { Timeout.timeout(0.2) { results.pop } }.to raise_error(Timeout::Error)
     release_first << true
     [ first, second ].each { |thread| Timeout.timeout(10) { thread.join } }
 
-    outcomes = 2.times.map { results.pop }
+    outcomes = 2.times.map { pop_with_timeout(results) }
     expect(outcomes.count { |status, _value| status == :ok }).to eq(1)
     errors = outcomes.filter_map { |status, value| value if status == :error }
     expect(errors).to contain_exactly(an_instance_of(ArgumentError))
@@ -71,7 +71,7 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     results = Queue.new
     thread = apply_and_lock_thread(first_batch.id, results)
     Timeout.timeout(10) { thread.join }
-    expect(results.pop).to eq([ :ok, first_batch.id ])
+    expect(pop_with_timeout(results)).to eq([ :ok, first_batch.id ])
 
     expect(stale_batch.update(source_label: "Stale metadata")).to be(false)
     expect(stale_batch.errors.full_messages).to include("Locked historical imports cannot be changed")
@@ -82,13 +82,17 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     results = Queue.new
     thread = apply_and_lock_thread(first_batch.id, results)
     Timeout.timeout(10) { thread.join }
-    expect(results.pop).to eq([ :ok, first_batch.id ])
+    expect(pop_with_timeout(results)).to eq([ :ok, first_batch.id ])
 
     expect(stale_worker.update(source_name: "Stale worker")).to be(false)
-    expect(stale_worker.errors.full_messages).to include("Locked historical workers cannot be changed")
+    expect(stale_worker.errors.full_messages).to include("Historical workers can only be changed while the batch is a preview")
   end
 
   private
+
+  def pop_with_timeout(queue)
+    Timeout.timeout(10) { queue.pop }
+  end
 
   def apply_thread(batch_id, results, after_duplicate_check: nil)
     Thread.new do

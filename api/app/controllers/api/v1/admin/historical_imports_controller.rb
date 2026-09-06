@@ -47,7 +47,7 @@ module Api
               periods: @batch.historical_pay_periods.reverse_chronological
                              .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
                              .map { |period| period_json(period) },
-              workers: @batch.historical_workers.order(:normalized_name)
+              workers: @batch.historical_workers.includes(:employee).order(:normalized_name)
                              .limit(QuickbooksHistory::BundleParser::MAX_WORKER_COUNT)
                              .map { |worker| worker_json(worker) },
               paychecks: paychecks.map { |paycheck| paycheck_json(paycheck) }
@@ -73,7 +73,7 @@ module Api
             return
           end
 
-          render json: { data: batch_json(result.batch), idempotent: result.idempotent }
+          render json: { data: batch_json(result.batch), meta: { idempotent: result.idempotent } }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
