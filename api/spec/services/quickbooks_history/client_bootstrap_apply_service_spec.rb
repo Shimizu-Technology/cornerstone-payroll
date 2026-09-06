@@ -100,6 +100,44 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
     end.to raise_error(ArgumentError, /Type PREPARE CLEAN CLIENT EMPLOYEES/)
   end
 
+  it "rejects a deactivated administrator at preview, queue, and apply service boundaries" do
+    bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    actor.update_columns(active: false)
+
+    expect do
+      QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor.reload).call
+    end.to raise_error(ArgumentError, /manager or administrator/)
+    expect do
+      QuickbooksHistory::ClientBootstrapEnqueueService.new(
+        bootstrap: bootstrap,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      ).call
+    end.to raise_error(ArgumentError, /manager or administrator/)
+    expect do
+      described_class.new(
+        bootstrap: bootstrap,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      ).call
+    end.to raise_error(ArgumentError, /manager or administrator/)
+    expect(company.employees).to be_empty
+  end
+
+  it "returns a concurrently applied bootstrap instead of rewriting its preview" do
+    bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    allow(batch).to receive(:lock!).and_wrap_original do |original|
+      bootstrap.update_columns(status: "applied", applied_at: Time.current, applied_by_id: actor.id)
+      original.call
+    end
+    allow(QuickbooksHistory::ClientBootstrapPlan).to receive(:new).and_call_original
+
+    result = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+
+    expect(result.reload).to be_applied
+    expect(QuickbooksHistory::ClientBootstrapPlan).not_to have_received(:new)
+  end
+
   it "rejects plan drift between preview and apply" do
     bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
     company.update!(pay_frequency: "weekly")

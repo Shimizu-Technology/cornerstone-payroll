@@ -257,16 +257,20 @@ export function HistoricalPayroll(): ReactElement {
     preferredBatchId: number | null = selectedBatchIdRef.current,
   ): Promise<void> => {
     const requestId = ++listRequestIdRef.current;
+    const selectionAtRequestStart = selectedBatchIdRef.current;
     const response = await historicalImportsApi.list({ page: requestedPage, per_page: EMPTY_META.per_page });
     if (requestId !== listRequestIdRef.current) return;
 
+    const currentPreferredBatchId = selectedBatchIdRef.current !== selectionAtRequestStart
+      ? selectedBatchIdRef.current
+      : preferredBatchId;
     setBatches(response.data);
     setArchive(response.meta.archive);
     setBatchMeta(response.meta);
     selectBatchPage(response.meta.current_page);
     selectBatch(
-      preferredBatchId && response.data.some((batch) => batch.id === preferredBatchId)
-        ? preferredBatchId
+      currentPreferredBatchId && response.data.some((batch) => batch.id === currentPreferredBatchId)
+        ? currentPreferredBatchId
         : response.data[0]?.id ?? null,
     );
   }, [selectBatch, selectBatchPage]);

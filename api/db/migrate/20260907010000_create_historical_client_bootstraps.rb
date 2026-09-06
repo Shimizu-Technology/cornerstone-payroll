@@ -8,16 +8,19 @@ class CreateHistoricalClientBootstraps < ActiveRecord::Migration[8.0]
 
     add_check_constraint :employees,
                          "configuration_review_status IN ('complete', 'needs_review')",
-                         name: "employees_configuration_review_status_check"
+                         name: "employees_configuration_review_status_check",
+                         validate: false
     add_check_constraint :employees,
                          "configuration_source IS NULL OR configuration_source IN ('quickbooks_history')",
-                         name: "employees_configuration_source_check"
+                         name: "employees_configuration_source_check",
+                         validate: false
     add_check_constraint :employees,
                          "jsonb_typeof(configuration_review_items) = 'array'",
-                         name: "employees_configuration_review_items_array"
+                         name: "employees_configuration_review_items_array",
+                         validate: false
 
     create_table :historical_client_bootstraps do |t|
-      t.references :company, null: false, foreign_key: true
+      t.references :company, null: false, foreign_key: true, index: false
       t.references :historical_import_batch, null: false, foreign_key: true, index: { unique: true }
       t.references :created_by, foreign_key: { to_table: :users, on_delete: :nullify }
       t.references :applied_by, foreign_key: { to_table: :users, on_delete: :nullify }

@@ -504,7 +504,9 @@ class Employee < ApplicationRecord
   def configuration_review_allows_blank?(field)
     return false unless configuration_source == "quickbooks_history" && configuration_review_status == "needs_review"
 
-    configuration_review_items.any? do |item|
+    Array(configuration_review_items).any? do |item|
+      next false unless item.is_a?(Hash)
+
       Array(item["fields"]).include?(field.to_s)
     end
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_07_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_07_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -806,7 +806,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010000) do
     t.jsonb "warnings", default: [], null: false
     t.index ["applied_by_id"], name: "index_historical_client_bootstraps_on_applied_by_id"
     t.index ["company_id", "status"], name: "index_historical_client_bootstraps_on_company_id_and_status"
-    t.index ["company_id"], name: "index_historical_client_bootstraps_on_company_id"
     t.index ["created_by_id"], name: "index_historical_client_bootstraps_on_created_by_id"
     t.index ["historical_import_batch_id"], name: "idx_on_historical_import_batch_id_e2c1f62422", unique: true
     t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text", name: "historical_client_bootstraps_summary_object"

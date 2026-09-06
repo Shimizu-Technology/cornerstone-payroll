@@ -57,6 +57,52 @@ RSpec.describe Employee, type: :model do
       expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "legacy_w4_allowances" ])
       expect(employee.configuration_review_status).to eq("needs_review")
     end
+
+    it "marks setup complete when the only source-field review item is resolved" do
+      employee = create(
+        :employee,
+        hire_date: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          }
+        ]
+      )
+
+      employee.update!(hire_date: Date.new(2024, 1, 15))
+
+      expect(employee.reload.configuration_review_items).to be_empty
+      expect(employee.configuration_review_status).to eq("complete")
+    end
+
+    it "keeps malformed review items and invalid field names on the validation path without executing them" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          17,
+          {
+            "code" => "invalid_source_field",
+            "message" => "Invalid source field",
+            "fields" => [ "destroy!" ]
+          }
+        ]
+      )
+
+      expect { employee.valid? }.not_to raise_error
+      expect(employee.configuration_review_items).to contain_exactly(
+        17,
+        hash_including("code" => "invalid_source_field", "fields" => [ "destroy!" ])
+      )
+      expect(employee.errors[:configuration_review_items]).to include("contains an invalid review item")
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+    end
   end
 
   describe "#active_wage_rates" do

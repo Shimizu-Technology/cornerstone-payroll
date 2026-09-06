@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe QuickbooksHistory::WorkerProfileParser do
-  def worker(source_name: "Worker, Alice", source_status: "active", pay_info:, tax_info: nil, directory: {})
+  def worker(pay_info:, source_name: "Worker, Alice", source_status: "active", tax_info: nil, directory: {})
     HistoricalWorker.new(
       id: 41,
       source_name: source_name,
@@ -89,6 +89,19 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
   end
 
+  it "suppresses a Nevada address even when QuickBooks omitted the ZIP code" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, Henderson, Nevada" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("quickbooks_nevada_address_suppressed")
+  end
+
   it "uses variable salary for commission-only workers and flags legacy withholding allowances" do
     parsed = described_class.new(
       worker: worker(
@@ -126,6 +139,33 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     expect(parsed.warnings).to contain_exactly("A QuickBooks placeholder deduction was intentionally not activated")
   end
 
+  it "does not discard a percentage-based loan as a one-dollar placeholder" do
+    parsed = described_class.new(
+      worker: worker(pay_info: "Hourly rate: $9.25/hr Pay method: Check Deductions: Loan: 1.00% Contributions: None Time off: None"),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.payroll_fields).to contain_exactly(
+      hash_including(name: "Loan", category: "loan", amount_type: "percentage", percentage: 1.to_d)
+    )
+    expect(parsed.warnings).to be_empty
+    expect(parsed.review_items.pluck("code")).to include("obligation_terms_missing")
+  end
+
+  it "treats non-object retained snapshots as missing setup instead of crashing" do
+    malformed_worker = HistoricalWorker.new(
+      id: 42,
+      source_name: "Worker, Alice",
+      source_status: "active",
+      private_snapshot: "null"
+    )
+
+    parsed = described_class.new(worker: malformed_worker, pay_frequency: "biweekly").call
+
+    expect(parsed.errors).to include(/employee directory setup is missing/)
+    expect(parsed.errors).to include(/pay setup could not be separated/)
+  end
+
   it "blocks unknown positive deductions instead of guessing their tax treatment" do
     parsed = described_class.new(
       worker: worker(pay_info: "Hourly rate: $9.25/hr Pay method: Check Deductions: Mystery: $10.00 Contributions: None Time off: None"),
@@ -133,5 +173,16 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     ).call
 
     expect(parsed.errors).to include(/needs an explicit tax\/category mapping/)
+  end
+
+
+  it "records an unreadable deduction label instead of raising" do
+    parsed = described_class.new(
+      worker: worker(pay_info: "Hourly rate: $9.25/hr Pay method: Check Deductions: : $25.00 Contributions: None Time off: None"),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.errors).to include("QuickBooks deductions contain an unreadable item")
+    expect(parsed.payroll_fields).to be_empty
   end
 end

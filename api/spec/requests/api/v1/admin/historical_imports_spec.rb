@@ -203,7 +203,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "wage_rate_count" => 3
     )
     expect(response.parsed_body.dig("data", "ready_to_apply")).to be(true)
-    acknowledgement = response.parsed_body.dig("data", "acknowledgement")
+    acknowledgement = QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT
 
     expect do
       post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
@@ -227,6 +227,22 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(PayPeriod.where(company: company)).to be_empty
     expect(batch.reload).to be_previewed
     expect(AuditLog.where(action: "historical_imports#apply_client_bootstrap", company: company)).to exist
+  end
+
+  it "rejects an incorrect clean-client preparation acknowledgement without enqueueing work" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:ok), response.body
+
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+        acknowledgement: "PREPARE EMPLOYEES"
+      }
+    end.not_to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob)
+
+    expect(response).to have_http_status(:unprocessable_entity), response.body
+    expect(batch.historical_client_bootstrap.reload).to be_previewed
+    expect(Employee.where(company: company)).to be_empty
   end
 
   it "lets accountants review history but not mutate imports" do

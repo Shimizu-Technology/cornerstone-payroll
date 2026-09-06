@@ -68,9 +68,7 @@ module QuickbooksHistory
     end
 
     def ensure_authorized_actor!
-      return if actor&.can_access_company?(bootstrap.company_id) && StaffRolePolicy.allowed?(actor, :manage_client_configuration)
-
-      raise ArgumentError, "An attributed manager or administrator with client access is required"
+      ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: bootstrap.company_id)
     end
 
     def create_wage_rates!(employee, wage_rates)

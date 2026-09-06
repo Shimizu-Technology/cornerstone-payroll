@@ -42,7 +42,9 @@ module QuickbooksHistory
       @warnings = []
       @errors = []
       snapshot = worker.private_snapshot_data
+      snapshot = {} unless snapshot.is_a?(Hash)
       directory = snapshot.fetch("_employee_directory", {})
+      directory = {} unless directory.is_a?(Hash)
       details = snapshot.except("_employee_directory")
       if directory.blank?
         errors << "QuickBooks employee directory setup is missing from the retained snapshot; import the source with the current importer before creating live employees"
@@ -230,7 +232,13 @@ module QuickbooksHistory
           break
         end
 
-        label, raw_value = match.match(/\A(.+?):\s*(\$[\d,]+(?:\.\d+)?|[\d.]+%)\z/).captures
+        item_match = match.match(/\A(.+?):\s*(\$[\d,]+(?:\.\d+)?|[\d.]+%)\z/)
+        unless item_match
+          errors << "QuickBooks #{section} contain an unreadable item"
+          break
+        end
+
+        label, raw_value = item_match.captures
         items << if raw_value.end_with?("%")
           { label: label.squish, value: decimal(raw_value.delete_suffix("%")), value_type: "percentage" }
         else
@@ -259,7 +267,7 @@ module QuickbooksHistory
           result[:roth_retirement_rate] = rate_fraction(value)
         elsif label.match?(/\A401\(k\) Pre-Tax\z/i) && item.fetch(:value_type) == "percentage"
           result[:retirement_rate] = rate_fraction(value)
-        elsif placeholder_deduction?(label, value)
+        elsif placeholder_deduction?(label, value, item.fetch(:value_type))
           warnings << "A QuickBooks placeholder deduction was intentionally not activated"
         else
           field = payroll_field_for(item)
@@ -329,8 +337,8 @@ module QuickbooksHistory
       }
     end
 
-    def placeholder_deduction?(label, value)
-      label.casecmp("Loan").zero? && value <= PLACEHOLDER_DEDUCTION_MAXIMUM
+    def placeholder_deduction?(label, value, value_type)
+      value_type == "fixed" && label.casecmp("Loan").zero? && value <= PLACEHOLDER_DEDUCTION_MAXIMUM
     end
 
     def review_obligation(_label)
@@ -363,11 +371,13 @@ module QuickbooksHistory
 
       parts = text.split(",").map(&:strip).reject(&:blank?)
       region_and_zip = parts.pop.to_s
-      region_match = region_and_zip.to_s.match(/\A(?<state>.+?)\s+(?<zip>\d{5}(?:-\d{4})?)\z/)
-      state = region_match&.[](:state)
-      if state.to_s.match?(/\A(?:NV|Nevada)\z/i)
+      region_label = region_and_zip.sub(/\s+\d{5}(?:-\d{4})?\z/, "").strip
+      if region_label.match?(/\A(?:NV|Nevada)\z/i)
         return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: true }
       end
+
+      region_match = region_and_zip.match(/\A(?<state>.+?)\s+(?<zip>\d{5}(?:-\d{4})?)\z/)
+      state = region_match&.[](:state)
       return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false } unless region_match
 
       city = parts.pop

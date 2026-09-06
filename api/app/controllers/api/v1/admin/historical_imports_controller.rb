@@ -21,8 +21,8 @@ module Api
                     .includes(
                       :applied_by,
                       :locked_by,
-                      :historical_client_bootstrap,
                       :historical_import_source_files,
+                      historical_client_bootstrap: :applied_by,
                       historical_import_cutover_review: %i[verified_by approved_by]
                     )
                     .recent_first

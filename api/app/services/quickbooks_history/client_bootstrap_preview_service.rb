@@ -12,12 +12,15 @@ module QuickbooksHistory
       existing = batch.historical_client_bootstrap
       return existing if existing&.applied? || existing&.pending?
 
-      plan = ClientBootstrapPlan.new(batch: batch).call
       HistoricalClientBootstrap.transaction do
         batch.lock!
-        raise ArgumentError, "The QuickBooks history must still be a preview" unless batch.previewed?
+        existing = batch.historical_client_bootstrap
+        next existing if existing&.applied? || existing&.pending?
 
-        bootstrap = batch.historical_client_bootstrap || batch.build_historical_client_bootstrap(
+        raise ArgumentError, "The QuickBooks history must still be a preview" unless batch.previewed?
+        plan = ClientBootstrapPlan.new(batch: batch).call
+
+        bootstrap = existing || batch.build_historical_client_bootstrap(
           company: batch.company,
           created_by: actor
         )
@@ -42,9 +45,7 @@ module QuickbooksHistory
     attr_reader :batch, :actor
 
     def ensure_authorized_actor!
-      return if actor&.can_access_company?(batch.company_id) && StaffRolePolicy.allowed?(actor, :manage_client_configuration)
-
-      raise ArgumentError, "An attributed manager or administrator with client access is required"
+      ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: batch.company_id)
     end
 
     def record_audit!(bootstrap, plan)
