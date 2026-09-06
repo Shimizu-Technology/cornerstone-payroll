@@ -31,6 +31,7 @@ import {
   Files,
   LogOut,
   UserCircle,
+  ArchiveRestore,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -57,6 +58,7 @@ const clientNavigation: NavItem[] = [
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Historical Payroll', href: '/historical-payroll', icon: <ArchiveRestore className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Checks & Payments', href: '/checks-payments', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee Loans', href: '/employee-loans', icon: <HandCoins className="h-[18px] w-[18px] shrink-0" /> },
@@ -219,7 +221,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const { user, isAccountant, signOut } = useAuth();
-  const { canViewClientManagement } = useCompany();
+  const { activeCompany, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const canManageClientConfiguration = isAdmin || user?.role === 'manager';
@@ -231,7 +233,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const primaryNavigation = isClient ? portalNavigation : clientNavigation;
+  const historicalPayrollEnabled = activeCompany?.historical_payroll_enabled === true;
+  const primaryNavigation = isClient
+    ? portalNavigation
+    : clientNavigation.filter((item) => (
+        item.href === '/historical-payroll' ? historicalPayrollEnabled : true
+      ));
 
   useEffect(() => {
     if (!userMenuOpen) return;

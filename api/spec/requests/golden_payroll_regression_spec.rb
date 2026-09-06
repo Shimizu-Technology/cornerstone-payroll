@@ -111,6 +111,8 @@ RSpec.describe "Golden payroll regression", type: :request do
     calculate_approve_and_commit!
   end
 
+  after { cleanup_quickbooks_history_uploads }
+
   it "reconciles the real calculation and commit pipeline to fixed expected paychecks" do
     items_by_name = pay_period.reload.payroll_items.includes(:employee).index_by { |item| item.employee.full_name }
 
@@ -184,6 +186,24 @@ RSpec.describe "Golden payroll regression", type: :request do
     expect(money(ytd.dig("company_totals", "net_pay"))).to eq(period_expected.fetch("total_net"))
     expect(money(ytd.dig("company_totals", "withholding_tax"))).to eq(period_expected.fetch("withholding_tax"))
     expect(ytd.dig("company_totals", "payroll_count")).to eq(1)
+  end
+
+  it "keeps committed payroll, YTD balances, and live report values stable through a historical import" do
+    before_snapshot = live_payroll_snapshot
+
+    batch = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads,
+      actor: admin_user
+    ).call.batch
+    review_historical_workers_as_archive_only(batch, actor: admin_user)
+    lifecycle = QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin_user)
+    lifecycle.apply!(acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT)
+    lifecycle.lock!
+
+    expect(batch.reload).to be_locked
+    expect(batch.historical_paychecks.count).to eq(2)
+    expect(live_payroll_snapshot).to eq(before_snapshot)
   end
 
   it "ties SWICA, Form 941, W-2GU, and 1099-NEC to the same committed snapshot" do
@@ -315,5 +335,27 @@ RSpec.describe "Golden payroll regression", type: :request do
 
   def money(value)
     BigDecimal(value.to_s).round(2).to_f
+  end
+
+  def live_payroll_snapshot
+    get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+    expect(response).to have_http_status(:ok)
+    register = response.parsed_body.fetch("report")
+    get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    ytd_report = response.parsed_body.fetch("report")
+
+    # Report generation timestamps describe each request, not payroll state.
+    register["meta"]&.delete("generated_at")
+    ytd_report["meta"]&.delete("generated_at")
+
+    {
+      pay_period: pay_period.reload.attributes,
+      payroll_items: pay_period.payroll_items.order(:id).map(&:attributes),
+      employee_ytd: EmployeeYtdTotal.where(employee_id: company.employees.select(:id)).order(:employee_id, :year).map(&:attributes),
+      company_ytd: CompanyYtdTotal.where(company: company).order(:year).map(&:attributes),
+      payroll_register: register,
+      ytd_report: ytd_report
+    }
   end
 end

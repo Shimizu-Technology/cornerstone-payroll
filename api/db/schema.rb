@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_013000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -254,6 +254,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_013000) do
     t.datetime "created_at", null: false
     t.string "ein"
     t.string "email"
+    t.boolean "historical_payroll_enabled", default: false, null: false
     t.string "name", null: false
     t.integer "next_check_number", default: 1001, null: false
     t.bigint "organization_id", null: false
@@ -779,6 +780,132 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_013000) do
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
     t.check_constraint "source_kind::text = ANY (ARRAY['standalone'::character varying, 'pay_period'::character varying]::text[])", name: "general_transmittals_source_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
+  end
+
+  create_table "historical_import_batches", force: :cascade do |t|
+    t.datetime "applied_at"
+    t.bigint "applied_by_id"
+    t.text "apply_acknowledgement"
+    t.string "bundle_digest", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "importer_version", null: false
+    t.datetime "locked_at"
+    t.bigint "locked_by_id"
+    t.jsonb "preview_summary", default: {}, null: false
+    t.jsonb "reconciliation_summary", default: {}, null: false
+    t.jsonb "source_file_manifest", default: [], null: false
+    t.string "source_label", null: false
+    t.string "source_system", default: "quickbooks_online", null: false
+    t.string "status", default: "previewed", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: [], null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["applied_by_id"], name: "index_historical_import_batches_on_applied_by_id"
+    t.index ["company_id", "source_system", "bundle_digest"], name: "idx_historical_batches_unique_bundle", unique: true
+    t.index ["company_id"], name: "index_historical_import_batches_on_company_id"
+    t.index ["created_by_id"], name: "index_historical_import_batches_on_created_by_id"
+    t.index ["locked_by_id"], name: "index_historical_import_batches_on_locked_by_id"
+    t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
+  end
+
+  create_table "historical_pay_periods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.date "end_date", null: false
+    t.string "external_key", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.date "pay_date", null: false
+    t.integer "paycheck_count", default: 0, null: false
+    t.string "period_type", default: "regular", null: false
+    t.string "source_label", null: false
+    t.date "start_date", null: false
+    t.jsonb "totals", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "pay_date"], name: "index_historical_pay_periods_on_company_id_and_pay_date"
+    t.index ["company_id"], name: "index_historical_pay_periods_on_company_id"
+    t.index ["historical_import_batch_id", "external_key"], name: "idx_historical_periods_unique_source", unique: true
+    t.index ["historical_import_batch_id"], name: "index_historical_pay_periods_on_historical_import_batch_id"
+    t.check_constraint "end_date >= start_date AND pay_date >= end_date", name: "historical_pay_periods_date_order"
+    t.check_constraint "period_type::text = ANY (ARRAY['regular'::character varying::text, 'opening_summary'::character varying::text])", name: "historical_pay_periods_type"
+  end
+
+  create_table "historical_paychecks", force: :cascade do |t|
+    t.decimal "adjusted_gross", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "after_tax_deduction_breakdown", default: [], null: false
+    t.decimal "after_tax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.string "check_number"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "earnings_breakdown", default: [], null: false
+    t.bigint "employee_id"
+    t.jsonb "employee_tax_breakdown", default: [], null: false
+    t.decimal "employee_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "employer_contribution_breakdown", default: [], null: false
+    t.decimal "employer_contributions", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "employer_tax_breakdown", default: [], null: false
+    t.decimal "employer_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.string "external_key", null: false
+    t.decimal "federal_income_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "gross_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.bigint "historical_pay_period_id", null: false
+    t.bigint "historical_worker_id", null: false
+    t.jsonb "hours_breakdown", default: [], null: false
+    t.decimal "hours_total", precision: 12, scale: 4, default: "0.0", null: false
+    t.decimal "medicare_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "net_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.date "pay_date", null: false
+    t.string "payment_method"
+    t.date "period_end", null: false
+    t.date "period_start", null: false
+    t.jsonb "pretax_deduction_breakdown", default: [], null: false
+    t.decimal "pretax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.string "reconciliation_status", null: false
+    t.decimal "social_security_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.string "source_employee_name", null: false
+    t.jsonb "source_metadata", default: {}, null: false
+    t.integer "source_row_number", null: false
+    t.string "source_status", default: "recorded", null: false
+    t.decimal "total_payroll_cost", precision: 15, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "external_key"], name: "index_historical_paychecks_on_company_id_and_external_key"
+    t.index ["company_id", "pay_date"], name: "index_historical_paychecks_on_company_id_and_pay_date"
+    t.index ["company_id"], name: "index_historical_paychecks_on_company_id"
+    t.index ["employee_id"], name: "index_historical_paychecks_on_employee_id"
+    t.index ["historical_import_batch_id", "external_key"], name: "idx_historical_paychecks_unique_source", unique: true
+    t.index ["historical_import_batch_id"], name: "index_historical_paychecks_on_historical_import_batch_id"
+    t.index ["historical_pay_period_id"], name: "index_historical_paychecks_on_historical_pay_period_id"
+    t.index ["historical_worker_id", "pay_date"], name: "idx_on_historical_worker_id_pay_date_085f957883"
+    t.index ["historical_worker_id"], name: "index_historical_paychecks_on_historical_worker_id"
+    t.check_constraint "period_end >= period_start AND pay_date >= period_end", name: "historical_paychecks_date_order"
+    t.check_constraint "reconciliation_status::text = ANY (ARRAY['matched'::character varying::text, 'opening_summary'::character varying::text, 'unmatched'::character varying::text])", name: "historical_paychecks_reconciliation_status"
+  end
+
+  create_table "historical_workers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id"
+    t.string "external_key", null: false
+    t.date "hire_date"
+    t.bigint "historical_import_batch_id", null: false
+    t.string "mapping_status", default: "needs_review", null: false
+    t.decimal "match_confidence", precision: 5, scale: 4
+    t.string "match_method"
+    t.string "normalized_name", null: false
+    t.text "private_snapshot"
+    t.string "source_name", null: false
+    t.string "source_status", default: "unknown", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "normalized_name"], name: "index_historical_workers_on_company_id_and_normalized_name"
+    t.index ["company_id"], name: "index_historical_workers_on_company_id"
+    t.index ["employee_id"], name: "index_historical_workers_on_employee_id"
+    t.index ["historical_import_batch_id", "external_key"], name: "idx_historical_workers_unique_source", unique: true
+    t.index ["historical_import_batch_id"], name: "index_historical_workers_on_historical_import_batch_id"
+    t.check_constraint "mapping_status::text = ANY (ARRAY['needs_review'::character varying, 'exact_match'::character varying, 'manual_match'::character varying, 'archive_only'::character varying]::text[])", name: "historical_workers_mapping_status"
+    t.check_constraint "source_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'unknown'::character varying::text])", name: "historical_workers_source_status"
   end
 
   create_table "information_return_thresholds", force: :cascade do |t|
@@ -2295,6 +2422,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_013000) do
   add_foreign_key "general_transmittals", "pay_periods"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
+  add_foreign_key "historical_import_batches", "companies"
+  add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_batches", "users", column: "locked_by_id", on_delete: :nullify
+  add_foreign_key "historical_pay_periods", "companies"
+  add_foreign_key "historical_pay_periods", "historical_import_batches"
+  add_foreign_key "historical_paychecks", "companies"
+  add_foreign_key "historical_paychecks", "employees"
+  add_foreign_key "historical_paychecks", "historical_import_batches"
+  add_foreign_key "historical_paychecks", "historical_pay_periods"
+  add_foreign_key "historical_paychecks", "historical_workers"
+  add_foreign_key "historical_workers", "companies"
+  add_foreign_key "historical_workers", "employees"
+  add_foreign_key "historical_workers", "historical_import_batches"
   add_foreign_key "invoice_artifacts", "invoices"
   add_foreign_key "invoice_artifacts", "organizations"
   add_foreign_key "invoice_artifacts", "users", column: "created_by_id"

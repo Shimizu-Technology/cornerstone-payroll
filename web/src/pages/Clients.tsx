@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId, type ReactElement } from 'react';
 import { Plus, Building2, Check, X, Pencil } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -45,12 +45,53 @@ const emptyForm: CompanyFormData = {
   check_stock_type: 'top_check',
   next_check_number: 1001,
   simple_payroll_register_enabled: false,
+  historical_payroll_enabled: false,
 };
 
 function formatEIN(value: string): string {
   const digits = value.replace(/\D/g, '').slice(0, 9);
   if (digits.length <= 2) return digits;
   return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+}
+
+interface SettingToggleProps {
+  checked: boolean;
+  label: string;
+  description?: string;
+  onToggle: () => void;
+}
+
+function SettingToggle({ checked, label, description, onToggle }: SettingToggleProps): ReactElement {
+  const switchId = useId();
+  const labelId = `${switchId}-label`;
+  const descriptionId = description ? `${switchId}-description` : undefined;
+
+  return (
+    <div className="flex items-start gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <button
+        id={switchId}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-describedby={descriptionId}
+        onClick={onToggle}
+        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 ${
+          checked ? 'bg-blue-600' : 'bg-gray-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+      </button>
+      <div>
+        <label id={labelId} htmlFor={switchId} className="cursor-pointer text-sm font-medium text-gray-800">{label}</label>
+        {description && <p id={descriptionId} className="mt-1 text-xs leading-5 text-gray-600">{description}</p>}
+      </div>
+    </div>
+  );
 }
 
 export function Clients() {
@@ -112,6 +153,7 @@ export function Clients() {
         check_stock_type: c.check_stock_type || 'bottom_check',
         next_check_number: c.next_check_number ?? 1001,
         simple_payroll_register_enabled: c.simple_payroll_register_enabled === true,
+        historical_payroll_enabled: c.historical_payroll_enabled === true,
       });
       setEditingId(id);
       setFormError(null);
@@ -335,31 +377,19 @@ export function Clients() {
 
                   {/* Payroll Reporting */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
-                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={form.simple_payroll_register_enabled === true}
-                      aria-label="Use simple payroll register Excel format"
-                      onClick={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
-                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                        form.simple_payroll_register_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          form.simple_payroll_register_enabled === true ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">Simple payroll register Excel format</p>
-                      <p className="mt-1 text-xs text-gray-600">
-                        Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets.
-                        Leave this off for clients that require a different register format.
-                      </p>
-                    </div>
-                  </div>
+                  <SettingToggle
+                    checked={form.simple_payroll_register_enabled === true}
+                    label="Simple payroll register Excel format"
+                    description="Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
+                    onToggle={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
+                  />
+
+                  <SettingToggle
+                    checked={form.historical_payroll_enabled === true}
+                    label="Historical payroll workspace"
+                    description="Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review."
+                    onToggle={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
+                  />
 
                   {/* Check Settings */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
@@ -390,24 +420,11 @@ export function Clients() {
 
               {/* Active toggle (edit only) */}
               {editingId && canManageClients && (
-                <div className="flex items-center gap-3 pt-2">
-                  <label className="text-sm font-medium text-gray-700">Active</label>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={form.active !== false}
-                    onClick={() => updateField('active', form.active === false)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      form.active !== false ? 'bg-blue-600' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        form.active !== false ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
+                <SettingToggle
+                  checked={form.active !== false}
+                  label="Active client"
+                  onToggle={() => updateField('active', form.active === false)}
+                />
               )}
             </div>
 

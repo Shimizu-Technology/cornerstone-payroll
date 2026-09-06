@@ -2,7 +2,7 @@ import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { CompanyProvider } from '@/contexts/CompanyContext';
+import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
 
@@ -38,6 +38,7 @@ const InvoiceCenter = lazy(() => import('@/pages/InvoiceCenter').then((module) =
 const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
+const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
@@ -175,6 +176,19 @@ function StaffOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+interface HistoricalPayrollRouteProps {
+  children: React.ReactNode;
+}
+
+function HistoricalPayrollRoute({ children }: HistoricalPayrollRouteProps): ReactElement {
+  const { activeCompany, loading } = useCompany();
+
+  if (loading) return <PageLoader />;
+  if (!activeCompany?.historical_payroll_enabled) return <Navigate to="/app" replace />;
+
+  return <StaffOnlyRoute>{children}</StaffOnlyRoute>;
+}
+
 function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isClient, isLoading } = useAuth();
 
@@ -296,6 +310,7 @@ function AppRoutes() {
         <Route path="departments" element={<Departments />} />
         <Route path="pay-periods" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
         <Route path="pay-periods/:id" element={isClient ? <ClientPayPeriodDetail /> : <PayPeriodDetail />} />
+        <Route path="historical-payroll" element={<HistoricalPayrollRoute><HistoricalPayroll /></HistoricalPayrollRoute>} />
         <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />
         <Route path="pay-periods/:id/form-500" element={<StaffOnlyRoute><Form500Page /></StaffOnlyRoute>} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />

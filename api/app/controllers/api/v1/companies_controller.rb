@@ -36,7 +36,8 @@ module Api
           active: company.active,
           active_employees: active_employee_counts.fetch(company.id, 0),
           total_employees: total_employee_counts.fetch(company.id, 0),
-          pay_frequency: company.pay_frequency
+          pay_frequency: company.pay_frequency,
+          historical_payroll_enabled: company.historical_payroll_enabled
         }
       end
 
