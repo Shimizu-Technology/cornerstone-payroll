@@ -169,8 +169,8 @@ export function EmployeeClassificationTransitionDialog({
       onTransitioned(response.data);
       onOpenChange(false);
     } catch (err) {
-      if (err instanceof ApiError && err.details) {
-        setFieldErrors(err.details);
+      if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
+        setFieldErrors(err.fieldErrors);
         setError('Complete the missing filing information on the current record, then try again.');
       } else {
         setError(err instanceof Error ? err.message : 'Unable to create the new worker record');

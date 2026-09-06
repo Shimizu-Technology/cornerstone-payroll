@@ -2,7 +2,7 @@
 
 module PayrollImport
   # Orchestrates the payroll import process:
-  # 1. Parse Revel PDF (hours + gross pay)
+  # 1. Parse Revel PDF (hours only; source pay values are never imported)
   # 2. Parse Excel template (tips + loans)
   # 3. Match names to Employee records
   # 4. Return preview data
@@ -32,10 +32,12 @@ module PayrollImport
 
       # Pre-match all Excel records to employee IDs using the fuzzy NameMatcher
       # so tips/loans are correctly linked even when names have middle initials or typos.
-      excel_by_employee_id = build_excel_lookup(excel_records, matcher)
+      excel_lookup = build_excel_lookup(excel_records, matcher, employees_by_id)
+      excel_by_employee_id = excel_lookup.fetch(:by_employee_id)
 
       matched = []
-      unmatched = []
+      unmatched_pdf_names = []
+      low_confidence_matches = excel_lookup.fetch(:low_confidence_matches)
 
       pdf_records.each do |pdf_row|
         match = matcher.match_pdf_name(pdf_row[:employee_name])
@@ -46,8 +48,11 @@ module PayrollImport
 
           excel_data = excel_by_employee_id[employee.id]
           matched << build_preview_row(pdf_row, employee, match, excel_data)
+          if low_confidence?(match)
+            low_confidence_matches << build_match_review("Revel hours", pdf_row[:employee_name], employee, match)
+          end
         else
-          unmatched << pdf_row[:employee_name]
+          unmatched_pdf_names << pdf_row[:employee_name]
         end
       end
 
@@ -62,12 +67,30 @@ module PayrollImport
         matched << build_preview_row(nil, employee, excel_match, excel_data)
       end
 
+      duplicate_employee_matches = matched
+        .group_by { |row| row[:employee_id] }
+        .filter_map do |employee_id, rows|
+          next unless rows.many?
+
+          {
+            employee_id: employee_id,
+            employee_name: rows.first[:employee_name],
+            source_names: rows.filter_map { |row| row[:pdf_employee_name] }.uniq
+          }
+        end
+
+      unmatched_excel_names = excel_lookup.fetch(:unmatched_names)
+
       {
         matched: matched,
-        unmatched_pdf_names: unmatched,
+        unmatched_pdf_names: unmatched_pdf_names,
+        unmatched_excel_names: unmatched_excel_names,
+        duplicate_employee_matches: duplicate_employee_matches,
+        low_confidence_matches: low_confidence_matches.uniq,
         pdf_count: pdf_records.length,
         excel_count: excel_records.length,
-        matched_count: matched.length
+        matched_count: matched.length,
+        can_apply: unmatched_pdf_names.empty? && unmatched_excel_names.empty? && duplicate_employee_matches.empty?
       }
     end
 
@@ -175,16 +198,34 @@ module PayrollImport
       results
     end
 
-    def build_excel_lookup(excel_records, matcher)
+    def build_excel_lookup(excel_records, matcher, employees_by_id)
       lookup = {}
+      unmatched_names = []
+      low_confidence_matches = []
+
       excel_records.each do |row|
         match = matcher.match_excel_name(row[:last_name], row[:first_name])
-        next unless match
+        source_name = [ row[:first_name], row[:last_name] ].compact.join(" ").strip
+
+        unless match
+          unmatched_names << source_name
+          next
+        end
+
+        employee = employees_by_id[match[:employee_id]]
+        if employee && low_confidence?(match)
+          low_confidence_matches << build_match_review("Tips/loans workbook", source_name, employee, match)
+        end
 
         existing = lookup[match[:employee_id]]
         lookup[match[:employee_id]] = existing ? merge_excel_rows(existing, row) : row.dup
       end
-      lookup
+
+      {
+        by_employee_id: lookup,
+        unmatched_names: unmatched_names.uniq,
+        low_confidence_matches: low_confidence_matches
+      }
     end
 
     def merge_excel_rows(existing, incoming)
@@ -222,10 +263,7 @@ module PayrollImport
         # PDF data
         regular_hours: pdf_row&.dig(:regular_hours) || 0.0,
         overtime_hours: pdf_row&.dig(:overtime_hours) || 0.0,
-        regular_pay: pdf_row&.dig(:regular_pay) || 0.0,
-        overtime_pay: pdf_row&.dig(:overtime_pay) || 0.0,
         total_hours: pdf_row&.dig(:total_hours) || 0.0,
-        total_pay: pdf_row&.dig(:total_pay) || 0.0,
         pdf_employee_name: pdf_row&.dig(:employee_name),
         # Excel data
         total_tips: excel_data&.dig(:total_tips) || 0.0,
@@ -241,6 +279,20 @@ module PayrollImport
       }
 
       row
+    end
+
+    def low_confidence?(match)
+      match[:confidence].to_f < 1.0
+    end
+
+    def build_match_review(source, source_name, employee, match)
+      {
+        source: source,
+        source_name: source_name,
+        employee_id: employee.id,
+        employee_name: employee.full_name,
+        confidence: match[:confidence]
+      }
     end
   end
 end

@@ -287,15 +287,28 @@ class ApiClient {
 
 export class ApiError extends Error {
   status: number;
-  details?: Record<string, string[]>;
+  details?: Record<string, string[] | Record<string, unknown>[] | number>;
   data?: unknown;
 
-  constructor(message: string, status: number, details?: Record<string, string[]>, data?: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    details?: Record<string, string[] | Record<string, unknown>[] | number>,
+    data?: unknown,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
     this.data = data;
+  }
+
+  get fieldErrors(): Record<string, string[]> {
+    return Object.fromEntries(
+      Object.entries(this.details || {}).filter(
+        (entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((value) => typeof value === 'string'),
+      ),
+    );
   }
 }
 
@@ -1038,13 +1051,22 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>
     api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
-  previewImport: async (id: number, pdfFile: File, excelFile?: File) => {
+  previewImport: async (
+    id: number,
+    pdfFile: File,
+    excelFile?: File,
+    tipsPaidOutFromTips = false,
+  ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);
     if (excelFile) formData.append('excel_file', excelFile);
+    formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
-  applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[]; tips_paid_out_from_tips?: boolean }) =>
+  applyImport: (
+    id: number,
+    data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean },
+  ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
 
   // CPR-71: Payroll correction workflow
@@ -1426,10 +1448,7 @@ export interface ImportPreviewRow {
   matched_name: string;
   regular_hours: number;
   overtime_hours: number;
-  regular_pay: number;
-  overtime_pay: number;
   total_hours: number;
-  total_pay: number;
   pdf_employee_name: string | null;
   total_tips: number;
   tips_boh?: number;
@@ -1448,9 +1467,24 @@ export interface ImportPreviewResponse {
   preview: {
     matched: ImportPreviewRow[];
     unmatched_pdf_names: string[];
+    unmatched_excel_names: string[];
+    duplicate_employee_matches: {
+      employee_id: number;
+      employee_name: string;
+      source_names: string[];
+    }[];
+    low_confidence_matches: {
+      source: string;
+      source_name: string;
+      employee_id: number;
+      employee_name: string;
+      confidence: number;
+    }[];
     pdf_count: number;
     excel_count: number;
     matched_count: number;
+    can_apply: boolean;
+    tips_paid_out_from_tips: boolean;
   };
 }
 

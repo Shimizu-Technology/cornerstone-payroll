@@ -228,7 +228,7 @@ export function HistoricalPayroll(): ReactElement {
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
-      setValidationErrors(err.details || {});
+      setValidationErrors(err.fieldErrors);
       setError(err.message);
       return;
     }

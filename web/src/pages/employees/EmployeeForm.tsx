@@ -812,9 +812,9 @@ export function EmployeeForm() {
         state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
     } catch (err) {
-      if (err instanceof ApiError && err.details) {
-        setErrors(err.details);
-        focusFirstInvalidField(Object.keys(err.details)[0]);
+      if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
+        setErrors(err.fieldErrors);
+        focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
       }
