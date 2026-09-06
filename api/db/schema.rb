@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_06_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -809,6 +809,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
     t.index ["locked_by_id"], name: "index_historical_import_batches_on_locked_by_id"
     t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
+  end
+
+  create_table "historical_import_source_files", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.bigint "company_id", null: false
+    t.string "content_type", null: false
+    t.datetime "created_at", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.string "original_filename", null: false
+    t.integer "position", null: false
+    t.string "report_type", null: false
+    t.string "sha256", null: false
+    t.string "storage_key", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "uploaded_by_id"
+    t.string "verification_error"
+    t.string "verification_status", default: "verified", null: false
+    t.datetime "verified_at"
+    t.index ["company_id"], name: "index_historical_import_source_files_on_company_id"
+    t.index ["historical_import_batch_id", "position"], name: "idx_historical_source_files_batch_position", unique: true
+    t.index ["historical_import_batch_id"], name: "idx_on_historical_import_batch_id_77cd828a3a"
+    t.index ["storage_key"], name: "index_historical_import_source_files_on_storage_key", unique: true
+    t.index ["uploaded_by_id"], name: "index_historical_import_source_files_on_uploaded_by_id"
+    t.check_constraint "byte_size > 0", name: "historical_source_files_positive_size"
+    t.check_constraint "verification_status::text = ANY (ARRAY['verified'::character varying::text, 'failed'::character varying::text])", name: "historical_source_files_verification_status"
   end
 
   create_table "historical_pay_periods", force: :cascade do |t|
@@ -2426,6 +2451,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_123500) do
   add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "locked_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_source_files", "companies"
+  add_foreign_key "historical_import_source_files", "historical_import_batches"
+  add_foreign_key "historical_import_source_files", "users", column: "uploaded_by_id", on_delete: :nullify
   add_foreign_key "historical_pay_periods", "companies"
   add_foreign_key "historical_pay_periods", "historical_import_batches"
   add_foreign_key "historical_paychecks", "companies"

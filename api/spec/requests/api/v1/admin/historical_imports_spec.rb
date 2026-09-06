@@ -9,9 +9,13 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(admin)
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_company_id).and_return(company.id)
+    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll"))
   end
 
-  after { cleanup_quickbooks_history_uploads }
+  after do
+    cleanup_quickbooks_history_uploads
+    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll"))
+  end
 
   it "previews, paginates, applies, and locks a reconciled QuickBooks bundle" do
     post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
@@ -24,6 +28,15 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "period_count" => 2
     )
     expect(preview_body.fetch("meta")).to eq("idempotent" => false)
+    expect(preview_body.dig("data", "source_retention_summary")).to include(
+      "expected_file_count" => 5,
+      "retained_file_count" => 5,
+      "verified_file_count" => 5,
+      "failed_file_count" => 0,
+      "ready" => true
+    )
+    expect(preview_body.dig("data", "source_files").size).to eq(5)
+    expect(preview_body.to_json).not_to include("storage_key")
     expect(PayPeriod.count).to eq(0)
     expect(PayrollItem.count).to eq(0)
 
@@ -131,7 +144,64 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(response).to have_http_status(:forbidden)
     post "/api/v1/admin/historical_imports/#{batch.id}/lock"
     expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
+    expect(response).to have_http_status(:forbidden)
+    source_file = batch.historical_import_source_files.first
+    get "/api/v1/admin/historical_imports/#{batch.id}/source_files/#{source_file.id}/download"
+    expect(response).to have_http_status(:forbidden)
     expect(batch.reload).to be_previewed
+  end
+
+  it "verifies and downloads an exact retained source file for a manager or administrator" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    source_file = batch.historical_import_source_files.in_manifest_order.first
+    expected_bytes = R2StorageService.new.download(source_file.storage_key)
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("meta", "all_verified")).to be(true)
+
+    get "/api/v1/admin/historical_imports/#{batch.id}/source_files/#{source_file.id}/download"
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq("application/vnd.ms-excel")
+    expect(response.headers.fetch("Content-Disposition")).to include(source_file.original_filename)
+    expect(response.body).to eq(expected_bytes)
+    expect(AuditLog.where(action: "historical_imports#download_source_file", record_id: source_file.id)).to exist
+  end
+
+  it "marks altered retained evidence as failed and blocks apply" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    review_historical_workers_as_archive_only(batch, actor: admin)
+    source_file = batch.historical_import_source_files.in_manifest_order.first
+    R2StorageService.new.upload(source_file.storage_key, "altered", content_type: source_file.content_type)
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("meta", "all_verified")).to be(false)
+    expect(response.parsed_body.dig("data", "source_retention_summary")).to include(
+      "failed_file_count" => 1,
+      "ready" => false
+    )
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply", params: {
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to match(/source file.*verified/i)
+    expect(batch.reload).to be_previewed
+  end
+
+  it "does not let a source-file id escape its batch or company scope" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    cleanup_quickbooks_history_uploads
+    other_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
+    other_actor = create(:user, company: other_company, organization: company.organization, role: "admin")
+    other_batch = QuickbooksHistory::ImportService.new(company: other_company, files: quickbooks_history_uploads(suffix: "other"), actor: other_actor).call.batch
+    other_source_file = other_batch.historical_import_source_files.first
+
+    get "/api/v1/admin/historical_imports/#{batch.id}/source_files/#{other_source_file.id}/download"
+
+    expect(response).to have_http_status(:not_found)
   end
 
   it "returns a clear error when a selected live employee is unavailable" do

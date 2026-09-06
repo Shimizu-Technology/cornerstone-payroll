@@ -11,6 +11,10 @@ module QuickbooksHistory
 
     def apply!(acknowledgement:)
       ensure_authorized_actor!
+      batch.reload
+      return batch if batch.applied? || batch.locked?
+      raise ArgumentError, "Only a previewed historical import can be applied" unless batch.previewed?
+      verify_source_files!(action: "applying")
 
       HistoricalImportBatch.transaction do
         Company.lock.find(batch.company_id)
@@ -20,6 +24,7 @@ module QuickbooksHistory
         raise ArgumentError, "Resolve every reconciliation error before applying" if batch.blocking_errors?
         raise ArgumentError, "Review every QuickBooks worker before applying" if batch.unresolved_worker_count.positive?
         raise ArgumentError, "Confirm the authoritative snapshot acknowledgement" unless acknowledgement.to_s == ACKNOWLEDGEMENT
+        raise ArgumentError, "Every original QuickBooks source file must be retained and verified before applying" unless batch.source_files_complete_and_verified?
 
         verify_preview_totals!
         ensure_no_applied_duplicates!
@@ -35,6 +40,10 @@ module QuickbooksHistory
 
     def lock!
       ensure_authorized_actor!
+      batch.reload
+      return batch if batch.locked?
+      raise ArgumentError, "Apply the historical import before locking it" unless batch.applied?
+      verify_source_files!(action: "locking")
 
       batch.with_lock do
         return batch if batch.locked?
@@ -42,6 +51,7 @@ module QuickbooksHistory
         raise ArgumentError, "Reconciliation must pass before the historical import can be locked" unless batch.reconciliation_summary.to_h["passed"] == true
         raise ArgumentError, "Every non-summary paycheck must reconcile before locking" if batch.historical_paychecks.where(reconciliation_status: "unmatched").exists?
         raise ArgumentError, "Review every QuickBooks worker before locking" if batch.unresolved_worker_count.positive?
+        raise ArgumentError, "Every original QuickBooks source file must be retained and verified before locking" unless batch.source_files_complete_and_verified?
 
         verify_preview_totals!
         batch.update!(status: "locked", locked_by: actor, locked_at: Time.current)
@@ -74,6 +84,15 @@ module QuickbooksHistory
         expected_value = BigDecimal(expected_totals.fetch(field.to_s, "0")).round(2)
         raise ArgumentError, "Preview #{field.to_s.humanize.downcase} no longer matches staged history" unless actual == expected_value
       end
+    end
+
+    def verify_source_files!(action:)
+      result = SourceFileVerificationService.new(batch: batch, actor: actor).call
+      return if result.all_verified
+
+      raise ArgumentError, "Every original QuickBooks source file must be retained and verified before #{action}"
+    rescue R2StorageService::ConfigurationError, R2StorageService::DownloadError
+      raise ArgumentError, "QuickBooks source files could not be verified before #{action}"
     end
 
     def ensure_no_applied_duplicates!

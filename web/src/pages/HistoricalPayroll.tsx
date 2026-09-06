@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eye,
   FileArchive,
   FileCheck2,
@@ -170,7 +171,7 @@ export function HistoricalPayroll(): ReactElement {
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'worker_review' | null>(null);
+  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -340,7 +341,7 @@ export function HistoricalPayroll(): ReactElement {
   }, [selectedBatchId]);
 
   const selectedBatch = useMemo(
-    () => batches.find((batch) => batch.id === selectedBatchId) || detail,
+    () => detail?.id === selectedBatchId ? detail : batches.find((batch) => batch.id === selectedBatchId) || null,
     [batches, detail, selectedBatchId],
   );
 
@@ -390,6 +391,51 @@ export function HistoricalPayroll(): ReactElement {
     setError(null);
     setValidationErrors({});
     setFiles(selected);
+  };
+
+  const verifySourceFiles = async (): Promise<void> => {
+    if (!selectedBatchId) return;
+    setAction('verify');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.verifySourceFiles(selectedBatchId);
+      setDetail((current) => current?.id === selectedBatchId ? { ...current, ...response.data } : current);
+      setNotice({
+        tone: response.meta.all_verified ? 'success' : 'warning',
+        message: response.meta.all_verified
+          ? 'Every retained QuickBooks source file matches its original SHA-256 fingerprint.'
+          : 'One or more retained files are missing or no longer match the original fingerprint. Applying is blocked.',
+      });
+      await loadList(batchPageRef.current, selectedBatchId);
+      await loadDetail(selectedBatchId);
+    } catch (err) {
+      handleError(err, 'QuickBooks source files could not be verified.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const downloadSourceFile = async (sourceFileId: number, filename: string): Promise<void> => {
+    if (!selectedBatchId) return;
+    setAction('source_download');
+    setError(null);
+    try {
+      const blob = await historicalImportsApi.downloadSourceFile(selectedBatchId, sourceFileId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice({ tone: 'success', message: `${filename} passed integrity verification and was downloaded.` });
+    } catch (err) {
+      handleError(err, 'That QuickBooks source file could not be downloaded.');
+    } finally {
+      setAction(null);
+    }
   };
 
   const changeBatchPage = async (nextPage: number): Promise<void> => {
@@ -504,7 +550,8 @@ export function HistoricalPayroll(): ReactElement {
 
   const reconciliationPassed = Boolean(selectedBatch?.reconciliation_summary.passed && selectedBatch.errors.length === 0);
   const workersReviewed = (selectedBatch?.worker_review_summary.needs_review || 0) === 0;
-  const readyToApply = reconciliationPassed && workersReviewed;
+  const sourcesReady = Boolean(selectedBatch?.source_retention_summary.ready);
+  const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
 
@@ -580,7 +627,7 @@ export function HistoricalPayroll(): ReactElement {
                 <p className="mt-2 text-sm leading-6 text-primary-100/80">Historical money is written to an isolated ledger. The live payroll calculator and payment workflows cannot touch it.</p>
               </div>
               <div className="space-y-2 text-xs text-primary-100/80">
-                <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Encrypted employee setup evidence</p>
+                <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Private, encrypted original exports</p>
                 <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Bundle and file SHA-256 fingerprints</p>
                 <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Apply-time total verification</p>
               </div>
@@ -590,7 +637,7 @@ export function HistoricalPayroll(): ReactElement {
 
         <section className="grid gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
           <Card>
-            <CardHeader><CardTitle>Stage a QuickBooks bundle</CardTitle><CardDescription>Select every exported report and supporting PDF/image. Files are hashed and parsed into a preview; the source files are not saved in this application.</CardDescription></CardHeader>
+            <CardHeader><CardTitle>Stage a QuickBooks bundle</CardTitle><CardDescription>Select every exported report and supporting PDF/image. Each original file is stored privately, then checked against its SHA-256 fingerprint before a preview can be applied.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
               {canMutate ? (
                 <>
@@ -626,22 +673,23 @@ export function HistoricalPayroll(): ReactElement {
 
           <Card>
             <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Import readiness</CardTitle><CardDescription>Payroll Details must agree with both Paycheck History and Payroll Summary, and every worker needs a clear disposition.</CardDescription></div>{selectedBatch && (readyToApply ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Ready</Badge> : <Badge variant="danger">Blocked</Badge>)}</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Import readiness</CardTitle><CardDescription>Source files must verify, Payroll Details must agree with Paycheck History and Payroll Summary, and every worker needs a clear disposition.</CardDescription></div>{selectedBatch && (readyToApply ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Ready</Badge> : <Badge variant="danger">Blocked</Badge>)}</div>
             </CardHeader>
             <CardContent className="space-y-5">
               {selectedBatch ? (
                 <>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Payroll rows</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.payroll_detail_rows?.toLocaleString() || 0}</p></div>
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">History matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_native_rows?.toLocaleString() || 0}</p></div>
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Summary matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_summary_rows?.toLocaleString() || 0}</p></div>
                     <div className={`rounded-xl p-4 ${workersReviewed ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Workers to review</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.worker_review_summary.needs_review.toLocaleString()}</p></div>
+                    <div className={`rounded-xl p-4 ${sourcesReady ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Source evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.source_retention_summary.verified_file_count}/{selectedBatch.source_retention_summary.expected_file_count}</p><p className="mt-1 text-xs text-neutral-500">files verified</p></div>
                   </div>
                   {selectedBatch.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4"><p className="text-sm font-semibold text-danger-800">Resolve before applying</p><ul className="mt-2 space-y-1 text-sm text-danger-700">{selectedBatch.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {selectedBatch.warnings.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4"><p className="text-sm font-semibold text-warning-800">Known source limitations</p><ul className="mt-2 space-y-1 text-sm leading-6 text-warning-700">{selectedBatch.warnings.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {canMutate && (
                     <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply makes reconciled rows visible in the archive. Lock makes the batch permanently read-only through ordinary workflows.</p>
+                      <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply is available only after the source exports, reconciliation, and worker review all pass. Lock seals the accepted archive.</p>
                       <div className="flex gap-2">
                         {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!readyToApply || action !== null}>Apply history</Button>}
                         {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={action !== null}><LockKeyhole className="mr-2 h-4 w-4" />Lock batch</Button>}
@@ -757,17 +805,40 @@ export function HistoricalPayroll(): ReactElement {
 
         {selectedBatch && (
           <Card>
-            <CardHeader><CardTitle>Source inventory</CardTitle><CardDescription>{selectedBatch.source_file_manifest.length} files fingerprinted. Private source content and employee tax details are never returned by this screen.</CardDescription></CardHeader>
+            <CardHeader>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div><CardTitle>Source inventory</CardTitle><CardDescription>{selectedBatch.source_file_manifest.length} original files retained in private storage. The screen returns fingerprints and status—not file contents or private storage keys.</CardDescription></div>
+                {canMutate && <Button size="sm" variant="outline" onClick={() => void verifySourceFiles()} disabled={action !== null}><ShieldCheck className="mr-2 h-4 w-4" />{action === 'verify' ? 'Verifying…' : 'Verify all files'}</Button>}
+              </div>
+            </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {selectedBatch.source_file_manifest.map((file) => (
-                <div key={`${file.filename}-${file.sha256}`} className="flex min-w-0 items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-                  <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-neutral-900" title={file.filename}>{file.filename}</p>
-                    <p className="mt-1 text-xs text-neutral-500">{file.report_type.replaceAll('_', ' ')} · {(file.byte_size / 1024).toFixed(0)} KB</p>
+              {selectedBatch.source_file_manifest.length === 0 && (
+                <div className="flex items-start gap-4 rounded-xl border border-dashed border-warning-300 bg-warning-50 p-4 sm:col-span-2 xl:col-span-3">
+                  <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-warning-900">No source inventory is attached</p>
+                    <p className="mt-2 text-sm leading-6 text-warning-800">Upload the same QuickBooks bundle again to retain and verify its original files before applying this preview.</p>
                   </div>
                 </div>
-              ))}
+              )}
+              {selectedBatch.source_file_manifest.map((file, index) => {
+                const retained = selectedBatch.source_files?.find((source) => source.position === (file.position ?? index));
+                const verified = retained?.verification_status === 'verified';
+                return (
+                  <div key={`${file.filename}-${file.sha256}`} className="flex min-w-0 items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+                    <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-sm font-medium text-neutral-900" title={file.filename}>{file.filename}</p>
+                        <Badge variant={verified ? 'success' : retained ? 'danger' : 'warning'}>{verified ? 'Verified' : retained ? 'Failed' : 'Missing'}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-neutral-500">{file.report_type.replaceAll('_', ' ')} · {(file.byte_size / 1024).toFixed(0)} KB</p>
+                      <p className="mt-1 truncate font-mono text-[10px] text-neutral-400" title={file.sha256}>SHA-256 {file.sha256}</p>
+                      {canMutate && retained && <Button size="sm" variant="ghost" className="mt-2" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         )}

@@ -254,6 +254,23 @@ RSpec.describe QuickbooksHistory::BundleParser do
     file&.close!
   end
 
+  it "rejects an empty export before retaining it as evidence" do
+    file = Tempfile.new([ "empty-history", ".xls" ])
+    upload = Rack::Test::UploadedFile.new(
+      file.path,
+      "application/vnd.ms-excel",
+      true,
+      original_filename: "PayrollDetails.xls"
+    )
+
+    expect { described_class.new(files: [ upload ]).call }.to raise_error(
+      ArgumentError,
+      "PayrollDetails.xls is empty"
+    )
+  ensure
+    file&.close!
+  end
+
   it "classifies supplemental QuickBooks filenames through the public bundle interface" do
     files = quickbooks_history_uploads
     files << build_quickbooks_xls("PayrollTaxPayments.xls", [ [ "Example Company" ], [ "Payroll tax payments report" ] ])

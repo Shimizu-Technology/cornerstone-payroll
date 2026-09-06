@@ -70,6 +70,8 @@ class StaffRolePolicy
     "api/v1/admin/historical_imports#preview" => :manage_client_configuration,
     "api/v1/admin/historical_imports#apply" => :manage_client_configuration,
     "api/v1/admin/historical_imports#lock" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#verify_source_files" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#download_source_file" => :manage_client_configuration,
     "api/v1/admin/historical_imports#archive_unlinked_workers" => :manage_client_configuration,
     "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration
   }.freeze

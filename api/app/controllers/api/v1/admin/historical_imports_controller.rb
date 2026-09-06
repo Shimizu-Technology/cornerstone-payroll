@@ -8,13 +8,15 @@ module Api
         MAX_PER_PAGE = 200
 
         before_action :require_historical_payroll_enabled!
-        before_action :set_batch, only: %i[show apply lock archive_unlinked_workers update_worker]
+        before_action :set_batch, only: %i[
+          show apply lock verify_source_files download_source_file archive_unlinked_workers update_worker
+        ]
 
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
           batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id))
-                    .includes(:applied_by, :locked_by)
+                    .includes(:applied_by, :locked_by, :historical_import_source_files)
                     .recent_first
           total = batches.count
           archive = archive_summary
@@ -43,7 +45,7 @@ module Api
                            .limit(per_page)
 
           render json: {
-            data: batch_json(@batch).merge(
+            data: batch_json(@batch, include_source_files: true).merge(
               periods: @batch.historical_pay_periods.reverse_chronological
                              .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
                              .map { |period| period_json(period) },
@@ -73,7 +75,7 @@ module Api
             return
           end
 
-          render json: { data: batch_json(result.batch), meta: { idempotent: result.idempotent } }
+          render json: { data: batch_json(result.batch, include_source_files: true), meta: { idempotent: result.idempotent } }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -92,6 +94,46 @@ module Api
           render json: { data: batch_json(batch) }
         rescue ArgumentError => e
           render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def verify_source_files
+          result = QuickbooksHistory::SourceFileVerificationService.new(batch: @batch, actor: current_user).call
+          render json: {
+            data: batch_json(@batch.reload, include_source_files: true),
+            meta: { all_verified: result.all_verified }
+          }
+        rescue R2StorageService::ConfigurationError => e
+          Rails.logger.error("Historical source verification configuration failed: #{e.message}")
+          render json: { error: "Historical source storage is unavailable", details: {} }, status: :service_unavailable
+        end
+
+        def download_source_file
+          source_file = @batch.historical_import_source_files.find(params[:source_file_id])
+          bytes = QuickbooksHistory::SourceFileVerificationService.new(
+            batch: @batch,
+            actor: current_user,
+            audit: false
+          ).verified_bytes!(source_file)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: @batch.company.organization_id,
+            company_id: @batch.company_id,
+            action: "historical_imports#download_source_file",
+            record_type: "historical_import_source_files",
+            record_id: source_file.id,
+            subject_name: source_file.original_filename,
+            metadata: { historical_import_batch_id: @batch.id, sha256: source_file.sha256 }
+          )
+          send_data bytes,
+                    filename: source_file.original_filename,
+                    type: source_file.content_type,
+                    disposition: "attachment"
+        rescue R2StorageService::ConfigurationError, R2StorageService::DownloadError => e
+          Rails.logger.error("Historical source download failed for batch #{@batch.id}: #{e.class}: #{e.message}")
+          render json: {
+            error: "That source file is unavailable or failed integrity verification",
+            details: {}
+          }, status: :unprocessable_entity
         end
 
         def archive_unlinked_workers
@@ -185,9 +227,14 @@ module Api
           }
         end
 
-        def batch_json(batch, mapping_counts: nil)
+        def batch_json(batch, mapping_counts: nil, include_source_files: false)
           mapping_counts ||= batch.historical_workers.group(:mapping_status).count
-          {
+          source_files = if batch.association(:historical_import_source_files).loaded?
+            batch.historical_import_source_files.target.sort_by { |file| [ file.position, file.id ] }
+          else
+            batch.historical_import_source_files.in_manifest_order.to_a
+          end
+          payload = {
             id: batch.id,
             company_id: batch.company_id,
             source_system: batch.source_system,
@@ -200,6 +247,14 @@ module Api
             reconciliation_summary: batch.reconciliation_summary,
             warnings: batch.warnings,
             errors: batch.validation_errors,
+            source_retention_summary: {
+              expected_file_count: Array(batch.source_file_manifest).size,
+              retained_file_count: source_files.size,
+              verified_file_count: source_files.count(&:verified?),
+              failed_file_count: source_files.count { |file| !file.verified? },
+              ready: batch.source_files_complete_and_verified?,
+              last_verified_at: source_files.filter_map(&:verified_at).max
+            },
             worker_review_summary: {
               total: mapping_counts.values.sum,
               needs_review: mapping_counts.fetch("needs_review", 0),
@@ -211,6 +266,23 @@ module Api
             locked_at: batch.locked_at,
             locked_by_name: batch.locked_by&.name,
             created_at: batch.created_at
+          }
+          payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
+          payload
+        end
+
+        def source_file_json(source_file)
+          {
+            id: source_file.id,
+            original_filename: source_file.original_filename,
+            content_type: source_file.content_type,
+            byte_size: source_file.byte_size,
+            sha256: source_file.sha256,
+            report_type: source_file.report_type,
+            position: source_file.position,
+            verification_status: source_file.verification_status,
+            verified_at: source_file.verified_at,
+            verification_error: source_file.verification_error
           }
         end
 
