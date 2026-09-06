@@ -191,6 +191,90 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(imported.id)
   end
 
+  it "previews and applies clean-client employee preparation without applying historical payroll" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "preview_summary")).to include(
+      "worker_count" => 3,
+      "active_employee_count" => 2,
+      "inactive_employee_count" => 1,
+      "wage_rate_count" => 3
+    )
+    expect(response.parsed_body.dig("data", "ready_to_apply")).to be(true)
+    acknowledgement = QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT
+
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+        acknowledgement: acknowledgement
+      }
+    end.to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).with(batch.historical_client_bootstrap.id, admin.id, kind_of(String))
+    expect(response).to have_http_status(:accepted), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("pending")
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(true)
+
+    bootstrap = batch.historical_client_bootstrap.reload
+    QuickbooksHistory::ClientBootstrapJob.perform_now(bootstrap.id, admin.id, bootstrap.apply_started_at.iso8601(6))
+    get "/api/v1/admin/historical_imports/#{batch.id}"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("applied")
+    expect(response.parsed_body.dig("data", "worker_review_summary")).to include(
+      "needs_review" => 0,
+      "linked" => 3
+    )
+    expect(Employee.where(company: company).count).to eq(3)
+    expect(PayPeriod.where(company: company)).to be_empty
+    expect(batch.reload).to be_previewed
+    expect(AuditLog.where(action: "historical_imports#apply_client_bootstrap", company: company)).to exist
+  end
+
+  it "rejects an incorrect clean-client preparation acknowledgement without enqueueing work" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:ok), response.body
+
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+        acknowledgement: "PREPARE EMPLOYEES"
+      }
+    end.not_to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob)
+
+    expect(response).to have_http_status(:unprocessable_entity), response.body
+    expect(batch.historical_client_bootstrap.reload).to be_previewed
+    expect(Employee.where(company: company)).to be_empty
+  end
+
+  it "accepts a durable clean-client preparation when immediate queue submission fails" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "queue unavailable")
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+      acknowledgement: QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT
+    }
+
+    expect(response).to have_http_status(:accepted), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("pending")
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(false)
+    dispatch = batch.historical_client_bootstrap.historical_client_bootstrap_dispatches.sole
+    expect(dispatch.enqueued_at).to be_nil
+    expect(dispatch.last_error).to eq("queue unavailable")
+  end
+
+  it "returns forbidden when bootstrap authorization changes during a request" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    allow(QuickbooksHistory::ClientBootstrapAuthorization).to receive(:ensure_authorized!).and_raise(
+      QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized,
+      QuickbooksHistory::ClientBootstrapAuthorization::ERROR_MESSAGE
+    )
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+
+    expect(response).to have_http_status(:forbidden), response.body
+    expect(batch.reload.historical_client_bootstrap).to be_nil
+  end
+
   it "lets accountants review history but not mutate imports" do
     accountant = create(:user, company: company, organization: company.organization, role: "accountant")
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)
@@ -214,6 +298,10 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
     expect(response).to have_http_status(:forbidden)
     post "/api/v1/admin/historical_imports/#{batch.id}/verify_cutover"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap"
     expect(response).to have_http_status(:forbidden)
     patch "/api/v1/admin/historical_imports/#{batch.id}/update_cutover_review"
     expect(response).to have_http_status(:forbidden)

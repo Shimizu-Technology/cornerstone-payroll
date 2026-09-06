@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
 
 interface MockWorker {
   id: number;
@@ -239,6 +239,45 @@ function pendingCutoverReview(): HistoricalCutoverReview {
   };
 }
 
+function clientBootstrap(
+  status: 'previewed' | 'pending' | 'applied' | 'failed' = 'previewed',
+  readyToApply: boolean = status === 'previewed',
+): HistoricalClientBootstrap {
+  return {
+    id: 90,
+    status,
+    plan_digest: 'f'.repeat(64),
+    preview_summary: {
+      worker_count: 114,
+      active_employee_count: 57,
+      inactive_employee_count: 57,
+      hourly_employee_count: 112,
+      variable_pay_employee_count: 2,
+      wage_rate_count: 244,
+      payroll_field_assignment_count: 32,
+      employees_with_recurring_setup_count: 28,
+      employees_needing_review_count: 114,
+      error_count: 0,
+    },
+    warnings: [{ message: 'A QuickBooks placeholder deduction was intentionally not activated', worker_count: 3 }],
+    errors: [],
+    review_items: [{
+      code: 'verify_hire_date',
+      message: 'QuickBooks hire dates were retained with the source evidence but were not copied into live payroll. Confirm the effective hire date.',
+      worker_count: 114,
+      historical_worker_ids: [1],
+    }],
+    ready_to_apply: readyToApply,
+    apply_started_at: status === 'pending' ? '2026-09-07T02:30:00Z' : null,
+    apply_error: status === 'failed' ? 'Employee preparation could not be completed. Review the current setup preview and try again.' : null,
+    applied_at: status === 'applied' ? '2026-09-07T03:00:00Z' : null,
+    applied_by_name: status === 'applied' ? 'History Admin' : null,
+    acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES',
+    created_at: '2026-09-07T02:00:00Z',
+    updated_at: status === 'applied' ? '2026-09-07T03:00:00Z' : '2026-09-07T02:00:00Z',
+  };
+}
+
 function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImportBatch {
   const { periods: _periods, workers: _workers, paychecks: _paychecks, ...payload } = value;
   return payload;
@@ -292,6 +331,254 @@ async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = '
     meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 200 },
   }));
 }
+
+function migratedEmployee(reviewStatus: 'needs_review' | 'complete' = 'needs_review') {
+  return {
+    id: 900,
+    company_id: 1,
+    first_name: 'Migrated',
+    middle_name: '',
+    last_name: 'Employee',
+    email: 'migrated@example.test',
+    ssn: '000-00-0001',
+    ssn_last_four: '0001',
+    date_of_birth: '1990-01-02',
+    hire_date: '2024-01-01',
+    employment_type: 'salary',
+    salary_type: 'variable',
+    pay_rate: 0,
+    pay_frequency: 'biweekly',
+    filing_status: 'single',
+    allowances: 0,
+    additional_withholding: 0,
+    w4_dependent_credit: 0,
+    w4_step2_multiple_jobs: false,
+    w4_step4a_other_income: 0,
+    w4_step4b_deductions: 0,
+    w4_form_version: 2020,
+    w4_effective_on: null,
+    retirement_rate: 0.04,
+    roth_retirement_rate: 0.03,
+    employer_retirement_match_rate: 0.0425,
+    employer_roth_match_rate: 0.035,
+    status: 'active',
+    configuration_source: 'quickbooks_history',
+    configuration_review_status: reviewStatus,
+    configuration_review_items: reviewStatus === 'needs_review' ? [
+      { code: 'verify_hire_date', message: 'Confirm the effective hire date.', fields: ['hire_date'] },
+      { code: 'legacy_w4_allowances', message: 'Confirm a current W-4.', fields: ['allowances', 'w4_form_version'] },
+    ] : [],
+    address_line1: '123 Main Street',
+    address_line2: '',
+    city: 'Hagatna',
+    state: 'GU',
+    zip: '96910',
+    wage_rates: [],
+    default_payroll_adjustments: [],
+    created_at: '2026-09-07T02:00:00Z',
+    updated_at: '2026-09-07T02:00:00Z',
+  };
+}
+
+async function browserToday(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
+}
+
+async function mockEmployeeFormDependencies(page: Page): Promise<void> {
+  await page.route('**/api/v1/admin/departments**', (route) => fulfillJson(route, { data: [] }));
+  await page.route('**/api/v1/admin/payroll_fields**', (route) => fulfillJson(route, { payroll_fields: [] }));
+  await page.route('**/api/v1/admin/employees/900/payroll_fields', (route) => fulfillJson(route, { employee_payroll_fields: [] }));
+}
+
+test('preserves decimal employer matches and explains every migrated setup review item', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  let submittedEmployee: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      submittedEmployee = (await route.request().postDataJSON()).employee;
+      await fulfillJson(route, { data: migratedEmployee() });
+      return;
+    }
+
+    await fulfillJson(route, { data: migratedEmployee() });
+  });
+
+  await page.goto('/employees/900');
+
+  await expect(page.getByText('QuickBooks setup needs review')).toBeVisible();
+  await expect(page.getByText('Confirm the effective hire date.')).toBeVisible();
+  await expect(page.getByText('Confirm a current W-4.')).toBeVisible();
+  const pretaxMatch = page.getByLabel('Employer Pre-Tax Match (%)');
+  const rothMatch = page.getByLabel('Employer Roth Match (%)');
+  await expect(pretaxMatch).toHaveValue('4.25');
+  await expect(rothMatch).toHaveValue('3.50');
+
+  await pretaxMatch.fill('4.75');
+  await pretaxMatch.blur();
+  await page.getByRole('button', { name: 'Update Employee' }).click();
+
+  await expect.poll(() => submittedEmployee?.employer_retirement_match_rate).toBe(0.0475);
+  expect(submittedEmployee?.employer_roth_match_rate).toBe(0.035);
+});
+
+test('hides QuickBooks setup review outside a migrated employee needing review', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: migratedEmployee('complete') }));
+
+  await page.goto('/employees/900');
+  await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
+  await expect(page.getByText('QuickBooks setup needs review')).toHaveCount(0);
+
+  await page.goto('/employees/new');
+  await expect(page.getByRole('heading', { name: 'Add Employee / Contractor' })).toBeVisible();
+  await expect(page.getByText('QuickBooks setup needs review')).toHaveCount(0);
+});
+
+test('blocks an out-of-range imported employer match before employee submission', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  let submitted = false;
+  await page.route('**/api/v1/admin/employees/900', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      submitted = true;
+      await fulfillJson(route, { data: migratedEmployee() });
+      return;
+    }
+
+    await fulfillJson(route, {
+      data: { ...migratedEmployee(), employer_retirement_match_rate: 1.25 },
+    });
+  });
+
+  await page.goto('/employees/900');
+  await page.getByRole('button', { name: 'Update Employee' }).click();
+
+  await expect(page.getByText('Employer pre-tax match must be between 0% and 100%')).toBeVisible();
+  expect(submitted).toBe(false);
+});
+
+test('does not validate hidden employer-match fields for a contractor', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  let submittedEmployee: Record<string, unknown> | undefined;
+  const contractor = {
+    ...migratedEmployee('complete'),
+    employment_type: 'contractor',
+    contractor_type: 'individual',
+    contractor_pay_type: 'flat_fee',
+    pay_rate: 100,
+    employer_retirement_match_rate: 1.25,
+    employer_roth_match_rate: 1.25,
+  };
+  await page.route('**/api/v1/admin/employees/900', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      submittedEmployee = (await route.request().postDataJSON()).employee;
+    }
+    await fulfillJson(route, { data: contractor });
+  });
+
+  await page.goto('/employees/900');
+  await expect(page.getByLabel('Employer Pre-Tax Match (%)')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Update Contractor' }).click();
+
+  await expect.poll(() => submittedEmployee).toBeTruthy();
+  await expect(page).toHaveURL(/\/employees\/?$/);
+  expect(submittedEmployee?.retirement_rate).toBe(0);
+  expect(submittedEmployee?.roth_retirement_rate).toBe(0);
+  expect(submittedEmployee?.employer_retirement_match_rate).toBe(0);
+  expect(submittedEmployee?.employer_roth_match_rate).toBe(0);
+});
+
+test('uses today without an invented minimum when terminating a migrated employee with no hire date', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = { ...migratedEmployee('complete'), hire_date: null };
+  let submittedTermination: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/terminate', async (route) => {
+    submittedTermination = (await route.request().postDataJSON()).termination;
+    await fulfillJson(route, { data: { ...employee, status: 'terminated' } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Terminate Employee' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Terminate Migrated' });
+  const dateInputs = dialog.locator('input[type="date"]');
+  await expect(dateInputs.nth(0)).toHaveValue(today);
+  await expect(dateInputs.nth(0)).not.toHaveAttribute('min');
+  await expect(dateInputs.nth(1)).not.toHaveAttribute('min');
+  await dialog.getByRole('button', { name: 'Terminate employee' }).click();
+
+  await expect.poll(() => submittedTermination).toEqual({ effective_date: today });
+});
+
+test('uses today without an invented minimum when reactivating a migrated employee with no known dates', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    status: 'terminated',
+    termination_date: null,
+  };
+  let submittedReactivation: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/reactivate', async (route) => {
+    submittedReactivation = (await route.request().postDataJSON()).reactivation;
+    await fulfillJson(route, { data: { ...employee, status: 'active' } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Reactivate' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Reactivate Migrated' });
+  const effectiveDate = dialog.locator('input[type="date"]');
+  await expect(effectiveDate).toHaveValue(today);
+  await expect(effectiveDate).not.toHaveAttribute('min');
+  await dialog.getByRole('button', { name: 'Reactivate employee' }).click();
+
+  await expect.poll(() => submittedReactivation).toEqual({ effective_date: today });
+});
+
+test('initializes a migrated salary work profile today without inventing a hire-date minimum', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    current_work_profile: null,
+  };
+  let submittedProfile: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/work_profiles', async (route) => {
+    submittedProfile = (await route.request().postDataJSON()).work_profile;
+    await fulfillJson(route, { data: { id: 77, ...submittedProfile } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Set up profile' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Confirm a new salary work profile' });
+  const effectiveDate = dialog.locator('input[type="date"]').first();
+  await expect(effectiveDate).toHaveValue(today);
+  await expect(effectiveDate).not.toHaveAttribute('min');
+  await dialog.locator('select').filter({ has: page.locator('option[value="nonexempt"]') }).selectOption('nonexempt');
+  await dialog.getByPlaceholder('Example: Employment agreement confirms the weekly salary covers 45 straight-time hours.').fill('Confirmed by the employer for migration.');
+  await dialog.getByRole('button', { name: 'Confirm new profile' }).click();
+
+  await expect.poll(() => submittedProfile?.effective_on).toBe(today);
+  expect(submittedProfile?.pay_basis).toBe('salary');
+  expect(submittedProfile?.overtime_status).toBe('nonexempt');
+});
 
 test('keeps every historical batch reachable with simple pagination', async ({ page }) => {
   await mockApplicationShell(page);
@@ -448,6 +735,87 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
 });
 
+test('never lets a completed employee-preparation poll restore a batch the user left', async ({ page }) => {
+  await mockApplicationShell(page);
+  const pending: HistoricalImportDetail = {
+    ...detail(1),
+    client_bootstrap: clientBootstrap('pending'),
+  };
+  let detailRequests = 0;
+  let reloadStarted = false;
+  let releaseReload: (() => void) | undefined;
+  const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    detailRequests += 1;
+    await fulfillJson(route, {
+      data: detailRequests === 1 ? pending : { ...pending, client_bootstrap: clientBootstrap('applied') },
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_imports/2?**', (route) => fulfillJson(route, {
+    data: detail(2),
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
+    if (detailRequests >= 2) {
+      reloadStarted = true;
+      await reloadGate;
+    }
+    await fulfillJson(route, {
+      data: [withoutDetailCollections(pending), batch(2)],
+      meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  const batchSelector = page.locator('#historical-batch');
+  await expect(batchSelector).toHaveValue('1');
+  await expect.poll(() => reloadStarted).toBe(true);
+
+  await batchSelector.selectOption('2');
+  await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
+  releaseReload?.();
+
+  await expect(batchSelector).toHaveValue('2');
+  await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
+});
+
+test('makes failed preparation retryable while pending recovery stays safely in progress', async ({ page }) => {
+  await mockApplicationShell(page);
+  const failed: HistoricalImportDetail = {
+    ...detail(1),
+    client_bootstrap: clientBootstrap('failed', true),
+  };
+  const recovering: HistoricalImportDetail = {
+    ...detail(2),
+    client_bootstrap: clientBootstrap('pending'),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(failed), withoutDetailCollections(recovering)],
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/*?**', (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    return fulfillJson(route, {
+      data: id === 1 ? failed : recovering,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('Preparation failed')).toBeVisible();
+  await expect(page.getByText('Employee preparation could not be completed. Review the current setup preview and try again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh preview' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+
+  await page.locator('#historical-batch').selectOption('2');
+  await expect(page.getByText('Preparing employees')).toBeVisible();
+  await expect(page.getByText('Creating employee records…')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+});
+
 test('keeps checking verification status after a temporary refresh failure', async ({ page }) => {
   await mockApplicationShell(page);
   const pendingBatch: HistoricalImportDetail = {
@@ -578,6 +946,103 @@ test('makes retained source verification and exact download clear to an administ
   await page.getByRole('button', { name: 'Download original' }).click();
   await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
+});
+
+test('previews and creates a clean current-payroll roster without running payroll', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  let current: HistoricalImportDetail = detailWithVerifiedSource(1);
+  let rosterApplied = false;
+  let employeeListRequests = 0;
+  let bootstrapPolls = 0;
+
+  await page.unroute('**/api/v1/companies');
+  await page.unroute('**/api/v1/admin/employees**');
+  await page.route('**/api/v1/companies', (route) => fulfillJson(route, {
+    companies: [
+      {
+        id: 1,
+        name: 'Historical Payroll Company',
+        active: true,
+        active_employees: rosterApplied ? 57 : 0,
+        total_employees: rosterApplied ? 114 : 0,
+        pay_frequency: 'biweekly',
+        historical_payroll_enabled: true,
+      },
+      {
+        id: 2,
+        name: 'Another Client',
+        active: true,
+        active_employees: 1,
+        total_employees: 1,
+        pay_frequency: 'biweekly',
+        historical_payroll_enabled: false,
+      },
+    ],
+    can_manage_clients: true,
+    can_view_client_management: true,
+    can_switch_company: true,
+    current_company_id: 1,
+  }));
+  await page.route('**/api/v1/admin/employees**', async (route) => {
+    employeeListRequests += 1;
+    await fulfillJson(route, {
+      data: rosterApplied
+        ? [{ id: 900, first_name: 'Imported', last_name: 'Employee', status: 'active' }]
+        : [],
+      meta: { current_page: 1, total_pages: rosterApplied ? 1 : 0, total_count: rosterApplied ? 1 : 0, per_page: 200 },
+    });
+  });
+
+  await page.route('**/api/v1/admin/historical_imports/1/preview_client_bootstrap', async (route) => {
+    current = { ...current, client_bootstrap: clientBootstrap() };
+    await fulfillJson(route, { data: current.client_bootstrap });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1/apply_client_bootstrap', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
+    current = { ...current, client_bootstrap: clientBootstrap('pending') };
+    await fulfillJson(route, { data: withoutDetailCollections(current), meta: { enqueued: true } }, 202);
+  });
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    if (current.client_bootstrap?.status === 'pending') {
+      bootstrapPolls += 1;
+      rosterApplied = true;
+      current = { ...current, client_bootstrap: clientBootstrap('applied') };
+    }
+    await fulfillJson(route, {
+      data: current,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByRole('heading', { name: 'Prepare this clean client for its next payroll' })).toBeVisible();
+  await expect(page.getByText('It makes no changes.')).toBeVisible();
+  await expect(page.getByText(/suppresses the incorrect Nevada addresses/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Preview current setup' }).click();
+  await expect(page.getByText('Current employee and recurring-payroll setup is ready for review. No live records were created.')).toBeVisible();
+  await expect(page.getByText('114', { exact: true })).toHaveCount(3);
+  await expect(page.getByText(/placeholder deduction was intentionally not activated/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create employee records' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Create employee records' }).click();
+  const confirm = page.getByRole('button', { name: 'Create employees' });
+  await expect(confirm).toBeDisabled();
+  await page.getByLabel('Type the confirmation exactly').fill('PREPARE CLEAN CLIENT EMPLOYEES');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  await expect(page.getByText('Employee preparation started. This page will update automatically when every record is ready.')).toBeVisible();
+  await expect(page.getByText('Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.')).toBeVisible();
+  await expect(page.getByText('Employees prepared')).toBeVisible();
+  await expect(page.getByText(/Prepared .* by History Admin/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Historical Payroll Company 57 employees/ })).toBeVisible();
+  expect(bootstrapPolls).toBeGreaterThanOrEqual(1);
+  expect(employeeListRequests).toBeGreaterThanOrEqual(2);
 });
 
 test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {

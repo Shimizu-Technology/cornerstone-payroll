@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -634,6 +634,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
     t.string "business_name"
     t.string "city"
     t.bigint "company_id", null: false
+    t.jsonb "configuration_review_items", default: [], null: false
+    t.string "configuration_review_status", default: "complete", null: false
+    t.string "configuration_source"
     t.string "contractor_ein"
     t.string "contractor_pay_type", default: "flat_fee"
     t.string "contractor_type", default: "individual"
@@ -678,6 +681,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
     t.index ["employment_type"], name: "index_employees_on_employment_type"
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
+    t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying, 'needs_review'::character varying]::text[])", name: "employees_configuration_review_status_check"
+    t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
+    t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
   end
 
@@ -780,6 +786,46 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
     t.check_constraint "source_kind::text = ANY (ARRAY['standalone'::character varying, 'pay_period'::character varying]::text[])", name: "general_transmittals_source_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
+  end
+
+  create_table "historical_client_bootstraps", force: :cascade do |t|
+    t.text "apply_error"
+    t.datetime "apply_started_at"
+    t.datetime "applied_at"
+    t.bigint "applied_by_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.bigint "historical_import_batch_id", null: false
+    t.string "plan_digest", null: false
+    t.jsonb "preview_summary", default: {}, null: false
+    t.jsonb "review_items", default: [], null: false
+    t.string "status", default: "previewed", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: [], null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["applied_by_id"], name: "index_historical_client_bootstraps_on_applied_by_id"
+    t.index ["company_id", "status"], name: "index_historical_client_bootstraps_on_company_id_and_status"
+    t.index ["created_by_id"], name: "index_historical_client_bootstraps_on_created_by_id"
+    t.index ["historical_import_batch_id"], name: "idx_on_historical_import_batch_id_e2c1f62422", unique: true
+    t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text", name: "historical_client_bootstraps_summary_object"
+    t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text AND jsonb_typeof(review_items) = 'array'::text", name: "historical_client_bootstraps_arrays"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'pending'::character varying, 'applied'::character varying, 'failed'::character varying]::text[])", name: "historical_client_bootstraps_status_check"
+  end
+
+  create_table "historical_client_bootstrap_dispatches", force: :cascade do |t|
+    t.string "attempt_token", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.integer "dispatch_attempts", default: 0, null: false
+    t.datetime "enqueued_at"
+    t.bigint "historical_client_bootstrap_id", null: false
+    t.text "last_error"
+    t.bigint "requested_by_id"
+    t.datetime "updated_at", null: false
+    t.index ["completed_at", "enqueued_at"], name: "idx_historical_bootstrap_dispatch_due"
+    t.index ["historical_client_bootstrap_id", "attempt_token"], name: "idx_historical_bootstrap_dispatch_attempt", unique: true
+    t.index ["requested_by_id"], name: "index_historical_client_bootstrap_dispatches_on_requested_by_id"
   end
 
   create_table "historical_import_batches", force: :cascade do |t|
@@ -2473,6 +2519,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
   add_foreign_key "general_transmittals", "pay_periods"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
+  add_foreign_key "historical_client_bootstraps", "companies"
+  add_foreign_key "historical_client_bootstraps", "historical_import_batches"
+  add_foreign_key "historical_client_bootstraps", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_client_bootstraps_batch_tenant"
+  add_foreign_key "historical_client_bootstraps", "users", column: "applied_by_id", on_delete: :nullify
+  add_foreign_key "historical_client_bootstraps", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "historical_client_bootstrap_dispatches", "historical_client_bootstraps"
+  add_foreign_key "historical_client_bootstrap_dispatches", "users", column: "requested_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "companies"
   add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify

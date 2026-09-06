@@ -1,6 +1,142 @@
 require "rails_helper"
 
 RSpec.describe Employee, type: :model do
+  describe "QuickBooks configuration review" do
+    it "allows only explicitly reviewed filing fields to remain blank after a protected import" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        address_line1: nil,
+        city: nil,
+        state: nil,
+        zip: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "employee_address_missing",
+            "message" => "Confirm employee address",
+            "fields" => %w[address_line1 city state zip]
+          }
+        ]
+      )
+
+      expect(employee).to be_valid
+    end
+
+    it "does not weaken ordinary employee filing-data validation" do
+      employee = build(:employee, hire_date: nil, address_line1: nil)
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+      expect(employee.errors[:address_line1]).to include("can't be blank")
+    end
+
+    it "clears source-field review items when the missing values are supplied" do
+      employee = create(
+        :employee,
+        hire_date: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "legacy_w4_allowances",
+            "message" => "Confirm current W-4",
+            "fields" => %w[allowances w4_form_version]
+          }
+        ]
+      )
+
+      employee.update!(hire_date: Date.new(2024, 1, 15))
+
+      expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "legacy_w4_allowances" ])
+      expect(employee.configuration_review_status).to eq("needs_review")
+    end
+
+    it "marks setup complete when the only source-field review item is resolved" do
+      employee = create(
+        :employee,
+        hire_date: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          }
+        ]
+      )
+
+      employee.update!(hire_date: Date.new(2024, 1, 15))
+
+      expect(employee.reload.configuration_review_items).to be_empty
+      expect(employee.configuration_review_status).to eq("complete")
+    end
+
+    it "keeps malformed review items and invalid field names on the validation path without executing them" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          17,
+          {
+            "code" => "invalid_source_field",
+            "message" => "Invalid source field",
+            "fields" => [ "destroy!" ]
+          }
+        ]
+      )
+
+      expect { employee.valid? }.not_to raise_error
+      expect(employee.configuration_review_items).to contain_exactly(
+        17,
+        hash_including("code" => "invalid_source_field", "fields" => [ "destroy!" ])
+      )
+      expect(employee.errors[:configuration_review_items]).to include("contains an invalid review item")
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+    end
+
+    it "does not let an unknown or empty-field review item waive required filing data" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        address_line1: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "unknown_review",
+            "message" => "Unknown review",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "employee_address_missing",
+            "message" => "Address review with no fields",
+            "fields" => []
+          }
+        ]
+      )
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+      expect(employee.errors[:address_line1]).to include("can't be blank")
+      expect(employee.configuration_review_items.pluck("code")).to contain_exactly("unknown_review", "employee_address_missing")
+    end
+  end
+
   describe "#active_wage_rates" do
     let!(:company) { create(:company) }
     let!(:department) { create(:department, company: company) }

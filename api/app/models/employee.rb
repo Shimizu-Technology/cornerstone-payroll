@@ -5,6 +5,8 @@ class Employee < ApplicationRecord
   attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
 
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
+  CONFIGURATION_REVIEW_STATUSES = %w[complete needs_review].freeze
+  CONFIGURATION_SOURCES = %w[quickbooks_history].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
@@ -96,6 +98,7 @@ class Employee < ApplicationRecord
   before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
   before_validation :normalize_default_payroll_adjustments
+  before_validation :clear_resolved_import_review_items
 
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
@@ -110,6 +113,9 @@ class Employee < ApplicationRecord
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }
+  validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
+  validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
+  validate :configuration_review_items_are_valid
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
   validates :contractor_pay_type, inclusion: { in: CONTRACTOR_PAY_TYPES }, if: :contractor?
@@ -414,6 +420,40 @@ class Employee < ApplicationRecord
 
   private
 
+  AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES = %w[
+    verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
+  ].freeze
+
+  def clear_resolved_import_review_items
+    return unless configuration_source == "quickbooks_history" && configuration_review_items.is_a?(Array)
+
+    self.configuration_review_items = configuration_review_items.reject do |item|
+      next false unless item.is_a?(Hash)
+      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
+
+      fields = Array(item["fields"])
+      next false if fields.empty?
+
+      fields.all? do |field|
+        field = field.to_s
+        self.class.column_names.include?(field) && read_attribute(field).present?
+      end
+    end
+    self.configuration_review_status = configuration_review_items.empty? ? "complete" : "needs_review"
+  end
+
+  def configuration_review_items_are_valid
+    unless configuration_review_items.is_a?(Array)
+      errors.add(:configuration_review_items, "must be a list")
+      return
+    end
+
+    invalid = configuration_review_items.reject do |item|
+      item.is_a?(Hash) && item["code"].present? && item["message"].present? && item["fields"].is_a?(Array)
+    end
+    errors.add(:configuration_review_items, "contains an invalid review item") if invalid.any?
+  end
+
   def tax_classification_cannot_change_in_place
     return unless will_save_change_to_employment_type?
     return if ActiveModel::Type::Boolean.new.cast(allow_tax_classification_change)
@@ -446,7 +486,7 @@ class Employee < ApplicationRecord
       state: state,
       zip: zip
     }.each do |field, value|
-      errors.add(field, "can't be blank") if value.blank?
+      errors.add(field, "can't be blank") if value.blank? && !configuration_review_allows_blank?(field)
     end
 
     if business_contractor?
@@ -462,6 +502,17 @@ class Employee < ApplicationRecord
     return true if new_record?
 
     (changes_to_save.keys - %w[status termination_date updated_at]).any?
+  end
+
+  def configuration_review_allows_blank?(field)
+    return false unless configuration_source == "quickbooks_history" && configuration_review_status == "needs_review"
+
+    Array(configuration_review_items).any? do |item|
+      next false unless item.is_a?(Hash)
+      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
+
+      Array(item["fields"]).include?(field.to_s)
+    end
   end
 
   def portal_pending_employee_is_inactive
