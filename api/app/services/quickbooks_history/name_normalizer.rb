@@ -5,6 +5,7 @@ module QuickbooksHistory
     class << self
       def call(value)
         value.to_s
+             .scrub("")
              .unicode_normalize(:nfkd)
              .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
              .downcase

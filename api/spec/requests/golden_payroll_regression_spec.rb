@@ -344,8 +344,8 @@ RSpec.describe "Golden payroll regression", type: :request do
     ytd_report = response.parsed_body.fetch("report")
 
     # Report generation timestamps describe each request, not payroll state.
-    register.fetch("meta").delete("generated_at")
-    ytd_report.fetch("meta").delete("generated_at")
+    register["meta"]&.delete("generated_at")
+    ytd_report["meta"]&.delete("generated_at")
 
     {
       pay_period: pay_period.reload.attributes,

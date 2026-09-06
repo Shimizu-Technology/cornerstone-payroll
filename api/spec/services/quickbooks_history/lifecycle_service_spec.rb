@@ -40,6 +40,13 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     end.to raise_error(ArgumentError, /attributed manager or administrator/)
   end
 
+  it "refuses to lock a preview before it is applied" do
+    expect do
+      described_class.new(batch: batch, actor: actor).lock!
+    end.to raise_error(ArgumentError, /Apply the historical import before locking/)
+    expect(batch.reload).to be_previewed
+  end
+
   it "refuses apply if staged totals no longer equal the preview" do
     review_historical_workers_as_archive_only(batch, actor: actor)
     batch.historical_paychecks.first.update_column(:net_pay, 1)

@@ -9,16 +9,18 @@ RSpec.describe "quickbooks_history:import" do
   let!(:accountant) { create(:user, company: company, organization: company.organization, role: "accountant") }
   let(:task) { Rake::Task["quickbooks_history:import"] }
   let(:bundle_dir) { Dir.mktmpdir("quickbooks-history-rake") }
+  let(:managed_env_keys) { %w[BUNDLE_DIR COMPANY_ID ACTOR_EMAIL APPLY LOCK] }
 
   before do
     Rails.application.load_tasks unless Rake::Task.task_defined?("quickbooks_history:import")
     task.reenable
+    @previous_env = managed_env_keys.index_with { |key| ENV[key] }
     ENV["BUNDLE_DIR"] = bundle_dir
     ENV["COMPANY_ID"] = company.id.to_s
   end
 
   after do
-    %w[BUNDLE_DIR COMPANY_ID ACTOR_EMAIL APPLY LOCK].each { |key| ENV.delete(key) }
+    @previous_env.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
     FileUtils.remove_entry(bundle_dir) if File.exist?(bundle_dir)
   end
 

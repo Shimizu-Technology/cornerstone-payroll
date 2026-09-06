@@ -7,8 +7,8 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 200
 
-        before_action :set_batch, only: %i[show apply lock archive_unlinked_workers update_worker]
         before_action :require_historical_payroll_enabled!
+        before_action :set_batch, only: %i[show apply lock archive_unlinked_workers update_worker]
 
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
@@ -18,8 +18,10 @@ module Api
                     .recent_first
           total = batches.count
           archive = archive_summary
+          page_batches = batches.offset((page - 1) * per_page).limit(per_page).to_a
+          mapping_counts = worker_mapping_counts(page_batches)
           render json: {
-            data: batches.offset((page - 1) * per_page).limit(per_page).map { |batch| batch_json(batch) },
+            data: page_batches.map { |batch| batch_json(batch, mapping_counts: mapping_counts.fetch(batch.id, {})) },
             meta: {
               current_page: page,
               per_page: per_page,
@@ -42,8 +44,12 @@ module Api
 
           render json: {
             data: batch_json(@batch).merge(
-              periods: @batch.historical_pay_periods.reverse_chronological.map { |period| period_json(period) },
-              workers: @batch.historical_workers.order(:normalized_name).map { |worker| worker_json(worker) },
+              periods: @batch.historical_pay_periods.reverse_chronological
+                             .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
+                             .map { |period| period_json(period) },
+              workers: @batch.historical_workers.order(:normalized_name)
+                             .limit(QuickbooksHistory::BundleParser::MAX_WORKER_COUNT)
+                             .map { |worker| worker_json(worker) },
               paychecks: paychecks.map { |paycheck| paycheck_json(paycheck) }
             ),
             meta: {
@@ -104,7 +110,10 @@ module Api
         def update_worker
           worker = @batch.historical_workers.find(params[:worker_id])
           archive_only = ActiveModel::Type::Boolean.new.cast(params[:archive_only])
-          employee = Employee.find_by(id: params[:employee_id], company_id: current_company_id) if params[:employee_id].present?
+          if params[:employee_id].present?
+            employee = Employee.find_by(id: params[:employee_id], company_id: current_company_id)
+            raise ArgumentError, "The selected live employee could not be found for this client" unless employee
+          end
           QuickbooksHistory::MappingService.new(
             worker: worker,
             employee: employee,
@@ -176,8 +185,8 @@ module Api
           }
         end
 
-        def batch_json(batch)
-          mapping_counts = batch.historical_workers.group(:mapping_status).count
+        def batch_json(batch, mapping_counts: nil)
+          mapping_counts ||= batch.historical_workers.group(:mapping_status).count
           {
             id: batch.id,
             company_id: batch.company_id,
@@ -203,6 +212,15 @@ module Api
             locked_by_name: batch.locked_by&.name,
             created_at: batch.created_at
           }
+        end
+
+        def worker_mapping_counts(batches)
+          counts = HistoricalWorker.where(historical_import_batch_id: batches.map(&:id))
+                                   .group(:historical_import_batch_id, :mapping_status)
+                                   .count
+          counts.each_with_object(Hash.new { |hash, key| hash[key] = {} }) do |((batch_id, status), count), grouped|
+            grouped[batch_id][status] = count
+          end
         end
 
         def period_json(period)

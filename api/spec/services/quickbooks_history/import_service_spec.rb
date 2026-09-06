@@ -25,7 +25,9 @@ RSpec.describe QuickbooksHistory::ImportService do
       federal_income_tax: 100.to_d
     )
     worker = batch.historical_workers.find_by(source_name: "Worker, Alice")
-    encrypted_value = HistoricalWorker.connection.select_value("SELECT private_snapshot FROM historical_workers WHERE id = #{worker.id.to_i}")
+    encrypted_value = HistoricalWorker.connection.select_value(
+      HistoricalWorker.sanitize_sql_array([ "SELECT private_snapshot FROM historical_workers WHERE id = ?", worker.id ])
+    )
     expect(encrypted_value).not_to include("000-00-0001")
     expect(worker.private_snapshot_data.dig("Tax info")).to include("000-00-0001")
     expect(batch.historical_workers.find_by!(source_name: "Worker, Charlie")).to have_attributes(
@@ -89,16 +91,15 @@ RSpec.describe QuickbooksHistory::ImportService do
 
   it "requires review when more than one live employee has the same name and SSN" do
     department = create(:department, company: company)
-    2.times do
-      create(
-        :employee,
-        company: company,
-        department: department,
-        first_name: "Alice",
-        last_name: "Worker",
-        ssn_encrypted: "000-00-0001"
-      )
-    end
+    create_list(
+      :employee,
+      2,
+      company: company,
+      department: department,
+      first_name: "Alice",
+      last_name: "Worker",
+      ssn_encrypted: "000-00-0001"
+    )
 
     batch = described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call.batch
 

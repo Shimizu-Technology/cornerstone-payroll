@@ -3,6 +3,16 @@
 require "rails_helper"
 require "timeout"
 
+module QuickbooksHistoryLifecycleConcurrencyHook
+  def ensure_no_applied_duplicates!
+    super
+    Thread.current[:quickbooks_history_after_duplicate_check]&.call
+  end
+end
+
+QuickbooksHistory::LifecycleService.prepend(QuickbooksHistoryLifecycleConcurrencyHook) unless
+  QuickbooksHistory::LifecycleService < QuickbooksHistoryLifecycleConcurrencyHook
+
 RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
   self.use_transactional_tests = false
 
@@ -35,24 +45,13 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
   it "serializes competing applies before checking for overlapping paycheck snapshots" do
     first_checked = Queue.new
     release_first = Queue.new
-    checked_once = false
-    mutex = Mutex.new
     results = Queue.new
-
-    allow_any_instance_of(described_class).to receive(:ensure_no_applied_duplicates!).and_wrap_original do |original|
-      original.call
-      pause = mutex.synchronize do
-        next false if checked_once
-
-        checked_once = true
-      end
-      if pause
-        first_checked << true
-        release_first.pop
-      end
+    pause_after_duplicate_check = lambda do
+      first_checked << true
+      release_first.pop
     end
 
-    first = apply_thread(first_batch.id, results)
+    first = apply_thread(first_batch.id, results, after_duplicate_check: pause_after_duplicate_check)
     first_checked.pop
     second = apply_thread(second_batch.id, results)
     expect { Timeout.timeout(0.2) { results.pop } }.to raise_error(Timeout::Error)
@@ -91,8 +90,9 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
 
   private
 
-  def apply_thread(batch_id, results)
+  def apply_thread(batch_id, results, after_duplicate_check: nil)
     Thread.new do
+      Thread.current[:quickbooks_history_after_duplicate_check] = after_duplicate_check
       ActiveRecord::Base.connection_pool.with_connection do
         batch = HistoricalImportBatch.find(batch_id)
         thread_actor = User.find(actor.id)
@@ -102,6 +102,8 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
         results << [ :ok, batch_id ]
       rescue StandardError => e
         results << [ :error, e ]
+      ensure
+        Thread.current[:quickbooks_history_after_duplicate_check] = nil
       end
     end
   end

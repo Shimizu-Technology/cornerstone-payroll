@@ -62,7 +62,7 @@ The native Payroll Details and Paycheck History exports reconcile exactly at 2,8
 
 The totals above include two QuickBooks void/reversal rows. Employee taxes and deductions use a payroll-facing sign convention: normal withholding is positive and reversal withholding is negative. Employer taxes, employer contributions, gross, net, and total payroll cost retain their QuickBooks report direction. This makes the stored aggregates agree with the signed source report instead of inflating totals by taking absolute values.
 
-QuickBooks Paycheck History omits a check number on 2,578 paychecks. The archive preserves the 255 numbers that exist and reports the missing values as source-data warnings, not import failures.
+QuickBooks Paycheck History omits a check number on 2,578 of the 2,833 native paychecks; the 48 opening-balance rows also carry no check number. The archive preserves the 255 numbers that exist and reports the missing values as source-data warnings, not import failures.
 
 ## Source-retention boundary
 

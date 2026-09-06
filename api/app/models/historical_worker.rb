@@ -43,6 +43,8 @@ class HistoricalWorker < ApplicationRecord
   end
 
   def prevent_locked_batch_update
+    # Bulk updates bypass callbacks; callers must lock the batch row and verify
+    # it is still previewed before changing historical worker mappings.
     current_batch = HistoricalImportBatch.lock.find(historical_import_batch_id)
     return unless current_batch.locked?
 

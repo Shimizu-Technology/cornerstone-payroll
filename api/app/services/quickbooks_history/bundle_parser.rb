@@ -11,6 +11,9 @@ module QuickbooksHistory
     MAX_FILE_COUNT = 75
     MAX_FILE_BYTES = 30.megabytes
     MAX_BUNDLE_BYTES = 150.megabytes
+    MAX_WORKER_COUNT = 2_000
+    MAX_PERIOD_COUNT = 2_000
+    MAX_PAYCHECK_COUNT = 250_000
     ALLOWED_EXTENSIONS = %w[.xls .xlsx .pdf .jpg .jpeg .png].freeze
 
     Result = Struct.new(
@@ -48,7 +51,9 @@ module QuickbooksHistory
       required_entries = report_entries.select { |entry| REQUIRED_REPORTS.include?(entry.fetch(:report_type)) }
       errors << "Every required QuickBooks report must identify its company" if required_entries.any? { |entry| entry[:company_name].blank? }
       errors << "Required QuickBooks reports name more than one company" if multiple_source_companies?(report_entries)
-      inventory.select { |entry| entry[:report_type] == "unreadable_spreadsheet" }.each do |entry|
+      inventory.select do |entry|
+        entry[:report_type] == "unreadable_spreadsheet" && REQUIRED_REPORTS.include?(entry[:expected_report_type])
+      end.each do |entry|
         errors << "#{entry.fetch(:filename)} could not be read as a spreadsheet"
       end
 
@@ -66,6 +71,7 @@ module QuickbooksHistory
         reports.fetch("employee_details").fetch(:rows)
       )
       periods = build_periods(detail.fetch(:paychecks))
+      validate_record_counts!(workers, periods, detail.fetch(:paychecks))
       reconciliation = build_reconciliation(detail.fetch(:paychecks), history, payroll_summary)
       warnings = build_warnings(detail.fetch(:paychecks), history, inventory)
       company_name = inventory.find { |entry| entry[:report_type] == "payroll_details" }.fetch(:company_name)
@@ -114,7 +120,11 @@ module QuickbooksHistory
       else
         file.to_s
       end
-      size = file.respond_to?(:size) ? file.size : File.size(path)
+      size = if file.respond_to?(:tempfile) || file.is_a?(File)
+        file.size
+      else
+        File.size(path)
+      end
       # Keep the upload object alive while parsing. Rack may unlink its tempfile
       # when the uploaded-file wrapper is garbage collected.
       SourceFile.new(original_filename: filename, path: path, size: size, source: file)
@@ -148,7 +158,13 @@ module QuickbooksHistory
       rescue StandardError
         nil
       end
-      return entry.merge(report_type: "unreadable_spreadsheet", parse_error: "Spreadsheet could not be read") unless rows
+      unless rows
+        return entry.merge(
+          report_type: "unreadable_spreadsheet",
+          expected_report_type: classify_report("", file.original_filename),
+          parse_error: "Spreadsheet could not be read"
+        )
+      end
 
       title = rows.first(6).flatten.compact.map(&:to_s).find { |value| value.downcase.include?("report") }.to_s
       report_type = classify_report(title, file.original_filename)
@@ -207,6 +223,7 @@ module QuickbooksHistory
         row_number = zero_index + 1
         pay_date = required_date(cell(row, headers, "Pay date"), "Payroll Details row #{row_number} Pay date")
         period_start, period_end = required_period(cell(row, headers, "Time period"), "Payroll Details row #{row_number} Time period")
+        validate_date_order!(period_start, period_end, pay_date, "Payroll Details row #{row_number}")
 
         gross = money_cell(row, headers, "Gross pay - total", "Payroll Details", row_number)
         net = money_cell(row, headers, "Net pay", "Payroll Details", row_number)
@@ -512,8 +529,10 @@ module QuickbooksHistory
         warnings << "#{opening_count} employee opening-balance rows summarize #{opening_start.strftime('%m/%d/%Y')} through #{opening_end.strftime('%m/%d/%Y')}. They preserve QuickBooks totals but are not original paycheck-level periods."
       end
       warnings << "#{missing_check_numbers} QuickBooks paychecks have no accounting check number in Paycheck History." if missing_check_numbers.positive?
-      unreadable = inventory.count { |entry| entry[:report_type] == "unreadable_spreadsheet" }
-      warnings << "#{unreadable} supplemental spreadsheet(s) could not be inventoried." if unreadable.positive?
+      unreadable = inventory.select { |entry| entry[:report_type] == "unreadable_spreadsheet" }
+      if unreadable.any?
+        warnings << "Supplemental spreadsheet(s) could not be parsed: #{unreadable.map { |entry| entry.fetch(:filename) }.join(', ')}. They remain fingerprinted as source evidence."
+      end
       warnings
     end
 
@@ -566,6 +585,17 @@ module QuickbooksHistory
 
     def opening_summary?(start_date, end_date)
       (end_date - start_date).to_i > 45
+    end
+
+    def validate_date_order!(period_start, period_end, pay_date, context)
+      raise ArgumentError, "#{context} period end must be on or after period start" if period_end < period_start
+      raise ArgumentError, "#{context} pay date must be on or after period end" if pay_date < period_end
+    end
+
+    def validate_record_counts!(workers, periods, paychecks)
+      raise ArgumentError, "QuickBooks bundle exceeds #{MAX_WORKER_COUNT.to_fs(:delimited)} workers" if workers.size > MAX_WORKER_COUNT
+      raise ArgumentError, "QuickBooks bundle exceeds #{MAX_PERIOD_COUNT.to_fs(:delimited)} pay periods" if periods.size > MAX_PERIOD_COUNT
+      raise ArgumentError, "QuickBooks bundle exceeds #{MAX_PAYCHECK_COUNT.to_fs(:delimited)} paychecks" if paychecks.size > MAX_PAYCHECK_COUNT
     end
 
     def breakdown(row, headers, prefix, exclude:, report:, row_number:, negate: false, scale: 2)

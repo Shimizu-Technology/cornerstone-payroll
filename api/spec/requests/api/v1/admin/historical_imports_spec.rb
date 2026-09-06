@@ -120,6 +120,31 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
     expect(response).to have_http_status(:forbidden)
     expect(HistoricalImportBatch.count).to eq(0)
+
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    post "/api/v1/admin/historical_imports/#{batch.id}/archive_unlinked_workers"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply", params: {
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    }
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/lock"
+    expect(response).to have_http_status(:forbidden)
+    expect(batch.reload).to be_previewed
+  end
+
+  it "returns a clear error when a selected live employee is unavailable" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    worker = batch.historical_workers.find_by!(source_name: "Worker, Alice")
+
+    patch "/api/v1/admin/historical_imports/#{batch.id}/workers/#{worker.id}", params: { employee_id: -1 }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include(
+      "error" => "The selected live employee could not be found for this client",
+      "details" => {}
+    )
+    expect(worker.reload).to have_attributes(employee_id: nil, mapping_status: "needs_review")
   end
 
   it "lets managers review and mutate imports for enabled clients" do
@@ -143,6 +168,15 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "error" => "Historical payroll is not enabled for this client",
       "details" => {}
     )
+  end
+
+  it "applies the feature gate before looking up a batch" do
+    company.update!(historical_payroll_enabled: false)
+
+    get "/api/v1/admin/historical_imports/999999"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Historical payroll is not enabled for this client")
   end
 
   it "returns structured validation details when preview persistence fails" do

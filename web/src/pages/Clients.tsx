@@ -54,6 +54,41 @@ function formatEIN(value: string): string {
   return `${digits.slice(0, 2)}-${digits.slice(2)}`;
 }
 
+interface SettingToggleProps {
+  checked: boolean;
+  label: string;
+  ariaLabel: string;
+  description: string;
+  onToggle: () => void;
+}
+
+function SettingToggle({ checked, label, ariaLabel, description, onToggle }: SettingToggleProps) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={ariaLabel}
+        onClick={onToggle}
+        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+          checked ? 'bg-blue-600' : 'bg-gray-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+      </button>
+      <div>
+        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 export function Clients() {
   const { refreshCompanies } = useCompany();
   const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
@@ -337,56 +372,21 @@ export function Clients() {
 
                   {/* Payroll Reporting */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
-                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={form.simple_payroll_register_enabled === true}
-                      aria-label="Use simple payroll register Excel format"
-                      onClick={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
-                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                        form.simple_payroll_register_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          form.simple_payroll_register_enabled === true ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">Simple payroll register Excel format</p>
-                      <p className="mt-1 text-xs text-gray-600">
-                        Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets.
-                        Leave this off for clients that require a different register format.
-                      </p>
-                    </div>
-                  </div>
+                  <SettingToggle
+                    checked={form.simple_payroll_register_enabled === true}
+                    label="Simple payroll register Excel format"
+                    ariaLabel="Use simple payroll register Excel format"
+                    description="Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
+                    onToggle={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
+                  />
 
-                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={form.historical_payroll_enabled === true}
-                      aria-label="Enable historical payroll workspace"
-                      onClick={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
-                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                        form.historical_payroll_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          form.historical_payroll_enabled === true ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">Historical payroll workspace</p>
-                      <p className="mt-1 text-xs leading-5 text-gray-600">
-                        Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review.
-                      </p>
-                    </div>
-                  </div>
+                  <SettingToggle
+                    checked={form.historical_payroll_enabled === true}
+                    label="Historical payroll workspace"
+                    ariaLabel="Enable historical payroll workspace"
+                    description="Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review."
+                    onToggle={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
+                  />
 
                   {/* Check Settings */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>

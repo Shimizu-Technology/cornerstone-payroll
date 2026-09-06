@@ -60,6 +60,18 @@ RSpec.describe QuickbooksHistory::MappingService do
     expect(worker.reload).to have_attributes(employee_id: nil, mapping_status: "needs_review")
   end
 
+  it "rejects an employee from another company without changing history" do
+    other_company = create(:company, organization: company.organization)
+    foreign_employee = create(:employee, company: other_company, department: create(:department, company: other_company))
+
+    expect do
+      described_class.new(worker: worker, employee: foreign_employee, actor: admin).call
+    end.to raise_error(ArgumentError, /same company/)
+
+    expect(worker.reload).to have_attributes(employee_id: nil, mapping_status: "needs_review")
+    expect(worker.historical_paychecks.distinct.pluck(:employee_id)).to eq([ nil ])
+  end
+
   it "cannot race a locked batch when changing a mapping" do
     review_historical_workers_as_archive_only(batch, actor: admin)
     QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(

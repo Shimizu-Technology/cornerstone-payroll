@@ -21,8 +21,7 @@ module QuickbooksHistory
         raise ArgumentError, "Unlinked workers can only be bulk-reviewed while the batch is a preview" unless batch.previewed?
 
         workers = batch.historical_workers.where(mapping_status: "needs_review")
-        count = workers.count
-        workers.update_all(
+        count = workers.update_all(
           employee_id: nil,
           mapping_status: "archive_only",
           match_method: "archive_only",

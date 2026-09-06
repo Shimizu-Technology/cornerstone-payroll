@@ -8,7 +8,7 @@ RSpec.describe QuickbooksHistory::SpreadsheetReader do
     allow(sheet).to receive(:row).with(1).and_return([ "value" ])
     workbook = instance_double(Roo::Excelx, sheet: sheet)
     allow(workbook).to receive(:close)
-    allow(Roo::Spreadsheet).to receive(:open).and_return(workbook)
+    allow(Roo::Spreadsheet).to receive(:open).with("/tmp/example.xlsx", extension: :xlsx).and_return(workbook)
 
     expect(described_class.read(path: "/tmp/example.xlsx", extension: ".xlsx")).to eq([ [ "value" ] ])
     expect(workbook).to have_received(:close)
@@ -19,11 +19,21 @@ RSpec.describe QuickbooksHistory::SpreadsheetReader do
     allow(sheet).to receive(:row).and_raise(StandardError, "invalid row")
     workbook = instance_double(Roo::Excelx, sheet: sheet)
     allow(workbook).to receive(:close)
-    allow(Roo::Spreadsheet).to receive(:open).and_return(workbook)
+    allow(Roo::Spreadsheet).to receive(:open).with("/tmp/example.xlsx", extension: :xlsx).and_return(workbook)
 
     expect do
       described_class.read(path: "/tmp/example.xlsx", extension: ".xlsx")
     end.to raise_error(StandardError, "invalid row")
     expect(workbook).to have_received(:close)
+  end
+
+
+  it "closes an xls workbook after materializing its rows" do
+    worksheet = [ [ "legacy value" ] ]
+    workbook = instance_double(Spreadsheet::Workbook, worksheet: worksheet)
+    allow(Spreadsheet).to receive(:open).with("/tmp/example.xls").and_yield(workbook)
+
+    expect(described_class.read(path: "/tmp/example.xls", extension: ".xls")).to eq([ [ "legacy value" ] ])
+    expect(Spreadsheet).to have_received(:open).with("/tmp/example.xls")
   end
 end

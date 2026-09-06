@@ -10,9 +10,10 @@ module QuickbooksHistory
     def self.read(path:, extension:)
       case extension.to_s.downcase
       when ".xls"
-        workbook = Spreadsheet.open(path.to_s)
-        worksheet = workbook.worksheet(0)
-        worksheet.map { |row| Array(row).map { |cell| cell.respond_to?(:value) ? cell.value : cell } }
+        Spreadsheet.open(path.to_s) do |workbook|
+          worksheet = workbook.worksheet(0)
+          worksheet.map { |row| Array(row).map { |cell| cell.respond_to?(:value) ? cell.value : cell } }
+        end
       when ".xlsx"
         workbook = Roo::Spreadsheet.open(path.to_s, extension: :xlsx)
         begin

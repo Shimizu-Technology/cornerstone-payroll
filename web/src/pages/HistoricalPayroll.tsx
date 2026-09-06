@@ -238,9 +238,17 @@ export function HistoricalPayroll(): ReactElement {
     }
 
     let current = true;
-    void employeesApi.list({ per_page: 200 }).then((response) => {
-      if (current) setEmployees(response.data);
-    }).catch((err: unknown) => {
+    const loadAllEmployees = async (): Promise<void> => {
+      const perPage = 200;
+      const first = await employeesApi.list({ page: 1, per_page: perPage });
+      const collected = [...first.data];
+      for (let pageNumber = 2; pageNumber <= first.meta.total_pages; pageNumber += 1) {
+        const page = await employeesApi.list({ page: pageNumber, per_page: perPage });
+        collected.push(...page.data);
+      }
+      if (current) setEmployees(collected);
+    };
+    void loadAllEmployees().catch((err: unknown) => {
       if (current) handleError(err, 'Live employees could not be loaded for worker review.');
     });
     return () => { current = false; };
@@ -371,7 +379,7 @@ export function HistoricalPayroll(): ReactElement {
   const workersReviewed = (selectedBatch?.worker_review_summary.needs_review || 0) === 0;
   const readyToApply = reconciliationPassed && workersReviewed;
   const summary = selectedBatch?.preview_summary;
-  const linkedWorkers = detail?.workers.filter((worker) => worker.employee_id).length || 0;
+  const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
 
   return (
     <div className="min-h-full bg-neutral-50/70">

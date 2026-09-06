@@ -141,6 +141,24 @@ RSpec.describe QuickbooksHistory::BundleParser do
     end.to raise_error(ArgumentError, /Payroll Details row 6 Pay date is missing or invalid/)
   end
 
+  it "rejects a paycheck whose pay date precedes the period end before persistence" do
+    details = payroll_details_rows
+    details[5][1] = "06/20/2024"
+
+    expect do
+      described_class.new(files: authoritative_quickbooks_files(details: details, history: paycheck_history_rows)).call
+    end.to raise_error(ArgumentError, /Payroll Details row 6 pay date must be on or after period end/)
+  end
+
+  it "measures path inputs by file bytes rather than path length" do
+    uploads = quickbooks_history_uploads
+    paths = uploads.map(&:path)
+
+    result = described_class.new(files: paths).call
+
+    expect(result.manifest.map { |entry| entry.fetch(:byte_size) }).to eq(paths.map { |path| File.size(path) })
+  end
+
   it "preserves the direction of void and reversal amounts" do
     result = described_class.new(files: quickbooks_history_uploads_with_reversal).call
     reversal = result.paychecks.find { |row| row[:gross_pay].negative? }
@@ -207,10 +225,30 @@ RSpec.describe QuickbooksHistory::BundleParser do
     file&.close!
   end
 
-  it "classifies supplemental QuickBooks filenames that omit spaces" do
-    parser = described_class.new(files: [])
+  it "classifies supplemental QuickBooks filenames through the public bundle interface" do
+    files = quickbooks_history_uploads
+    files << build_quickbooks_xls("PayrollTaxPayments.xls", [ [ "Example Company" ], [ "Payroll tax payments report" ] ])
+    files << build_quickbooks_xls("TimeOffReport.xls", [ [ "Example Company" ], [ "Time off report" ] ])
 
-    expect(parser.send(:classify_report, "", "PayrollTaxPayments.xlsx")).to eq("payroll_tax_payments")
-    expect(parser.send(:classify_report, "", "TimeOffReport.xlsx")).to eq("time_off")
+    result = described_class.new(files: files).call
+    types = result.manifest.map { |entry| entry.fetch(:report_type) }
+
+    expect(types).to include("payroll_tax_payments", "time_off")
+  end
+
+  it "warns on an unreadable supplemental spreadsheet without blocking required reports" do
+    file = Tempfile.new([ "broken-time-off", ".xls" ])
+    file.write("not a spreadsheet")
+    file.rewind
+    upload = Rack::Test::UploadedFile.new(file.path, "application/vnd.ms-excel", true, original_filename: "TimeOffReport.xls")
+
+    result = described_class.new(files: quickbooks_history_uploads + [ upload ]).call
+
+    expect(result.errors).to be_empty
+    expect(result.warnings).to include(
+      "Supplemental spreadsheet(s) could not be parsed: TimeOffReport.xls. They remain fingerprinted as source evidence."
+    )
+  ensure
+    file&.close!
   end
 end
