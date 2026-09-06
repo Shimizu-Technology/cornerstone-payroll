@@ -12,6 +12,7 @@ class HistoricalImportBatch < ApplicationRecord
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_pay_periods, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
+  has_many :historical_import_source_files, dependent: :restrict_with_error
 
   validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
   validates :source_label, :bundle_digest, :importer_version, presence: true
@@ -42,6 +43,26 @@ class HistoricalImportBatch < ApplicationRecord
 
   def unresolved_worker_count
     historical_workers.where(mapping_status: "needs_review").count
+  end
+
+  def source_files_complete_and_verified?
+    manifest = Array(source_file_manifest)
+    retained = if association(:historical_import_source_files).loaded?
+      historical_import_source_files.target.sort_by { |file| [ file.position, file.id ] }
+    else
+      historical_import_source_files.in_manifest_order.to_a
+    end
+    return false unless manifest.size == retained.size && manifest.any?
+
+    manifest.each_with_index.all? do |entry, position|
+      source = retained.fetch(position)
+      source.position == position &&
+        source.original_filename == entry["filename"] &&
+        source.byte_size == entry["byte_size"].to_i &&
+        ActiveSupport::SecurityUtils.secure_compare(source.sha256, entry["sha256"].to_s) &&
+        source.report_type == entry["report_type"] &&
+        source.verified?
+    end
   end
 
   private

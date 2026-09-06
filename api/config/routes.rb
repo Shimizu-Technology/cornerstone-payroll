@@ -109,6 +109,8 @@ Rails.application.routes.draw do
           member do
             post :apply
             post :lock
+            post :verify_source_files
+            get "source_files/:source_file_id/download", action: :download_source_file, as: :source_file_download
             post :archive_unlinked_workers
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
