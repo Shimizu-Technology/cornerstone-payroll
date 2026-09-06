@@ -28,10 +28,11 @@ module QuickbooksHistory
       :reconciliation,
       :warnings,
       :errors,
+      :source_files,
       keyword_init: true
     )
 
-    SourceFile = Struct.new(:original_filename, :path, :size, :source, keyword_init: true)
+    SourceFile = Struct.new(:original_filename, :path, :size, :content_type, :source, keyword_init: true)
 
     def initialize(files:)
       @files = Array(files).map { |file| normalize_file(file) }
@@ -82,14 +83,15 @@ module QuickbooksHistory
         bundle_digest: bundle_digest,
         company_name: company_name,
         source_label: "#{company_name} QuickBooks history through #{max_pay_date.iso8601}",
-        manifest: inventory.map { |entry| entry.except(:rows) },
+        manifest: inventory.each_with_index.map { |entry, position| entry.except(:rows).merge(position: position) },
         workers: workers,
         periods: periods,
         paychecks: detail.fetch(:paychecks),
         summary: build_summary(detail.fetch(:paychecks), workers, periods, inventory),
         reconciliation: reconciliation,
         warnings: warnings,
-        errors: reconciliation.fetch("errors")
+        errors: reconciliation.fetch("errors"),
+        source_files: files
       )
     end
 
@@ -128,7 +130,8 @@ module QuickbooksHistory
       end
       # Keep the upload object alive while parsing. Rack may unlink its tempfile
       # when the uploaded-file wrapper is garbage collected.
-      SourceFile.new(original_filename: filename, path: path, size: size, source: file)
+      content_type = file.respond_to?(:content_type) ? file.content_type : nil
+      SourceFile.new(original_filename: filename, path: path, size: size, content_type: content_type, source: file)
     end
 
     def validate_bundle!
@@ -139,6 +142,7 @@ module QuickbooksHistory
       files.each do |file|
         extension = File.extname(file.original_filename.to_s).downcase
         raise ArgumentError, "Unsupported file type: #{extension.presence || 'unknown'}" unless ALLOWED_EXTENSIONS.include?(extension)
+        raise ArgumentError, "#{safe_filename(file)} is empty" unless file.size.to_i.positive?
         raise ArgumentError, "#{safe_filename(file)} is larger than #{MAX_FILE_BYTES / 1.megabyte} MB" if file.size.to_i > MAX_FILE_BYTES
         raise ArgumentError, "QuickBooks export file is missing" unless File.file?(file.path.to_s)
       end
@@ -709,14 +713,15 @@ module QuickbooksHistory
         bundle_digest: bundle_digest,
         company_name: inventory.filter_map { |entry| entry[:company_name] }.first || "QuickBooks company",
         source_label: "Incomplete QuickBooks history bundle",
-        manifest: inventory.map { |entry| entry.except(:rows) },
+        manifest: inventory.each_with_index.map { |entry, position| entry.except(:rows).merge(position: position) },
         workers: [],
         periods: [],
         paychecks: [],
         summary: { "file_count" => inventory.size, "worker_count" => 0, "period_count" => 0, "paycheck_count" => 0, "totals" => {} },
         reconciliation: { "passed" => false, "errors" => errors },
         warnings: [],
-        errors: errors
+        errors: errors,
+        source_files: files
       )
     end
   end

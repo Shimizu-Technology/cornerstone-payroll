@@ -35,7 +35,10 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     HistoricalPaycheck.where(company_id: company.id).delete_all
     HistoricalPayPeriod.where(company_id: company.id).delete_all
     HistoricalWorker.where(company_id: company.id).delete_all
+    batch_ids = HistoricalImportBatch.where(company_id: company.id).select(:id)
+    HistoricalImportSourceFile.where(historical_import_batch_id: batch_ids).delete_all
     HistoricalImportBatch.where(company_id: company.id).delete_all
+    AuditLog.where(company_id: company.id).delete_all
     User.where(id: actor.id).delete_all
     Company.where(id: company.id).delete_all
     Organization.where(id: organization.id).delete_all

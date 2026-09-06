@@ -3647,6 +3647,7 @@ export interface HistoricalImportBatch {
   importer_version: string;
   status: 'previewed' | 'applied' | 'locked' | 'failed';
   source_file_manifest: Array<{
+    position: number;
     filename: string;
     sha256: string;
     byte_size: number;
@@ -3654,6 +3655,15 @@ export interface HistoricalImportBatch {
     row_count?: number;
     parse_error?: string;
   }>;
+  source_retention_summary: {
+    expected_file_count: number;
+    retained_file_count: number;
+    verified_file_count: number;
+    failed_file_count: number;
+    ready: boolean;
+    last_verified_at?: string | null;
+  };
+  source_files?: HistoricalImportSourceFile[];
   preview_summary: {
     file_count: number;
     worker_count: number;
@@ -3694,6 +3704,19 @@ export interface HistoricalImportBatch {
   locked_at?: string | null;
   locked_by_name?: string | null;
   created_at: string;
+}
+
+export interface HistoricalImportSourceFile {
+  id: number;
+  original_filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  report_type: string;
+  position: number;
+  verification_status: 'verified' | 'failed';
+  verified_at?: string | null;
+  verification_error?: string | null;
 }
 
 export interface HistoricalPayPeriod {
@@ -3791,6 +3814,10 @@ export const historicalImportsApi = {
     acknowledgement: HISTORICAL_IMPORT_ACKNOWLEDGEMENT,
   }),
   lock: (id: number): Promise<{ data: HistoricalImportBatch }> => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
+  verifySourceFiles: (id: number): Promise<{ data: HistoricalImportBatch; meta: { all_verified: boolean } }> =>
+    api.post<{ data: HistoricalImportBatch; meta: { all_verified: boolean } }>(`/admin/historical_imports/${id}/verify_source_files`),
+  downloadSourceFile: (batchId: number, sourceFileId: number): Promise<Blob> =>
+    api.getBlob(`/admin/historical_imports/${batchId}/source_files/${sourceFileId}/download`),
   mapWorker: (batchId: number, workerId: number, employeeId: number): Promise<{ data: HistoricalWorker }> =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
   keepWorkerArchiveOnly: (batchId: number, workerId: number): Promise<{ data: HistoricalWorker }> =>

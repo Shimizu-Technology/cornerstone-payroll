@@ -23,12 +23,25 @@ module QuickbooksHistory
 
     def call
       parsed = BundleParser.new(files: files).call
-      existing = HistoricalImportBatch.find_by(
-        company: company,
-        source_system: "quickbooks_online",
-        bundle_digest: parsed.bundle_digest
-      )
-      return Result.new(batch: existing, idempotent: true) if existing
+      existing = find_existing_batch(parsed)
+      return Result.new(batch: existing, idempotent: true) if existing&.source_files_complete_and_verified?
+
+      storage_service = SourceFileStorageService.new(company: company, actor: actor)
+      stored_source_files = storage_service.store!(parsed: parsed)
+      source_files_persisted = false
+
+      if existing
+        attached_source_files = false
+        HistoricalImportBatch.transaction do
+          existing.lock!
+          unless existing.source_files_complete_and_verified?
+            attach_source_files!(existing, stored_source_files)
+            attached_source_files = true
+          end
+        end
+        source_files_persisted = attached_source_files
+        return Result.new(batch: existing.reload, idempotent: true)
+      end
 
       batch = nil
       HistoricalImportBatch.transaction do
@@ -50,29 +63,46 @@ module QuickbooksHistory
           warnings: parsed.warnings,
           validation_errors: errors
         )
+        attach_source_files!(batch, stored_source_files)
 
         workers_by_name = create_workers!(batch, parsed.workers)
         periods_by_key = create_periods!(batch, parsed.periods)
         create_paychecks!(batch, parsed.paychecks, workers_by_name, periods_by_key)
       end
+      source_files_persisted = true
 
       Result.new(batch: batch, idempotent: false)
     rescue ActiveRecord::RecordNotUnique => e
-      existing = HistoricalImportBatch.find_by(
-        company: company,
-        source_system: "quickbooks_online",
-        bundle_digest: parsed.bundle_digest
-      )
-      raise e unless existing
+      existing = find_existing_batch(parsed)
+      raise e unless existing&.source_files_complete_and_verified?
 
       Result.new(batch: existing, idempotent: true)
-    rescue ArgumentError, ActiveRecord::RecordInvalid => e
+    rescue ArgumentError, ActiveRecord::RecordInvalid, R2StorageService::ConfigurationError,
+           SourceFileStorageService::StorageError => e
       Result.new(idempotent: false, error: e)
+    ensure
+      storage_service&.cleanup(stored_source_files) if stored_source_files.present? && !source_files_persisted
     end
 
     private
 
     attr_reader :company, :files, :actor
+
+    def find_existing_batch(parsed)
+      HistoricalImportBatch.find_by(
+        company: company,
+        source_system: "quickbooks_online",
+        bundle_digest: parsed.bundle_digest
+      )
+    end
+
+    def attach_source_files!(batch, stored_source_files)
+      if batch.historical_import_source_files.exists?
+        raise ArgumentError, "This QuickBooks preview has incomplete source-file evidence and cannot be repaired automatically"
+      end
+
+      stored_source_files.each { |attributes| batch.historical_import_source_files.create!(attributes) }
+    end
 
     def duplicate_source_count(paychecks)
       paychecks.map { |row| row.fetch(:external_key) }

@@ -33,6 +33,14 @@ function batch(id: number, workers: MockWorker[] = []): HistoricalImportBatch {
     importer_version: 'test',
     status: 'previewed' as const,
     source_file_manifest: [],
+    source_retention_summary: {
+      expected_file_count: 0,
+      retained_file_count: 0,
+      verified_file_count: 0,
+      failed_file_count: 0,
+      ready: false,
+      last_verified_at: null,
+    },
     preview_summary: {
       file_count: 5,
       worker_count: workers.length,
@@ -65,6 +73,40 @@ function batch(id: number, workers: MockWorker[] = []): HistoricalImportBatch {
     warnings: [],
     errors: [],
     created_at: '2026-09-06T00:00:00Z',
+  };
+}
+
+function detailWithVerifiedSource(id: number): HistoricalImportDetail {
+  const source = {
+    id: 700,
+    original_filename: 'Payroll Details.xls',
+    content_type: 'application/vnd.ms-excel',
+    byte_size: 2048,
+    sha256: 'a'.repeat(64),
+    report_type: 'payroll_details',
+    position: 0,
+    verification_status: 'verified' as const,
+    verified_at: '2026-09-06T01:00:00Z',
+    verification_error: null,
+  };
+  return {
+    ...detail(id),
+    source_file_manifest: [{
+      position: 0,
+      filename: source.original_filename,
+      byte_size: source.byte_size,
+      sha256: source.sha256,
+      report_type: source.report_type,
+    }],
+    source_retention_summary: {
+      expected_file_count: 1,
+      retained_file_count: 1,
+      verified_file_count: 1,
+      failed_file_count: 0,
+      ready: true,
+      last_verified_at: source.verified_at,
+    },
+    source_files: [source],
   };
 }
 
@@ -202,4 +244,40 @@ test('never lets a completed worker mapping replace a newly selected batch', asy
   await expect(batchSelector).toBeEnabled();
   await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
   await expect.poll(() => detailRequests.filter((id) => id === 2).length).toBe(1);
+});
+
+test('makes retained source verification and exact download clear to an administrator', async ({ page }) => {
+  await mockApplicationShell(page);
+  const retainedDetail = detailWithVerifiedSource(1);
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [retainedDetail],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: retainedDetail,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1/verify_source_files', (route) => fulfillJson(route, {
+    data: retainedDetail,
+    meta: { all_verified: true },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1/source_files/700/download', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/vnd.ms-excel',
+    headers: { 'Content-Disposition': 'attachment; filename="Payroll Details.xls"' },
+    body: 'exact-source-bytes',
+  }));
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('1/1')).toBeVisible();
+  await expect(page.getByText('Verified', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Verify all files' }).click();
+  await expect(page.getByText('Every retained QuickBooks source file matches its original SHA-256 fingerprint.')).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original' }).click();
+  await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
+  await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
 });

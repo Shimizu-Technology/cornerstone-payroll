@@ -6,7 +6,11 @@ RSpec.describe QuickbooksHistory::ImportService do
   let!(:company) { create(:company) }
   let!(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
 
-  after { cleanup_quickbooks_history_uploads }
+  before { FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll")) }
+  after do
+    cleanup_quickbooks_history_uploads
+    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll"))
+  end
 
   it "stages immutable history without creating live payroll or YTD records" do
     live_counts = [ PayPeriod.count, PayrollItem.count, EmployeeYtdTotal.count ]
@@ -19,6 +23,11 @@ RSpec.describe QuickbooksHistory::ImportService do
 
     batch = @result.batch
     expect(batch).to be_previewed
+    expect(batch.historical_import_source_files.count).to eq(5)
+    expect(batch.source_files_complete_and_verified?).to be(true)
+    expect(batch.historical_import_source_files.in_manifest_order.map(&:sha256)).to eq(
+      batch.source_file_manifest.sort_by { |entry| entry.fetch("position") }.pluck("sha256")
+    )
     expect(batch.historical_paychecks.find_by(source_employee_name: "Worker, Alice")).to have_attributes(
       gross_pay: 1_000.to_d,
       net_pay: 725.to_d,
@@ -45,6 +54,7 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(second.batch).to eq(first.batch)
     expect(HistoricalImportBatch.count).to eq(1)
     expect(HistoricalPaycheck.count).to eq(2)
+    expect(HistoricalImportSourceFile.count).to eq(5)
   end
 
   it "automatically links only an unambiguous name-and-SSN identity match" do
@@ -150,6 +160,22 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(HistoricalWorker.count).to eq(0)
     expect(HistoricalPayPeriod.count).to eq(0)
     expect(HistoricalPaycheck.count).to eq(0)
+    expect(HistoricalImportSourceFile.count).to eq(0)
+    expect(Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll/**/*")].select { |path| File.file?(path) }).to be_empty
+  end
+
+  it "attaches protected source evidence when an older matching preview is uploaded again" do
+    files = quickbooks_history_uploads
+    first = described_class.new(company: company, files: files, actor: actor).call
+    HistoricalImportSourceFile.where(historical_import_batch_id: first.batch.id).delete_all
+
+    second = described_class.new(company: company, files: files, actor: actor).call
+
+    expect(second).to be_success
+    expect(second.idempotent).to be(true)
+    expect(second.batch).to eq(first.batch)
+    expect(second.batch.historical_import_source_files.count).to eq(5)
+    expect(second.batch.source_files_complete_and_verified?).to be(true)
   end
 
   it "returns parser validation failures through the service result contract" do
