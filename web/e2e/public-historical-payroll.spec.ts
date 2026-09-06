@@ -455,6 +455,38 @@ test('blocks an out-of-range imported employer match before employee submission'
   expect(submitted).toBe(false);
 });
 
+test('does not validate hidden employer-match fields for a contractor', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  let submittedEmployee: Record<string, unknown> | undefined;
+  const contractor = {
+    ...migratedEmployee('complete'),
+    employment_type: 'contractor',
+    contractor_type: 'individual',
+    contractor_pay_type: 'flat_fee',
+    pay_rate: 100,
+    employer_retirement_match_rate: 1.25,
+    employer_roth_match_rate: 1.25,
+  };
+  await page.route('**/api/v1/admin/employees/900', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      submittedEmployee = (await route.request().postDataJSON()).employee;
+    }
+    await fulfillJson(route, { data: contractor });
+  });
+
+  await page.goto('/employees/900');
+  await expect(page.getByLabel('Employer Pre-Tax Match (%)')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Update Contractor' }).click();
+
+  await expect.poll(() => submittedEmployee).toBeTruthy();
+  await expect(page).toHaveURL(/\/employees\/?$/);
+  expect(submittedEmployee?.retirement_rate).toBe(0);
+  expect(submittedEmployee?.roth_retirement_rate).toBe(0);
+  expect(submittedEmployee?.employer_retirement_match_rate).toBe(0);
+  expect(submittedEmployee?.employer_roth_match_rate).toBe(0);
+});
+
 test('keeps every historical batch reachable with simple pagination', async ({ page }) => {
   await mockApplicationShell(page);
   const allBatches = Array.from({ length: 51 }, (_, index) => batch(51 - index));

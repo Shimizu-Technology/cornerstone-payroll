@@ -670,10 +670,10 @@ export function EmployeeForm() {
     }
     const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
     const employerRothMatch = form.employer_roth_match_rate ?? 0;
-    if (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1) {
+    if (form.employment_type !== 'contractor' && (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1)) {
       newErrors.employer_retirement_match_rate = ['Employer pre-tax match must be between 0% and 100%'];
     }
-    if (!Number.isFinite(employerRothMatch) || employerRothMatch < 0 || employerRothMatch > 1) {
+    if (form.employment_type !== 'contractor' && (!Number.isFinite(employerRothMatch) || employerRothMatch < 0 || employerRothMatch > 1)) {
       newErrors.employer_roth_match_rate = ['Employer Roth match must be between 0% and 100%'];
     }
     const defaultAdjustments = normalizeDefaultPayrollAdjustments();
@@ -712,6 +712,14 @@ export function EmployeeForm() {
       };
       const employeePayload = {
         ...normalizeEmployeeMonetaryFields({ ...form, ...normalizedW4Values }),
+        ...(form.employment_type === 'contractor'
+          ? {
+              retirement_rate: 0,
+              roth_retirement_rate: 0,
+              employer_retirement_match_rate: 0,
+              employer_roth_match_rate: 0,
+            }
+          : {}),
         ...(form.employment_type === 'contractor' && form.contractor_type === 'business'
           ? { ssn: undefined, ssn_confirmation: undefined }
           : {}),
@@ -906,13 +914,13 @@ export function EmployeeForm() {
         )}
 
         {isEditing && !isClient && loadedEmployee?.configuration_review_status === 'needs_review' && (
-          <div className="mb-6 rounded-2xl border border-warning-200 bg-warning-50 p-5 text-warning-900">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
+          <div className="mb-6 rounded-2xl border border-warning-200 bg-warning-50 p-4 text-warning-900">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="mt-0 h-5 w-5 shrink-0 text-warning-700" />
               <div>
                 <p className="font-semibold">QuickBooks setup needs review</p>
-                <p className="mt-1 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Entering the missing hire date or address clears that source-field item when you save.</p>
-                <ul className="mt-3 space-y-2 text-sm leading-6">
+                <p className="mt-2 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Entering the missing hire date or address clears that source-field item when you save.</p>
+                <ul className="mt-4 space-y-2 text-sm leading-6">
                   {(loadedEmployee.configuration_review_items || []).map((item) => (
                     <li key={item.code}>• {item.message}</li>
                   ))}
