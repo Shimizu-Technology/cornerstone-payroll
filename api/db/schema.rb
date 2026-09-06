@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_06_202000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -806,6 +806,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_202000) do
     t.index ["company_id", "source_system", "bundle_digest"], name: "idx_historical_batches_unique_bundle", unique: true
     t.index ["company_id"], name: "index_historical_import_batches_on_company_id"
     t.index ["created_by_id"], name: "index_historical_import_batches_on_created_by_id"
+    t.index ["id", "company_id"], name: "idx_historical_import_batches_tenant_key", unique: true
     t.index ["locked_by_id"], name: "index_historical_import_batches_on_locked_by_id"
     t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
@@ -2478,6 +2479,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_202000) do
   add_foreign_key "historical_import_batches", "users", column: "locked_by_id", on_delete: :nullify
   add_foreign_key "historical_import_cutover_reviews", "companies"
   add_foreign_key "historical_import_cutover_reviews", "historical_import_batches"
+  add_foreign_key "historical_import_cutover_reviews", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_cutover_reviews_batch_tenant"
   add_foreign_key "historical_import_cutover_reviews", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "historical_import_cutover_reviews", "users", column: "verified_by_id", on_delete: :nullify
   add_foreign_key "historical_import_source_files", "companies"

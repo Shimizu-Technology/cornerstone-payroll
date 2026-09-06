@@ -71,7 +71,7 @@ module QuickbooksHistory
     def normalized_attestations(value)
       source = value.to_h.stringify_keys
       HistoricalImportCutoverReview::ATTESTATIONS.keys.to_h do |key|
-        [ key, ActiveModel::Type::Boolean.new.cast(source[key]) ]
+        [ key, ActiveModel::Type::Boolean.new.cast(source[key]) || false ]
       end
     end
 

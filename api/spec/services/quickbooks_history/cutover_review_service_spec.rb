@@ -53,7 +53,8 @@ RSpec.describe QuickbooksHistory::CutoverReviewService do
     service = described_class.new(review: review, actor: actor)
     service.save!(exception_dispositions: {}, attestations: {}, approval_notes: "Pending review.")
 
-    expect(review.reload).not_to be_ready_for_approval
+    expect(review.reload.attestations).to eq(HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(false))
+    expect(review).not_to be_ready_for_approval
     expect do
       service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
     end.to raise_error(ArgumentError, /Complete every cutover check/)

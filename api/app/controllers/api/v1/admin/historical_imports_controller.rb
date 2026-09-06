@@ -51,7 +51,7 @@ module Api
                            .limit(per_page)
 
           render json: {
-            data: batch_json(@batch, include_source_files: true).merge(
+            data: batch_json(@batch, include_source_files: true, include_cutover_evidence: true).merge(
               periods: @batch.historical_pay_periods.reverse_chronological
                              .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
                              .map { |period| period_json(period) },
@@ -81,7 +81,7 @@ module Api
             return
           end
 
-          render json: { data: batch_json(result.batch, include_source_files: true), meta: { idempotent: result.idempotent } }
+          render json: { data: batch_json(result.batch, include_source_files: true, include_cutover_evidence: true), meta: { idempotent: result.idempotent } }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -105,7 +105,7 @@ module Api
         def verify_source_files
           result = QuickbooksHistory::SourceFileVerificationService.new(batch: @batch, actor: current_user).call
           render json: {
-            data: batch_json(@batch.reload, include_source_files: true),
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
             meta: { all_verified: result.all_verified }
           }
         rescue R2StorageService::ConfigurationError => e
@@ -176,7 +176,7 @@ module Api
         def verify_cutover
           result = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: @batch, actor: current_user).call
           render json: {
-            data: batch_json(@batch.reload, include_source_files: true),
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
             meta: { enqueued: result.enqueued, status: result.review.status }
           }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
@@ -190,7 +190,7 @@ module Api
             attestations: cutover_attestations,
             approval_notes: params[:approval_notes]
           )
-          render json: { data: batch_json(@batch.reload, include_source_files: true) }
+          render json: { data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true) }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -200,7 +200,7 @@ module Api
           QuickbooksHistory::CutoverReviewService.new(review: review, actor: current_user).approve!(
             acknowledgement: params[:acknowledgement]
           )
-          render json: { data: batch_json(@batch.reload, include_source_files: true) }
+          render json: { data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true) }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -306,7 +306,7 @@ module Api
           }
         end
 
-        def batch_json(batch, mapping_counts: nil, include_source_files: false)
+        def batch_json(batch, mapping_counts: nil, include_source_files: false, include_cutover_evidence: false)
           mapping_counts ||= batch.historical_workers.group(:mapping_status).count
           source_files = if batch.association(:historical_import_source_files).loaded?
             batch.historical_import_source_files.target.sort_by { |file| [ file.position, file.id ] }
@@ -346,7 +346,7 @@ module Api
             locked_by_name: batch.locked_by&.name,
             cutover_review: cutover_review_json(
               batch.historical_import_cutover_review,
-              include_evidence: include_source_files
+              include_evidence: include_cutover_evidence
             ),
             created_at: batch.created_at
           }

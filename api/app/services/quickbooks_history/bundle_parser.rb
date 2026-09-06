@@ -572,7 +572,7 @@ module QuickbooksHistory
     end
 
     def money_totals(rows)
-      %i[gross_pay adjusted_gross pretax_deductions employee_taxes federal_income_tax social_security_tax medicare_tax after_tax_deductions net_pay employer_taxes employer_contributions total_payroll_cost].to_h do |field|
+      ImportService::MONEY_FIELDS.to_h do |field|
         [ field.to_s, sum(rows, field).to_s("F") ]
       end
     end

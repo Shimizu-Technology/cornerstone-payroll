@@ -77,7 +77,7 @@ Verified bundle totals:
 
 The native Payroll Details and Paycheck History exports reconcile exactly at 2,833 rows, $3,970,837.34 gross, and $2,822,901.55 net. The 48 early records are only opening summaries because QuickBooks did not provide their original paycheck-level periods in these reports. The UI and API label them accordingly instead of pretending they are complete individual pay periods.
 
-The 114-worker count is the authoritative v3 result from the Employee Directory and Employee Details reports. An older local rehearsal contained 113 workers because it used an earlier name-normalization interpretation under the same v2 label. No production history was imported from that rehearsal. The v3 importer label prevents that older interpretation from satisfying the final cutover check.
+The 114-worker count is the authoritative v3 result from the Employee Directory and Employee Details reports. An older local rehearsal contained 113 workers because it used an earlier name-normalization interpretation under the same v2 label. No production history was imported from that rehearsal. The fresh source-to-ledger comparison blocks that older interpretation because a current parse of the retained originals produces 114 workers and fails the stored-count and worker-ledger checks against the older archive.
 
 The totals above include two QuickBooks void/reversal rows. Employee taxes and deductions use a payroll-facing sign convention: normal withholding is positive and reversal withholding is negative. Employer taxes, employer contributions, gross, net, and total payroll cost retain their QuickBooks report direction. This makes the stored aggregates agree with the signed source report instead of inflating totals by taking absolute values.
 

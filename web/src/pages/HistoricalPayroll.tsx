@@ -753,11 +753,11 @@ export function HistoricalPayroll(): ReactElement {
     setAction('cutover_download');
     setError(null);
     try {
-      const blob = await historicalImportsApi.downloadCutoverEvidence(batchId);
-      const url = URL.createObjectURL(blob);
+      const download = await historicalImportsApi.downloadCutoverEvidence(batchId);
+      const url = URL.createObjectURL(download.blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `quickbooks_cutover_evidence_batch_${batchId}.xlsx`;
+      anchor.download = download.filename || `quickbooks_cutover_evidence_batch_${batchId}.xlsx`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();

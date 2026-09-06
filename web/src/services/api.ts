@@ -3943,8 +3943,8 @@ export const historicalImportsApi = {
     api.patch<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/update_cutover_review`, payload),
   approveCutover: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch }> =>
     api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/approve_cutover`, { acknowledgement }),
-  downloadCutoverEvidence: (batchId: number): Promise<Blob> =>
-    api.getBlob(`/admin/historical_imports/${batchId}/download_cutover_evidence`),
+  downloadCutoverEvidence: (batchId: number): Promise<BlobDownload> =>
+    api.getBlobWithParams(`/admin/historical_imports/${batchId}/download_cutover_evidence`),
 };
 
 export const historicalReportsApi = {
