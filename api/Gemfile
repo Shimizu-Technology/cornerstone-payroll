@@ -51,6 +51,7 @@ gem "caxlsx"
 # PDF + Excel parsing for payroll imports
 gem "pdf-reader"
 gem "roo"
+gem "spreadsheet"
 gem "fuzzy_match"
 
 # S3-compatible storage (for Cloudflare R2)

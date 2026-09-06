@@ -78,6 +78,17 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(response.parsed_body.dig("company", "editable_fields")).to include("simple_payroll_register_enabled")
     end
 
+    it "lets organization admins deliberately enable the historical payroll workspace" do
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: { historical_payroll_enabled: true }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.historical_payroll_enabled).to be(true)
+      expect(response.parsed_body.dig("company", "historical_payroll_enabled")).to be(true)
+      expect(response.parsed_body.dig("company", "editable_fields")).to include("historical_payroll_enabled")
+    end
+
     it "resets field-level check layout overrides when stock type changes from client management" do
       client_company.update!(
         check_stock_type: "top_check",

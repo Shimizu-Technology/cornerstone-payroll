@@ -1,0 +1,60 @@
+# frozen_string_literal: true
+
+module QuickbooksHistory
+  class BulkArchiveOnlyService
+    Result = Struct.new(:reviewed_count, :error, keyword_init: true) do
+      def success?
+        error.nil?
+      end
+    end
+
+    def initialize(batch:, actor:)
+      @batch = batch
+      @actor = actor
+    end
+
+    def call
+      ensure_authorized_actor!
+
+      HistoricalImportBatch.transaction do
+        batch.lock!
+        raise ArgumentError, "Unlinked workers can only be bulk-reviewed while the batch is a preview" unless batch.previewed?
+
+        workers = batch.historical_workers.where(mapping_status: "needs_review")
+        count = workers.update_all(
+          employee_id: nil,
+          mapping_status: "archive_only",
+          match_method: "archive_only",
+          match_confidence: nil,
+          updated_at: Time.current
+        )
+        AuditLog.record!(
+          user: actor,
+          organization_id: batch.company.organization_id,
+          company_id: batch.company_id,
+          action: "historical_imports#archive_unlinked_workers",
+          record_type: "historical_import_batches",
+          record_id: batch.id,
+          subject_name: batch.source_label,
+          metadata: { reviewed_count: count }
+        )
+        Result.new(reviewed_count: count)
+      end
+    rescue ArgumentError => e
+      Result.new(error: e)
+    end
+
+    private
+
+    attr_reader :batch, :actor
+
+    def ensure_authorized_actor!
+      authorized = actor.present? &&
+        actor.can_access_company?(batch.company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+      return if authorized
+
+      raise ArgumentError, "An attributed manager or administrator with company access is required"
+    end
+  end
+end

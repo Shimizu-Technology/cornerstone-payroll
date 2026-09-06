@@ -25,6 +25,7 @@ class StaffRolePolicy
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,
     "api/v1/admin/audit_logs" => :view_audit_history,
+    "api/v1/admin/historical_imports" => :payroll_operations,
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
@@ -65,7 +66,12 @@ class StaffRolePolicy
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#reactivate" => :manage_client_configuration,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,
-    "api/v1/admin/employee_work_profiles#create" => :manage_client_configuration
+    "api/v1/admin/employee_work_profiles#create" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#preview" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#apply" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#lock" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#archive_unlinked_workers" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration
   }.freeze
 
   def self.capability_for(controller_path:, action_name:)

@@ -11,7 +11,7 @@ module Api
           %i[
             name ein pay_frequency active address_line1 address_line2 city state zip
             phone email bank_name bank_address check_stock_type check_offset_x check_offset_y
-            next_check_number simple_payroll_register_enabled
+            next_check_number simple_payroll_register_enabled historical_payroll_enabled
           ] + [ "check_layout_config" ]
         ).freeze
 
@@ -118,7 +118,7 @@ module Api
             :phone, :email,
             :bank_name, :bank_address,
             :check_stock_type, :check_offset_x, :check_offset_y,
-            :next_check_number, :simple_payroll_register_enabled,
+            :next_check_number, :simple_payroll_register_enabled, :historical_payroll_enabled,
             check_layout_config: {}
           )
         end
@@ -157,7 +157,8 @@ module Api
             active: company.active,
             active_employees: active_employee_counts&.fetch(company.id, 0) || company.employees.active.count,
             total_employees: total_employee_counts&.fetch(company.id, 0) || company.employees.count,
-            pay_frequency: company.pay_frequency
+            pay_frequency: company.pay_frequency,
+            historical_payroll_enabled: company.historical_payroll_enabled
           }
 
           if detailed
@@ -177,7 +178,8 @@ module Api
               check_offset_y: company.check_offset_y,
               check_layout_config: company.check_layout_config || {},
               next_check_number: company.next_check_number,
-              simple_payroll_register_enabled: company.simple_payroll_register_enabled
+              simple_payroll_register_enabled: company.simple_payroll_register_enabled,
+              historical_payroll_enabled: company.historical_payroll_enabled
             )
           end
 

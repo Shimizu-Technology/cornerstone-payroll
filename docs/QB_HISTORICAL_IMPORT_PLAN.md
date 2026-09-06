@@ -1,8 +1,124 @@
 # QuickBooks Historical Import Plan
 
-**Status:** planned  
+**Status:** core importer hardened and locally validated; source retention, unified reporting, and cutover evidence remain before a production import
 **Owner:** Leon / Shimizu Technology  
-**Last reviewed:** 2026-04-23
+**Last reviewed:** 2026-09-06
+
+## Decision and implementation record
+
+QuickBooks history now has a separate, immutable archive instead of using the live `PayPeriod` and `PayrollItem` calculation path. This is the central safety decision.
+
+The historical import lane now:
+
+- requires one authoritative Payroll Details, Paycheck History, Payroll Summary, Employee Details, and Employee Directory report, plus optional supporting XLS, XLSX, PDF, JPEG, and PNG files;
+- inventories every supplied file with its filename, size, report classification, and SHA-256 digest;
+- preserves QuickBooks' final paycheck values and itemized breakdowns without running Cornerstone's payroll calculators;
+- encrypts the private Employee Details snapshot at rest;
+- stages the bundle as a preview, requires an explicit acknowledgement before apply, and locks a reconciled import against later edits;
+- requires an attributed manager or administrator with access to the company for every apply, lock, and manual worker mapping, including command-line operations;
+- detects an identical bundle and reuses the prior batch instead of importing it twice;
+- blocks missing or duplicate required reports, mixed-company bundles, unmatched native paychecks, ambiguous duplicate paycheck signatures, altered staged totals, and overlap with already-applied history;
+- lets accountants browse the archive while limiting preview, apply, lock, and employee mapping to managers and administrators;
+- never creates or changes live pay periods, payroll items, YTD aggregates, payments, tax filings, checks, reminders, or notifications.
+
+The archive uses four dedicated records:
+
+- `HistoricalImportBatch` records provenance, validation, reconciliation, lifecycle state, and operator attribution.
+- `HistoricalWorker` preserves the QuickBooks worker identity and an optional link to a current employee.
+- `HistoricalPayPeriod` groups source paychecks by period and pay date.
+- `HistoricalPaycheck` stores the authoritative money, hours, taxes, deductions, contributions, payment metadata, and source-row evidence.
+
+This is intentionally an archive and reconciliation feature. It does not recreate old payroll as editable live payroll and does not backfill current YTD balances.
+
+## Verified MoSa bundle
+
+The read-only QuickBooks export collected on 2026-09-05 contains 45 files. The parser currently produces:
+
+- 114 historical workers, including workers with no paycheck in the exported range;
+- 59 historical period groups;
+- 2,881 paycheck snapshots from 2024-06-30 through 2026-08-27;
+- 2,833 native paycheck rows that match Payroll Details to Paycheck History exactly;
+- 48 opening-balance rows covering 2023-12-29 through 2024-06-27;
+- 255 preserved check numbers.
+
+Verified bundle totals:
+
+| Measure | QuickBooks total |
+| --- | ---: |
+| Gross pay | $4,766,581.41 |
+| Adjusted gross | $4,566,330.54 |
+| Pretax deductions | $200,250.87 |
+| Employee taxes | $765,110.85 |
+| Federal income tax | $421,788.51 |
+| Social Security | $273,424.34 |
+| Medicare | $69,898.00 |
+| After-tax deductions | $409,028.99 |
+| Net pay | $3,392,190.70 |
+| Employer taxes | $341,671.91 |
+| Employer contributions | $108,013.60 |
+| Total payroll cost | $5,216,266.92 |
+
+The native Payroll Details and Paycheck History exports reconcile exactly at 2,833 rows, $3,970,837.34 gross, and $2,822,901.55 net. The 48 early records are only opening summaries because QuickBooks did not provide their original paycheck-level periods in these reports. The UI and API label them accordingly instead of pretending they are complete individual pay periods.
+
+The totals above include two QuickBooks void/reversal rows. Employee taxes and deductions use a payroll-facing sign convention: normal withholding is positive and reversal withholding is negative. Employer taxes, employer contributions, gross, net, and total payroll cost retain their QuickBooks report direction. This makes the stored aggregates agree with the signed source report instead of inflating totals by taking absolute values.
+
+QuickBooks Paycheck History omits a check number on 2,578 of the 2,833 native paychecks; the 48 opening-balance rows also carry no check number. The archive preserves the 255 numbers that exist and reports the missing values as source-data warnings, not import failures.
+
+## Source-retention boundary
+
+The database stores the structured payroll history, encrypted employee snapshot data, and a cryptographic inventory of every supplied file. It does **not** store the original XLS, XLSX, PDF, or image bytes.
+
+Cornerstone must therefore keep the original export bundle in an approved encrypted archive with controlled access and backups before deleting QuickBooks. File hashes in Cornerstone prove which source files produced an import, but a hash cannot recreate a deleted report. Moving original source files into application-managed encrypted object storage is a separate security and records-retention project; it should not be added silently to this importer.
+
+## Local operator runbook
+
+The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`. Every run requires `ACTOR_EMAIL`; that user must be a manager or administrator with access to the company.
+
+```sh
+DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \
+BUNDLE_DIR=/absolute/path/to/quickbooks-export \
+COMPANY_ID=<local-company-id> \
+ACTOR_EMAIL=<local-operator-email> \
+bundle exec rails quickbooks_history:import
+```
+
+After reviewing the preview and reconciliation:
+
+```sh
+DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \
+BUNDLE_DIR=/absolute/path/to/quickbooks-export \
+COMPANY_ID=<local-company-id> \
+ACTOR_EMAIL=<local-operator-email> \
+APPLY=1 LOCK=1 \
+bundle exec rails quickbooks_history:import
+```
+
+The command prints the import outcome, batch and company IDs, aggregate counts, state, warning and error counts, and a shortened digest. It does not print employee names, tax identifiers, addresses, or banking data.
+
+## Promotion gate
+
+Before any production import:
+
+1. Run all backend, frontend, security, migration, and browser checks against an isolated database.
+2. Confirm the MoSa local archive counts and totals above from both the database and the UI.
+3. Have Cornerstone review the opening-summary and missing-check-number warnings.
+4. Confirm the original export bundle has an approved encrypted retention location and backup.
+5. Deploy the feature through the normal reviewed pull-request and deployment process.
+6. Create a production preview only. Review its reconciliation before applying it.
+7. Apply and lock only after written approval from the responsible Cornerstone operator.
+
+No production preview, apply, or lock has been performed as part of the local implementation.
+
+## Production completion sequence
+
+The QuickBooks exit is deliberately split into four reviewable releases. Finishing the first release does not authorize a production import.
+
+1. **Importer safety and reconciliation:** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
+2. **Protected source retention:** application-managed encrypted source-file storage, access controls, hashes, retention status, and restore verification so the original evidence is not lost when QuickBooks access ends.
+3. **Unified read-only history and reports:** payroll register, employee history, tax, deduction, retirement, loan, and check views read historical snapshots without writing to live YTD or recalculating historical values. Reports must label source, completeness, and opening-summary limitations.
+4. **Cutover evidence and signoff:** repeatable reconciliation artifacts, exception disposition, independent aggregate checks, operator approval, rollback rehearsal, and a final no-QuickBooks dependency checklist.
+
+The production feature flag remains off until these releases are deployed and the cutover gate is signed. The first production action is a preview; apply and lock require separate operator approval.
 
 ## Purpose
 
@@ -15,11 +131,11 @@ Cornerstone wants to fully leave QuickBooks and move historical company data int
 
 This document defines what the current system can and cannot do, what QuickBooks data we still need to inspect, and what must be built so historical QuickBooks data can be imported safely without mutating or reinterpreting prior payroll history.
 
-This is intentionally a planning document, not an implementation spec for the existing MoSa import flow.
+The sections below retain the discovery rationale that led to the implemented design. Where an older recommendation conflicts with the decision record above, the decision record is authoritative.
 
 ## Current State
 
-### What exists today
+### What existed before this implementation
 
 - Payroll can be created and processed natively through `PayPeriod` + `PayrollItem`.
 - Historical-style backfill has been done for MoSa, but only through the existing live-payroll model.
@@ -93,11 +209,9 @@ Open question:
 
 - whether Cornerstone also needs non-payroll accounting data from QuickBooks, or only payroll-domain data plus enough supporting metadata to replace QuickBooks for payroll operations and audit lookup
 
-## Discovery Work Still Required
+## Discovery work completed for MoSa
 
-We do **not** yet know the exact QuickBooks export package Cornerstone will hand us. That is the first blocker.
-
-We need sample exports for at least one client and ideally one full quarter before implementation starts.
+The MoSa package supplied the required reports and enough supporting quarterly, annual, tax, deduction, retirement, directory, time-off, check, PDF, and image evidence to design and validate the first importer. New clients must still be previewed because report shape and data quality can differ by company and QuickBooks usage.
 
 ### Files we need from Cornerstone
 
