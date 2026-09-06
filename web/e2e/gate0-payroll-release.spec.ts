@@ -287,7 +287,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     };
     await page.route(payrollItemPattern, holdAndRejectSave);
     try {
-      const rejectedResponse = page.waitForResponse((response) =>
+      const rejectedResponse = page.waitForResponse((response): boolean =>
         response.request().method() === 'PATCH' &&
         response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
       );
@@ -295,6 +295,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await saveStarted;
       await page.keyboard.press('Escape');
       try {
+        await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
+        await page.locator('[data-dialog-portal] > div').first().evaluate((backdrop: HTMLElement) => backdrop.click());
         await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
       } finally {
         releaseSave();

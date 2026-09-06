@@ -174,6 +174,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const requestClose = () => {
+    if (loading || action || savingNumbers) return;
     if (hasUnsavedNumbers && !window.confirm('Discard the unsaved check-number changes?')) return;
     discardNumberChanges();
     onOpenChange(false);

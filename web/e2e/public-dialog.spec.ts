@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const harnessModule = '/e2e/fixtures/dialog-harness.tsx';
 
-test('shared Dialog applies the latest Escape policy and handler while open', async ({ page }) => {
+test('shared Dialog applies the latest Escape policy and handler while open', async ({ page }): Promise<void> => {
   await page.goto('/');
   await page.addScriptTag({
     type: 'module',

@@ -300,9 +300,13 @@ export function ReplaceCheckModal({
   const corrected = preview?.corrected;
   const mode = preview?.mode;
   const employeeName = payrollItem.employee_name ?? 'this employee';
+  const handleDialogOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && submitting) return;
+    onOpenChange(nextOpen);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!submitting}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange} dismissOnEscape={!submitting}>
       <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Replace check (uncashed)</DialogTitle>

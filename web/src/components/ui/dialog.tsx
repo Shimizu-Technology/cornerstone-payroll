@@ -108,7 +108,7 @@ interface DialogProps {
   dismissOnEscape?: boolean;
 }
 
-export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }: DialogProps): React.ReactElement | null {
   const generatedTitleId = React.useId();
   const [titleId, setTitleId] = React.useState(generatedTitleId);
   const portalRef = React.useRef<HTMLDivElement>(null);

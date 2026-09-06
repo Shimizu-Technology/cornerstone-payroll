@@ -59,6 +59,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   };
 
   const handleClose = () => {
+    if (loading || step === 'applying') return;
     reset();
     onOpenChange(false);
   };

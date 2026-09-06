@@ -170,6 +170,7 @@ export function PayrollIntakeImportModal({
   };
 
   const handleClose = () => {
+    if (loading || step === 'applying' || creatingEmployee) return;
     reset();
     onOpenChange(false);
   };
@@ -427,7 +428,13 @@ export function PayrollIntakeImportModal({
     <>
       <Dialog
         open={open}
-        onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}
+        onOpenChange={(nextOpen): void => {
+          if (nextOpen) {
+            onOpenChange(true);
+            return;
+          }
+          handleClose();
+        }}
         dismissOnEscape={!loading && step !== 'applying' && !creatingEmployee}
       >
       <DialogContent className="dialog-top dialog-wide max-w-7xl max-h-[calc(100vh-5rem)] overflow-y-auto">
@@ -688,7 +695,9 @@ export function PayrollIntakeImportModal({
 
       <Dialog
         open={Boolean(createEmployeeRow)}
-        onOpenChange={(nextOpen) => !nextOpen && !creatingEmployee && setCreateEmployeeRow(null)}
+        onOpenChange={(nextOpen): void => {
+          if (!nextOpen && !creatingEmployee) setCreateEmployeeRow(null);
+        }}
         dismissOnEscape={!creatingEmployee}
       >
         <DialogContent className="max-w-2xl rounded-3xl">
