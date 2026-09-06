@@ -64,6 +64,7 @@ interface SettingToggleProps {
 function SettingToggle({ checked, label, description, onToggle }: SettingToggleProps): ReactElement {
   const switchId = useId();
   const labelId = `${switchId}-label`;
+  const descriptionId = description ? `${switchId}-description` : undefined;
 
   return (
     <div className="flex items-start gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -73,6 +74,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
         role="switch"
         aria-checked={checked}
         aria-labelledby={labelId}
+        aria-describedby={descriptionId}
         onClick={onToggle}
         className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 ${
           checked ? 'bg-blue-600' : 'bg-gray-300'
@@ -86,7 +88,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
       </button>
       <div>
         <label id={labelId} htmlFor={switchId} className="cursor-pointer text-sm font-medium text-gray-800">{label}</label>
-        {description && <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>}
+        {description && <p id={descriptionId} className="mt-1 text-xs leading-5 text-gray-600">{description}</p>}
       </div>
     </div>
   );
