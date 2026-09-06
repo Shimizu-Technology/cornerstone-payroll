@@ -31,7 +31,7 @@ class R2StorageService
   class UploadError < StandardError; end
   class DownloadError < StandardError; end
   class InvalidKeyError < StandardError; end
-  LOCAL_STORAGE_ROOT = Rails.root.join("tmp", "local_r2_storage")
+  LOCAL_STORAGE_ROOT = Rails.root.join("tmp", "local_r2_storage", Rails.env)
 
   def initialize
     validate_configuration!

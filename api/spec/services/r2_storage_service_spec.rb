@@ -6,8 +6,14 @@ RSpec.describe R2StorageService do
   let(:service) { described_class.new }
 
   before do
-    FileUtils.rm_rf(Rails.root.join("tmp/local_r2_storage"))
+    FileUtils.rm_rf(described_class::LOCAL_STORAGE_ROOT)
     allow(service).to receive(:configured?).and_return(false)
+  end
+
+  after { FileUtils.rm_rf(described_class::LOCAL_STORAGE_ROOT) }
+
+  it "isolates local objects by Rails environment" do
+    expect(described_class::LOCAL_STORAGE_ROOT).to eq(Rails.root.join("tmp", "local_r2_storage", "test"))
   end
 
   it "rejects traversal keys for local uploads" do

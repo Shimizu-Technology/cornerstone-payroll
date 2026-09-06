@@ -52,6 +52,9 @@ module QuickbooksHistory
         raise ArgumentError, "Every non-summary paycheck must reconcile before locking" if batch.historical_paychecks.where(reconciliation_status: "unmatched").exists?
         raise ArgumentError, "Review every QuickBooks worker before locking" if batch.unresolved_worker_count.positive?
         raise ArgumentError, "Every original QuickBooks source file must be retained and verified before locking" unless batch.source_files_complete_and_verified?
+        unless batch.historical_import_cutover_review&.approved?
+          raise ArgumentError, "Approve the verified QuickBooks cutover review before locking"
+        end
 
         verify_preview_totals!
         batch.update!(status: "locked", locked_by: actor, locked_at: Time.current)

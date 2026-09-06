@@ -26,6 +26,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { formatCurrency, formatDateRange } from '@/lib/utils';
@@ -47,6 +48,7 @@ import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
 const MAX_BUNDLE_FILES = 75;
+const CUTOVER_POLL_DELAYS_MS = [2_000, 3_000, 5_000, 8_000, 10_000] as const;
 const HISTORICAL_REPORTS: Array<{ value: HistoricalReportType; label: string }> = [
   { value: 'register', label: 'Payroll register' },
   { value: 'employee_summary', label: 'Employee summary' },
@@ -178,6 +180,7 @@ export function HistoricalPayroll(): ReactElement {
   const reportRequestIdRef = useRef(0);
   const selectedBatchIdRef = useRef<number | null>(null);
   const batchPageRef = useRef(1);
+  const detailQueryRef = useRef<{ page: number; periodId?: number; search: string }>({ page: 1, search: '' });
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
@@ -192,7 +195,7 @@ export function HistoricalPayroll(): ReactElement {
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | null>(null);
+  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | 'cutover_verify' | 'cutover_save' | 'cutover_download' | 'cutover_approve' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -213,6 +216,15 @@ export function HistoricalPayroll(): ReactElement {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportExporting, setReportExporting] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
+  const [cutoverDispositions, setCutoverDispositions] = useState<Record<string, string>>({});
+  const [cutoverAttestations, setCutoverAttestations] = useState<Record<string, boolean>>({});
+  const [cutoverNotes, setCutoverNotes] = useState('');
+  const [cutoverApprovalOpen, setCutoverApprovalOpen] = useState(false);
+  const [cutoverPollingError, setCutoverPollingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    detailQueryRef.current = { page, periodId, search };
+  }, [page, periodId, search]);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -415,6 +427,75 @@ export function HistoricalPayroll(): ReactElement {
     () => detail?.id === selectedBatchId ? detail : batches.find((batch) => batch.id === selectedBatchId) || null,
     [batches, detail, selectedBatchId],
   );
+  const cutoverReviewSyncKey = [
+    selectedBatch?.cutover_review?.id ?? '',
+    selectedBatch?.cutover_review?.status ?? '',
+    selectedBatch?.cutover_review?.evidence_digest ?? '',
+    selectedBatch?.cutover_review?.updated_at ?? '',
+  ].join('|');
+
+  useEffect(() => {
+    const review = selectedBatch?.cutover_review;
+    setCutoverDispositions(review?.exception_dispositions || {});
+    setCutoverAttestations(review?.attestations || {});
+    setCutoverNotes(review?.approval_notes || '');
+    setCutoverApprovalOpen(false);
+  // Reset only when the persisted review changes, not when a list refresh creates an equivalent object.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutoverReviewSyncKey, selectedBatchId]);
+
+  useEffect(() => {
+    if (!selectedBatchId || selectedBatch?.cutover_review?.status !== 'pending') {
+      setCutoverPollingError(null);
+      return;
+    }
+
+    setCutoverPollingError(null);
+    let cancelled = false;
+    let startedListLoad = false;
+    let timeoutId: number | undefined;
+    let pollAttempt = 1;
+    const poll = async (): Promise<void> => {
+      let shouldContinue = true;
+      try {
+        const requestId = ++detailRequestIdRef.current;
+        const detailQuery = detailQueryRef.current;
+        const response = await historicalImportsApi.show(selectedBatchId, {
+          page: detailQuery.page,
+          per_page: 50,
+          period_id: detailQuery.periodId,
+          search: detailQuery.search.trim() || undefined,
+        });
+        if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
+
+        shouldContinue = response.data.cutover_review?.status === 'pending';
+        setDetail(response.data);
+        setMeta(response.meta);
+        setCutoverPollingError(null);
+
+        if (!shouldContinue) {
+          startedListLoad = true;
+          await loadList(batchPageRef.current, selectedBatchId);
+        }
+        if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
+      } catch (err) {
+        if (!cancelled) setCutoverPollingError(errorMessage(err, 'Cutover verification status could not be refreshed.'));
+      } finally {
+        if (!cancelled && shouldContinue) {
+          const delay = CUTOVER_POLL_DELAYS_MS[Math.min(pollAttempt, CUTOVER_POLL_DELAYS_MS.length - 1)];
+          pollAttempt += 1;
+          timeoutId = window.setTimeout(() => void poll(), delay);
+        }
+      }
+    };
+    timeoutId = window.setTimeout(() => void poll(), CUTOVER_POLL_DELAYS_MS[0]);
+
+    return () => {
+      cancelled = true;
+      if (startedListLoad) listRequestIdRef.current += 1;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
 
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
@@ -619,6 +700,97 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
+  const verifyCutover = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('cutover_verify');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.verifyCutover(batchId);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
+      setNotice({
+        tone: 'success',
+        message: response.meta.enqueued
+          ? 'Final verification started. This page will update automatically when every retained source comparison finishes.'
+          : 'Final verification is already running. This page will update automatically.',
+      });
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'Final cutover verification could not be completed.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const saveCutoverReview = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('cutover_save');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.updateCutoverReview(batchId, {
+        exception_dispositions: cutoverDispositions,
+        attestations: cutoverAttestations,
+        approval_notes: cutoverNotes,
+      });
+      if (selectedBatchIdRef.current !== batchId) return;
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
+      setNotice({ tone: 'success', message: response.data.cutover_review?.ready_for_approval ? 'Cutover review saved and ready for approval.' : 'Cutover review saved. Complete every item before approval.' });
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'The cutover review could not be saved.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const downloadCutoverEvidence = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('cutover_download');
+    setError(null);
+    try {
+      const download = await historicalImportsApi.downloadCutoverEvidence(batchId);
+      const url = URL.createObjectURL(download.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = download.filename || `quickbooks_cutover_evidence_batch_${batchId}.xlsx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice({ tone: 'success', message: 'The cutover evidence workbook was downloaded.' });
+    } catch (err) {
+      handleError(err, 'The cutover evidence workbook could not be downloaded.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const approveCutover = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    const review = selectedBatch?.cutover_review;
+    if (!batchId || !review) return;
+    setAction('cutover_approve');
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.approveCutover(batchId, review.approval_acknowledgement);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
+      setCutoverApprovalOpen(false);
+      setNotice({ tone: 'success', message: 'QuickBooks cutover is approved. The historical batch can now be locked.' });
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'The cutover review could not be approved.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   const downloadHistoricalReport = async (format: 'csv' | 'xlsx' | 'pdf'): Promise<void> => {
     setReportExporting(format);
     setReportError(null);
@@ -648,6 +820,14 @@ export function HistoricalPayroll(): ReactElement {
   const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
+  const cutoverReview = selectedBatch?.cutover_review;
+  const cutoverApproved = cutoverReview?.status === 'approved';
+  const canDownloadCutoverEvidence = canMutate || cutoverApproved;
+  const cutoverChecks = cutoverReview?.evidence?.checks || [];
+  const cutoverYears = cutoverReview?.evidence?.years || [];
+  const cutoverExceptions = cutoverReview?.evidence?.exceptions || [];
+  const cutoverEvidencePassed = cutoverReview?.evidence?.passed === true;
+  const cutoverEvidenceDate = cutoverReview?.verified_at || cutoverReview?.evidence?.generated_at;
   const historicalReportFormats: ReportDownloadFormat[] = [
     ...(report && report.summary.row_count <= 10_000 ? [
       { key: 'pdf', label: 'PDF', description: 'Readable report with source notes', kind: 'pdf' as const, loading: reportExporting === 'pdf', onSelect: () => downloadHistoricalReport('pdf') },
@@ -730,7 +910,7 @@ export function HistoricalPayroll(): ReactElement {
               <div className="space-y-2 text-xs text-primary-100/80">
                 <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Private, encrypted original exports</p>
                 <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Bundle and file SHA-256 fingerprints</p>
-                <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Apply-time total verification</p>
+                <p className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-success-300" />Exact paycheck and component verification</p>
               </div>
             </CardContent>
           </Card>
@@ -793,7 +973,7 @@ export function HistoricalPayroll(): ReactElement {
                       <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply is available only after the source exports, reconciliation, and worker review all pass. Lock seals the accepted archive.</p>
                       <div className="flex gap-2">
                         {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!readyToApply || action !== null}>Apply history</Button>}
-                        {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={action !== null}><LockKeyhole className="mr-2 h-4 w-4" />Lock batch</Button>}
+                        {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={!cutoverApproved || action !== null}><LockKeyhole className="mr-2 h-4 w-4" />{cutoverApproved ? 'Lock batch' : 'Complete cutover review'}</Button>}
                         {selectedBatch.status === 'locked' && <Badge variant="success" className="px-4 py-2">Locked and immutable</Badge>}
                       </div>
                     </div>
@@ -803,6 +983,110 @@ export function HistoricalPayroll(): ReactElement {
             </CardContent>
           </Card>
         </section>
+
+        {selectedBatch && (selectedBatch.status === 'applied' || selectedBatch.status === 'locked') && (
+          <Card className="overflow-hidden">
+            <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(255,247,237,0.72),rgba(255,255,255,0.98)_55%,rgba(240,253,250,0.72))]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><ShieldCheck className="h-4 w-4" />Final cutover gate</div>
+                  <CardTitle className="mt-2">Prove the archive works without QuickBooks</CardTitle>
+                  <CardDescription className="mt-2">Re-open the retained originals, parse them again, compare every worker, period, paycheck, component, count, and money total, document known limitations, and confirm the recovery plan before locking this batch.</CardDescription>
+                </div>
+                <div className="shrink-0 lg:text-right">
+                  {cutoverReview?.status === 'approved'
+                    ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Approved</Badge>
+                    : cutoverReview?.status === 'verified'
+                      ? <Badge variant="warning">Checklist needed</Badge>
+                      : cutoverReview?.status === 'failed'
+                        ? <Badge variant="danger">Verification failed</Badge>
+                        : cutoverReview?.status === 'pending'
+                          ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Verification running</Badge>
+                          : <Badge variant="default">Not verified</Badge>}
+                  {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-500">by {cutoverReview.approved_by_name} on {shortDate(cutoverReview.approved_at?.slice(0, 10))}</p>}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 p-4 sm:p-6">
+              {!cutoverReview ? (
+                <div className="flex flex-col gap-4 rounded-2xl border border-dashed border-primary-300 bg-primary-50/40 p-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div><p className="font-semibold text-neutral-950">Run the independent source check</p><p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">This reads the private retained files and compares a fresh parse with the accepted archive. It does not recalculate payroll or change any paycheck.</p></div>
+                  {canMutate && <Button onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Run final verification</Button>}
+                </div>
+              ) : cutoverReview.status === 'pending' ? (
+                <>
+                  <div className="flex items-start gap-4 rounded-2xl border border-primary-200 bg-primary-50 p-6">
+                    <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary-700" />
+                    <div><p className="font-semibold text-neutral-950">Comparing the retained source with the archive</p><p className="mt-2 text-sm leading-6 text-neutral-600">This page checks for the result automatically. You can leave and come back without interrupting verification.</p></div>
+                  </div>
+                  {cutoverPollingError && <div role="alert" className="flex items-start gap-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{cutoverPollingError} Retrying automatically.</span></div>}
+                </>
+              ) : (
+                <>
+                  {cutoverReview.verification_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{cutoverReview.verification_error}</div>}
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverChecks.filter((check) => check.passed).length}/{cutoverChecks.length}</p><p className="mt-1 text-xs text-neutral-500">fresh source comparisons passed</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverYears.length}</p><p className="mt-1 text-xs text-neutral-500">each reconciled independently</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-500">{cutoverEvidencePassed ? 'verified' : 'checked'} {shortDate(cutoverEvidenceDate?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {cutoverChecks.map((check) => (
+                      <div key={check.key} className={`flex items-start gap-4 rounded-xl border p-4 text-sm ${check.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
+                        {check.passed ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
+                        <span>{check.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {cutoverExceptions.length > 0 && (
+                    <section>
+                      <h3 className="font-display text-lg font-extrabold text-neutral-950">Known limitations need a decision</h3>
+                      <p className="mt-1 text-sm leading-6 text-neutral-600">Record why each source limitation is acceptable or what follow-up owns it. Blank decisions block approval.</p>
+                      <div className="mt-4 space-y-4">
+                        {cutoverExceptions.map((exception) => (
+                          <div key={exception.key} className="rounded-xl border border-warning-200 bg-warning-50/60 p-4">
+                            <p className="text-sm leading-6 text-warning-900">{exception.message}</p>
+                            <label htmlFor={`cutover-exception-${exception.key}`} className="mt-3 block text-xs font-bold uppercase tracking-[0.12em] text-warning-800">Reviewed decision</label>
+                            <Textarea id={`cutover-exception-${exception.key}`} value={cutoverDispositions[exception.key] || ''} onChange={(event) => setCutoverDispositions((current) => ({ ...current, [exception.key]: event.target.value }))} placeholder="Explain why this is acceptable or name the follow-up owner." className="mt-2 bg-white" disabled={!canMutate || cutoverApproved} maxLength={1000} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  <section>
+                    <h3 className="font-display text-lg font-extrabold text-neutral-950">No-QuickBooks checklist</h3>
+                    <p className="mt-1 text-sm leading-6 text-neutral-600">These are operational facts the application cannot safely assume. Confirm them only after someone performs each step.</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {Object.entries(cutoverReview.attestation_labels).map(([key, label]) => (
+                        <label key={key} className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-700">
+                          <input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-700 focus:ring-primary-300" checked={Boolean(cutoverAttestations[key])} onChange={(event) => setCutoverAttestations((current) => ({ ...current, [key]: event.target.checked }))} disabled={!canMutate || cutoverApproved} />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div>
+                    <label htmlFor="cutover-approval-notes" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Final review notes</label>
+                    <Textarea id="cutover-approval-notes" value={cutoverNotes} onChange={(event) => setCutoverNotes(event.target.value)} placeholder="Name any remaining limitation or write “None.”" className="mt-2" disabled={!canMutate || cutoverApproved} maxLength={2000} />
+                  </div>
+
+                  <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel QuickBooks only after this approval and the business owner’s separate cancellation decision.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {canDownloadCutoverEvidence && <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>}
+                      {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
+                      {canMutate && cutoverReview.status === 'verified' && <Button variant="outline" onClick={() => void saveCutoverReview()} disabled={action !== null}>{action === 'cutover_save' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Save review</Button>}
+                      {canMutate && cutoverReview.status === 'verified' && <Button onClick={() => setCutoverApprovalOpen(true)} disabled={!cutoverReview.ready_for_approval || action !== null}><ShieldCheck className="mr-2 h-4 w-4" />Approve cutover</Button>}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {detail && (
           <Card>
@@ -1058,6 +1342,14 @@ export function HistoricalPayroll(): ReactElement {
           <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive and fixes the worker links as reviewed. It does not run payroll or update live YTD totals.' : 'Locking seals the applied batch metadata against ordinary changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmation?.action === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
           <DialogFooter><Button variant="outline" onClick={() => setConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmation?.action === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmation?.action === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cutoverApprovalOpen} onOpenChange={(open) => { if (!open && action !== 'cutover_approve') setCutoverApprovalOpen(false); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Approve QuickBooks cutover?</DialogTitle><DialogDescription>This seals the final review record and allows the accepted historical batch to be locked. It does not cancel QuickBooks or change live payroll.</DialogDescription></DialogHeader>
+          <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">{cutoverReview?.approval_acknowledgement}</div>
+          <DialogFooter><Button variant="outline" onClick={() => setCutoverApprovalOpen(false)} disabled={action === 'cutover_approve'}>Cancel</Button><Button onClick={() => void approveCutover()} disabled={action === 'cutover_approve'}>{action === 'cutover_approve' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}Approve verified cutover</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

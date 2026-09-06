@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_06_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_06_223000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -806,9 +806,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_060000) do
     t.index ["company_id", "source_system", "bundle_digest"], name: "idx_historical_batches_unique_bundle", unique: true
     t.index ["company_id"], name: "index_historical_import_batches_on_company_id"
     t.index ["created_by_id"], name: "index_historical_import_batches_on_created_by_id"
+    t.index ["id", "company_id"], name: "idx_historical_import_batches_tenant_key", unique: true
     t.index ["locked_by_id"], name: "index_historical_import_batches_on_locked_by_id"
     t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
+  end
+
+  create_table "historical_import_cutover_reviews", force: :cascade do |t|
+    t.text "approval_acknowledgement"
+    t.text "approval_notes"
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.jsonb "attestations", default: {}, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "evidence", default: {}, null: false
+    t.string "evidence_digest"
+    t.jsonb "exception_dispositions", default: {}, null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.text "verification_error"
+    t.datetime "verification_started_at"
+    t.datetime "verified_at"
+    t.bigint "verified_by_id"
+    t.index ["approved_by_id"], name: "index_historical_import_cutover_reviews_on_approved_by_id"
+    t.index ["company_id"], name: "index_historical_import_cutover_reviews_on_company_id"
+    t.index ["historical_import_batch_id"], name: "idx_historical_cutover_reviews_batch", unique: true
+    t.index ["verified_by_id"], name: "index_historical_import_cutover_reviews_on_verified_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'verified'::character varying::text, 'approved'::character varying::text, 'failed'::character varying::text])", name: "historical_cutover_reviews_status"
   end
 
   create_table "historical_import_source_files", force: :cascade do |t|
@@ -2451,6 +2477,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_06_060000) do
   add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "locked_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_cutover_reviews", "companies"
+  add_foreign_key "historical_import_cutover_reviews", "historical_import_batches"
+  add_foreign_key "historical_import_cutover_reviews", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_cutover_reviews_batch_tenant"
+  add_foreign_key "historical_import_cutover_reviews", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "historical_import_cutover_reviews", "users", column: "verified_by_id", on_delete: :nullify
   add_foreign_key "historical_import_source_files", "companies"
   add_foreign_key "historical_import_source_files", "historical_import_batches"
   add_foreign_key "historical_import_source_files", "users", column: "uploaded_by_id", on_delete: :nullify

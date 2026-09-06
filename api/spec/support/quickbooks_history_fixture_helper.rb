@@ -67,6 +67,25 @@ module QuickbooksHistoryFixtureHelper
     end
   end
 
+  def approve_historical_cutover(batch, actor:)
+    evidence = { "version" => 1, "passed" => true, "exceptions" => [] }
+    HistoricalImportCutoverReview.create!(
+      company: batch.company,
+      historical_import_batch: batch,
+      status: "approved",
+      evidence: evidence,
+      evidence_digest: Digest::SHA256.hexdigest(JSON.generate(evidence)),
+      verified_at: Time.current,
+      verified_by: actor,
+      exception_dispositions: {},
+      attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+      approval_notes: "No remaining limitations in this lifecycle test.",
+      approval_acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT,
+      approved_at: Time.current,
+      approved_by: actor
+    )
+  end
+
   def cleanup_quickbooks_history_uploads
     Array(@quickbooks_history_tempfiles).each do |tempfile|
       tempfile.close

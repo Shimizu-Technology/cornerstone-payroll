@@ -18,6 +18,8 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     review_historical_workers_as_archive_only(batch, actor: actor)
     expect { service.apply!(acknowledgement: "yes") }.to raise_error(ArgumentError, /acknowledgement/)
     expect { service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT) }.to change { batch.reload.status }.from("previewed").to("applied")
+    expect { service.lock! }.to raise_error(ArgumentError, /Approve the verified QuickBooks cutover review/)
+    approve_historical_cutover(batch, actor: actor)
     expect { service.lock! }.to change { batch.reload.status }.from("applied").to("locked")
     expect(batch.locked_by).to eq(actor)
     expect(batch.locked_at).to be_present
@@ -61,6 +63,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     service = described_class.new(batch: batch, actor: actor)
     review_historical_workers_as_archive_only(batch, actor: actor)
     service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    approve_historical_cutover(batch, actor: actor)
     service.lock!
     paycheck = batch.historical_paychecks.first
 
@@ -90,6 +93,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     review_historical_workers_as_archive_only(batch, actor: actor)
     service = described_class.new(batch: batch, actor: actor)
     service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+    approve_historical_cutover(batch, actor: actor)
     service.lock!
 
     expect(batch.update(source_label: "Changed after lock")).to be(false)
