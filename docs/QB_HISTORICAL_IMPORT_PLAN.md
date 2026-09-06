@@ -1,6 +1,6 @@
 # QuickBooks Historical Import Plan
 
-**Status:** core importer and protected source retention hardened and locally validated; unified reporting and cutover evidence remain before a production import
+**Status:** core importer, protected source retention, and unified historical reporting are implemented and locally validated; cutover evidence remains before a production import
 **Owner:** Leon / Shimizu Technology  
 **Last reviewed:** 2026-09-06
 
@@ -32,11 +32,25 @@ The archive uses five dedicated records:
 
 This is intentionally an archive and reconciliation feature. It does not recreate old payroll as editable live payroll and does not backfill current YTD balances.
 
+## Historical report boundary
+
+Accepted `applied` and `locked` batches feed five read-only report views:
+
+- payroll register;
+- employee summary;
+- employee and employer tax detail;
+- pre-tax deductions, after-tax deductions, loans, retirement items, and employer contributions;
+- check and payment history.
+
+Each view supports all-years or source-pay-year filtering, an optional worker filter, pagination, and CSV, XLSX, and PDF exports. The report response and Excel workbook include source-batch provenance and verified-file counts. Accountants can use these views; previews remain excluded from official history.
+
+Opening summaries are always counted and totaled separately from detailed paychecks. They may cover a span of dates for which QuickBooks did not supply individual paycheck periods, so the system does not represent them as monthly or quarterly activity. Reports use QuickBooks' stored values without invoking Cornerstone calculators, writing live YTD totals, or exposing employee SSNs, encrypted snapshots, or private object-store keys.
+
 ## Verified MoSa bundle
 
 The read-only QuickBooks export collected on 2026-09-05 contains 45 files. The parser currently produces:
 
-- 114 historical workers, including workers with no paycheck in the exported range;
+- 113 historical workers, including workers with no paycheck in the exported range;
 - 59 historical period groups;
 - 2,881 paycheck snapshots from 2024-06-30 through 2026-08-27;
 - 2,833 native paycheck rows that match Payroll Details to Paycheck History exactly;
@@ -119,7 +133,7 @@ The QuickBooks exit is deliberately split into four reviewable releases. Finishi
 
 1. **Importer safety and reconciliation:** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
 2. **Protected source retention (implemented; production verification pending):** application-managed private source-file storage, access controls, hashes, retention status, and integrity-checked downloads so the original evidence is not lost when QuickBooks access ends. Provider durability/backup and restore evidence remain operational cutover gates.
-3. **Unified read-only history and reports:** payroll register, employee history, tax, deduction, retirement, loan, and check views read historical snapshots without writing to live YTD or recalculating historical values. Reports must label source, completeness, and opening-summary limitations.
+3. **Unified read-only history and reports (implemented; production verification pending):** payroll register, employee summary, tax, deduction/contribution, retirement, loan, and check views read only accepted historical snapshots without writing to live YTD or recalculating historical values. UI and exports label their QuickBooks source, provenance, and opening-summary limitations.
 4. **Cutover evidence and signoff:** repeatable reconciliation artifacts, exception disposition, independent aggregate checks, operator approval, rollback rehearsal, and a final no-QuickBooks dependency checklist.
 
 The production feature flag remains off until these releases are deployed and the cutover gate is signed. The first production action is a preview; apply and lock require separate operator approval.

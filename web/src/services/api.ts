@@ -3800,6 +3800,71 @@ export interface HistoricalArchiveSummary {
   net_pay: string;
 }
 
+export type HistoricalReportType = 'register' | 'employee_summary' | 'taxes' | 'deductions' | 'checks';
+
+export interface HistoricalReportColumn {
+  key: string;
+  label: string;
+  format: 'date' | 'text' | 'number' | 'money';
+}
+
+export interface HistoricalReportMoneyTotals {
+  gross_pay: string;
+  pretax_deductions: string;
+  employee_taxes: string;
+  after_tax_deductions: string;
+  net_pay: string;
+  employer_taxes: string;
+  employer_contributions: string;
+  total_payroll_cost: string;
+}
+
+export interface HistoricalReport {
+  report_type: HistoricalReportType;
+  title: string;
+  description: string;
+  generated_at: string;
+  source_statement: string;
+  filters: { year: number | null; worker_key: string | null };
+  available_years: number[];
+  available_workers: Array<{ key: string; name: string }>;
+  columns: HistoricalReportColumn[];
+  rows: Array<Record<string, string | number | null>>;
+  summary: {
+    row_count: number;
+    paycheck_count: number;
+    detailed_paycheck_count: number;
+    opening_summary_count: number;
+    totals: HistoricalReportMoneyTotals;
+    detailed_paycheck_totals: HistoricalReportMoneyTotals;
+    opening_summary_totals: HistoricalReportMoneyTotals;
+    missing_check_number_count: number;
+  };
+  coverage: {
+    first_detailed_pay_date: string | null;
+    last_detailed_pay_date: string | null;
+    opening_summary_start: string | null;
+    opening_summary_end: string | null;
+  };
+  warnings: string[];
+  provenance: Array<{
+    batch_id: number;
+    source_label: string;
+    status: 'applied' | 'locked';
+    bundle_digest: string;
+    importer_version: string;
+    applied_at: string | null;
+    locked_at: string | null;
+    retained_file_count: number;
+    verified_file_count: number;
+  }>;
+}
+
+export interface HistoricalReportResponse {
+  data: HistoricalReport;
+  meta: PaginationMeta;
+}
+
 export const historicalImportsApi = {
   list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }>('/admin/historical_imports', params),
@@ -3824,6 +3889,21 @@ export const historicalImportsApi = {
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
   archiveUnlinkedWorkers: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
+};
+
+export const historicalReportsApi = {
+  show: (
+    reportType: HistoricalReportType,
+    params?: { page?: number; per_page?: number; year?: number; worker_key?: string },
+    signal?: AbortSignal,
+  ): Promise<HistoricalReportResponse> =>
+    api.get<HistoricalReportResponse>(`/admin/historical_reports/${reportType}`, params, { signal }),
+  download: (
+    reportType: HistoricalReportType,
+    format: 'csv' | 'xlsx' | 'pdf',
+    params?: { year?: number; worker_key?: string },
+  ): Promise<BlobDownload> =>
+    api.getBlobWithParams(`/admin/historical_reports/${reportType}/${format}`, params),
 };
 
 // Auth
