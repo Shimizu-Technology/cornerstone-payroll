@@ -178,6 +178,31 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     expect(parsed.errors).to include(/pay setup could not be separated/)
   end
 
+  it "turns malformed retained tax and pay sections into review errors" do
+    malformed_worker = HistoricalWorker.new(
+      id: 43,
+      source_name: "Worker, Alice",
+      source_status: "active",
+      private_snapshot: JSON.generate(
+        {
+          "Tax info" => nil,
+          "Pay info" => { "rate" => 11.25 },
+          "_employee_directory" => {
+            "Birth date" => "01/02/1990",
+            "Email" => "worker@example.test",
+            "Home address" => "123 Main Street, Hagatna, GU 96910"
+          }
+        }
+      )
+    )
+
+    parsed = described_class.new(worker: malformed_worker, pay_frequency: "biweekly").call
+
+    expect(parsed.errors).to include("QuickBooks tax info is malformed in the retained employee snapshot")
+    expect(parsed.errors).to include("QuickBooks pay info is malformed in the retained employee snapshot")
+    expect(parsed.errors).to include(/pay setup could not be separated/)
+  end
+
   it "blocks unknown positive deductions instead of guessing their tax treatment" do
     parsed = described_class.new(
       worker: worker(pay_info: "Hourly rate: $9.25/hr Pay method: Check Deductions: Mystery: $10.00 Contributions: None Time off: None"),

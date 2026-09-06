@@ -22,7 +22,7 @@ The historical import lane now:
 - lets accountants browse the archive while limiting preview, apply, lock, and employee mapping to managers and administrators;
 - never creates or changes live pay periods, payroll items, YTD aggregates, payments, tax filings, checks, reminders, or notifications.
 
-The archive uses seven dedicated records:
+The archive and clean-client preparation use eight dedicated records:
 
 - `HistoricalImportBatch` records provenance, validation, reconciliation, lifecycle state, and operator attribution.
 - `HistoricalImportSourceFile` records immutable source metadata, private object location, verification state, and the user who uploaded it.
@@ -31,6 +31,7 @@ The archive uses seven dedicated records:
 - `HistoricalPaycheck` stores the authoritative money, hours, taxes, deductions, contributions, payment metadata, and source-row evidence.
 - `HistoricalImportCutoverReview` stores the sealed source-to-ledger verification, exception decisions, operational attestations, and attributed approval required before lock.
 - `HistoricalClientBootstrap` stores the reviewed, fingerprinted plan used to create a clean client roster and link it to the archive.
+- `HistoricalClientBootstrapDispatch` is the durable queue outbox for a specific preparation attempt, allowing automatic recovery if queue submission is interrupted after the database commit.
 
 This is intentionally an archive and reconciliation feature. It does not recreate old payroll as editable live payroll and does not backfill current YTD balances.
 

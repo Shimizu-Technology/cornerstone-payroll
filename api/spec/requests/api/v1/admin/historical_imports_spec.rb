@@ -245,6 +245,23 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(Employee.where(company: company)).to be_empty
   end
 
+  it "accepts a durable clean-client preparation when immediate queue submission fails" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "queue unavailable")
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+      acknowledgement: QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT
+    }
+
+    expect(response).to have_http_status(:accepted), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("pending")
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(false)
+    dispatch = batch.historical_client_bootstrap.historical_client_bootstrap_dispatches.sole
+    expect(dispatch.enqueued_at).to be_nil
+    expect(dispatch.last_error).to eq("queue unavailable")
+  end
+
   it "returns forbidden when bootstrap authorization changes during a request" do
     batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
     allow(QuickbooksHistory::ClientBootstrapAuthorization).to receive(:ensure_authorized!).and_raise(

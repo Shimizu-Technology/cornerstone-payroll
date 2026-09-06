@@ -656,25 +656,25 @@ test('never lets a completed employee-preparation poll restore a batch the user 
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
 });
 
-test('makes failed and interrupted employee preparation safe to understand and retry', async ({ page }) => {
+test('makes failed preparation retryable while pending recovery stays safely in progress', async ({ page }) => {
   await mockApplicationShell(page);
   const failed: HistoricalImportDetail = {
     ...detail(1),
     client_bootstrap: clientBootstrap('failed', true),
   };
-  const interrupted: HistoricalImportDetail = {
+  const recovering: HistoricalImportDetail = {
     ...detail(2),
-    client_bootstrap: clientBootstrap('pending', true),
+    client_bootstrap: clientBootstrap('pending'),
   };
 
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
-    data: [withoutDetailCollections(failed), withoutDetailCollections(interrupted)],
+    data: [withoutDetailCollections(failed), withoutDetailCollections(recovering)],
     meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
   }));
   await page.route('**/api/v1/admin/historical_imports/*?**', (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
     return fulfillJson(route, {
-      data: id === 1 ? failed : interrupted,
+      data: id === 1 ? failed : recovering,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
   });
@@ -685,10 +685,9 @@ test('makes failed and interrupted employee preparation safe to understand and r
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
 
   await page.locator('#historical-batch').selectOption('2');
-  await expect(page.getByText('Preparation interrupted')).toBeVisible();
-  await expect(page.getByText('Employee preparation appears to have been interrupted. No partial setup was kept. Try again to safely restart it.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
-  await expect(page.getByText('Creating employee records…')).toHaveCount(0);
+  await expect(page.getByText('Preparing employees')).toBeVisible();
+  await expect(page.getByText('Creating employee records…')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 });
 
 test('keeps checking verification status after a temporary refresh failure', async ({ page }) => {

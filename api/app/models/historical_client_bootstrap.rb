@@ -2,12 +2,11 @@
 
 class HistoricalClientBootstrap < ApplicationRecord
   STATUSES = %w[previewed pending applied failed].freeze
-  PENDING_STALE_AFTER = 30.minutes
-
   belongs_to :company
   belongs_to :historical_import_batch
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :applied_by, class_name: "User", optional: true
+  has_many :historical_client_bootstrap_dispatches, dependent: :restrict_with_error
 
   validates :historical_import_batch_id, uniqueness: true
   validates :plan_digest, presence: true
@@ -34,13 +33,7 @@ class HistoricalClientBootstrap < ApplicationRecord
   end
 
   def ready_to_apply?
-    (previewed? || failed? || stale_pending?) && Array(validation_errors).empty?
-  end
-
-  def stale_pending?
-    # The job must finish within this recovery window. A retry uses a new token,
-    # so a delayed job can never apply after an operator starts another attempt.
-    pending? && apply_started_at.present? && apply_started_at <= PENDING_STALE_AFTER.ago
+    (previewed? || failed?) && Array(validation_errors).empty?
   end
 
   private

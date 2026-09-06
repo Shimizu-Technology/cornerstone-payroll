@@ -40,31 +40,30 @@ RSpec.describe HistoricalClientBootstrap do
     expect(bootstrap.errors[:base]).to include("Client bootstrap evidence cannot be deleted")
   end
 
-  it "allows an interrupted pending preparation to be retried after the recovery window" do
+  it "keeps pending preparation in automatic recovery instead of allowing a competing attempt" do
     company = create(:company)
     bootstrap = described_class.create!(
       company: company,
       historical_import_batch: historical_batch(company),
       plan_digest: "b" * 64,
       status: "pending",
-      apply_started_at: described_class::PENDING_STALE_AFTER.ago - 1.second
+      apply_started_at: 2.hours.ago
     )
 
-    expect(bootstrap).to be_stale_pending
-    expect(bootstrap).to be_ready_to_apply
+    expect(bootstrap).not_to be_ready_to_apply
   end
 
-  it "does not offer a duplicate retry while pending preparation is still current" do
+  it "allows a failed preparation to be retried after the background job records failure" do
     company = create(:company)
     bootstrap = described_class.create!(
       company: company,
       historical_import_batch: historical_batch(company),
       plan_digest: "b" * 64,
-      status: "pending",
-      apply_started_at: Time.current
+      status: "failed",
+      apply_started_at: Time.current,
+      apply_error: "Employee preparation could not be completed."
     )
 
-    expect(bootstrap).not_to be_stale_pending
-    expect(bootstrap).not_to be_ready_to_apply
+    expect(bootstrap).to be_ready_to_apply
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_07_010100) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -811,6 +811,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010100) do
     t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text", name: "historical_client_bootstraps_summary_object"
     t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text AND jsonb_typeof(review_items) = 'array'::text", name: "historical_client_bootstraps_arrays"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'pending'::character varying, 'applied'::character varying, 'failed'::character varying]::text[])", name: "historical_client_bootstraps_status_check"
+  end
+
+  create_table "historical_client_bootstrap_dispatches", force: :cascade do |t|
+    t.string "attempt_token", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.integer "dispatch_attempts", default: 0, null: false
+    t.datetime "enqueued_at"
+    t.bigint "historical_client_bootstrap_id", null: false
+    t.text "last_error"
+    t.bigint "requested_by_id"
+    t.datetime "updated_at", null: false
+    t.index ["completed_at", "enqueued_at"], name: "idx_historical_bootstrap_dispatch_due"
+    t.index ["historical_client_bootstrap_id", "attempt_token"], name: "idx_historical_bootstrap_dispatch_attempt", unique: true
+    t.index ["requested_by_id"], name: "index_historical_client_bootstrap_dispatches_on_requested_by_id"
   end
 
   create_table "historical_import_batches", force: :cascade do |t|
@@ -2509,6 +2524,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010100) do
   add_foreign_key "historical_client_bootstraps", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_client_bootstraps_batch_tenant"
   add_foreign_key "historical_client_bootstraps", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_client_bootstraps", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "historical_client_bootstrap_dispatches", "historical_client_bootstraps"
+  add_foreign_key "historical_client_bootstrap_dispatches", "users", column: "requested_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "companies"
   add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify

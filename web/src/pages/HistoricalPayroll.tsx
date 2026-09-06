@@ -465,7 +465,6 @@ export function HistoricalPayroll(): ReactElement {
 
     setCutoverPollingError(null);
     let cancelled = false;
-    let startedListLoad = false;
     let timeoutId: number | undefined;
     let pollAttempt = 1;
     const poll = async (): Promise<void> => {
@@ -487,7 +486,6 @@ export function HistoricalPayroll(): ReactElement {
         setCutoverPollingError(null);
 
         if (!shouldContinue) {
-          startedListLoad = true;
           await loadList(batchPageRef.current, selectedBatchId);
         }
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
@@ -505,7 +503,6 @@ export function HistoricalPayroll(): ReactElement {
 
     return () => {
       cancelled = true;
-      if (startedListLoad) listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
@@ -520,7 +517,6 @@ export function HistoricalPayroll(): ReactElement {
     let cancelled = false;
     let timeoutId: number | undefined;
     let pollAttempt = 1;
-    let startedListLoad = false;
     const poll = async (): Promise<void> => {
       let shouldContinue = true;
       try {
@@ -544,14 +540,12 @@ export function HistoricalPayroll(): ReactElement {
           if (status === 'applied') {
             setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.' });
             setEmployeeReloadToken((current) => current + 1);
-            startedListLoad = true;
             await Promise.all([
               loadList(batchPageRef.current, selectedBatchId),
               refreshCompanies(),
             ]);
           } else if (status === 'failed') {
             setNotice({ tone: 'warning', message: 'Employee preparation did not finish. No partial employee setup was kept; review the message below and try again.' });
-            startedListLoad = true;
             await loadList(batchPageRef.current, selectedBatchId);
           }
         }
@@ -569,7 +563,6 @@ export function HistoricalPayroll(): ReactElement {
 
     return () => {
       cancelled = true;
-      if (startedListLoad) listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadList, refreshCompanies, selectedBatch?.client_bootstrap?.status, selectedBatchId]);
@@ -820,7 +813,7 @@ export function HistoricalPayroll(): ReactElement {
         tone: 'success',
         message: response.meta.enqueued
           ? 'Employee preparation started. This page will update automatically when every record is ready.'
-          : 'Employee preparation is already running. This page will update automatically.',
+          : 'Employee preparation is safely queued or already running. This page will update automatically.',
       });
       await loadList(batchPageRef.current, batchId);
     } catch (err) {
@@ -1126,10 +1119,8 @@ export function HistoricalPayroll(): ReactElement {
                 </div>
                 {clientBootstrap?.status === 'applied'
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
-                  : clientBootstrap?.status === 'pending' && !clientBootstrap.ready_to_apply
-                    ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Preparing employees</Badge>
                   : clientBootstrap?.status === 'pending'
-                    ? <Badge variant="warning">Preparation interrupted</Badge>
+                    ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Preparing employees</Badge>
                   : clientBootstrap?.ready_to_apply
                     ? <Badge variant="info">Preview ready</Badge>
                     : clientBootstrap
@@ -1195,7 +1186,6 @@ export function HistoricalPayroll(): ReactElement {
                     </div>
                   </div>
                   {clientBootstrap.status === 'failed' && clientBootstrap.apply_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{clientBootstrap.apply_error}</div>}
-                  {clientBootstrap.status === 'pending' && clientBootstrap.ready_to_apply && <div role="alert" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">Employee preparation appears to have been interrupted. No partial setup was kept. Try again to safely restart it.</div>}
                   {clientBootstrap.status === 'pending' && bootstrapPollingError && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{bootstrapPollingError}</div>}
                 </>
               )}

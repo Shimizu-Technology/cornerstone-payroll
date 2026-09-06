@@ -179,7 +179,7 @@ module Api
           render json: {
             data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
             meta: { enqueued: result.enqueued }
-          }, status: result.enqueued ? :accepted : :ok
+          }, status: result.bootstrap.pending? ? :accepted : :ok
         rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
           render json: error_payload(e), status: :forbidden
         rescue ArgumentError, ActiveRecord::RecordInvalid => e

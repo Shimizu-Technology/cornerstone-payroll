@@ -14,11 +14,10 @@ module QuickbooksHistory
       ensure_authorized!
       raise ArgumentError, "Type #{ClientBootstrapApplyService::ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ClientBootstrapApplyService::ACKNOWLEDGEMENT
 
-      prepared, should_enqueue = prepare_pending_bootstrap!
-      return Result.new(bootstrap: prepared, enqueued: false) unless should_enqueue
+      prepared, dispatch = prepare_pending_bootstrap!
+      return Result.new(bootstrap: prepared, enqueued: false) unless dispatch
 
-      enqueue!(prepared)
-      Result.new(bootstrap: prepared, enqueued: true)
+      Result.new(bootstrap: prepared, enqueued: dispatch.dispatch!)
     end
 
     private
@@ -32,9 +31,13 @@ module QuickbooksHistory
     def prepare_pending_bootstrap!
       bootstrap.with_lock do
         bootstrap.reload
-        return [ bootstrap, false ] if bootstrap.applied?
-        if bootstrap.pending? && !bootstrap.stale_pending?
-          return [ bootstrap, false ]
+        return [ bootstrap, nil ] if bootstrap.applied?
+        if bootstrap.pending?
+          dispatch = bootstrap.historical_client_bootstrap_dispatches.find_or_create_by!(
+            attempt_token: bootstrap.apply_started_at.iso8601(6)
+          ) { |record| record.requested_by = actor }
+          dispatch.update!(requested_by: actor) unless dispatch.requested_by
+          return [ bootstrap, dispatch ]
         end
 
         plan = ClientBootstrapPlan.new(batch: bootstrap.historical_import_batch).call
@@ -44,37 +47,13 @@ module QuickbooksHistory
         end
 
         bootstrap.update!(status: "pending", apply_started_at: Time.current, apply_error: nil)
+        dispatch = bootstrap.historical_client_bootstrap_dispatches.create!(
+          requested_by: actor,
+          attempt_token: bootstrap.apply_started_at.iso8601(6)
+        )
         record_audit!("historical_imports#queue_client_bootstrap", record: bootstrap)
-        [ bootstrap, true ]
+        [ bootstrap, dispatch ]
       end
-    end
-
-    def enqueue!(prepared)
-      token = prepared.apply_started_at.iso8601(6)
-      begin
-        ClientBootstrapJob.perform_later(prepared.id, actor.id, token)
-      rescue StandardError => e
-        mark_enqueue_failed_safely!(prepared, token)
-        Rails.logger.error("Historical client bootstrap enqueue failed for bootstrap #{prepared.id}: #{e.class}: #{e.message}")
-        raise ArgumentError, "Clean-client employee preparation could not be queued"
-      end
-    end
-
-    def mark_enqueue_failed!(prepared, token)
-      prepared.with_lock do
-        return unless prepared.pending? && prepared.apply_started_at&.iso8601(6) == token
-
-        prepared.update!(status: "failed", apply_error: "Employee preparation could not be queued. Try again.")
-        record_audit!("historical_imports#client_bootstrap_failed", record: prepared)
-      end
-    end
-
-    def mark_enqueue_failed_safely!(prepared, token)
-      mark_enqueue_failed!(prepared, token)
-    rescue StandardError => e
-      Rails.logger.error(
-        "Historical client bootstrap enqueue failure could not be persisted for bootstrap #{prepared.id}: #{e.class}: #{e.message}"
-      )
     end
 
     def record_audit!(action, record:)

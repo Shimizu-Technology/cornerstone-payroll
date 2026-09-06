@@ -138,36 +138,52 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
     expect(QuickbooksHistory::ClientBootstrapPlan).not_to have_received(:new)
   end
 
-  it "persists a safe retry state when the job adapter cannot enqueue preparation" do
+  it "persists a durable dispatch and recovers when the job adapter becomes available" do
     bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
     allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "private adapter failure")
 
+    result = nil
     expect do
-      QuickbooksHistory::ClientBootstrapEnqueueService.new(
+      result = QuickbooksHistory::ClientBootstrapEnqueueService.new(
         bootstrap: bootstrap,
         actor: actor,
         acknowledgement: described_class::ACKNOWLEDGEMENT
       ).call
-    end.to raise_error(ArgumentError, "Clean-client employee preparation could not be queued")
+    end.to change(HistoricalClientBootstrapDispatch, :count).by(1)
 
-    expect(bootstrap.reload).to be_failed
-    expect(bootstrap.apply_error).to eq("Employee preparation could not be queued. Try again.")
+    dispatch = bootstrap.historical_client_bootstrap_dispatches.sole
+    expect(result.enqueued).to be(false)
+    expect(bootstrap.reload).to be_pending
+    expect(dispatch.reload.enqueued_at).to be_nil
+    expect(dispatch.last_error).to eq("private adapter failure")
+    expect(dispatch.dispatch_attempts).to eq(1)
+    expect(dispatch.attempt_token).to eq(bootstrap.apply_started_at.iso8601(6))
+
+    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_call_original
+    expect do
+      HistoricalClientBootstrapDispatch.dispatch_pending!
+    end.to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).with(
+      bootstrap.id, actor.id, bootstrap.apply_started_at.iso8601(6)
+    )
+    expect(dispatch.reload.enqueued_at).to be_present
+    expect(dispatch.last_error).to be_nil
   end
 
-  it "preserves the enqueue error even if persisting the safe failure state also fails" do
+  it "backfills a durable dispatch for an already-pending preparation" do
     bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
-    service = QuickbooksHistory::ClientBootstrapEnqueueService.new(
-      bootstrap: bootstrap,
-      actor: actor,
-      acknowledgement: described_class::ACKNOWLEDGEMENT
-    )
-    allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise(StandardError, "private adapter failure")
-    allow(service).to receive(:mark_enqueue_failed!).and_raise(StandardError, "private persistence failure")
-    allow(Rails.logger).to receive(:error)
+    bootstrap.update!(status: "pending", apply_started_at: Time.current)
 
-    expect { service.call }.to raise_error(ArgumentError, "Clean-client employee preparation could not be queued")
-    expect(Rails.logger).to have_received(:error).with(/could not be persisted/)
-    expect(bootstrap.reload).to be_pending
+    expect do
+      result = QuickbooksHistory::ClientBootstrapEnqueueService.new(
+        bootstrap: bootstrap,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      ).call
+      expect(result.enqueued).to be(true)
+    end.to change(HistoricalClientBootstrapDispatch, :count).by(1)
+      .and have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).with(
+        bootstrap.id, actor.id, bootstrap.apply_started_at.iso8601(6)
+      )
   end
 
   it "rejects plan drift between preview and apply" do

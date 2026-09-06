@@ -50,8 +50,8 @@ module QuickbooksHistory
         errors << "QuickBooks employee directory setup is missing from the retained snapshot; import the source with the current importer before creating live employees"
       end
       first_name, middle_name, last_name = parse_name(worker.source_name)
-      tax = parse_tax(details.fetch("Tax info", ""))
-      pay = parse_pay(details.fetch("Pay info", ""), active: worker.source_status == "active")
+      tax = parse_tax(snapshot_section(details, "Tax info"))
+      pay = parse_pay(snapshot_section(details, "Pay info"), active: worker.source_status == "active")
       address = parse_address(directory.fetch("Home address", ""))
 
       review(
@@ -109,6 +109,14 @@ module QuickbooksHistory
     private
 
     attr_reader :worker, :pay_frequency, :review_items, :warnings, :errors
+
+    def snapshot_section(details, key)
+      value = details.fetch(key, "")
+      return value if value.is_a?(String)
+
+      errors << "QuickBooks #{key.downcase} is malformed in the retained employee snapshot"
+      ""
+    end
 
     def parse_name(source_name)
       clean = source_name.to_s.delete_prefix("*").squish
