@@ -142,6 +142,10 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "net_pay" => "2325.0"
     )
     expect(index_body.fetch("meta")).to include("total_count" => 1, "current_page" => 1)
+    expect(index_body.dig("data", 0, "cutover_review")).not_to have_key("evidence")
+
+    get "/api/v1/admin/historical_imports/#{batch_id}"
+    expect(response.parsed_body.dig("data", "cutover_review", "evidence", "version")).to eq(1)
   end
 
   it "filters and paginates historical import batches" do

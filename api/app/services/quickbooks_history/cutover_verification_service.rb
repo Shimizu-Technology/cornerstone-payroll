@@ -160,12 +160,13 @@ module QuickbooksHistory
 
         exception_keys = evidence.fetch("exceptions").pluck("key")
         dispositions = review.exception_dispositions.to_h.slice(*exception_keys)
+        passed = evidence.fetch("passed")
         review.assign_attributes(
-          status: evidence.fetch("passed") ? "verified" : "failed",
+          status: passed ? "verified" : "failed",
           evidence: evidence,
           evidence_digest: Digest::SHA256.hexdigest(JSON.generate(evidence)),
-          verified_at: Time.current,
-          verified_by: actor,
+          verified_at: passed ? Time.current : nil,
+          verified_by: passed ? actor : nil,
           verification_started_at: review.verification_started_at || Time.current,
           verification_error: nil,
           exception_dispositions: dispositions,
@@ -210,10 +211,7 @@ module QuickbooksHistory
     end
 
     def stored_year_totals
-      @stored_year_totals ||= batch.historical_paychecks.includes(:historical_pay_period)
-                                    .group_by { |paycheck| paycheck.pay_date.year }.sort.to_h do |year, paychecks|
-        [ year.to_s, year_payload(paychecks) ]
-      end
+      stored_paycheck_verification.fetch("years")
     end
 
     def ledger_digests(parsed)
@@ -227,12 +225,51 @@ module QuickbooksHistory
           "stored" => row_digest(batch.historical_pay_periods.map { |row| select_payload(row, PERIOD_FIELDS) })
         },
         "paychecks" => {
-          "source" => row_digest(parsed.paychecks.map { |row| select_payload(row, PAYCHECK_FIELDS) }),
-          "stored" => row_digest(
-            batch.historical_paychecks.includes(:historical_worker, :historical_pay_period).map { |row| stored_paycheck_payload(row) }
-          )
+          "source" => row_digest(parsed.paychecks) { |row| select_payload(row, PAYCHECK_FIELDS) },
+          "stored" => stored_paycheck_verification.fetch("digest")
         }
       }
+    end
+
+    def stored_paycheck_verification
+      @stored_paycheck_verification ||= begin
+        years = Hash.new { |hash, year| hash[year] = empty_year_totals }
+        relation = batch.historical_paychecks.includes(:historical_worker, :historical_pay_period)
+        rows = relation.find_each(cursor: %i[external_key id], order: %i[asc asc], batch_size: 1_000)
+        digest = ordered_row_digest(rows) do |row|
+          accumulate_year_totals!(years[row.pay_date.year], row)
+          stored_paycheck_payload(row)
+        end
+        {
+          "years" => years.sort.to_h.transform_keys(&:to_s).transform_values { |totals| finalized_year_totals(totals) },
+          "digest" => digest
+        }
+      end
+    end
+
+    def empty_year_totals
+      {
+        "paycheck_count" => 0,
+        "detailed_paycheck_count" => 0,
+        "opening_summary_count" => 0,
+        "totals" => ImportService::MONEY_FIELDS.to_h { |field| [ field.to_s, 0.to_d ] }
+      }
+    end
+
+    def accumulate_year_totals!(totals, row)
+      totals["paycheck_count"] += 1
+      period_type = row_period_type(row)
+      totals["detailed_paycheck_count"] += 1 if period_type == "regular"
+      totals["opening_summary_count"] += 1 if period_type == "opening_summary"
+      ImportService::MONEY_FIELDS.each do |field|
+        totals.fetch("totals")[field.to_s] += row_value(row, field).to_d
+      end
+    end
+
+    def finalized_year_totals(totals)
+      totals.merge(
+        "totals" => totals.fetch("totals").transform_values { |value| value.round(2).to_s("F") }
+      )
     end
 
     def source_worker_payload(row)
@@ -257,10 +294,23 @@ module QuickbooksHistory
       end
     end
 
-    def row_digest(rows)
-      normalized = rows.map { |row| normalize_digest_value(row) }
-                       .sort_by { |row| row.fetch("external_key") }
-      Digest::SHA256.hexdigest(JSON.generate(normalized))
+    def row_digest(rows, &payload)
+      ordered = rows.sort_by do |row|
+        row.respond_to?(:external_key) ? row.external_key : row.fetch(:external_key) { row.fetch("external_key") }
+      end
+      ordered_row_digest(ordered, &payload)
+    end
+
+    def ordered_row_digest(rows)
+      digest = Digest::SHA256.new
+      digest << "["
+      rows.each_with_index do |row, index|
+        payload = block_given? ? yield(row) : row
+        digest << "," unless index.zero?
+        digest << JSON.generate(normalize_digest_value(payload))
+      end
+      digest << "]"
+      digest.hexdigest
     end
 
     def normalize_digest_value(value)

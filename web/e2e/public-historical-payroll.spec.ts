@@ -247,6 +247,15 @@ function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImpo
   return payload as HistoricalImportBatch;
 }
 
+function withoutCutoverEvidence(value: HistoricalImportDetail): HistoricalImportBatch {
+  const payload = withoutDetailCollections(value);
+  if (!payload.cutover_review) return payload;
+
+  const review = { ...payload.cutover_review };
+  delete review.evidence;
+  return { ...payload, cutover_review: review };
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -392,8 +401,13 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
     status: 'applied',
     cutover_review: null,
   };
+  const verifiedBatch: HistoricalImportDetail = {
+    ...pendingBatch,
+    cutover_review: cutoverReview('verified', false),
+  };
   let listRequestCount = 0;
   let fulfilledListResponseCount = 0;
+  let detailRequestCount = 0;
   let releasePoll: (() => void) | undefined;
   let markPollStarted: (() => void) | undefined;
   const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
@@ -406,15 +420,16 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
       await pollGate;
     }
     await fulfillJson(route, {
-      data: [pendingBatch, otherBatch],
+      data: [withoutCutoverEvidence(listRequestCount >= 2 ? verifiedBatch : pendingBatch), withoutDetailCollections(otherBatch)],
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
     });
     fulfilledListResponseCount += 1;
   });
   await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    if (id === 1) detailRequestCount += 1;
     await fulfillJson(route, {
-      data: id === 1 ? pendingBatch : otherBatch,
+      data: id === 1 ? (detailRequestCount >= 2 ? verifiedBatch : pendingBatch) : otherBatch,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
   });
@@ -447,17 +462,24 @@ test('keeps checking verification status after a temporary refresh failure', asy
     ...pendingBatch,
     cutover_review: cutoverReview('verified', false),
   };
-  let listRequestCount = 0;
-  let failNextListRequest = false;
+  let detailRequestCount = 0;
+  let fulfilledDetailResponseCount = 0;
+  let failNextDetailRequest = false;
   let pollFailureCount = 0;
   let verificationComplete = false;
   let markPollFailed: (() => void) | undefined;
   const pollFailed = new Promise<void>((resolve) => { markPollFailed = resolve; });
 
   await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
-    listRequestCount += 1;
-    if (failNextListRequest) {
-      failNextListRequest = false;
+    await fulfillJson(route, {
+      data: [withoutCutoverEvidence(verificationComplete ? verifiedBatch : pendingBatch)],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    detailRequestCount += 1;
+    if (failNextDetailRequest) {
+      failNextDetailRequest = false;
       await fulfillJson(route, { error: 'Temporary status refresh failed.' }, 503);
       pollFailureCount += 1;
       markPollFailed?.();
@@ -465,27 +487,23 @@ test('keeps checking verification status after a temporary refresh failure', asy
     }
     if (pollFailureCount > 0) verificationComplete = true;
     await fulfillJson(route, {
-      data: [verificationComplete ? verifiedBatch : pendingBatch],
-      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
-    });
-  });
-  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
-    await fulfillJson(route, {
       data: verificationComplete ? verifiedBatch : pendingBatch,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
+    fulfilledDetailResponseCount += 1;
   });
 
   await page.goto('/historical-payroll');
   await expect(page.getByText('Comparing the retained source with the archive')).toBeVisible();
-  failNextListRequest = true;
+  await expect.poll(() => fulfilledDetailResponseCount).toBeGreaterThanOrEqual(1);
+  failNextDetailRequest = true;
   await pollFailed;
   await expect(page.getByRole('alert')).toContainText('Temporary status refresh failed. Retrying automatically.');
 
   await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('2/2')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  expect(listRequestCount).toBeGreaterThanOrEqual(3);
+  expect(detailRequestCount).toBeGreaterThanOrEqual(3);
 });
 
 test('makes retained source verification and exact download clear to an administrator', async ({ page }) => {
@@ -623,7 +641,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
     await fulfillJson(route, { data: withoutDetailCollections(current) });
   });
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
-    data: [current],
+    data: [withoutCutoverEvidence(current)],
     meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
   }));
   await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
@@ -673,7 +691,7 @@ test('gives an accountant the accepted evidence without import or source-file co
   };
 
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
-    data: [accepted],
+    data: [withoutCutoverEvidence(accepted)],
     meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
   }));
   await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {

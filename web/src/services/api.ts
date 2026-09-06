@@ -3665,7 +3665,7 @@ export interface HistoricalCutoverEvidence {
 export interface HistoricalCutoverReview {
   id: number;
   status: 'pending' | 'verified' | 'approved' | 'failed';
-  evidence: Partial<HistoricalCutoverEvidence>;
+  evidence?: Partial<HistoricalCutoverEvidence>;
   evidence_digest?: string | null;
   verified_at?: string | null;
   verified_by_name?: string | null;

@@ -2,6 +2,8 @@
 
 module QuickbooksHistory
   class CutoverEvidenceExporter
+    SUPPORTED_EVIDENCE_VERSIONS = [ 1 ].freeze
+
     attr_reader :filename
 
     def initialize(review:)
@@ -11,6 +13,9 @@ module QuickbooksHistory
 
     def generate
       raise ArgumentError, "Run cutover verification before exporting evidence" unless review.evidence_passed?
+      unless review.evidence.to_h["version"].in?(SUPPORTED_EVIDENCE_VERSIONS)
+        raise ArgumentError, "This cutover evidence uses an unsupported version. Re-run cutover verification."
+      end
 
       SpreadsheetReportExporter.new(filename: filename, sheets: sheets).generate
     end

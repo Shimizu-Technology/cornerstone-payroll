@@ -344,20 +344,22 @@ module Api
             applied_by_name: batch.applied_by&.name,
             locked_at: batch.locked_at,
             locked_by_name: batch.locked_by&.name,
-            cutover_review: cutover_review_json(batch.historical_import_cutover_review),
+            cutover_review: cutover_review_json(
+              batch.historical_import_cutover_review,
+              include_evidence: include_source_files
+            ),
             created_at: batch.created_at
           }
           payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
           payload
         end
 
-        def cutover_review_json(review)
+        def cutover_review_json(review, include_evidence: false)
           return nil unless review
 
-          {
+          payload = {
             id: review.id,
             status: review.status,
-            evidence: review.evidence,
             evidence_digest: review.evidence_digest,
             verified_at: review.verified_at,
             verified_by_name: review.verified_by&.name,
@@ -373,6 +375,8 @@ module Api
             approval_acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT,
             updated_at: review.updated_at
           }
+          payload[:evidence] = review.evidence if include_evidence
+          payload
         end
 
         def source_file_json(source_file)

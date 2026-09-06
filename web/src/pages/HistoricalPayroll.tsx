@@ -48,6 +48,7 @@ import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
 const MAX_BUNDLE_FILES = 75;
+const CUTOVER_POLL_DELAYS_MS = [2_000, 3_000, 5_000, 8_000, 10_000] as const;
 const HISTORICAL_REPORTS: Array<{ value: HistoricalReportType; label: string }> = [
   { value: 'register', label: 'Payroll register' },
   { value: 'employee_summary', label: 'Employee summary' },
@@ -447,27 +448,44 @@ export function HistoricalPayroll(): ReactElement {
     setCutoverPollingError(null);
     let cancelled = false;
     let timeoutId: number | undefined;
+    let pollAttempt = 1;
     const poll = async (): Promise<void> => {
+      let shouldContinue = true;
       try {
-        await Promise.all([
-          loadDetail(selectedBatchId),
-          loadList(batchPageRef.current, selectedBatchId),
-        ]);
-        if (!cancelled) setCutoverPollingError(null);
+        const requestId = ++detailRequestIdRef.current;
+        const response = await historicalImportsApi.show(selectedBatchId, {
+          page,
+          per_page: 50,
+          period_id: periodId,
+          search: search.trim() || undefined,
+        });
+        if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
+
+        shouldContinue = response.data.cutover_review?.status === 'pending';
+        if (!shouldContinue) await loadList(batchPageRef.current, selectedBatchId);
+        if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
+
+        setDetail(response.data);
+        setMeta(response.meta);
+        setCutoverPollingError(null);
       } catch (err) {
         if (!cancelled) setCutoverPollingError(errorMessage(err, 'Cutover verification status could not be refreshed.'));
       } finally {
-        if (!cancelled) timeoutId = window.setTimeout(() => void poll(), 2_000);
+        if (!cancelled && shouldContinue) {
+          const delay = CUTOVER_POLL_DELAYS_MS[Math.min(pollAttempt, CUTOVER_POLL_DELAYS_MS.length - 1)];
+          pollAttempt += 1;
+          timeoutId = window.setTimeout(() => void poll(), delay);
+        }
       }
     };
-    timeoutId = window.setTimeout(() => void poll(), 2_000);
+    timeoutId = window.setTimeout(() => void poll(), CUTOVER_POLL_DELAYS_MS[0]);
 
     return () => {
       cancelled = true;
       listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [loadDetail, loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
+  }, [loadList, page, periodId, search, selectedBatch?.cutover_review?.status, selectedBatchId]);
 
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
@@ -794,10 +812,11 @@ export function HistoricalPayroll(): ReactElement {
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
   const cutoverApproved = cutoverReview?.status === 'approved';
-  const cutoverChecks = cutoverReview?.evidence.checks || [];
-  const cutoverYears = cutoverReview?.evidence.years || [];
-  const cutoverExceptions = cutoverReview?.evidence.exceptions || [];
-  const cutoverEvidencePassed = cutoverReview?.evidence.passed === true;
+  const cutoverChecks = cutoverReview?.evidence?.checks || [];
+  const cutoverYears = cutoverReview?.evidence?.years || [];
+  const cutoverExceptions = cutoverReview?.evidence?.exceptions || [];
+  const cutoverEvidencePassed = cutoverReview?.evidence?.passed === true;
+  const cutoverEvidenceDate = cutoverReview?.verified_at || cutoverReview?.evidence?.generated_at;
   const historicalReportFormats: ReportDownloadFormat[] = [
     ...(report && report.summary.row_count <= 10_000 ? [
       { key: 'pdf', label: 'PDF', description: 'Readable report with source notes', kind: 'pdf' as const, loading: reportExporting === 'pdf', onSelect: () => downloadHistoricalReport('pdf') },
@@ -997,7 +1016,7 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverChecks.filter((check) => check.passed).length}/{cutoverChecks.length}</p><p className="mt-1 text-xs text-neutral-500">fresh source comparisons passed</p></div>
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverYears.length}</p><p className="mt-1 text-xs text-neutral-500">each reconciled independently</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-500">verified {shortDate(cutoverReview.verified_at?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-500">{cutoverEvidencePassed ? 'verified' : 'checked'} {shortDate(cutoverEvidenceDate?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
                   </div>
 
                   <div className="grid gap-2 md:grid-cols-2">

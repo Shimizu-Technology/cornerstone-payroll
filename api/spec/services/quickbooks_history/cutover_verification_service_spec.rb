@@ -97,6 +97,8 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
 
     expect(result.passed).to be(false)
     expect(result.review.status).to eq("failed")
+    expect(result.review.verified_at).to be_nil
+    expect(result.review.verified_by).to be_nil
     expect(result.review.evidence.fetch("checks")).to include(
       include("key" => "stored_totals", "passed" => false),
       include("key" => "year_totals", "passed" => false)
@@ -117,10 +119,24 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
       .to raise_error(ArgumentError, /manager or administrator/)
   end
 
-  it "supports v2 evidence only when the current parser reproduces it exactly" do
-    batch.update_column(:importer_version, "quickbooks-online-payroll-v2")
+  it "verifies a batch genuinely recorded by the unchanged v2 parser contract" do
+    v2_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
+    v2_actor = create(:user, company: v2_company, organization: company.organization, role: "admin")
+    v2_batch = nil
+    RSpec::Mocks.with_temporary_scope do
+      stub_const("QuickbooksHistory::BundleParser::IMPORTER_VERSION", "quickbooks-online-payroll-v2")
+      v2_batch = QuickbooksHistory::ImportService.new(
+        company: v2_company,
+        files: quickbooks_history_uploads(suffix: " v2"),
+        actor: v2_actor
+      ).call.batch
+    end
+    review_historical_workers_as_archive_only(v2_batch, actor: v2_actor)
+    QuickbooksHistory::LifecycleService.new(batch: v2_batch, actor: v2_actor).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
 
-    result = described_class.new(batch: batch, actor: actor).call
+    result = described_class.new(batch: v2_batch, actor: v2_actor).call
 
     expect(result.passed).to be(true)
     expect(result.review.evidence).to include(

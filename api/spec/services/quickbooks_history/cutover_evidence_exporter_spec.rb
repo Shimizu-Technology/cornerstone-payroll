@@ -18,6 +18,7 @@ RSpec.describe QuickbooksHistory::CutoverEvidenceExporter do
       historical_import_batch: batch,
       status: "verified",
       evidence: {
+        "version" => 1,
         "passed" => true,
         "checks" => [ { "label" => "Stored totals match", "passed" => true } ],
         "ledger_digests" => { "paychecks" => { "source" => "c" * 64, "stored" => "c" * 64 } },
@@ -40,5 +41,9 @@ RSpec.describe QuickbooksHistory::CutoverEvidenceExporter do
       expect(sheets.join).not_to include("<f>", "private_snapshot", "storage_key")
       expect(sheets.join).to include("&#39;=Unsafe source label", "&#39;+source.xls")
     end
+
+    review.update!(evidence: review.evidence.merge("version" => 2))
+    expect { described_class.new(review: review).generate }
+      .to raise_error(ArgumentError, /unsupported version/)
   end
 end
