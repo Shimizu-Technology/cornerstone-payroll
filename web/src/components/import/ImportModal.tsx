@@ -59,6 +59,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   };
 
   const handleClose = () => {
+    if (loading || step === 'applying') return;
     reset();
     onOpenChange(false);
   };
@@ -134,7 +135,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={handleClose} dismissOnEscape={!loading && step !== 'applying'}>
       <DialogContent className="dialog-top dialog-wide max-w-6xl max-h-[calc(100vh-8rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
@@ -404,7 +405,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         <DialogFooter>
           {step === 'upload' && (
             <>
-              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
               <Button onClick={handlePreview} disabled={!pdfFile || loading}>
                 {loading ? 'Parsing...' : 'Preview Import'}
               </Button>

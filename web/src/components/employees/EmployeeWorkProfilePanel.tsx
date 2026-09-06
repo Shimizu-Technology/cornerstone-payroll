@@ -39,7 +39,7 @@ function nextDate(date: string): string {
 
 function initialInput(employee: Employee): EmployeeWorkProfileInput {
   const current = employee.current_work_profile;
-  const earliest = current ? nextDate(current.effective_on) : employee.hire_date;
+  const earliest = current ? nextDate(current.effective_on) : (employee.hire_date || todayIsoDate());
   return {
     effective_on: earliest > todayIsoDate() ? earliest : todayIsoDate(),
     pay_basis: employee.employment_type,
@@ -184,7 +184,7 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-neutral-800">Effective date <span className="text-danger-600">*</span></label>
-                <Input type="date" min={current ? nextDate(current.effective_on) : employee.hire_date} value={form.effective_on} onChange={(event) => setForm({ ...form, effective_on: event.target.value })} />
+                <Input type="date" min={current ? nextDate(current.effective_on) : (employee.hire_date || undefined)} value={form.effective_on} onChange={(event) => setForm({ ...form, effective_on: event.target.value })} />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-neutral-800">Overtime status <span className="text-danger-600">*</span></label>

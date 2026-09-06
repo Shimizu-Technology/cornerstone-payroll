@@ -122,7 +122,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
               <Input
                 type="date"
                 required
-                min={mode === 'reactivate' && employee.termination_date ? employee.termination_date : employee.hire_date}
+                min={(mode === 'reactivate' && employee.termination_date ? employee.termination_date : employee.hire_date) || undefined}
                 max={todayIsoDate()}
                 value={effectiveDate}
                 onChange={(event) => setEffectiveDate(event.target.value)}
@@ -133,7 +133,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
                 <label className="mb-1 block text-sm font-medium text-neutral-800">Last day worked <span className="text-xs font-normal text-neutral-500">(optional)</span></label>
                 <Input
                   type="date"
-                  min={employee.hire_date}
+                  min={employee.hire_date || undefined}
                   max={effectiveDate}
                   value={lastWorkedOn}
                   onChange={(event) => setLastWorkedOn(event.target.value)}
