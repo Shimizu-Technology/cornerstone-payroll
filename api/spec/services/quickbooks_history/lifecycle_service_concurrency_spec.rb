@@ -32,6 +32,7 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
   end
 
   after do
+    HistoricalImportCutoverReview.where(company_id: company.id).delete_all
     HistoricalPaycheck.where(company_id: company.id).delete_all
     HistoricalPayPeriod.where(company_id: company.id).delete_all
     HistoricalWorker.where(company_id: company.id).delete_all
@@ -124,6 +125,7 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
         thread_actor = User.find(actor.id)
         service = described_class.new(batch: batch, actor: thread_actor)
         service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+        approve_historical_cutover(batch, actor: thread_actor)
         service.lock!
         results << [ :ok, batch_id ]
       rescue StandardError => e

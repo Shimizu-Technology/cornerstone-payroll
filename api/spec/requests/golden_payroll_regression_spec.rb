@@ -199,6 +199,19 @@ RSpec.describe "Golden payroll regression", type: :request do
     review_historical_workers_as_archive_only(batch, actor: admin_user)
     lifecycle = QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin_user)
     lifecycle.apply!(acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT)
+    verification = QuickbooksHistory::CutoverVerificationService.new(batch: batch, actor: admin_user).call
+    expect(verification.passed).to be(true)
+
+    review = verification.review
+    review_service = QuickbooksHistory::CutoverReviewService.new(review: review, actor: admin_user)
+    review_service.save!(
+      exception_dispositions: Array(review.evidence["exceptions"]).to_h do |exception|
+        [ exception.fetch("key"), "Accepted for the isolated golden-payroll regression." ]
+      end,
+      attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+      approval_notes: "No remaining limitations in the golden-payroll regression."
+    )
+    review_service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
     lifecycle.lock!
 
     expect(batch.reload).to be_locked

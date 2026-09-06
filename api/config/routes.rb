@@ -111,6 +111,10 @@ Rails.application.routes.draw do
             post :lock
             post :verify_source_files
             get "source_files/:source_file_id/download", action: :download_source_file, as: :source_file_download
+            post :verify_cutover
+            patch :update_cutover_review
+            post :approve_cutover
+            get :download_cutover_evidence
             post :archive_unlinked_workers
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end

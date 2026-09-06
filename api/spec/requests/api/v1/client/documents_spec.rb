@@ -17,7 +17,7 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user).and_return(client_user)
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user_id).and_return(client_user.id)
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_company_id).and_return(company.id)
-    FileUtils.rm_rf(Rails.root.join("tmp/local_r2_storage"))
+    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT)
   end
 
   describe "document upload lifecycle" do

@@ -25,7 +25,7 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_user_id).and_return(admin_user.id)
     allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_company_id).and_return(company.id)
 
-    FileUtils.rm_rf(Rails.root.join("tmp/local_r2_storage"))
+    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT)
     storage = R2StorageService.new
     storage.upload(document.file_key, "admin review document", content_type: "text/plain")
     storage.upload(document.preview_file_key, "%PDF-1.4\npreview", content_type: "application/pdf")

@@ -10,13 +10,19 @@ module Api
         before_action :require_historical_payroll_enabled!
         before_action :set_batch, only: %i[
           show apply lock verify_source_files download_source_file archive_unlinked_workers update_worker
+          verify_cutover update_cutover_review approve_cutover download_cutover_evidence
         ]
 
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
           batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id))
-                    .includes(:applied_by, :locked_by, :historical_import_source_files)
+                    .includes(
+                      :applied_by,
+                      :locked_by,
+                      :historical_import_source_files,
+                      historical_import_cutover_review: %i[verified_by approved_by]
+                    )
                     .recent_first
           total = batches.count
           archive = archive_summary
@@ -45,7 +51,7 @@ module Api
                            .limit(per_page)
 
           render json: {
-            data: batch_json(@batch, include_source_files: true).merge(
+            data: batch_json(@batch, include_source_files: true, include_cutover_evidence: true).merge(
               periods: @batch.historical_pay_periods.reverse_chronological
                              .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
                              .map { |period| period_json(period) },
@@ -75,7 +81,7 @@ module Api
             return
           end
 
-          render json: { data: batch_json(result.batch, include_source_files: true), meta: { idempotent: result.idempotent } }
+          render json: { data: batch_json(result.batch, include_source_files: true, include_cutover_evidence: true), meta: { idempotent: result.idempotent } }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -99,7 +105,7 @@ module Api
         def verify_source_files
           result = QuickbooksHistory::SourceFileVerificationService.new(batch: @batch, actor: current_user).call
           render json: {
-            data: batch_json(@batch.reload, include_source_files: true),
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
             meta: { all_verified: result.all_verified }
           }
         rescue R2StorageService::ConfigurationError => e
@@ -167,7 +173,83 @@ module Api
           render json: error_payload(e), status: :unprocessable_entity
         end
 
+        def verify_cutover
+          result = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: @batch, actor: current_user).call
+          render json: {
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true),
+            meta: { enqueued: result.enqueued, status: result.review.status }
+          }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def update_cutover_review
+          review = @batch.historical_import_cutover_review || raise(ArgumentError, "Run cutover verification first")
+          QuickbooksHistory::CutoverReviewService.new(review: review, actor: current_user).save!(
+            exception_dispositions: cutover_exception_dispositions(review),
+            attestations: cutover_attestations,
+            approval_notes: params[:approval_notes]
+          )
+          render json: { data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def approve_cutover
+          review = @batch.historical_import_cutover_review || raise(ArgumentError, "Run cutover verification first")
+          QuickbooksHistory::CutoverReviewService.new(review: review, actor: current_user).approve!(
+            acknowledgement: params[:acknowledgement]
+          )
+          render json: { data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def download_cutover_evidence
+          review = @batch.historical_import_cutover_review || raise(ArgumentError, "Run cutover verification first")
+          unless review.approved? || StaffRolePolicy.allowed?(current_user, :manage_client_configuration)
+            render json: { error: "Approved cutover evidence or manager/admin access required", details: {} }, status: :forbidden
+            return
+          end
+
+          exporter = QuickbooksHistory::CutoverEvidenceExporter.new(review: review)
+          bytes = exporter.generate
+          AuditLog.record!(
+            user: current_user,
+            organization_id: @batch.company.organization_id,
+            company_id: @batch.company_id,
+            action: "historical_imports#download_cutover_evidence",
+            record_type: "historical_import_cutover_reviews",
+            record_id: review.id,
+            subject_name: @batch.source_label,
+            metadata: { historical_import_batch_id: @batch.id, evidence_digest: review.evidence_digest }
+          )
+          send_data bytes,
+                    filename: exporter.filename,
+                    type: SpreadsheetReportExporter::CONTENT_TYPE,
+                    disposition: "attachment"
+        rescue ArgumentError => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
         private
+
+        def cutover_exception_dispositions(review)
+          allowed_keys = Array(review.evidence.to_h["exceptions"]).pluck("key")
+          permitted_object(:exception_dispositions).permit(*allowed_keys).to_h
+        end
+
+        def cutover_attestations
+          permitted_object(:attestations).permit(*HistoricalImportCutoverReview::ATTESTATIONS.keys).to_h
+        end
+
+        def permitted_object(key)
+          value = params[key]
+          return value if value.is_a?(ActionController::Parameters)
+          raise ArgumentError, "#{key} must be an object" unless value.nil?
+
+          ActionController::Parameters.new
+        end
 
         def require_historical_payroll_enabled!
           return if current_company&.historical_payroll_enabled?
@@ -179,7 +261,9 @@ module Api
         end
 
         def set_batch
-          @batch = HistoricalImportBatch.where(company_id: current_company_id).find(params[:id])
+          @batch = HistoricalImportBatch.where(company_id: current_company_id)
+                                        .includes(historical_import_cutover_review: %i[verified_by approved_by])
+                                        .find(params[:id])
         end
 
         def filtered_paychecks(scope)
@@ -227,7 +311,7 @@ module Api
           }
         end
 
-        def batch_json(batch, mapping_counts: nil, include_source_files: false)
+        def batch_json(batch, mapping_counts: nil, include_source_files: false, include_cutover_evidence: false)
           mapping_counts ||= batch.historical_workers.group(:mapping_status).count
           source_files = if batch.association(:historical_import_source_files).loaded?
             batch.historical_import_source_files.target.sort_by { |file| [ file.position, file.id ] }
@@ -265,9 +349,38 @@ module Api
             applied_by_name: batch.applied_by&.name,
             locked_at: batch.locked_at,
             locked_by_name: batch.locked_by&.name,
+            cutover_review: cutover_review_json(
+              batch.historical_import_cutover_review,
+              include_evidence: include_cutover_evidence
+            ),
             created_at: batch.created_at
           }
           payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
+          payload
+        end
+
+        def cutover_review_json(review, include_evidence: false)
+          return nil unless review
+
+          payload = {
+            id: review.id,
+            status: review.status,
+            evidence_digest: review.evidence_digest,
+            verified_at: review.verified_at,
+            verified_by_name: review.verified_by&.name,
+            verification_started_at: review.verification_started_at,
+            verification_error: review.verification_error,
+            exception_dispositions: review.exception_dispositions,
+            attestations: review.attestations,
+            attestation_labels: HistoricalImportCutoverReview::ATTESTATIONS,
+            approval_notes: review.approval_notes,
+            ready_for_approval: review.ready_for_approval?,
+            approved_at: review.approved_at,
+            approved_by_name: review.approved_by&.name,
+            approval_acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT,
+            updated_at: review.updated_at
+          }
+          payload[:evidence] = review.evidence if include_evidence
           payload
         end
 
