@@ -39,6 +39,7 @@ RSpec.describe QuickbooksHistory::ImportService do
     )
     expect(encrypted_value).not_to include("000-00-0001")
     expect(worker.private_snapshot_data.dig("Tax info")).to include("000-00-0001")
+    expect(worker.private_snapshot_data.dig("_employee_directory", "Email")).to eq("alice@example.test")
     expect(batch.historical_workers.find_by!(source_name: "Worker, Charlie")).to have_attributes(
       source_status: "active",
       mapping_status: "needs_review"

@@ -23,3 +23,8 @@ production:
     class: AirePayrollAcknowledgementDispatchJob
     queue: default
     schedule: every 5 minutes
+
+  dispatch_historical_client_bootstraps:
+    class: HistoricalClientBootstrapDispatchJob
+    queue: default
+    schedule: every 5 minutes

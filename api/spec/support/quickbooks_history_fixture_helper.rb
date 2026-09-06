@@ -162,9 +162,9 @@ module QuickbooksHistoryFixtureHelper
       [],
       [ "For all employees" ],
       [ "Personal info", "Hire date", "Work location", "Pay info", "Tax info", "Notes" ],
-      [ "Worker, Alice DOB: 01/01/1990", "01/01/2024", "Test location", "Hourly rate: $25.00/hr", "SSN: 000-00-0001", "Synthetic fixture" ],
-      [ "*Worker, Bob DOB: 01/01/1980", "01/01/2024", "Test location", "Hourly rate: $25.00/hr", "SSN: 000-00-0002", "Synthetic fixture" ],
-      [ "Worker, Charlie DOB: 01/01/1985", "02/01/2024", "Test location", "Hourly rate: $20.00/hr", "SSN: 000-00-0003", "No paycheck in export window" ]
+      [ "Worker, Alice DOB: 01/01/1990", "01/01/2024", "Test location", "Hourly rate: $25.00/hr Joint: $25.00/hr Pay method: Check Deductions: Health Insurance: $105.00 401(k) After Tax: 4.00% Contributions: 401(k) After Tax: 4.00% Time off: None", "SSN: 000-00-0001 Fed: Single or Married Filing Separately", "Synthetic fixture" ],
+      [ "*Worker, Bob DOB: 01/01/1980", "01/01/2024", "Test location", "Hourly rate: $25.00/hr Pay method: Check Deductions: None Contributions: None Time off: None", "SSN: 000-00-0002 Fed: Single", "Synthetic fixture" ],
+      [ "Worker, Charlie DOB: 01/01/1985", "02/01/2024", "Test location", "Pay type: Commission Only Pay method: Check Deductions: Loan (example): $25.00 Contributions: None Time off: None", "SSN: 000-00-0003 Fed: Head of Household", "No paycheck in export window" ]
     ]
   end
 

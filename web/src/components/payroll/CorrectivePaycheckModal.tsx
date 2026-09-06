@@ -203,9 +203,13 @@ export function CorrectivePaycheckModal({
   const original = preview?.original;
   const willGenerateCheck = preview?.meta.will_generate_check ?? false;
   const employeeName = originalItem.employee_name ?? 'this employee';
+  const handleDialogOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && issuing) return;
+    onOpenChange(nextOpen);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange} dismissOnEscape={!issuing}>
       <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Issue Corrective Paycheck</DialogTitle>

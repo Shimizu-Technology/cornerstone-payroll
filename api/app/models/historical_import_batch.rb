@@ -14,6 +14,7 @@ class HistoricalImportBatch < ApplicationRecord
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_import_source_files, dependent: :restrict_with_error
   has_one :historical_import_cutover_review, dependent: :restrict_with_error
+  has_one :historical_client_bootstrap, dependent: :restrict_with_error
 
   validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
   validates :source_label, :bundle_digest, :importer_version, presence: true

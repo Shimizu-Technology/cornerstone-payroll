@@ -273,6 +273,7 @@ export function PayrollItemEditModal({
   };
 
   const handleSaveAndRecalculate = async () => {
+    if (saving || removing) return;
     setSaving(true);
     setError(null);
     try {
@@ -340,6 +341,7 @@ export function PayrollItemEditModal({
   };
 
   const handleRemoveFromPayroll = async () => {
+    if (saving || removing) return;
     if (!confirmRemove) {
       setConfirmRemove(true);
       return;
@@ -358,8 +360,13 @@ export function PayrollItemEditModal({
     }
   };
 
+  const handleDialogOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && (saving || removing)) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange} dismissOnEscape={!saving && !removing}>
       <DialogContent className="dialog-wide w-full max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
@@ -837,7 +844,7 @@ export function PayrollItemEditModal({
             {confirmRemove ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-red-600">Remove this employee from payroll?</span>
-                <Button variant="destructive" size="sm" onClick={handleRemoveFromPayroll} disabled={removing}>
+                <Button variant="destructive" size="sm" onClick={handleRemoveFromPayroll} disabled={saving || removing}>
                   {removing ? 'Removing...' : 'Yes, Remove'}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setConfirmRemove(false)} disabled={removing}>
@@ -850,17 +857,17 @@ export function PayrollItemEditModal({
                 size="sm"
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
                 onClick={handleRemoveFromPayroll}
-                disabled={saving}
+                disabled={saving || removing}
               >
                 Remove from Payroll
               </Button>
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || removing}>
               Cancel
             </Button>
-            <Button onClick={handleSaveAndRecalculate} disabled={saving}>
+            <Button onClick={handleSaveAndRecalculate} disabled={saving || removing}>
               {saving ? 'Saving...' : 'Save & Recalculate'}
             </Button>
           </div>

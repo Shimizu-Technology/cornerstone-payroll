@@ -170,6 +170,7 @@ export function PayrollIntakeImportModal({
   };
 
   const handleClose = () => {
+    if (loading || step === 'applying' || creatingEmployee) return;
     reset();
     onOpenChange(false);
   };
@@ -425,7 +426,17 @@ export function PayrollIntakeImportModal({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen): void => {
+          if (nextOpen) {
+            onOpenChange(true);
+            return;
+          }
+          handleClose();
+        }}
+        dismissOnEscape={!loading && step !== 'applying' && !creatingEmployee}
+      >
       <DialogContent className="dialog-top dialog-wide max-w-7xl max-h-[calc(100vh-5rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Spike Payroll Intake</DialogTitle>
@@ -444,8 +455,11 @@ export function PayrollIntakeImportModal({
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_360px]">
             <div className="space-y-4">
               <div>
-                <label className="mb-2 block text-sm font-semibold text-neutral-800">Paste email body or copied table</label>
+                <label htmlFor="payroll-intake-source-text" className="mb-2 block text-sm font-semibold text-neutral-800">
+                  Paste email body or copied table
+                </label>
                 <Textarea
+                  id="payroll-intake-source-text"
                   value={pastedText}
                   onChange={(event) => setPastedText(event.target.value)}
                   onPaste={handlePaste}
@@ -655,7 +669,7 @@ export function PayrollIntakeImportModal({
         <DialogFooter>
           {step === 'upload' && (
             <>
-              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
               <Button onClick={handlePreview} disabled={loading || (!pastedText.trim() && files.length === 0)}>
                 {loading ? 'Extracting...' : 'Preview Intake'}
               </Button>
@@ -682,7 +696,13 @@ export function PayrollIntakeImportModal({
       </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(createEmployeeRow)} onOpenChange={(nextOpen) => !nextOpen && setCreateEmployeeRow(null)}>
+      <Dialog
+        open={Boolean(createEmployeeRow)}
+        onOpenChange={(nextOpen): void => {
+          if (!nextOpen && !creatingEmployee) setCreateEmployeeRow(null);
+        }}
+        dismissOnEscape={!creatingEmployee}
+      >
         <DialogContent className="max-w-2xl rounded-3xl">
           <DialogHeader>
             <DialogTitle>Create employee</DialogTitle>
