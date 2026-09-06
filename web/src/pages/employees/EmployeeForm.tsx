@@ -39,6 +39,8 @@ const initialFormData: EmployeeFormData = {
   w4_effective_on: '',
   retirement_rate: 0,
   roth_retirement_rate: 0,
+  employer_retirement_match_rate: 0,
+  employer_roth_match_rate: 0,
   department_id: undefined,
   business_name: '',
   contractor_ein: '',
@@ -256,7 +258,7 @@ export function EmployeeForm() {
         ssn: loadedSsn,
         ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
-        hire_date: employee.hire_date,
+        hire_date: employee.hire_date || '',
         employment_type: employee.employment_type,
         salary_type: employee.salary_type || 'annual',
         pay_rate: toNumberOrZero(employee.pay_rate),
@@ -272,6 +274,8 @@ export function EmployeeForm() {
         w4_effective_on: employee.w4_effective_on || '',
         retirement_rate: toNumberOrZero(employee.retirement_rate),
         roth_retirement_rate: toNumberOrZero(employee.roth_retirement_rate),
+        employer_retirement_match_rate: toNumberOrZero(employee.employer_retirement_match_rate),
+        employer_roth_match_rate: toNumberOrZero(employee.employer_roth_match_rate),
         department_id: employee.department_id ?? undefined,
         business_name: employee.business_name || '',
         contractor_ein: employee.contractor_ein || '',
@@ -890,6 +894,23 @@ export function EmployeeForm() {
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
             <p className="text-danger-700">{generalError}</p>
+          </div>
+        )}
+
+        {isEditing && loadedEmployee?.configuration_review_status === 'needs_review' && (
+          <div className="mb-6 rounded-2xl border border-warning-200 bg-warning-50 p-5 text-warning-900">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
+              <div>
+                <p className="font-semibold">QuickBooks setup needs review</p>
+                <p className="mt-1 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Entering the missing hire date or address clears that source-field item when you save.</p>
+                <ul className="mt-3 space-y-2 text-sm leading-6">
+                  {(loadedEmployee.configuration_review_items || []).map((item) => (
+                    <li key={item.code}>• {item.message}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1905,7 +1926,8 @@ export function EmployeeForm() {
 
               {/* Retirement Contributions */}
               <div className="mt-6 pt-4 border-t border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-800 mb-2">Retirement Contributions</h4>
+                <h4 className="text-sm font-semibold text-gray-800 mb-1">Retirement Contributions</h4>
+                <p className="mb-3 text-xs leading-5 text-gray-500">Employee deductions reduce the check. Employer matches are company-paid and do not reduce take-home pay.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1926,6 +1948,32 @@ export function EmployeeForm() {
                     <NumericInput
                       value={form.roth_retirement_rate * 100}
                       onValueChange={(value) => handleChange('roth_retirement_rate', (value ?? 0) / 100)}
+                      min={0}
+                      max={100}
+                      fixedDecimalsOnBlur={2}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Employer Pre-Tax Match (%)
+                    </label>
+                    <NumericInput
+                      value={(form.employer_retirement_match_rate || 0) * 100}
+                      onValueChange={(value) => handleChange('employer_retirement_match_rate', (value ?? 0) / 100)}
+                      min={0}
+                      max={100}
+                      fixedDecimalsOnBlur={2}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Employer Roth Match (%)
+                    </label>
+                    <NumericInput
+                      value={(form.employer_roth_match_rate || 0) * 100}
+                      onValueChange={(value) => handleChange('employer_roth_match_rate', (value ?? 0) / 100)}
                       min={0}
                       max={100}
                       fixedDecimalsOnBlur={2}

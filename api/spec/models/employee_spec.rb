@@ -1,6 +1,61 @@
 require "rails_helper"
 
 RSpec.describe Employee, type: :model do
+  describe "QuickBooks configuration review" do
+    it "allows only explicitly reviewed filing fields to remain blank after a protected import" do
+      employee = build(
+        :employee,
+        hire_date: nil,
+        address_line1: nil,
+        city: nil,
+        state: nil,
+        zip: nil,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "source_fields_need_review",
+            "message" => "Confirm source fields",
+            "fields" => %w[hire_date address_line1 city state zip]
+          }
+        ]
+      )
+
+      expect(employee).to be_valid
+    end
+
+    it "does not weaken ordinary employee filing-data validation" do
+      employee = build(:employee, hire_date: nil, address_line1: nil)
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:hire_date]).to include("can't be blank")
+      expect(employee.errors[:address_line1]).to include("can't be blank")
+    end
+
+    it "clears source-field review items when the missing values are supplied" do
+      employee = create(
+        :employee,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          {
+            "code" => "verify_hire_date",
+            "message" => "Confirm hire date",
+            "fields" => %w[hire_date]
+          },
+          {
+            "code" => "legacy_w4_allowances",
+            "message" => "Confirm current W-4",
+            "fields" => %w[allowances w4_form_version]
+          }
+        ]
+      )
+
+      expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "legacy_w4_allowances" ])
+      expect(employee.configuration_review_status).to eq("needs_review")
+    end
+  end
+
   describe "#active_wage_rates" do
     let!(:company) { create(:company) }
     let!(:department) { create(:department, company: company) }

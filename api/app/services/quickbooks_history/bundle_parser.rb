@@ -4,7 +4,7 @@ require "digest"
 
 module QuickbooksHistory
   class BundleParser
-    IMPORTER_VERSION = "quickbooks-online-payroll-v3"
+    IMPORTER_VERSION = "quickbooks-online-payroll-v4"
     REQUIRED_REPORTS = %w[
       payroll_details paycheck_history payroll_summary employee_details employee_directory
     ].freeze
@@ -402,7 +402,10 @@ module QuickbooksHistory
           normalized_name: normalized,
           source_status: name.start_with?("*") ? "inactive" : "active",
           hire_date: optional_date(cell(row, directory_headers, "Hire date"), "Employee Directory row #{zero_index + 1} Hire date"),
-          source_row_number: zero_index + 1
+          source_row_number: zero_index + 1,
+          directory_snapshot: directory_headers.each_with_index.to_h do |header, index|
+            [ header, row[index].to_s.squish ]
+          end
         } ]
       end
       duplicate_directory_names = source_workers.group_by(&:first).count { |_normalized, grouped| grouped.many? }
@@ -455,9 +458,11 @@ module QuickbooksHistory
         detail = details.fetch(normalized)
         worker.merge(
           hire_date: detail[:hire_date] || worker[:hire_date],
-          private_snapshot: detail.fetch(:private_snapshot),
+          private_snapshot: detail.fetch(:private_snapshot).merge(
+            "_employee_directory" => worker.fetch(:directory_snapshot)
+          ),
           details_source_row_number: detail.fetch(:source_row_number)
-        )
+        ).except(:directory_snapshot)
       end
     end
 

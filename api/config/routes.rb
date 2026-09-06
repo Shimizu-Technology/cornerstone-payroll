@@ -116,6 +116,8 @@ Rails.application.routes.draw do
             post :approve_cutover
             get :download_cutover_evidence
             post :archive_unlinked_workers
+            post :preview_client_bootstrap
+            post :apply_client_bootstrap
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
         end

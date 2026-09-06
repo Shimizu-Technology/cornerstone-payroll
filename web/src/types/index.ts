@@ -202,7 +202,7 @@ export interface Employee {
   ssn?: string | null;
   ssn_last_four?: string | null;
   date_of_birth?: string;
-  hire_date: string;
+  hire_date?: string | null;
   termination_date?: string;
   current_work_profile?: EmployeeWorkProfile | null;
   status_history?: EmployeeStatusEvent[];
@@ -231,6 +231,9 @@ export interface Employee {
   employer_roth_match_rate?: number;
   status: EmployeeStatus;
   portal_pending_approval?: boolean;
+  configuration_source?: 'quickbooks_history' | null;
+  configuration_review_status?: 'complete' | 'needs_review';
+  configuration_review_items?: Array<{ code: string; message: string; fields: string[] }>;
   // Contractor-specific fields
   business_name?: string;
   contractor_ein?: string;
@@ -393,6 +396,8 @@ export interface EmployeeFormData {
   w4_effective_on?: string | null;
   retirement_rate: number;
   roth_retirement_rate: number;
+  employer_retirement_match_rate?: number;
+  employer_roth_match_rate?: number;
   department_id?: number;
   // Contractor-specific fields
   business_name?: string;

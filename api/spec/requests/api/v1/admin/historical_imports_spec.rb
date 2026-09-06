@@ -191,6 +191,35 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(imported.id)
   end
 
+  it "previews and applies clean-client employee preparation without applying historical payroll" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "preview_summary")).to include(
+      "worker_count" => 3,
+      "active_employee_count" => 2,
+      "inactive_employee_count" => 1,
+      "wage_rate_count" => 3
+    )
+    expect(response.parsed_body.dig("data", "ready_to_apply")).to be(true)
+    acknowledgement = response.parsed_body.dig("data", "acknowledgement")
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap", params: {
+      acknowledgement: acknowledgement
+    }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "client_bootstrap", "status")).to eq("applied")
+    expect(response.parsed_body.dig("data", "worker_review_summary")).to include(
+      "needs_review" => 0,
+      "linked" => 3
+    )
+    expect(Employee.where(company: company).count).to eq(3)
+    expect(PayPeriod.where(company: company)).to be_empty
+    expect(batch.reload).to be_previewed
+    expect(AuditLog.where(action: "historical_imports#apply_client_bootstrap", company: company)).to exist
+  end
+
   it "lets accountants review history but not mutate imports" do
     accountant = create(:user, company: company, organization: company.organization, role: "accountant")
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)
@@ -214,6 +243,10 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
     expect(response).to have_http_status(:forbidden)
     post "/api/v1/admin/historical_imports/#{batch.id}/verify_cutover"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/apply_client_bootstrap"
     expect(response).to have_http_status(:forbidden)
     patch "/api/v1/admin/historical_imports/#{batch.id}/update_cutover_review"
     expect(response).to have_http_status(:forbidden)

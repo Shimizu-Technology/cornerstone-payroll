@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
 
 interface MockWorker {
   id: number;
@@ -236,6 +236,38 @@ function pendingCutoverReview(): HistoricalCutoverReview {
     verified_by_name: null,
     verification_started_at: '2026-09-06T02:00:00Z',
     updated_at: '2026-09-06T02:00:00Z',
+  };
+}
+
+function clientBootstrap(status: 'previewed' | 'applied' = 'previewed'): HistoricalClientBootstrap {
+  return {
+    id: 90,
+    status,
+    plan_digest: 'f'.repeat(64),
+    preview_summary: {
+      worker_count: 114,
+      active_employee_count: 57,
+      inactive_employee_count: 57,
+      hourly_employee_count: 112,
+      variable_pay_employee_count: 2,
+      wage_rate_count: 244,
+      payroll_field_assignment_count: 32,
+      employees_with_recurring_setup_count: 28,
+      employees_needing_review_count: 114,
+      error_count: 0,
+    },
+    warnings: [{ message: 'A QuickBooks placeholder deduction was intentionally not activated', worker_count: 3 }],
+    errors: [],
+    review_items: [{
+      code: 'verify_hire_date',
+      message: 'QuickBooks hire dates were retained with the source evidence but were not copied into live payroll. Confirm the effective hire date.',
+      worker_count: 114,
+      historical_worker_ids: [1],
+    }],
+    ready_to_apply: status === 'previewed',
+    applied_at: status === 'applied' ? '2026-09-07T03:00:00Z' : null,
+    applied_by_name: status === 'applied' ? 'History Admin' : null,
+    acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES',
   };
 }
 
@@ -578,6 +610,94 @@ test('makes retained source verification and exact download clear to an administ
   await page.getByRole('button', { name: 'Download original' }).click();
   await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
+});
+
+test('previews and creates a clean current-payroll roster without running payroll', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  let current: HistoricalImportDetail = detailWithVerifiedSource(1);
+  let rosterApplied = false;
+  let employeeListRequests = 0;
+
+  await page.unroute('**/api/v1/companies');
+  await page.unroute('**/api/v1/admin/employees**');
+  await page.route('**/api/v1/companies', (route) => fulfillJson(route, {
+    companies: [
+      {
+        id: 1,
+        name: 'Historical Payroll Company',
+        active: true,
+        active_employees: rosterApplied ? 57 : 1,
+        total_employees: rosterApplied ? 114 : 1,
+        pay_frequency: 'biweekly',
+        historical_payroll_enabled: true,
+      },
+      {
+        id: 2,
+        name: 'Another Client',
+        active: true,
+        active_employees: 1,
+        total_employees: 1,
+        pay_frequency: 'biweekly',
+        historical_payroll_enabled: false,
+      },
+    ],
+    can_manage_clients: true,
+    can_view_client_management: true,
+    can_switch_company: true,
+    current_company_id: 1,
+  }));
+  await page.route('**/api/v1/admin/employees**', async (route) => {
+    employeeListRequests += 1;
+    await fulfillJson(route, {
+      data: rosterApplied
+        ? [{ id: 900, first_name: 'Imported', last_name: 'Employee', status: 'active' }]
+        : [{ id: 800, first_name: 'Existing', last_name: 'Employee', status: 'active' }],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 200 },
+    });
+  });
+
+  await page.route('**/api/v1/admin/historical_imports/1/preview_client_bootstrap', async (route) => {
+    current = { ...current, client_bootstrap: clientBootstrap() };
+    await fulfillJson(route, { data: current.client_bootstrap });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1/apply_client_bootstrap', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
+    rosterApplied = true;
+    current = { ...current, client_bootstrap: clientBootstrap('applied') };
+    await fulfillJson(route, { data: withoutDetailCollections(current) });
+  });
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByRole('heading', { name: 'Prepare this clean client for its next payroll' })).toBeVisible();
+  await expect(page.getByText('It makes no changes.')).toBeVisible();
+  await expect(page.getByText(/suppresses the incorrect Nevada addresses/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Preview current setup' }).click();
+  await expect(page.getByText('Current employee and recurring-payroll setup is ready for review. No live records were created.')).toBeVisible();
+  await expect(page.getByText('114', { exact: true })).toHaveCount(3);
+  await expect(page.getByText(/placeholder deduction was intentionally not activated/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create employee records' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Create employee records' }).click();
+  const confirm = page.getByRole('button', { name: 'Create employees' });
+  await expect(confirm).toBeDisabled();
+  await page.getByLabel('Type the confirmation exactly').fill('PREPARE CLEAN CLIENT EMPLOYEES');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  await expect(page.getByText('Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.')).toBeVisible();
+  await expect(page.getByText('Employees prepared')).toBeVisible();
+  await expect(page.getByText(/Prepared .* by History Admin/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Historical Payroll Company 57 employees/ })).toBeVisible();
+  expect(employeeListRequests).toBeGreaterThanOrEqual(2);
 });
 
 test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {

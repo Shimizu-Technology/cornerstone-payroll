@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   Check,
   CheckCircle2,
+  ClipboardCheck,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -17,6 +18,7 @@ import {
   Search,
   ShieldCheck,
   UploadCloud,
+  UsersRound,
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
@@ -172,7 +174,7 @@ function PaycheckDetail({ paycheck }: { paycheck: HistoricalPaycheck }): ReactEl
 
 export function HistoricalPayroll(): ReactElement {
   const { user } = useAuth();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, refreshCompanies } = useCompany();
   const canMutate = ['super_admin', 'org_admin', 'admin', 'manager'].includes(user?.role || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRequestIdRef = useRef(0);
@@ -195,7 +197,7 @@ export function HistoricalPayroll(): ReactElement {
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | 'cutover_verify' | 'cutover_save' | 'cutover_download' | 'cutover_approve' | null>(null);
+  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | 'bootstrap_preview' | 'bootstrap_apply' | 'cutover_verify' | 'cutover_save' | 'cutover_download' | 'cutover_approve' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -205,8 +207,11 @@ export function HistoricalPayroll(): ReactElement {
   const [employeeSearchDraft, setEmployeeSearchDraft] = useState('');
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeHasMore, setEmployeeHasMore] = useState(false);
+  const [employeeReloadToken, setEmployeeReloadToken] = useState(0);
   const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
   const [archiveWorkersConfirmation, setArchiveWorkersConfirmation] = useState<ArchiveWorkersConfirmation | null>(null);
+  const [bootstrapApplyOpen, setBootstrapApplyOpen] = useState(false);
+  const [bootstrapAcknowledgement, setBootstrapAcknowledgement] = useState('');
   const [reportType, setReportType] = useState<HistoricalReportType>('register');
   const [reportYear, setReportYear] = useState<number | undefined>();
   const [reportWorker, setReportWorker] = useState<string | undefined>();
@@ -326,6 +331,8 @@ export function HistoricalPayroll(): ReactElement {
     setReportError(null);
     setEmployeeSearchDraft('');
     setEmployeeSearch('');
+    setBootstrapApplyOpen(false);
+    setBootstrapAcknowledgement('');
     setLoading(true);
     let current = true;
     void refresh().finally(() => {
@@ -414,7 +421,7 @@ export function HistoricalPayroll(): ReactElement {
       }
     });
     return () => controller.abort();
-  }, [activeCompanyId, canMutate, employeeSearch, handleError]);
+  }, [activeCompanyId, canMutate, employeeReloadToken, employeeSearch, handleError]);
 
   useEffect(() => {
     setPage(1);
@@ -700,6 +707,59 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
+  const previewClientBootstrap = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('bootstrap_preview');
+    setError(null);
+    setValidationErrors({});
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.previewClientBootstrap(batchId);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setDetail((current) => current?.id === batchId ? { ...current, client_bootstrap: response.data } : current);
+      setNotice({
+        tone: response.data.ready_to_apply ? 'success' : 'warning',
+        message: response.data.ready_to_apply
+          ? 'Current employee and recurring-payroll setup is ready for review. No live records were created.'
+          : 'Current-payroll preparation is blocked. Review the source or client-safety errors below.',
+      });
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'Current-payroll preparation could not be previewed.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const applyClientBootstrap = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    const bootstrap = selectedBatch?.client_bootstrap;
+    if (!batchId || !bootstrap) return;
+    setAction('bootstrap_apply');
+    setError(null);
+    setValidationErrors({});
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.applyClientBootstrap(batchId, bootstrapAcknowledgement);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setBootstrapApplyOpen(false);
+      setBootstrapAcknowledgement('');
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
+      setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.' });
+      setEmployeeReloadToken((current) => current + 1);
+      await Promise.all([
+        loadList(batchPageRef.current, batchId),
+        loadDetail(batchId),
+        refreshCompanies(),
+      ]);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'The clean-client employee setup could not be created.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   const verifyCutover = async (): Promise<void> => {
     const batchId = selectedBatchIdRef.current;
     if (!batchId) return;
@@ -819,6 +879,7 @@ export function HistoricalPayroll(): ReactElement {
   const sourcesReady = Boolean(selectedBatch?.source_retention_summary.ready);
   const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
+  const clientBootstrap = selectedBatch?.client_bootstrap;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
   const cutoverApproved = cutoverReview?.status === 'approved';
@@ -983,6 +1044,86 @@ export function HistoricalPayroll(): ReactElement {
             </CardContent>
           </Card>
         </section>
+
+        {selectedBatch && (
+          <Card className="overflow-hidden">
+            <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.8),rgba(255,255,255,0.98)_58%,rgba(239,246,255,0.8))]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><UsersRound className="h-4 w-4" />Current payroll setup</div>
+                  <CardTitle className="mt-2">Prepare this clean client for its next payroll</CardTitle>
+                  <CardDescription className="mt-2">Create one live employee for every QuickBooks worker, carry over supported pay rates and active recurring setup, and link the archive automatically. This is available only while the client has no live payroll data.</CardDescription>
+                </div>
+                {clientBootstrap?.status === 'applied'
+                  ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
+                  : clientBootstrap?.ready_to_apply
+                    ? <Badge variant="info">Preview ready</Badge>
+                    : clientBootstrap
+                      ? <Badge variant="danger">Blocked</Badge>
+                      : <Badge variant="default">Not previewed</Badge>}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 p-4 sm:p-6">
+              {!clientBootstrap ? (
+                <div className="flex flex-col gap-4 rounded-2xl border border-dashed border-primary-300 bg-primary-50/40 p-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-neutral-950">Check the employee setup before creating anything</p>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">The preview validates every private employee snapshot, rejects unknown deduction types, suppresses the incorrect Nevada addresses, and confirms the destination client is empty. It makes no changes.</p>
+                  </div>
+                  {canMutate && selectedBatch.status === 'previewed' && <Button onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}Preview current setup</Button>}
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.worker_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-500">Active</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.active_employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Inactive</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.inactive_employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Hourly rates</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.wage_rate_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Recurring fields</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.payroll_field_assignment_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-warning-50 p-4"><p className="text-xs text-neutral-500">Need review</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.employees_needing_review_count.toLocaleString()}</p></div>
+                  </div>
+
+                  {clientBootstrap.errors.length > 0 && (
+                    <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4">
+                      <p className="text-sm font-semibold text-danger-900">Resolve before creating employees</p>
+                      <ul className="mt-2 space-y-2 text-sm leading-6 text-danger-800">{clientBootstrap.errors.map((message) => <li key={message}>• {message}</li>)}</ul>
+                    </div>
+                  )}
+
+                  {clientBootstrap.review_items.length > 0 && (
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-950">Items deliberately left for accountant review</p>
+                      <p className="mt-1 text-sm leading-6 text-neutral-600">These do not prevent creating the roster. They stay visible on each employee record and are never filled with guessed values.</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {clientBootstrap.review_items.map((item) => (
+                          <div key={item.code} className="rounded-xl border border-warning-200 bg-warning-50/60 p-4">
+                            <div className="flex items-start justify-between gap-3"><p className="text-sm leading-6 text-warning-900">{item.message}</p><Badge variant="warning">{item.worker_count}</Badge></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {clientBootstrap.warnings.length > 0 && (
+                    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                      <p className="font-semibold text-neutral-900">Safe exclusions</p>
+                      <ul className="mt-2 space-y-1">{clientBootstrap.warnings.map((warning) => <li key={warning.message}>• {warning.message} ({warning.worker_count})</li>)}</ul>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {canMutate && clientBootstrap.status === 'previewed' && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
+                      {canMutate && clientBootstrap.status === 'previewed' && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyOpen(true); }} disabled={!clientBootstrap.ready_to_apply || action !== null}><UsersRound className="mr-2 h-4 w-4" />Create employee records</Button>}
+                      {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {shortDate(clientBootstrap.applied_at?.slice(0, 10))}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {selectedBatch && (selectedBatch.status === 'applied' || selectedBatch.status === 'locked') && (
           <Card className="overflow-hidden">
@@ -1342,6 +1483,27 @@ export function HistoricalPayroll(): ReactElement {
           <DialogHeader><DialogTitle>{confirmation?.action === 'apply' ? 'Apply historical payroll?' : 'Lock this historical batch?'}</DialogTitle><DialogDescription>{confirmation?.action === 'apply' ? 'This makes the reconciled QuickBooks snapshots available in the archive and fixes the worker links as reviewed. It does not run payroll or update live YTD totals.' : 'Locking seals the applied batch metadata against ordinary changes. Use this only after the reconciliation evidence is accepted.'}</DialogDescription></DialogHeader>
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">{confirmation?.action === 'apply' ? 'You are accepting QuickBooks final values as authoritative historical records.' : 'This is the final integrity gate for this imported bundle.'}</div>
           <DialogFooter><Button variant="outline" onClick={() => setConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void runLifecycleAction()} disabled={action !== null}>{action ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : confirmation?.action === 'lock' ? <LockKeyhole className="mr-2 h-4 w-4" /> : <FileCheck2 className="mr-2 h-4 w-4" />}{confirmation?.action === 'apply' ? 'Apply authoritative history' : 'Lock reconciled batch'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bootstrapApplyOpen} onOpenChange={(open) => { if (!open && action !== 'bootstrap_apply') { setBootstrapApplyOpen(false); setBootstrapAcknowledgement(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create this client’s employee records?</DialogTitle>
+            <DialogDescription>This is a one-time, atomic setup step. It will create the previewed live employees, rates, and recurring fields and link every QuickBooks worker.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">Incorrect Nevada addresses, unverified hire dates, legacy W-4 allowances, unknown obligation balances, and time-off policy are not guessed. They remain clearly flagged for review.</div>
+            <div>
+              <label htmlFor="bootstrap-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
+              <p className="mt-1 font-mono text-xs text-neutral-600">{clientBootstrap?.acknowledgement}</p>
+              <Input id="bootstrap-acknowledgement" className="mt-2" value={bootstrapAcknowledgement} onChange={(event) => setBootstrapAcknowledgement(event.target.value)} autoComplete="off" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setBootstrapApplyOpen(false); setBootstrapAcknowledgement(''); }} disabled={action === 'bootstrap_apply'}>Cancel</Button>
+            <Button onClick={() => void applyClientBootstrap()} disabled={action === 'bootstrap_apply' || bootstrapAcknowledgement !== clientBootstrap?.acknowledgement}>{action === 'bootstrap_apply' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <UsersRound className="mr-2 h-4 w-4" />}Create employees</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

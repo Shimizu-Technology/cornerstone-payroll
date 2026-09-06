@@ -11,6 +11,7 @@ module Api
         before_action :set_batch, only: %i[
           show apply lock verify_source_files download_source_file archive_unlinked_workers update_worker
           verify_cutover update_cutover_review approve_cutover download_cutover_evidence
+          preview_client_bootstrap apply_client_bootstrap
         ]
 
         def index
@@ -20,6 +21,7 @@ module Api
                     .includes(
                       :applied_by,
                       :locked_by,
+                      :historical_client_bootstrap,
                       :historical_import_source_files,
                       historical_import_cutover_review: %i[verified_by approved_by]
                     )
@@ -153,6 +155,30 @@ module Api
             data: batch_json(@batch.reload),
             meta: { reviewed_count: result.reviewed_count }
           }
+        end
+
+        def preview_client_bootstrap
+          bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(
+            batch: @batch,
+            actor: current_user
+          ).call
+          render json: { data: client_bootstrap_json(bootstrap) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def apply_client_bootstrap
+          bootstrap = @batch.historical_client_bootstrap || raise(ArgumentError, "Build and review the current-payroll preview first")
+          QuickbooksHistory::ClientBootstrapApplyService.new(
+            bootstrap: bootstrap,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement]
+          ).call
+          render json: {
+            data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true)
+          }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         def update_worker
@@ -353,6 +379,7 @@ module Api
               batch.historical_import_cutover_review,
               include_evidence: include_cutover_evidence
             ),
+            client_bootstrap: client_bootstrap_json(batch.historical_client_bootstrap),
             created_at: batch.created_at
           }
           payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
@@ -396,6 +423,26 @@ module Api
             verification_status: source_file.verification_status,
             verified_at: source_file.verified_at,
             verification_error: source_file.verification_error
+          }
+        end
+
+        def client_bootstrap_json(bootstrap)
+          return nil unless bootstrap
+
+          {
+            id: bootstrap.id,
+            status: bootstrap.status,
+            plan_digest: bootstrap.plan_digest,
+            preview_summary: bootstrap.preview_summary,
+            warnings: bootstrap.warnings,
+            errors: bootstrap.validation_errors,
+            review_items: bootstrap.review_items,
+            ready_to_apply: bootstrap.ready_to_apply?,
+            applied_at: bootstrap.applied_at,
+            applied_by_name: bootstrap.applied_by&.name,
+            acknowledgement: QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT,
+            created_at: bootstrap.created_at,
+            updated_at: bootstrap.updated_at
           }
         end
 

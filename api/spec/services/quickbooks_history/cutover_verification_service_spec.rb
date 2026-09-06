@@ -131,6 +131,9 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
         actor: v2_actor
       ).call.batch
     end
+    v2_batch.historical_workers.find_each do |worker|
+      worker.update!(private_snapshot: JSON.generate(worker.private_snapshot_data.except("_employee_directory")))
+    end
     review_historical_workers_as_archive_only(v2_batch, actor: v2_actor)
     QuickbooksHistory::LifecycleService.new(batch: v2_batch, actor: v2_actor).apply!(
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT

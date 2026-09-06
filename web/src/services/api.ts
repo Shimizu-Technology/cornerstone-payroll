@@ -3782,7 +3782,40 @@ export interface HistoricalImportBatch {
   locked_at?: string | null;
   locked_by_name?: string | null;
   cutover_review?: HistoricalCutoverReview | null;
+  client_bootstrap?: HistoricalClientBootstrap | null;
   created_at: string;
+}
+
+export interface HistoricalClientBootstrap {
+  id: number;
+  status: 'previewed' | 'applied';
+  plan_digest: string;
+  preview_summary: {
+    worker_count: number;
+    active_employee_count: number;
+    inactive_employee_count: number;
+    hourly_employee_count: number;
+    variable_pay_employee_count: number;
+    wage_rate_count: number;
+    payroll_field_assignment_count: number;
+    employees_with_recurring_setup_count: number;
+    employees_needing_review_count: number;
+    error_count: number;
+  };
+  warnings: Array<{ message: string; worker_count: number }>;
+  errors: string[];
+  review_items: Array<{
+    code: string;
+    message: string;
+    worker_count: number;
+    historical_worker_ids: number[];
+  }>;
+  ready_to_apply: boolean;
+  applied_at?: string | null;
+  applied_by_name?: string | null;
+  acknowledgement: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface HistoricalImportSourceFile {
@@ -3968,6 +4001,10 @@ export const historicalImportsApi = {
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
   archiveUnlinkedWorkers: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
+  previewClientBootstrap: (batchId: number): Promise<{ data: HistoricalClientBootstrap }> =>
+    api.post<{ data: HistoricalClientBootstrap }>(`/admin/historical_imports/${batchId}/preview_client_bootstrap`),
+  applyClientBootstrap: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch }> =>
+    api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/apply_client_bootstrap`, { acknowledgement }),
   verifyCutover: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
   updateCutoverReview: (
