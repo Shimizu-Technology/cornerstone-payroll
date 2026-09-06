@@ -82,4 +82,38 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
     expect { described_class.new(batch: batch, actor: accountant).call }
       .to raise_error(ArgumentError, /manager or administrator/)
   end
+
+  it "supports v2 evidence only when the current parser reproduces it exactly" do
+    batch.update_column(:importer_version, "quickbooks-online-payroll-v2")
+
+    result = described_class.new(batch: batch, actor: actor).call
+
+    expect(result.passed).to be(true)
+    expect(result.review.evidence).to include(
+      "importer_version" => "quickbooks-online-payroll-v2",
+      "verification_parser_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION
+    )
+  end
+
+  it "rejects an importer version outside the explicit compatibility set" do
+    batch.update_column(:importer_version, "quickbooks-online-payroll-v1")
+
+    expect { described_class.new(batch: batch, actor: actor).call }
+      .to raise_error(ArgumentError, /unsupported.*reviewed source migration/i)
+  end
+
+  it "cannot persist over a newer queued verification attempt" do
+    review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+    original_token = review.verification_started_at.iso8601(6)
+    service = described_class.new(batch: batch, actor: actor, expected_verification_started_at: original_token)
+    allow(service).to receive(:reparse_retained_sources!).and_wrap_original do |method|
+      parsed = method.call
+      review.update_columns(verification_started_at: 1.second.from_now)
+      parsed
+    end
+
+    expect { service.call }.to raise_error(described_class::StaleVerificationAttempt)
+    expect(review.reload).to be_pending
+    expect(review.evidence).to eq({})
+  end
 end

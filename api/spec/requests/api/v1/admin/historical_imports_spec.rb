@@ -69,12 +69,42 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to include("Approve the verified QuickBooks cutover review")
 
-    post "/api/v1/admin/historical_imports/#{batch_id}/verify_cutover"
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch_id}/verify_cutover"
+    end.to have_enqueued_job(QuickbooksHistory::CutoverVerificationJob).with(batch_id, admin.id, kind_of(String))
+    expect(response).to have_http_status(:accepted)
+    expect(response.parsed_body.dig("data", "cutover_review", "status")).to eq("pending")
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(true)
+
+    expect do
+      post "/api/v1/admin/historical_imports/#{batch_id}/verify_cutover"
+    end.not_to have_enqueued_job(QuickbooksHistory::CutoverVerificationJob)
+    expect(response).to have_http_status(:accepted)
+    expect(response.parsed_body.dig("meta", "enqueued")).to be(false)
+
+    verification_started_at = HistoricalImportBatch.find(batch_id).historical_import_cutover_review.verification_started_at.iso8601(6)
+    QuickbooksHistory::CutoverVerificationJob.perform_now(batch_id, admin.id, verification_started_at)
+    get "/api/v1/admin/historical_imports/#{batch_id}"
     expect(response).to have_http_status(:ok)
     cutover = response.parsed_body.dig("data", "cutover_review")
-    expect(response.parsed_body.dig("meta", "passed")).to be(true)
     expect(cutover.dig("evidence", "checks")).to all(include("passed" => true))
     expect(cutover.to_json).not_to include("000-00-0001", "private_snapshot", "storage_key")
+
+    patch "/api/v1/admin/historical_imports/#{batch_id}/update_cutover_review", params: {
+      exception_dispositions: "not-an-object",
+      attestations: [],
+      approval_notes: "Invalid request shape."
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("exception_dispositions must be an object")
+
+    patch "/api/v1/admin/historical_imports/#{batch_id}/update_cutover_review", params: {
+      exception_dispositions: {},
+      attestations: [],
+      approval_notes: "Invalid request shape."
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("attestations must be an object")
 
     dispositions = cutover.dig("evidence", "exceptions").to_h { |exception| [ exception.fetch("key"), "Accepted source limitation." ] }
     attestations = cutover.fetch("attestation_labels").keys.index_with(true)

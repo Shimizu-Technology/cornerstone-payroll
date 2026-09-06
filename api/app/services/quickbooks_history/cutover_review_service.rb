@@ -17,8 +17,8 @@ module QuickbooksHistory
           attestations: normalized_attestations(attestations),
           approval_notes: approval_notes.to_s.strip.presence
         )
+        record_audit!("historical_imports#save_cutover_review")
       end
-      record_audit!("historical_imports#save_cutover_review")
       review
     end
 
@@ -40,8 +40,8 @@ module QuickbooksHistory
           approved_by: actor,
           approved_at: Time.current
         )
+        record_audit!("historical_imports#approve_cutover")
       end
-      record_audit!("historical_imports#approve_cutover")
       review
     end
 

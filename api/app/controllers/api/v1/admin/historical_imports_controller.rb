@@ -17,7 +17,12 @@ module Api
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
           batches = filtered_batches(HistoricalImportBatch.where(company_id: current_company_id))
-                    .includes(:applied_by, :locked_by, :historical_import_source_files, :historical_import_cutover_review)
+                    .includes(
+                      :applied_by,
+                      :locked_by,
+                      :historical_import_source_files,
+                      historical_import_cutover_review: %i[verified_by approved_by]
+                    )
                     .recent_first
           total = batches.count
           archive = archive_summary
@@ -169,8 +174,11 @@ module Api
         end
 
         def verify_cutover
-          result = QuickbooksHistory::CutoverVerificationService.new(batch: @batch, actor: current_user).call
-          render json: { data: batch_json(@batch.reload, include_source_files: true), meta: { passed: result.passed } }
+          result = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: @batch, actor: current_user).call
+          render json: {
+            data: batch_json(@batch.reload, include_source_files: true),
+            meta: { enqueued: result.enqueued, status: result.review.status }
+          }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: error_payload(e), status: :unprocessable_entity
         end
@@ -223,12 +231,19 @@ module Api
 
         def cutover_exception_dispositions(review)
           allowed_keys = Array(review.evidence.to_h["exceptions"]).pluck("key")
-          params.fetch(:exception_dispositions, ActionController::Parameters.new).permit(*allowed_keys).to_h
+          permitted_object(:exception_dispositions).permit(*allowed_keys).to_h
         end
 
         def cutover_attestations
-          params.fetch(:attestations, ActionController::Parameters.new)
-                .permit(*HistoricalImportCutoverReview::ATTESTATIONS.keys).to_h
+          permitted_object(:attestations).permit(*HistoricalImportCutoverReview::ATTESTATIONS.keys).to_h
+        end
+
+        def permitted_object(key)
+          value = params[key]
+          return value if value.is_a?(ActionController::Parameters)
+          raise ArgumentError, "#{key} must be an object" unless value.nil?
+
+          ActionController::Parameters.new
         end
 
         def require_historical_payroll_enabled!
@@ -241,7 +256,9 @@ module Api
         end
 
         def set_batch
-          @batch = HistoricalImportBatch.where(company_id: current_company_id).find(params[:id])
+          @batch = HistoricalImportBatch.where(company_id: current_company_id)
+                                        .includes(historical_import_cutover_review: %i[verified_by approved_by])
+                                        .find(params[:id])
         end
 
         def filtered_paychecks(scope)
@@ -344,6 +361,8 @@ module Api
             evidence_digest: review.evidence_digest,
             verified_at: review.verified_at,
             verified_by_name: review.verified_by&.name,
+            verification_started_at: review.verification_started_at,
+            verification_error: review.verification_error,
             exception_dispositions: review.exception_dispositions,
             attestations: review.attestations,
             attestation_labels: HistoricalImportCutoverReview::ATTESTATIONS,
@@ -351,7 +370,8 @@ module Api
             ready_for_approval: review.ready_for_approval?,
             approved_at: review.approved_at,
             approved_by_name: review.approved_by&.name,
-            approval_acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT
+            approval_acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT,
+            updated_at: review.updated_at
           }
         end
 

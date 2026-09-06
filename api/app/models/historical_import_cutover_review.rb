@@ -18,6 +18,7 @@ class HistoricalImportCutoverReview < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :historical_import_batch_id, uniqueness: true
   validates :approval_notes, length: { maximum: 2_000 }, allow_blank: true
+  validates :verification_error, length: { maximum: 2_000 }, allow_blank: true
   validate :company_matches_batch
   validate :approved_fields_are_complete, if: :approved?
 
@@ -43,6 +44,10 @@ class HistoricalImportCutoverReview < ApplicationRecord
 
   def approved?
     status == "approved"
+  end
+
+  def pending?
+    status == "pending"
   end
 
   private

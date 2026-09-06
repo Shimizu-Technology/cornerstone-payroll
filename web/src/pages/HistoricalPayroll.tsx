@@ -420,6 +420,12 @@ export function HistoricalPayroll(): ReactElement {
     () => detail?.id === selectedBatchId ? detail : batches.find((batch) => batch.id === selectedBatchId) || null,
     [batches, detail, selectedBatchId],
   );
+  const cutoverReviewSyncKey = [
+    selectedBatch?.cutover_review?.id ?? '',
+    selectedBatch?.cutover_review?.status ?? '',
+    selectedBatch?.cutover_review?.evidence_digest ?? '',
+    selectedBatch?.cutover_review?.updated_at ?? '',
+  ].join('|');
 
   useEffect(() => {
     const review = selectedBatch?.cutover_review;
@@ -427,7 +433,29 @@ export function HistoricalPayroll(): ReactElement {
     setCutoverAttestations(review?.attestations || {});
     setCutoverNotes(review?.approval_notes || '');
     setCutoverApprovalOpen(false);
-  }, [selectedBatch?.cutover_review, selectedBatchId]);
+  // Reset only when the persisted review changes, not when a list refresh creates an equivalent object.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutoverReviewSyncKey, selectedBatchId]);
+
+  useEffect(() => {
+    if (!selectedBatchId || selectedBatch?.cutover_review?.status !== 'pending') return;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    const poll = async (): Promise<void> => {
+      await Promise.all([
+        loadDetail(selectedBatchId),
+        loadList(batchPageRef.current, selectedBatchId),
+      ]);
+      if (!cancelled) timeoutId = window.setTimeout(() => void poll(), 2_000);
+    };
+    timeoutId = window.setTimeout(() => void poll(), 2_000);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [loadDetail, loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);
 
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
@@ -641,12 +669,12 @@ export function HistoricalPayroll(): ReactElement {
     try {
       const response = await historicalImportsApi.verifyCutover(batchId);
       if (selectedBatchIdRef.current !== batchId) return;
-      setDetail(response.data);
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
       setNotice({
-        tone: response.meta.passed ? 'success' : 'warning',
-        message: response.meta.passed
-          ? 'Fresh source parsing matches the accepted historical ledger. Complete the final checklist and exception decisions.'
-          : 'Cutover verification found a mismatch. The batch cannot be approved or locked.',
+        tone: 'success',
+        message: response.meta.enqueued
+          ? 'Final verification started. This page will update automatically when every retained source comparison finishes.'
+          : 'Final verification is already running. This page will update automatically.',
       });
       await loadList(batchPageRef.current, batchId);
     } catch (err) {
@@ -669,7 +697,7 @@ export function HistoricalPayroll(): ReactElement {
         approval_notes: cutoverNotes,
       });
       if (selectedBatchIdRef.current !== batchId) return;
-      setDetail(response.data);
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
       setNotice({ tone: 'success', message: response.data.cutover_review?.ready_for_approval ? 'Cutover review saved and ready for approval.' : 'Cutover review saved. Complete every item before approval.' });
       await loadList(batchPageRef.current, batchId);
     } catch (err) {
@@ -712,7 +740,7 @@ export function HistoricalPayroll(): ReactElement {
     try {
       const response = await historicalImportsApi.approveCutover(batchId, review.approval_acknowledgement);
       if (selectedBatchIdRef.current !== batchId) return;
-      setDetail(response.data);
+      setDetail((current) => current?.id === batchId ? { ...current, ...response.data } : current);
       setCutoverApprovalOpen(false);
       setNotice({ tone: 'success', message: 'QuickBooks cutover is approved. The historical batch can now be locked.' });
       await loadList(batchPageRef.current, batchId);
@@ -754,6 +782,10 @@ export function HistoricalPayroll(): ReactElement {
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
   const cutoverApproved = cutoverReview?.status === 'approved';
+  const cutoverChecks = cutoverReview?.evidence.checks || [];
+  const cutoverYears = cutoverReview?.evidence.years || [];
+  const cutoverExceptions = cutoverReview?.evidence.exceptions || [];
+  const cutoverEvidencePassed = cutoverReview?.evidence.passed === true;
   const historicalReportFormats: ReportDownloadFormat[] = [
     ...(report && report.summary.row_count <= 10_000 ? [
       { key: 'pdf', label: 'PDF', description: 'Readable report with source notes', kind: 'pdf' as const, loading: reportExporting === 'pdf', onSelect: () => downloadHistoricalReport('pdf') },
@@ -926,7 +958,9 @@ export function HistoricalPayroll(): ReactElement {
                       ? <Badge variant="warning">Checklist needed</Badge>
                       : cutoverReview?.status === 'failed'
                         ? <Badge variant="danger">Verification failed</Badge>
-                        : <Badge variant="default">Not verified</Badge>}
+                        : cutoverReview?.status === 'pending'
+                          ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Verification running</Badge>
+                          : <Badge variant="default">Not verified</Badge>}
                   {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-500">by {cutoverReview.approved_by_name} on {shortDate(cutoverReview.approved_at?.slice(0, 10))}</p>}
                 </div>
               </div>
@@ -937,16 +971,22 @@ export function HistoricalPayroll(): ReactElement {
                   <div><p className="font-semibold text-neutral-950">Run the independent source check</p><p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">This reads the private retained files and compares a fresh parse with the accepted archive. It does not recalculate payroll or change any paycheck.</p></div>
                   {canMutate && <Button onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Run final verification</Button>}
                 </div>
+              ) : cutoverReview.status === 'pending' ? (
+                <div className="flex items-start gap-4 rounded-2xl border border-primary-200 bg-primary-50 p-6">
+                  <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary-700" />
+                  <div><p className="font-semibold text-neutral-950">Comparing the retained source with the archive</p><p className="mt-2 text-sm leading-6 text-neutral-600">This page checks for the result automatically. You can leave and come back without interrupting verification.</p></div>
+                </div>
               ) : (
                 <>
+                  {cutoverReview.verification_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{cutoverReview.verification_error}</div>}
                   <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverReview.evidence.checks.filter((check) => check.passed).length}/{cutoverReview.evidence.checks.length}</p><p className="mt-1 text-xs text-neutral-500">fresh source comparisons passed</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverReview.evidence.years.length}</p><p className="mt-1 text-xs text-neutral-500">each reconciled independently</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverChecks.filter((check) => check.passed).length}/{cutoverChecks.length}</p><p className="mt-1 text-xs text-neutral-500">fresh source comparisons passed</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverYears.length}</p><p className="mt-1 text-xs text-neutral-500">each reconciled independently</p></div>
                     <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-500">verified {shortDate(cutoverReview.verified_at?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
                   </div>
 
                   <div className="grid gap-2 md:grid-cols-2">
-                    {cutoverReview.evidence.checks.map((check) => (
+                    {cutoverChecks.map((check) => (
                       <div key={check.key} className={`flex items-start gap-3 rounded-xl border p-3 text-sm ${check.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
                         {check.passed ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
                         <span>{check.label}</span>
@@ -954,12 +994,12 @@ export function HistoricalPayroll(): ReactElement {
                     ))}
                   </div>
 
-                  {cutoverReview.evidence.exceptions.length > 0 && (
+                  {cutoverExceptions.length > 0 && (
                     <section>
                       <h3 className="font-display text-lg font-extrabold text-neutral-950">Known limitations need a decision</h3>
                       <p className="mt-1 text-sm leading-6 text-neutral-600">Record why each source limitation is acceptable or what follow-up owns it. Blank decisions block approval.</p>
                       <div className="mt-4 space-y-4">
-                        {cutoverReview.evidence.exceptions.map((exception) => (
+                        {cutoverExceptions.map((exception) => (
                           <div key={exception.key} className="rounded-xl border border-warning-200 bg-warning-50/60 p-4">
                             <p className="text-sm leading-6 text-warning-900">{exception.message}</p>
                             <label htmlFor={`cutover-exception-${exception.key}`} className="mt-3 block text-xs font-bold uppercase tracking-[0.12em] text-warning-800">Reviewed decision</label>
@@ -991,10 +1031,10 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel QuickBooks only after this approval and the business owner’s separate cancellation decision.</p>
                     <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverReview.evidence.passed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>
+                      <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>
                       {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
-                      {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void saveCutoverReview()} disabled={action !== null}>{action === 'cutover_save' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Save review</Button>}
-                      {canMutate && !cutoverApproved && <Button onClick={() => setCutoverApprovalOpen(true)} disabled={!cutoverReview.ready_for_approval || action !== null}><ShieldCheck className="mr-2 h-4 w-4" />Approve cutover</Button>}
+                      {canMutate && cutoverReview.status === 'verified' && <Button variant="outline" onClick={() => void saveCutoverReview()} disabled={action !== null}>{action === 'cutover_save' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Save review</Button>}
+                      {canMutate && cutoverReview.status === 'verified' && <Button onClick={() => setCutoverApprovalOpen(true)} disabled={!cutoverReview.ready_for_approval || action !== null}><ShieldCheck className="mr-2 h-4 w-4" />Approve cutover</Button>}
                     </div>
                   </div>
                 </>

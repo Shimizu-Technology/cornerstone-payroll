@@ -3645,6 +3645,7 @@ export interface HistoricalCutoverEvidence {
   batch_id: number;
   bundle_digest: string;
   importer_version: string;
+  verification_parser_version: string;
   checks: Array<{ key: string; label: string; passed: boolean }>;
   counts: { worker_count: number; period_count: number; paycheck_count: number };
   totals: HistoricalMoneyTotals;
@@ -3664,10 +3665,12 @@ export interface HistoricalCutoverEvidence {
 export interface HistoricalCutoverReview {
   id: number;
   status: 'pending' | 'verified' | 'approved' | 'failed';
-  evidence: HistoricalCutoverEvidence;
+  evidence: Partial<HistoricalCutoverEvidence>;
   evidence_digest?: string | null;
   verified_at?: string | null;
   verified_by_name?: string | null;
+  verification_started_at?: string | null;
+  verification_error?: string | null;
   exception_dispositions: Record<string, string>;
   attestations: Record<string, boolean>;
   attestation_labels: Record<string, string>;
@@ -3676,6 +3679,7 @@ export interface HistoricalCutoverReview {
   approved_at?: string | null;
   approved_by_name?: string | null;
   approval_acknowledgement: string;
+  updated_at: string;
 }
 
 export interface HistoricalImportBatch {
@@ -3930,15 +3934,15 @@ export const historicalImportsApi = {
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
   archiveUnlinkedWorkers: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
-  verifyCutover: (batchId: number): Promise<{ data: HistoricalImportDetail; meta: { passed: boolean } }> =>
-    api.post<{ data: HistoricalImportDetail; meta: { passed: boolean } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
+  verifyCutover: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }> =>
+    api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
   updateCutoverReview: (
     batchId: number,
     payload: { exception_dispositions: Record<string, string>; attestations: Record<string, boolean>; approval_notes: string },
-  ): Promise<{ data: HistoricalImportDetail }> =>
-    api.patch<{ data: HistoricalImportDetail }>(`/admin/historical_imports/${batchId}/update_cutover_review`, payload),
-  approveCutover: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportDetail }> =>
-    api.post<{ data: HistoricalImportDetail }>(`/admin/historical_imports/${batchId}/approve_cutover`, { acknowledgement }),
+  ): Promise<{ data: HistoricalImportBatch }> =>
+    api.patch<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/update_cutover_review`, payload),
+  approveCutover: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch }> =>
+    api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/approve_cutover`, { acknowledgement }),
   downloadCutoverEvidence: (batchId: number): Promise<Blob> =>
     api.getBlob(`/admin/historical_imports/${batchId}/download_cutover_evidence`),
 };

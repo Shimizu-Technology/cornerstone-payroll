@@ -187,6 +187,7 @@ function cutoverReview(status: 'verified' | 'approved', readyForApproval: boolea
       batch_id: 1,
       bundle_digest: 'a'.repeat(64),
       importer_version: 'test',
+      verification_parser_version: 'test',
       checks: [
         { key: 'source_bundle', label: 'Retained originals reproduce the recorded bundle', passed: true },
         { key: 'stored_totals', label: 'Stored payroll totals match the retained originals to the cent', passed: true },
@@ -221,7 +222,29 @@ function cutoverReview(status: 'verified' | 'approved', readyForApproval: boolea
     approved_at: status === 'approved' ? '2026-09-06T02:05:00Z' : null,
     approved_by_name: status === 'approved' ? 'History Admin' : null,
     approval_acknowledgement: 'I approve this verified QuickBooks history for lock and QuickBooks cutover.',
+    updated_at: status === 'approved' ? '2026-09-06T02:05:00Z' : readyForApproval ? '2026-09-06T02:03:00Z' : '2026-09-06T02:00:00Z',
   };
+}
+
+function pendingCutoverReview(): HistoricalCutoverReview {
+  return {
+    ...cutoverReview('verified', false),
+    status: 'pending',
+    evidence: {},
+    evidence_digest: null,
+    verified_at: null,
+    verified_by_name: null,
+    verification_started_at: '2026-09-06T02:00:00Z',
+    updated_at: '2026-09-06T02:00:00Z',
+  };
+}
+
+function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImportBatch {
+  const payload: Partial<HistoricalImportDetail> = { ...value };
+  delete payload.periods;
+  delete payload.workers;
+  delete payload.paychecks;
+  return payload as HistoricalImportBatch;
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
@@ -462,8 +485,9 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
   let current: HistoricalImportDetail = { ...detailWithVerifiedSource(1), status: 'applied', cutover_review: null };
 
   await page.route('**/api/v1/admin/historical_imports/1/verify_cutover', async (route) => {
+    const pending = { ...current, cutover_review: pendingCutoverReview() };
+    await fulfillJson(route, { data: withoutDetailCollections(pending), meta: { enqueued: true, status: 'pending' } }, 202);
     current = { ...current, cutover_review: cutoverReview('verified', false) };
-    await fulfillJson(route, { data: current, meta: { passed: true } });
   });
   await page.route('**/api/v1/admin/historical_imports/1/update_cutover_review', async (route) => {
     const payload = route.request().postDataJSON() as {
@@ -475,7 +499,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
     expect(Object.values(payload.attestations)).toEqual([true, true, true, true]);
     expect(payload.approval_notes).toBe('No remaining limitations.');
     current = { ...current, cutover_review: cutoverReview('verified', true) };
-    await fulfillJson(route, { data: current });
+    await fulfillJson(route, { data: withoutDetailCollections(current) });
   });
   await page.route('**/api/v1/admin/historical_imports/1/download_cutover_evidence', (route) => route.fulfill({
     status: 200,
@@ -488,7 +512,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
       acknowledgement: 'I approve this verified QuickBooks history for lock and QuickBooks cutover.',
     });
     current = { ...current, cutover_review: cutoverReview('approved', true) };
-    await fulfillJson(route, { data: current });
+    await fulfillJson(route, { data: withoutDetailCollections(current) });
   });
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [current],
@@ -504,11 +528,15 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
   await expect(page.getByRole('button', { name: 'Complete cutover review' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Run final verification' }).click();
+  await expect(page.getByText('Final verification started. This page will update automatically')).toBeVisible();
+  await expect(page.getByText('Comparing the retained source with the archive')).toBeVisible();
   await expect(page.getByText('2/2')).toBeVisible();
   await expect(page.getByText('Checklist needed')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve cutover' })).toBeDisabled();
 
   await page.getByLabel('Reviewed decision').fill('Accepted; detailed coverage begins on the recorded date.');
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByLabel('Reviewed decision')).toHaveValue('Accepted; detailed coverage begins on the recorded date.');
   for (const checkbox of await page.getByRole('checkbox').all()) await checkbox.check();
   await page.getByLabel('Final review notes').fill('No remaining limitations.');
   await page.getByRole('button', { name: 'Save review' }).click();

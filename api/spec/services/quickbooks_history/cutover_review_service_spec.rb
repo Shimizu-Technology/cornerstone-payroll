@@ -72,4 +72,39 @@ RSpec.describe QuickbooksHistory::CutoverReviewService do
       service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
     end.to raise_error(ArgumentError, /must remain applied/)
   end
+
+  it "rolls back review edits when their audit record cannot be written" do
+    original_notes = review.approval_notes
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
+
+    expect do
+      described_class.new(review: review, actor: actor).save!(
+        exception_dispositions: { opening: "Accepted because retained totals reconcile." },
+        attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+        approval_notes: "This must not survive without its audit record."
+      )
+    end.to raise_error(ActiveRecord::RecordInvalid)
+
+    expect(review.reload).to have_attributes(
+      exception_dispositions: {},
+      attestations: {},
+      approval_notes: original_notes
+    )
+  end
+
+  it "rolls back approval when its audit record cannot be written" do
+    service = described_class.new(review: review, actor: actor)
+    service.save!(
+      exception_dispositions: { opening: "Accepted because retained totals reconcile." },
+      attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+      approval_notes: "No remaining limitations."
+    )
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
+
+    expect do
+      service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
+    end.to raise_error(ActiveRecord::RecordInvalid)
+
+    expect(review.reload).to have_attributes(status: "verified", approved_at: nil, approved_by_id: nil)
+  end
 end

@@ -106,6 +106,10 @@ An applied batch cannot be locked until a manager or administrator completes a s
 
 The row-level fingerprints deliberately exclude only the optional link from a QuickBooks worker to a current Cornerstone employee. That link is an operator-reviewed application decision, not a QuickBooks source fact. The evidence returned through the API contains hashes and aggregate values, not SSNs, encrypted employee snapshots, private object keys, or raw source rows.
 
+The final verification runs as a durable background job because supported source bundles can be large. The workspace shows a running state and polls for the saved result, so an operator can leave and return without interrupting the comparison. Repeated requests reuse a recent pending review instead of creating duplicate jobs; a stale or failed review can be retried. A queue or verification failure is saved as a safe failed state and continues to block approval and lock.
+
+Importer compatibility is explicit rather than inferred from a version string. The current verification parser accepts v2 and v3 recorded batches only when a fresh parse of every retained original reproduces the stored manifest, reconciliation, counts, money totals, yearly totals, and worker/period/paycheck fingerprints exactly. Evidence records both the batch's importer version and the parser version that performed the check. Any other recorded version remains preserved but blocked until an intentionally reviewed source migration is added.
+
 Rollback means turning off the isolated historical-payroll feature while retaining the accepted archive and evidence. It never means deleting or rewriting payroll. Canceling QuickBooks remains a separate business-owner decision after the final application approval and recovery controls are complete.
 
 ## Local operator runbook

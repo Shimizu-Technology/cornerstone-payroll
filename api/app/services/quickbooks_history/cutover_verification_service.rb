@@ -5,6 +5,12 @@ require "tempfile"
 
 module QuickbooksHistory
   class CutoverVerificationService
+    class StaleVerificationAttempt < StandardError; end
+
+    SUPPORTED_RECORDED_IMPORTER_VERSIONS = %w[
+      quickbooks-online-payroll-v2
+      quickbooks-online-payroll-v3
+    ].freeze
     WORKER_FIELDS = %i[external_key source_name normalized_name source_status hire_date].freeze
     PERIOD_FIELDS = %i[external_key period_type start_date end_date pay_date source_label paycheck_count totals].freeze
     PAYCHECK_FIELDS = %i[
@@ -16,10 +22,18 @@ module QuickbooksHistory
 
     Result = Struct.new(:review, :passed, keyword_init: true)
 
-    def initialize(batch:, actor:, storage: R2StorageService.new)
+    def self.ensure_supported_importer_version!(version)
+      return if version.in?(SUPPORTED_RECORDED_IMPORTER_VERSIONS)
+
+      raise ArgumentError,
+            "Importer version #{version.inspect} is unsupported. Preserve this batch and use an explicitly reviewed source migration."
+    end
+
+    def initialize(batch:, actor:, storage: R2StorageService.new, expected_verification_started_at: nil)
       @batch = batch
       @actor = actor
       @storage = storage
+      @expected_verification_started_at = expected_verification_started_at
       @tempfiles = []
     end
 
@@ -29,7 +43,6 @@ module QuickbooksHistory
       checks = build_checks(parsed)
       evidence = build_evidence(parsed, checks)
       review = persist_review!(evidence)
-      record_audit!(review)
       Result.new(review: review, passed: evidence.fetch("passed"))
     ensure
       tempfiles.each(&:close!)
@@ -37,13 +50,15 @@ module QuickbooksHistory
 
     private
 
-    attr_reader :batch, :actor, :storage, :tempfiles
+    attr_reader :batch, :actor, :storage, :tempfiles, :expected_verification_started_at
 
     def ensure_eligible!
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
+      self.class.ensure_supported_importer_version!(batch.importer_version)
       if batch.historical_import_cutover_review&.approved?
         raise ArgumentError, "The approved cutover review is sealed"
       end
+      ensure_current_attempt!(batch.historical_import_cutover_review) if expected_verification_started_at
 
       authorized = actor.present? && actor.can_access_company?(batch.company_id) &&
         StaffRolePolicy.allowed?(actor, :manage_client_configuration)
@@ -85,7 +100,7 @@ module QuickbooksHistory
 
       [
         check("source_bundle", "Retained originals reproduce the recorded bundle", parsed.bundle_digest == batch.bundle_digest),
-        check("importer_version", "The retained originals are verified with their recorded importer version", batch.importer_version == BundleParser::IMPORTER_VERSION),
+        check("importer_version", "The recorded importer version is supported by this verification parser", batch.importer_version.in?(SUPPORTED_RECORDED_IMPORTER_VERSIONS)),
         check("source_manifest", "Fresh file classifications match the retained source manifest", canonical(parsed.manifest) == canonical(batch.source_file_manifest)),
         check("source_reconciliation", "Fresh QuickBooks cross-report reconciliation passes", parsed.errors.empty? && fresh_reconciliation["passed"] == true),
         check("preview_contract", "Fresh source summary matches the staged preview", fresh_summary == stored_summary),
@@ -114,6 +129,7 @@ module QuickbooksHistory
         "batch_id" => batch.id,
         "bundle_digest" => batch.bundle_digest,
         "importer_version" => batch.importer_version,
+        "verification_parser_version" => BundleParser::IMPORTER_VERSION,
         "checks" => checks,
         "counts" => stored_counts,
         "totals" => stored_money_totals,
@@ -140,6 +156,7 @@ module QuickbooksHistory
         batch.reload
         review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
         raise ArgumentError, "The approved cutover review is sealed" if review.approved?
+        ensure_current_attempt!(review) if expected_verification_started_at
 
         exception_keys = evidence.fetch("exceptions").pluck("key")
         dispositions = review.exception_dispositions.to_h.slice(*exception_keys)
@@ -149,6 +166,8 @@ module QuickbooksHistory
           evidence_digest: Digest::SHA256.hexdigest(JSON.generate(evidence)),
           verified_at: Time.current,
           verified_by: actor,
+          verification_started_at: review.verification_started_at || Time.current,
+          verification_error: nil,
           exception_dispositions: dispositions,
           approval_notes: nil,
           approval_acknowledgement: nil,
@@ -156,8 +175,16 @@ module QuickbooksHistory
           approved_by: nil
         )
         review.save!
+        record_audit!(review)
         review
       end
+    end
+
+    def ensure_current_attempt!(review)
+      current_token = review&.verification_started_at&.iso8601(6)
+      return if review&.pending? && current_token == expected_verification_started_at
+
+      raise StaleVerificationAttempt, "A newer cutover verification attempt superseded this job"
     end
 
     def stored_counts
