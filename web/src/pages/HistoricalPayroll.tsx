@@ -221,7 +221,10 @@ export function HistoricalPayroll(): ReactElement {
   const [cutoverNotes, setCutoverNotes] = useState('');
   const [cutoverApprovalOpen, setCutoverApprovalOpen] = useState(false);
   const [cutoverPollingError, setCutoverPollingError] = useState<string | null>(null);
-  detailQueryRef.current = { page, periodId, search };
+
+  useEffect(() => {
+    detailQueryRef.current = { page, periodId, search };
+  }, [page, periodId, search]);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -449,6 +452,7 @@ export function HistoricalPayroll(): ReactElement {
 
     setCutoverPollingError(null);
     let cancelled = false;
+    let startedListLoad = false;
     let timeoutId: number | undefined;
     let pollAttempt = 1;
     const poll = async (): Promise<void> => {
@@ -465,7 +469,10 @@ export function HistoricalPayroll(): ReactElement {
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
 
         shouldContinue = response.data.cutover_review?.status === 'pending';
-        if (!shouldContinue) await loadList(batchPageRef.current, selectedBatchId);
+        if (!shouldContinue) {
+          startedListLoad = true;
+          await loadList(batchPageRef.current, selectedBatchId);
+        }
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
 
         setDetail(response.data);
@@ -485,7 +492,7 @@ export function HistoricalPayroll(): ReactElement {
 
     return () => {
       cancelled = true;
-      listRequestIdRef.current += 1;
+      if (startedListLoad) listRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadList, selectedBatch?.cutover_review?.status, selectedBatchId]);

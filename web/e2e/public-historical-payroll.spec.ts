@@ -240,11 +240,8 @@ function pendingCutoverReview(): HistoricalCutoverReview {
 }
 
 function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImportBatch {
-  const payload: Partial<HistoricalImportDetail> = { ...value };
-  delete payload.periods;
-  delete payload.workers;
-  delete payload.paychecks;
-  return payload as HistoricalImportBatch;
+  const { periods: _periods, workers: _workers, paychecks: _paychecks, ...payload } = value;
+  return payload;
 }
 
 function withoutCutoverEvidence(value: HistoricalImportDetail): HistoricalImportBatch {

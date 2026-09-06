@@ -53,16 +53,16 @@ module QuickbooksHistory
     attr_reader :batch, :actor, :storage, :tempfiles, :expected_verification_started_at
 
     def ensure_eligible!
+      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+      raise ArgumentError, "A manager or administrator with company access is required" unless authorized
+
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
       self.class.ensure_supported_importer_version!(batch.importer_version)
       if batch.historical_import_cutover_review&.approved?
         raise ArgumentError, "The approved cutover review is sealed"
       end
       ensure_current_attempt!(batch.historical_import_cutover_review) if expected_verification_started_at
-
-      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
-      raise ArgumentError, "A manager or administrator with company access is required" unless authorized
     end
 
     def reparse_retained_sources!

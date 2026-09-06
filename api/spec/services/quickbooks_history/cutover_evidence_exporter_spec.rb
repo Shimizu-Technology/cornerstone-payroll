@@ -31,7 +31,11 @@ RSpec.describe QuickbooksHistory::CutoverEvidenceExporter do
       verified_by: actor
     )
 
-    bytes = described_class.new(review: review).generate
+    workbooks = [ "=Unsafe source label", "+Unsafe source label", "-Unsafe source label", "@Unsafe source label" ].to_h do |source_label|
+      batch.update!(source_label: source_label)
+      [ source_label, described_class.new(review: review).generate ]
+    end
+    bytes = workbooks.fetch("=Unsafe source label")
 
     expect(bytes.byteslice(0, 2)).to eq("PK")
     Zip::File.open_buffer(StringIO.new(bytes)) do |archive|
@@ -40,6 +44,11 @@ RSpec.describe QuickbooksHistory::CutoverEvidenceExporter do
       expect(workbook).to include("Cutover information", "Automated checks", "Ledger fingerprints", "Year reconciliation", "Exception decisions", "Cutover checklist", "Retained originals")
       expect(sheets.join).not_to include("<f>", "private_snapshot", "storage_key")
       expect(sheets.join).to include("&#39;=Unsafe source label", "&#39;+source.xls")
+    end
+    workbooks.each do |source_label, workbook_bytes|
+      Zip::File.open_buffer(StringIO.new(workbook_bytes)) do |archive|
+        expect(archive.read("xl/worksheets/sheet1.xml")).to include("&#39;#{source_label}")
+      end
     end
 
     review.update!(evidence: review.evidence.merge("version" => 2))
