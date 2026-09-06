@@ -31,6 +31,10 @@ module QuickbooksHistory
     end
 
     PLACEHOLDER_DEDUCTION_MAXIMUM = BigDecimal("1.00")
+    SUPPORTED_US_REGION_CODES = %w[
+      AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY
+      DC AS GU MP PR VI
+    ].freeze
 
     def initialize(worker:, pay_frequency:)
       @worker = worker
@@ -139,6 +143,8 @@ module QuickbooksHistory
       filing_status = case text
       when /Head of Household/i then "head_of_household"
       when /Married Filing Jointly|Qualifying Surviving Spouse/i then "married"
+      when /Married Filing Separately/i
+        text.match?(/Single or Married Filing Separately/i) ? "single" : "married_separate"
       when /Single or Married Filing Separately|\bSingle\b/i then "single"
       else
         errors << "QuickBooks tax setup has an unsupported filing status"
@@ -382,7 +388,7 @@ module QuickbooksHistory
       parts = text.split(",").map(&:strip).reject(&:blank?)
       region_and_zip = parts.pop.to_s
       region_label = region_and_zip.sub(/\s+\d{5}(?:-\d{4})?\z/, "").strip
-      if region_label.match?(/\A(?:NV|Nevada)\z/i)
+      if region_label.split.last.to_s.match?(/\A(?:NV|Nevada)\z/i)
         return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: true }
       end
 
@@ -391,7 +397,10 @@ module QuickbooksHistory
         return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false }
       end
 
-      state = region_match[:state]
+      state = region_match[:state].upcase
+      unless SUPPORTED_US_REGION_CODES.include?(state)
+        return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false }
+      end
       city = parts.pop
       street = parts.join(", ")
 

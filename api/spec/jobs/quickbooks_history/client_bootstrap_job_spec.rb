@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
+  include ActiveJob::TestHelper
+
   before { FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll")) }
 
   let!(:company) { create(:company, historical_payroll_enabled: true) }
@@ -54,6 +56,24 @@ RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
     expect(AuditLog.where(action: "historical_imports#client_bootstrap_failed", record_id: pending_bootstrap.id)).to exist
   end
 
+  it "keeps the failed state durable when failure auditing raises" do
+    pending_bootstrap = enqueue_bootstrap
+    allow(QuickbooksHistory::ClientBootstrapApplyService).to receive(:new).and_raise(StandardError, "private adapter detail")
+    allow(AuditLog).to receive(:record!).and_raise(StandardError, "audit unavailable")
+    allow(Rails.logger).to receive(:error)
+
+    described_class.perform_now(pending_bootstrap.id, actor.id, pending_bootstrap.apply_started_at.iso8601(6))
+
+    expect(pending_bootstrap.reload).to have_attributes(
+      status: "failed",
+      apply_error: "Employee preparation could not be completed. Review the current setup preview and try again."
+    )
+    expect(pending_bootstrap.historical_client_bootstrap_dispatches.sole).to have_attributes(
+      completed_at: be_present,
+      last_error: "StandardError"
+    )
+  end
+
   it "keeps the attempt pending and retries transient database contention" do
     pending_bootstrap = enqueue_bootstrap
     allow(QuickbooksHistory::ClientBootstrapApplyService).to receive(:new).and_raise(ActiveRecord::Deadlocked, "retryable")
@@ -64,6 +84,27 @@ RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
 
     expect(pending_bootstrap.reload).to be_pending
     expect(pending_bootstrap.apply_error).to be_nil
+  end
+
+  it "persists a safe failure after transient database retries are exhausted" do
+    allow(QuickbooksHistory::ClientBootstrapApplyService).to receive(:new).and_raise(ActiveRecord::Deadlocked, "private contention detail")
+    allow(Rails.logger).to receive(:error)
+
+    pending_bootstrap = nil
+    perform_enqueued_jobs(only: described_class) do
+      pending_bootstrap = enqueue_bootstrap
+    end
+
+    expect(QuickbooksHistory::ClientBootstrapApplyService).to have_received(:new).exactly(3).times
+    expect(pending_bootstrap.reload).to have_attributes(
+      status: "failed",
+      apply_error: "Employee preparation could not be completed. Review the current setup preview and try again."
+    )
+    expect(pending_bootstrap.apply_error).not_to include("private contention detail")
+    expect(pending_bootstrap.historical_client_bootstrap_dispatches.sole).to have_attributes(
+      completed_at: be_present,
+      last_error: "ActiveRecord::Deadlocked"
+    )
   end
 
   it "does not let a superseded job mutate a newer attempt" do

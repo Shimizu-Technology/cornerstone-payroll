@@ -83,7 +83,7 @@ RSpec.describe HistoricalClientBootstrapDispatch, type: :model do
     expect(described_class.due_for_dispatch).not_to include(dispatch)
   end
 
-  it "does not fail a delayed preparation after repeated successful queue submissions" do
+  it "fails a preparation after the durable redispatch limit even when queue submissions succeed" do
     dispatch = described_class.create!(
       historical_client_bootstrap: bootstrap,
       requested_by: actor,
@@ -91,17 +91,29 @@ RSpec.describe HistoricalClientBootstrapDispatch, type: :model do
     )
 
     expect do
-      5.times do
+      described_class::MAX_DISPATCH_ATTEMPTS.times do
         dispatch.update_columns(enqueued_at: 31.minutes.ago)
         expect(dispatch.dispatch!).to be(true)
       end
-    end.to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).exactly(5).times
+    end.to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob).exactly(described_class::MAX_DISPATCH_ATTEMPTS).times
     expect(dispatch.reload).to have_attributes(
       completed_at: nil,
-      dispatch_attempts: 0,
+      dispatch_attempts: described_class::MAX_DISPATCH_ATTEMPTS,
       last_error: nil
     )
     expect(bootstrap.reload).to be_pending
+
+    dispatch.update_columns(enqueued_at: 31.minutes.ago)
+    expect { dispatch.dispatch! }.not_to have_enqueued_job(QuickbooksHistory::ClientBootstrapJob)
+    expect(dispatch.reload).to have_attributes(
+      completed_at: be_present,
+      dispatch_attempts: described_class::MAX_DISPATCH_ATTEMPTS,
+      last_error: described_class::RETRIES_EXHAUSTED_ERROR
+    )
+    expect(bootstrap.reload).to have_attributes(
+      status: "failed",
+      apply_error: described_class::RETRIES_EXHAUSTED_ERROR
+    )
   end
 
   it "does not overwrite a preparation that completed while an enqueue failure was being handled" do

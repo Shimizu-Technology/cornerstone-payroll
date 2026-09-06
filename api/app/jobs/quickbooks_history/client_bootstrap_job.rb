@@ -6,7 +6,14 @@ module QuickbooksHistory
     TRANSIENT_ERRORS = [ ActiveRecord::Deadlocked, ActiveRecord::LockWaitTimeout, ActiveRecord::SerializationFailure ].freeze
 
     retry_on(*TRANSIENT_ERRORS, wait: :polynomially_longer, attempts: 3) do |job, error|
-      job.send(:persist_failure, *job.arguments, error)
+      bootstrap_id, actor_id, apply_started_at = job.arguments
+      job.send(
+        :persist_failure,
+        bootstrap_id: bootstrap_id,
+        actor_id: actor_id,
+        apply_started_at: apply_started_at,
+        error: error
+      )
     end
 
     def perform(bootstrap_id, actor_id, apply_started_at)
@@ -25,12 +32,17 @@ module QuickbooksHistory
     rescue *TRANSIENT_ERRORS
       raise
     rescue StandardError => e
-      persist_failure(bootstrap_id, actor_id, apply_started_at, e)
+      persist_failure(
+        bootstrap_id: bootstrap_id,
+        actor_id: actor_id,
+        apply_started_at: apply_started_at,
+        error: e
+      )
     end
 
     private
 
-    def persist_failure(bootstrap_id, actor_id, apply_started_at, error)
+    def persist_failure(bootstrap_id:, actor_id:, apply_started_at:, error:)
       Rails.logger.error(
         "Historical client bootstrap failed for bootstrap #{bootstrap_id}: " \
         "#{error.class}: #{error.message} job_id=#{job_id}"
@@ -38,7 +50,7 @@ module QuickbooksHistory
       bootstrap = HistoricalClientBootstrap.find_by(id: bootstrap_id)
       return unless bootstrap
 
-      bootstrap.with_lock do
+      failure_recorded = bootstrap.with_lock do
         return unless current_attempt?(bootstrap, apply_started_at)
 
         bootstrap.update!(
@@ -48,26 +60,30 @@ module QuickbooksHistory
         bootstrap.historical_client_bootstrap_dispatches
                  .where(attempt_token: apply_started_at, completed_at: nil)
                  .update_all(completed_at: Time.current, last_error: error.class.name, updated_at: Time.current)
-        actor = User.find_by(id: actor_id)
-        AuditLog.record!(
-          user: actor,
-          organization_id: bootstrap.company.organization_id,
-          company_id: bootstrap.company_id,
-          action: "historical_imports#client_bootstrap_failed",
-          record_type: "historical_client_bootstraps",
-          record_id: bootstrap.id,
-          subject_name: bootstrap.historical_import_batch.source_label,
-          metadata: {
-            historical_import_batch_id: bootstrap.historical_import_batch_id,
-            status: bootstrap.status,
-            error_class: error.class.name
-          }
-        )
+        true
       end
+      record_failure_audit(bootstrap, actor_id, error) if failure_recorded
     rescue StandardError => persistence_error
       Rails.logger.error(
-        "Historical client bootstrap failure could not be persisted for bootstrap #{bootstrap_id}: " \
+        "Historical client bootstrap failure handling did not fully complete for bootstrap #{bootstrap_id}: " \
         "#{persistence_error.class} job_id=#{job_id}"
+      )
+    end
+
+    def record_failure_audit(bootstrap, actor_id, error)
+      AuditLog.record!(
+        user: User.find_by(id: actor_id),
+        organization_id: bootstrap.company.organization_id,
+        company_id: bootstrap.company_id,
+        action: "historical_imports#client_bootstrap_failed",
+        record_type: "historical_client_bootstraps",
+        record_id: bootstrap.id,
+        subject_name: bootstrap.historical_import_batch.source_label,
+        metadata: {
+          historical_import_batch_id: bootstrap.historical_import_batch_id,
+          status: bootstrap.status,
+          error_class: error.class.name
+        }
       )
     end
 

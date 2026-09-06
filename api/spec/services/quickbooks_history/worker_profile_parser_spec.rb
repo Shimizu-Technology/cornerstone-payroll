@@ -125,6 +125,35 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     )
   end
 
+  it "accepts every supported U.S. territory code in a complete address" do
+    %w[AS GU MP PR VI].each do |region_code|
+      parsed = described_class.new(
+        worker: worker(
+          pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+          directory: { "Home address" => "123 Main Street, Example City, #{region_code} 96910" }
+        ),
+        pay_frequency: "biweekly"
+      ).call
+
+      expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq(
+        [ "123 Main Street", "Example City", region_code, "96910" ]
+      )
+    end
+  end
+
+  it "rejects an unknown region code even when the address has a valid-looking ZIP" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, Hagatna, XX 96910" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
+  end
+
   it "does not copy a partially parsed address when the state and ZIP are invalid" do
     parsed = described_class.new(
       worker: worker(
@@ -175,6 +204,31 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
 
     expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
     expect(parsed.review_items.pluck("code")).to include("quickbooks_nevada_address_suppressed")
+  end
+
+  it "suppresses a Nevada address when the exported region includes an extra prefix" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, Henderson, Clark County Nevada" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("quickbooks_nevada_address_suppressed")
+  end
+
+  it "preserves standalone married-filing-separately status" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        tax_info: "SSN: 000-00-0001 Fed: Married Filing Separately"
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.fetch(:filing_status)).to eq("married_separate")
   end
 
   it "uses variable salary for commission-only workers and flags legacy withholding allowances" do

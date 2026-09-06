@@ -4,7 +4,7 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   REDISPATCH_AFTER = 30.minutes
   MAX_DISPATCH_ATTEMPTS = 5
   MISSING_REQUESTER_ERROR = "The requesting payroll user is no longer available"
-  RETRIES_EXHAUSTED_ERROR = "Employee preparation could not be queued after #{MAX_DISPATCH_ATTEMPTS} attempts"
+  RETRIES_EXHAUSTED_ERROR = "Employee preparation did not complete after #{MAX_DISPATCH_ATTEMPTS} dispatch attempts"
 
   belongs_to :historical_client_bootstrap
   belongs_to :requested_by, class_name: "User", optional: true
@@ -50,7 +50,7 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
 
         begin
           QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
-          update!(enqueued_at: Time.current, last_error: nil, dispatch_attempts: 0)
+          update!(enqueued_at: Time.current, last_error: nil)
           true
         rescue StandardError => e
           if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
