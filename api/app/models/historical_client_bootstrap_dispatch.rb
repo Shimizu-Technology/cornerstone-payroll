@@ -2,6 +2,7 @@
 
 class HistoricalClientBootstrapDispatch < ApplicationRecord
   REDISPATCH_AFTER = 30.minutes
+  MISSING_REQUESTER_ERROR = "The requesting payroll user is no longer available"
 
   belongs_to :historical_client_bootstrap
   belongs_to :requested_by, class_name: "User", optional: true
@@ -35,7 +36,11 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
       self.dispatch_attempts += 1
       save!
       unless requested_by
-        update!(last_error: "The requesting payroll user is no longer available")
+        bootstrap.update!(status: "failed", apply_error: MISSING_REQUESTER_ERROR)
+        update!(
+          completed_at: Time.current,
+          last_error: MISSING_REQUESTER_ERROR
+        )
         next false
       end
 

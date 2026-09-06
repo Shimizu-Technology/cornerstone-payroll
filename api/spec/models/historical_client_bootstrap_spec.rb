@@ -4,11 +4,11 @@ require "rails_helper"
 
 RSpec.describe HistoricalClientBootstrap do
   def historical_batch(company)
-    HistoricalImportBatch.create!(
+    create(
+      :historical_import_batch,
       company: company,
       source_label: "Synthetic QuickBooks history",
-      bundle_digest: "a" * 64,
-      importer_version: QuickbooksHistory::BundleParser::IMPORTER_VERSION
+      bundle_digest: SecureRandom.hex(32)
     )
   end
 
@@ -26,7 +26,8 @@ RSpec.describe HistoricalClientBootstrap do
 
   it "cannot be changed or deleted after apply" do
     company = create(:company)
-    bootstrap = described_class.create!(
+    bootstrap = create(
+      :historical_client_bootstrap,
       company: company,
       historical_import_batch: historical_batch(company),
       plan_digest: "b" * 64,
@@ -42,7 +43,8 @@ RSpec.describe HistoricalClientBootstrap do
 
   it "keeps pending preparation in automatic recovery instead of allowing a competing attempt" do
     company = create(:company)
-    bootstrap = described_class.create!(
+    bootstrap = create(
+      :historical_client_bootstrap,
       company: company,
       historical_import_batch: historical_batch(company),
       plan_digest: "b" * 64,
@@ -55,7 +57,8 @@ RSpec.describe HistoricalClientBootstrap do
 
   it "allows a failed preparation to be retried after the background job records failure" do
     company = create(:company)
-    bootstrap = described_class.create!(
+    bootstrap = create(
+      :historical_client_bootstrap,
       company: company,
       historical_import_batch: historical_batch(company),
       plan_digest: "b" * 64,

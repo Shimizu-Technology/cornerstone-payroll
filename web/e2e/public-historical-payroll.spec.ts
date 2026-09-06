@@ -380,6 +380,16 @@ function migratedEmployee(reviewStatus: 'needs_review' | 'complete' = 'needs_rev
   };
 }
 
+async function browserToday(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
+}
+
 async function mockEmployeeFormDependencies(page: Page): Promise<void> {
   await page.route('**/api/v1/admin/departments**', (route) => fulfillJson(route, { data: [] }));
   await page.route('**/api/v1/admin/payroll_fields**', (route) => fulfillJson(route, { payroll_fields: [] }));
@@ -485,6 +495,89 @@ test('does not validate hidden employer-match fields for a contractor', async ({
   expect(submittedEmployee?.roth_retirement_rate).toBe(0);
   expect(submittedEmployee?.employer_retirement_match_rate).toBe(0);
   expect(submittedEmployee?.employer_roth_match_rate).toBe(0);
+});
+
+test('uses today without an invented minimum when terminating a migrated employee with no hire date', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = { ...migratedEmployee('complete'), hire_date: null };
+  let submittedTermination: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/terminate', async (route) => {
+    submittedTermination = (await route.request().postDataJSON()).termination;
+    await fulfillJson(route, { data: { ...employee, status: 'terminated' } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Terminate Employee' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Terminate Migrated' });
+  const dateInputs = dialog.locator('input[type="date"]');
+  await expect(dateInputs.nth(0)).toHaveValue(today);
+  await expect(dateInputs.nth(0)).not.toHaveAttribute('min');
+  await expect(dateInputs.nth(1)).not.toHaveAttribute('min');
+  await dialog.getByRole('button', { name: 'Terminate employee' }).click();
+
+  await expect.poll(() => submittedTermination).toEqual({ effective_date: today });
+});
+
+test('uses today without an invented minimum when reactivating a migrated employee with no known dates', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    status: 'terminated',
+    termination_date: null,
+  };
+  let submittedReactivation: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/reactivate', async (route) => {
+    submittedReactivation = (await route.request().postDataJSON()).reactivation;
+    await fulfillJson(route, { data: { ...employee, status: 'active' } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Reactivate' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Reactivate Migrated' });
+  const effectiveDate = dialog.locator('input[type="date"]');
+  await expect(effectiveDate).toHaveValue(today);
+  await expect(effectiveDate).not.toHaveAttribute('min');
+  await dialog.getByRole('button', { name: 'Reactivate employee' }).click();
+
+  await expect.poll(() => submittedReactivation).toEqual({ effective_date: today });
+});
+
+test('initializes a migrated salary work profile today without inventing a hire-date minimum', async ({ page }) => {
+  await mockApplicationShell(page);
+  await mockEmployeeFormDependencies(page);
+  const employee = {
+    ...migratedEmployee('complete'),
+    hire_date: null,
+    current_work_profile: null,
+  };
+  let submittedProfile: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
+  await page.route('**/api/v1/admin/employees/900/work_profiles', async (route) => {
+    submittedProfile = (await route.request().postDataJSON()).work_profile;
+    await fulfillJson(route, { data: { id: 77, ...submittedProfile } });
+  });
+
+  await page.goto('/employees/900');
+  const today = await browserToday(page);
+  await page.getByRole('button', { name: 'Set up profile' }).click();
+  const dialog = page.locator('body > div.fixed.inset-0').filter({ hasText: 'Confirm a new salary work profile' });
+  const effectiveDate = dialog.locator('input[type="date"]').first();
+  await expect(effectiveDate).toHaveValue(today);
+  await expect(effectiveDate).not.toHaveAttribute('min');
+  await dialog.locator('select').filter({ has: page.locator('option[value="nonexempt"]') }).selectOption('nonexempt');
+  await dialog.getByPlaceholder('Example: Employment agreement confirms the weekly salary covers 45 straight-time hours.').fill('Confirmed by the employer for migration.');
+  await dialog.getByRole('button', { name: 'Confirm new profile' }).click();
+
+  await expect.poll(() => submittedProfile?.effective_on).toBe(today);
+  expect(submittedProfile?.pay_basis).toBe('salary');
+  expect(submittedProfile?.overtime_status).toBe('nonexempt');
 });
 
 test('keeps every historical batch reachable with simple pagination', async ({ page }) => {
@@ -712,6 +805,7 @@ test('makes failed preparation retryable while pending recovery stays safely in 
   });
 
   await page.goto('/historical-payroll');
+  await expect(page.getByText('Preparation failed')).toBeVisible();
   await expect(page.getByText('Employee preparation could not be completed. Review the current setup preview and try again.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh preview' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();

@@ -89,6 +89,32 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
   end
 
+  it "does not mistake an address without comma-separated city details for a state" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street Hagatna GU 96910" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
+  end
+
+  it "does not mistake a street-only component for the city" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        directory: { "Home address" => "123 Main Street, GU 96910" }
+      ),
+      pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes.values_at(:address_line1, :city, :state, :zip)).to eq([ nil, nil, nil, nil ])
+    expect(parsed.review_items.pluck("code")).to include("employee_address_missing")
+  end
+
   it "suppresses a Nevada address even when QuickBooks omitted the ZIP code" do
     parsed = described_class.new(
       worker: worker(

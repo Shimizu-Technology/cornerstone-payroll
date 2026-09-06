@@ -385,9 +385,11 @@ module QuickbooksHistory
       end
 
       region_match = region_and_zip.match(/\A(?<state>.+?)\s+(?<zip>\d{5}(?:-\d{4})?)\z/)
-      state = region_match&.[](:state)
-      return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false } unless region_match
+      if region_match.nil? || parts.length < 2
+        return { address_line1: nil, city: nil, state: nil, zip: nil, suppressed: false }
+      end
 
+      state = region_match[:state]
       city = parts.pop
       street = parts.join(", ")
 

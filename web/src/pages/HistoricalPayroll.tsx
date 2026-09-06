@@ -1121,11 +1121,13 @@ export function HistoricalPayroll(): ReactElement {
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
                   : clientBootstrap?.status === 'pending'
                     ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Preparing employees</Badge>
-                  : clientBootstrap?.ready_to_apply
-                    ? <Badge variant="info">Preview ready</Badge>
-                    : clientBootstrap
-                      ? <Badge variant="danger">Blocked</Badge>
-                      : <Badge variant="default">Not previewed</Badge>}
+                    : clientBootstrap?.status === 'failed'
+                      ? <Badge variant="danger">Preparation failed</Badge>
+                      : clientBootstrap?.ready_to_apply
+                        ? <Badge variant="info">Preview ready</Badge>
+                        : clientBootstrap
+                          ? <Badge variant="danger">Blocked</Badge>
+                          : <Badge variant="default">Not previewed</Badge>}
               </div>
             </CardHeader>
             <CardContent className="space-y-6 p-4 sm:p-6">
