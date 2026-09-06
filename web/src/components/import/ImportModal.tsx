@@ -40,6 +40,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
+  const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +54,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     setPreviewData(null);
     setExcludedIds(new Set());
     setTipsPaidOutFromTips(false);
+    setReviewedSuggestedMatches(false);
     setResults(null);
   };
 
@@ -81,11 +83,11 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     try {
       setStep('applying');
       setError(null);
-      const matched = previewData.preview.matched.filter((r) => !excludedIds.has(r.employee_id));
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
-        matched,
+        excluded_employee_ids: Array.from(excludedIds),
         tips_paid_out_from_tips: tipsPaidOutFromTips,
+        acknowledge_low_confidence_matches: reviewedSuggestedMatches,
       });
       setResults({
         success: response.results.success.length,
@@ -113,6 +115,17 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
 
   const matched = previewData?.preview.matched || [];
   const included = matched.filter((r) => !excludedIds.has(r.employee_id));
+  const unresolvedCount = previewData
+    ? previewData.preview.unmatched_pdf_names.length
+      + previewData.preview.unmatched_excel_names.length
+      + previewData.preview.duplicate_employee_matches.length
+    : 0;
+  const suggestedMatchCount = previewData?.preview.low_confidence_matches.length || 0;
+  const canApply = Boolean(
+    previewData?.preview.can_apply
+      && included.length > 0
+      && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -120,8 +133,10 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
-            {step === 'upload' && 'Upload the Revel POS PDF and optional Excel file with tips/loans.'}
-            {step === 'preview' && `${included.length} employees matched. Review and apply.`}
+            {step === 'upload' && 'Upload Revel hours and the optional per-payroll tips and deductions workbook.'}
+            {step === 'preview' && (unresolvedCount > 0
+              ? `${unresolvedCount} source row${unresolvedCount === 1 ? '' : 's'} need attention before this import can be applied.`
+              : `${included.length} employees are ready. Review the source matches and apply.`)}
             {step === 'applying' && 'Applying import...'}
             {step === 'done' && 'Import complete.'}
           </DialogDescription>
@@ -148,11 +163,14 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
               {pdfFile && <p className="text-xs text-gray-500 mt-1">{pdfFile.name}</p>}
+              <p className="mt-2 text-xs text-gray-500">
+                Only regular and overtime hours are imported from Revel. Revel pay rates and pay amounts are ignored.
+              </p>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tips &amp; Loans Excel (optional)
+                Tips &amp; payroll deductions workbook (optional)
               </label>
               <input
                 ref={excelInputRef}
@@ -169,15 +187,60 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         {/* Preview Step */}
         {step === 'preview' && previewData && (
           <div className="space-y-3">
-            {/* Unmatched names warning */}
-            {previewData.preview.unmatched_pdf_names.length > 0 && (
-              <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm">
-                <p className="font-medium">Unmatched names from PDF:</p>
-                <ul className="mt-1 list-disc list-inside">
-                  {previewData.preview.unmatched_pdf_names.map((name) => (
-                    <li key={name}>{name}</li>
+            {unresolvedCount > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                <p className="font-medium">Nothing has been imported. Resolve these source rows first.</p>
+                <p className="mt-1 text-red-800">
+                  Correct the employee name in Cornerstone or the source file, then go back and preview again.
+                </p>
+                {previewData.preview.unmatched_pdf_names.length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-medium">Unmatched Revel hours</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {previewData.preview.unmatched_pdf_names.map((name) => <li key={`pdf-${name}`}>{name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {previewData.preview.unmatched_excel_names.length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-medium">Unmatched tips or deductions</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {previewData.preview.unmatched_excel_names.map((name) => <li key={`excel-${name}`}>{name}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {previewData.preview.duplicate_employee_matches.length > 0 && (
+                  <div className="mt-3">
+                    <p className="font-medium">Duplicate Revel employee matches</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {previewData.preview.duplicate_employee_matches.map((match) => (
+                        <li key={match.employee_id}>{match.employee_name}: {match.source_names.join(', ')}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {suggestedMatchCount > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                <p className="font-medium">Review {suggestedMatchCount} suggested name match{suggestedMatchCount === 1 ? '' : 'es'}</p>
+                <ul className="mt-2 space-y-1">
+                  {previewData.preview.low_confidence_matches.map((match, index) => (
+                    <li key={`${match.source}-${match.source_name}-${match.employee_id}-${index}`}>
+                      {match.source}: “{match.source_name}” → {match.employee_name} ({Math.round(match.confidence * 100)}%)
+                    </li>
                   ))}
                 </ul>
+                <label className="mt-3 flex items-start gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={reviewedSuggestedMatches}
+                    onChange={(event) => setReviewedSuggestedMatches(event.target.checked)}
+                    className="mt-0.5 rounded border-amber-300"
+                  />
+                  <span>I reviewed these suggestions and they point to the correct employees.</span>
+                </label>
               </div>
             )}
 
@@ -190,7 +253,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                     </TableHead>
                     <TableHead>Employee</TableHead>
                     <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-right">Gross (PDF)</TableHead>
+                    <TableHead className="text-right">Payroll rate</TableHead>
                     <TableHead className="text-right">Tips</TableHead>
                     <TableHead className="text-right">Loan Ded.</TableHead>
                     <TableHead className="text-center">Match</TableHead>
@@ -223,7 +286,10 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                             <span className="text-orange-600 ml-1">+{row.overtime_hours} OT</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">{formatCurrency(row.total_pay)}</TableCell>
+                        <TableCell className="text-right">
+                          <p>{formatCurrency(row.pay_rate)}</p>
+                          <p className="text-[11px] text-gray-500">from employee profile</p>
+                        </TableCell>
                         <TableCell className="text-right">
                           {row.total_tips > 0 ? (
                             <span>
@@ -244,7 +310,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                               <p>{formatCurrency(row.loan_deduction)}</p>
                               {((row.recurring_loan_deduction || 0) > 0 || (row.installment_payment || 0) > 0) && (
                                 <p className="mt-0.5 text-[11px] text-gray-500">
-                                  {(row.recurring_loan_deduction || 0) > 0 && `Recurring ${formatCurrency(row.recurring_loan_deduction || 0)}`}
+                                  {(row.recurring_loan_deduction || 0) > 0 && `This payroll ${formatCurrency(row.recurring_loan_deduction || 0)}`}
                                   {(row.recurring_loan_deduction || 0) > 0 && (row.installment_payment || 0) > 0 && ' · '}
                                   {(row.installment_payment || 0) > 0 && `Installment ${formatCurrency(row.installment_payment || 0)}`}
                                 </p>
@@ -282,6 +348,9 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               </label>
               <p>
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
+              </p>
+              <p>
+                Gross pay and taxes will be calculated from Cornerstone employee profiles, imported hours, and this period’s tips and deductions.
               </p>
               <p>
                 Excel loan deductions are applied to this payroll run only. They do not create or update Employee Loans balances yet.
@@ -330,7 +399,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               <Button variant="outline" onClick={() => { setStep('upload'); setPreviewData(null); }}>
                 Back
               </Button>
-              <Button onClick={handleApply} disabled={included.length === 0}>
+              <Button onClick={handleApply} disabled={!canApply}>
                 Apply Import ({included.length} employees)
               </Button>
             </>

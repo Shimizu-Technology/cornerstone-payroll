@@ -32,7 +32,10 @@ module Api
               excel_filename: excel_file&.original_filename,
               raw_data: {
                 pdf_count: preview_data[:pdf_count],
-                excel_count: preview_data[:excel_count]
+                excel_count: preview_data[:excel_count],
+                unmatched_excel_names: preview_data[:unmatched_excel_names],
+                duplicate_employee_matches: preview_data[:duplicate_employee_matches],
+                low_confidence_matches: preview_data[:low_confidence_matches]
               },
               matched_data: preview_data[:matched],
               unmatched_pdf_names: preview_data[:unmatched_pdf_names]
@@ -63,13 +66,34 @@ module Api
           end
 
           begin
+            unresolved_names = import_record.unmatched_pdf_names.to_a + import_record.raw_data.to_h.fetch("unmatched_excel_names", []).to_a
+            duplicate_matches = import_record.raw_data.to_h.fetch("duplicate_employee_matches", []).to_a
+
+            if unresolved_names.any? || duplicate_matches.any?
+              return render json: {
+                error: "Resolve every unmatched or duplicate source row, then preview the files again before applying."
+              }, status: :unprocessable_entity
+            end
+
+            low_confidence_matches = import_record.raw_data.to_h.fetch("low_confidence_matches", []).to_a
+            acknowledged_low_confidence = ActiveModel::Type::Boolean.new.cast(params[:acknowledge_low_confidence_matches])
+            if low_confidence_matches.any? && !acknowledged_low_confidence
+              return render json: {
+                error: "Review and confirm the suggested employee name matches before applying."
+              }, status: :unprocessable_entity
+            end
+
             service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
 
-            # Allow overrides from frontend (e.g., removing employees or adjusting hours)
-            matched_data = if params[:matched].present?
-              params[:matched].map { |m| m.to_unsafe_h.deep_symbolize_keys }
-            else
-              import_record.matched_data.map(&:deep_symbolize_keys)
+            # The persisted server preview is authoritative. The browser may
+            # exclude rows, but it cannot rewrite imported hours or money.
+            excluded_employee_ids = Array(params[:excluded_employee_ids]).map(&:to_i).to_set
+            matched_data = import_record.matched_data
+              .map(&:deep_symbolize_keys)
+              .reject { |row| excluded_employee_ids.include?(row[:employee_id].to_i) }
+
+            if matched_data.empty?
+              return render json: { error: "Keep at least one matched employee in the import." }, status: :unprocessable_entity
             end
 
             force_overwrite = params[:force_overwrite].to_s == "true"

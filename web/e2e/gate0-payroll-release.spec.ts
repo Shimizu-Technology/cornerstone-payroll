@@ -29,6 +29,14 @@ interface Gate0Fixture {
   time_tracking_source_id: number;
   first_time_import_id: number;
   retry_time_import_id: number;
+  safe_payroll_import_period_id: number;
+  blocked_payroll_import_period_id: number;
+  import_typo_employee_id: number;
+  import_typo_employee_rate: number;
+  safe_payroll_import_pdf_path: string;
+  safe_payroll_import_workbook_path: string;
+  blocked_payroll_import_pdf_path: string;
+  blocked_payroll_import_workbook_path: string;
   original_client_pay_rate: number;
   original_client_ssn_last_four: string;
 }
@@ -291,6 +299,59 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(secondBonusAlphaAdjustments.filter((adjustment) => adjustment.label === 'Bonus')).toHaveLength(1);
 
     await accountantContext.close();
+  });
+
+  test('accounts for every MoSa source row and ignores Revel pay amounts', async ({ browser }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.accountant_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+
+    await page.goto(`/pay-periods/${fixture.safe_payroll_import_period_id}`);
+    await page.getByRole('button', { name: 'Import (MoSa)' }).click();
+    const safeDialog = page.locator('.dialog-wide');
+    await expect(safeDialog.getByText('Revel pay rates and pay amounts are ignored.', { exact: false })).toBeVisible();
+    await safeDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.safe_payroll_import_pdf_path);
+    await safeDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.safe_payroll_import_workbook_path);
+    await safeDialog.getByRole('button', { name: 'Preview Import' }).click();
+
+    await expect(safeDialog.getByText(/Review 2 suggested name matches/)).toBeVisible();
+    await expect(safeDialog.getByText(/Petrius, Rosie.*Rosie Petirus/)).toBeVisible();
+    await expect(safeDialog.getByText('$19.25')).toBeVisible();
+    await expect(safeDialog.getByText('$8,888.88')).toHaveCount(0);
+    const applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
+    await expect(applySafeImport).toBeDisabled();
+    await safeDialog.getByLabel(/I reviewed these suggestions/).check();
+    await expect(applySafeImport).toBeEnabled();
+    await applySafeImport.click();
+    await expect(safeDialog.getByText('Successfully imported 2 employees.')).toBeVisible();
+
+    const importedPeriod = await accountantApi.get(`admin/pay_periods/${fixture.safe_payroll_import_period_id}`);
+    expect(importedPeriod.ok()).toBeTruthy();
+    const importedItems = ((await responseJson(importedPeriod)).pay_period as Record<string, unknown>).payroll_items as Array<Record<string, unknown>>;
+    const typoEmployeeItem = importedItems.find((item) => Number(item.employee_id) === fixture.import_typo_employee_id);
+    expect(Number(typoEmployeeItem?.pay_rate)).toBe(fixture.import_typo_employee_rate);
+    expect(Number(typoEmployeeItem?.hours_worked)).toBe(37.5);
+    expect(Number(typoEmployeeItem?.reported_tips)).toBe(117.5);
+    expect(Number(typoEmployeeItem?.loan_deduction)).toBe(123.5);
+    expect(Number(typoEmployeeItem?.gross_pay)).not.toBe(8_888.88);
+
+    await page.goto(`/pay-periods/${fixture.blocked_payroll_import_period_id}`);
+    await page.getByRole('button', { name: 'Import (MoSa)' }).click();
+    const blockedDialog = page.locator('.dialog-wide');
+    await blockedDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.blocked_payroll_import_pdf_path);
+    await blockedDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.blocked_payroll_import_workbook_path);
+    await blockedDialog.getByRole('button', { name: 'Preview Import' }).click();
+
+    await expect(blockedDialog.getByText('Nothing has been imported. Resolve these source rows first.')).toBeVisible();
+    await expect(blockedDialog.getByText('Unmatched Revel hours')).toBeVisible();
+    await expect(blockedDialog.getByText('Unmatched tips or deductions')).toBeVisible();
+    await expect(blockedDialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
+
+    await context.close();
   });
 
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {
