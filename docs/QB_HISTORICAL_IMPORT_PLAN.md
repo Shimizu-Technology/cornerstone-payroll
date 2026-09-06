@@ -105,7 +105,7 @@ An applied batch cannot be locked until a manager or administrator completes a s
 4. independently fingerprints every source worker, pay period, paycheck, earning, tax, deduction, contribution, payment field, and source-metadata field and compares those fingerprints with the stored immutable ledger;
 5. requires a written disposition for every known source limitation;
 6. requires confirmation that an original opens without QuickBooks, all five historical report families were reviewed, database/private-storage recovery is approved, and a named owner understands the non-destructive rollback;
-7. exports an evidence workbook and records the verifier and approver in the audit log; and
+7. exports an evidence workbook and records the verifier and approver in the audit log; managers and administrators may inspect it during review, while accountants receive it only after approval; and
 8. seals the approved review against update or deletion before permitting the batch lock.
 
 The row-level fingerprints deliberately exclude only the optional link from a QuickBooks worker to a current Cornerstone employee. That link is an operator-reviewed application decision, not a QuickBooks source fact. The evidence returned through the API contains hashes and aggregate values, not SSNs, encrypted employee snapshots, private object keys, or raw source rows.

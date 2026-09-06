@@ -258,10 +258,21 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
       approval_notes: "No remaining limitations."
     )
-    review_service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
 
     accountant = create(:user, company: company, organization: company.organization, role: "accountant")
     allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)
+
+    get "/api/v1/admin/historical_imports/#{batch.id}/download_cutover_evidence"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to include("Approved cutover evidence")
+    expect(AuditLog.where(
+      user: accountant,
+      action: "historical_imports#download_cutover_evidence",
+      record_id: review.id
+    )).not_to exist
+
+    review_service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
 
     get "/api/v1/admin/historical_imports/#{batch.id}/download_cutover_evidence"
 

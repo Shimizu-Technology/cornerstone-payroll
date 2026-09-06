@@ -754,3 +754,26 @@ test('gives an accountant the accepted evidence without import or source-file co
   await expect(page.getByRole('button', { name: 'Re-run verification' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Save review' })).toHaveCount(0);
 });
+
+test('withholds unapproved cutover evidence from an accountant', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page, 'accountant');
+  const awaitingApproval: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'applied',
+    cutover_review: cutoverReview('verified', false),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutCutoverEvidence(awaitingApproval)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: awaitingApproval,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.getByText('Checklist needed')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Evidence workbook' })).toHaveCount(0);
+});

@@ -822,6 +822,7 @@ export function HistoricalPayroll(): ReactElement {
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
   const cutoverApproved = cutoverReview?.status === 'approved';
+  const canDownloadCutoverEvidence = canMutate || cutoverApproved;
   const cutoverChecks = cutoverReview?.evidence?.checks || [];
   const cutoverYears = cutoverReview?.evidence?.years || [];
   const cutoverExceptions = cutoverReview?.evidence?.exceptions || [];
@@ -1075,7 +1076,7 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel QuickBooks only after this approval and the business owner’s separate cancellation decision.</p>
                     <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>
+                      {canDownloadCutoverEvidence && <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>}
                       {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
                       {canMutate && cutoverReview.status === 'verified' && <Button variant="outline" onClick={() => void saveCutoverReview()} disabled={action !== null}>{action === 'cutover_save' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Save review</Button>}
                       {canMutate && cutoverReview.status === 'verified' && <Button onClick={() => setCutoverApprovalOpen(true)} disabled={!cutoverReview.ready_for_approval || action !== null}><ShieldCheck className="mr-2 h-4 w-4" />Approve cutover</Button>}

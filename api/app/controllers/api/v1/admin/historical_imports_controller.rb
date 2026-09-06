@@ -207,6 +207,11 @@ module Api
 
         def download_cutover_evidence
           review = @batch.historical_import_cutover_review || raise(ArgumentError, "Run cutover verification first")
+          unless review.approved? || StaffRolePolicy.allowed?(current_user, :manage_client_configuration)
+            render json: { error: "Approved cutover evidence or manager/admin access required" }, status: :forbidden
+            return
+          end
+
           exporter = QuickbooksHistory::CutoverEvidenceExporter.new(review: review)
           bytes = exporter.generate
           AuditLog.record!(
