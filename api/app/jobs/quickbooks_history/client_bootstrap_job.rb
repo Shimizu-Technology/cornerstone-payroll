@@ -50,7 +50,7 @@ module QuickbooksHistory
       bootstrap = HistoricalClientBootstrap.find_by(id: bootstrap_id)
       return unless bootstrap
 
-      failure_recorded = bootstrap.with_lock do
+      failure_snapshot = bootstrap.with_lock do
         return unless current_attempt?(bootstrap, apply_started_at)
 
         bootstrap.update!(
@@ -60,9 +60,9 @@ module QuickbooksHistory
         bootstrap.historical_client_bootstrap_dispatches
                  .where(attempt_token: apply_started_at, completed_at: nil)
                  .update_all(completed_at: Time.current, last_error: error.class.name, updated_at: Time.current)
-        true
+        { status: bootstrap.status, attempt_token: apply_started_at }
       end
-      record_failure_audit(bootstrap, actor_id, error) if failure_recorded
+      record_failure_audit(bootstrap, actor_id, error, failure_snapshot)
     rescue StandardError => persistence_error
       Rails.logger.error(
         "Historical client bootstrap failure handling did not fully complete for bootstrap #{bootstrap_id}: " \
@@ -70,7 +70,7 @@ module QuickbooksHistory
       )
     end
 
-    def record_failure_audit(bootstrap, actor_id, error)
+    def record_failure_audit(bootstrap, actor_id, error, failure_snapshot)
       AuditLog.record!(
         user: User.find_by(id: actor_id),
         organization_id: bootstrap.company.organization_id,
@@ -81,7 +81,8 @@ module QuickbooksHistory
         subject_name: bootstrap.historical_import_batch.source_label,
         metadata: {
           historical_import_batch_id: bootstrap.historical_import_batch_id,
-          status: bootstrap.status,
+          status: failure_snapshot.fetch(:status),
+          attempt_token: failure_snapshot.fetch(:attempt_token),
           error_class: error.class.name
         }
       )

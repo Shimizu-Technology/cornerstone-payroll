@@ -53,7 +53,11 @@ RSpec.describe QuickbooksHistory::ClientBootstrapJob, type: :job do
       completed_at: be_present,
       last_error: "StandardError"
     )
-    expect(AuditLog.where(action: "historical_imports#client_bootstrap_failed", record_id: pending_bootstrap.id)).to exist
+    audit = AuditLog.find_by!(action: "historical_imports#client_bootstrap_failed", record_id: pending_bootstrap.id)
+    expect(audit.metadata).to include(
+      "status" => "failed",
+      "attempt_token" => pending_bootstrap.apply_started_at.iso8601(6)
+    )
   end
 
   it "keeps the failed state durable when failure auditing raises" do
