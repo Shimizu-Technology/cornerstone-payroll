@@ -405,7 +405,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         <DialogFooter>
           {step === 'upload' && (
             <>
-              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
               <Button onClick={handlePreview} disabled={!pdfFile || loading}>
                 {loading ? 'Parsing...' : 'Preview Import'}
               </Button>

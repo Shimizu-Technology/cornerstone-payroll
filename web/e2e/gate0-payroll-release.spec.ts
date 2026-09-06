@@ -296,7 +296,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await page.keyboard.press('Escape');
       try {
         await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
-        await page.locator('[data-dialog-portal] > div').first().evaluate((backdrop: HTMLElement) => backdrop.click());
+        await page.locator('[data-dialog-portal] > div').first().evaluate((backdrop: HTMLElement): void => backdrop.click());
         await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
       } finally {
         releaseSave();

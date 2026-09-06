@@ -258,6 +258,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     }
   };
 
+  const handleExpandedPreviewOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && action) return;
+    setPreviewExpanded(nextOpen);
+  };
+
   return (
     <>
       <Dialog
@@ -393,7 +398,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     <Button className="mt-3" size="sm" variant="outline" onClick={() => void loadPreview(run)} disabled={Boolean(action)}>Retry preview</Button>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={() => void download()}>Download</Button></div>
+                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={() => void download()} disabled={Boolean(action)}>Download</Button></div>
               </div>
             )}
             {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -409,7 +414,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         </DialogContent>
       </Dialog>
 
-      <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded}>
+      <Dialog
+        open={previewExpanded && Boolean(previewUrl)}
+        onOpenChange={handleExpandedPreviewOpenChange}
+        dismissOnEscape={!action}
+      >
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
           <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white">
             <div className="flex items-center justify-between gap-6 pr-8">
@@ -436,12 +445,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
           )}
 
           <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
-            <Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button>
+            <Button variant="outline" onClick={() => setPreviewExpanded(false)} disabled={Boolean(action)}>Return to package</Button>
             <Button variant="outline" onClick={print} disabled={!previewUrl} className="gap-2">
               <Printer className="h-4 w-4" />
               Print
             </Button>
-            <Button variant="outline" onClick={() => void download()} className="gap-2">
+            <Button variant="outline" onClick={() => void download()} disabled={Boolean(action)} className="gap-2">
               <Download className="h-4 w-4" />
               Download
             </Button>

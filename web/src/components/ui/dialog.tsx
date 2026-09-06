@@ -200,7 +200,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
         ImportModal additionally opts into `.dialog-top` so the workflow starts near the
         top of the viewport instead of the vertical midpoint.
       */}
-      <div className="relative z-10 h-full overflow-y-auto p-3 sm:p-6">
+      <div className="relative z-10 h-full overflow-y-auto p-4 sm:p-6">
         <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
           <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
         </div>
