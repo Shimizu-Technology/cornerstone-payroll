@@ -171,5 +171,72 @@ RSpec.describe PayrollImport::ImportService do
         )
       )
     end
+
+    it "accounts for unmatched workbook rows instead of silently discarding their money" do
+      create(:employee, company: company, first_name: "Avery", last_name: "Example")
+
+      result = service.preview(
+        pdf_records: [
+          {
+            employee_name: "Example, Avery",
+            regular_hours: 40.0,
+            overtime_hours: 2.0,
+            regular_pay: 4_000.0,
+            overtime_pay: 500.0,
+            total_pay: 4_500.0
+          }
+        ],
+        excel_records: [
+          { first_name: "Missing", last_name: "Worker", total_tips: 117.50, loan_deduction: 123.50 }
+        ]
+      )
+
+      expect(result).to include(
+        unmatched_pdf_names: [],
+        unmatched_excel_names: [ "Missing Worker" ],
+        can_apply: false
+      )
+      expect(result[:matched].first).not_to include(:regular_pay, :overtime_pay, :total_pay)
+      expect(result[:matched].first).to include(regular_hours: 40.0, overtime_hours: 2.0)
+    end
+
+    it "flags suggested typo matches for explicit review while keeping every source row" do
+      employee = create(:employee, company: company, first_name: "Rosie", last_name: "Petirus")
+
+      result = service.preview(
+        pdf_records: [ { employee_name: "Petrius, Rosie", regular_hours: 37.5 } ],
+        excel_records: [ { first_name: "Rosie", last_name: "Petrius", total_tips: 117.50 } ]
+      )
+
+      expect(result).to include(
+        unmatched_pdf_names: [],
+        unmatched_excel_names: [],
+        can_apply: true
+      )
+      expect(result[:matched]).to contain_exactly(include(employee_id: employee.id, total_tips: 117.50))
+      expect(result[:low_confidence_matches]).to contain_exactly(
+        include(source: "Tips/loans workbook", source_name: "Rosie Petrius", employee_id: employee.id),
+        include(source: "Revel hours", source_name: "Petrius, Rosie", employee_id: employee.id)
+      )
+    end
+
+    it "blocks duplicate source rows that resolve to one employee" do
+      employee = create(:employee, company: company, first_name: "Avery", last_name: "Example")
+
+      result = service.preview(
+        pdf_records: [
+          { employee_name: "Example, Avery", regular_hours: 20.0 },
+          { employee_name: "Example, Avery J.", regular_hours: 20.0 }
+        ],
+        excel_records: []
+      )
+
+      expect(result[:can_apply]).to be(false)
+      expect(result[:duplicate_employee_matches]).to contain_exactly(
+        employee_id: employee.id,
+        employee_name: employee.full_name,
+        source_names: [ "Example, Avery", "Example, Avery J." ]
+      )
+    end
   end
 end

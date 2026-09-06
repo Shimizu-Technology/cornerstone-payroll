@@ -58,7 +58,12 @@ RSpec.describe E2eReleaseFixture do
     )
     expect(fixture.fetch(:register_reconciliation_field_name)).to eq("Fixture Employer Benefit")
     expect(EmployeePayrollField.where(payroll_field_definition: PayrollFieldDefinition.find_by!(name: "Fixture Employer Benefit")).sum(:amount)).to eq(35.79)
+    expect(File).to exist(fixture.fetch(:safe_payroll_import_pdf_path))
+    expect(File).to exist(fixture.fetch(:safe_payroll_import_workbook_path))
+    expect(File).to exist(fixture.fetch(:blocked_payroll_import_pdf_path))
+    expect(File).to exist(fixture.fetch(:blocked_payroll_import_workbook_path))
   ensure
+    FileUtils.rm_rf(output.dirname.join("payroll-import")) if output
     FileUtils.rm_f(output) if output
   end
 end

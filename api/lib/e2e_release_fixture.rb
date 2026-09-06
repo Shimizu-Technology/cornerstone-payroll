@@ -4,6 +4,8 @@ require "digest"
 require "fileutils"
 require "json"
 require "pathname"
+require "prawn"
+require "caxlsx"
 
 class E2eReleaseFixture
   SYNTHETIC_ORGANIZATION_SLUG = "gate-0-synthetic-firm"
@@ -19,6 +21,7 @@ class E2eReleaseFixture
         build_fixture
       end
 
+      fixture.merge!(write_payroll_import_files!(output_path))
       write_fixture!(output_path, fixture)
       fixture
     end
@@ -364,6 +367,35 @@ class E2eReleaseFixture
         payload_key: "retry"
       )
 
+      import_typo_employee = create_employee!(
+        company: company,
+        department: department,
+        first_name: "Rosie",
+        last_name: "Petirus",
+        email: "rosie@example.test",
+        ssn: "900-00-0008",
+        pay_rate: 19.25,
+        hire_date: Date.new(2026, 8, 30)
+      )
+      safe_import_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 8, 30),
+        end_date: Date.new(2026, 9, 12),
+        pay_date: Date.new(2026, 9, 18),
+        notes: "Gate 0 safe MoSa import scenario"
+      )
+      blocked_import_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 9, 13),
+        end_date: Date.new(2026, 9, 26),
+        pay_date: Date.new(2026, 10, 2),
+        notes: "Gate 0 unresolved MoSa import scenario"
+      )
+
       AuditLog.record!(
         user: accountant,
         organization_id: organization.id,
@@ -402,6 +434,10 @@ class E2eReleaseFixture
         time_tracking_source_id: source.id,
         first_time_import_id: first_import.id,
         retry_time_import_id: retry_import.id,
+        safe_payroll_import_period_id: safe_import_period.id,
+        blocked_payroll_import_period_id: blocked_import_period.id,
+        import_typo_employee_id: import_typo_employee.id,
+        import_typo_employee_rate: import_typo_employee.pay_rate.to_f,
         original_client_pay_rate: client_employee.pay_rate.to_f,
         original_client_ssn_last_four: client_employee.ssn_last_four
       }
@@ -498,6 +534,106 @@ class E2eReleaseFixture
       path = Pathname(output_path)
       FileUtils.mkdir_p(path.dirname)
       path.write(JSON.pretty_generate(fixture))
+    end
+
+    def write_payroll_import_files!(output_path)
+      directory = Pathname(output_path).dirname.join("payroll-import")
+      FileUtils.mkdir_p(directory)
+
+      safe_pdf = directory.join("revel-hours-with-reviewed-typo.pdf")
+      blocked_pdf = directory.join("revel-hours-with-unmatched-worker.pdf")
+      safe_workbook = directory.join("tips-and-deductions-with-reviewed-typo.xlsx")
+      blocked_workbook = directory.join("tips-and-deductions-with-unmatched-worker.xlsx")
+
+      write_revel_pdf!(
+        safe_pdf,
+        [
+          { name: "Example, Avery", regular_hours: 40.0, overtime_hours: 2.0, source_pay: 9_999.99 },
+          { name: "Petrius, Rosie", regular_hours: 37.5, overtime_hours: 0.0, source_pay: 8_888.88 }
+        ]
+      )
+      write_revel_pdf!(
+        blocked_pdf,
+        [ { name: "Unknown, Worker", regular_hours: 40.0, overtime_hours: 0.0, source_pay: 7_777.77 } ]
+      )
+      write_payroll_workbook!(
+        safe_workbook,
+        [
+          { last_name: "Example", first_name: "Avery", tips: 25.50, deduction: 0.0 },
+          { last_name: "Petrius", first_name: "Rosie", tips: 117.50, deduction: 123.50 }
+        ]
+      )
+      write_payroll_workbook!(
+        blocked_workbook,
+        [ { last_name: "Unknown", first_name: "Worker", tips: 50.0, deduction: 25.0 } ]
+      )
+
+      {
+        safe_payroll_import_pdf_path: safe_pdf.to_s,
+        safe_payroll_import_workbook_path: safe_workbook.to_s,
+        blocked_payroll_import_pdf_path: blocked_pdf.to_s,
+        blocked_payroll_import_workbook_path: blocked_workbook.to_s
+      }
+    end
+
+    def write_revel_pdf!(path, rows)
+      header = [
+        "Employee", "Role", "Ext. ID", "Wage", "Regular h.", "Overtime h.", "Doubletime h.",
+        "Regular", "Overtime", "Doubletime", "Total Hours", "Total", "Fees"
+      ].map { |value| value.ljust(20) }
+      header[0] = "Employee".ljust(40)
+
+      Prawn::Document.generate(path.to_s, page_size: [ 1_000, 700 ], margin: 20) do |pdf|
+        pdf.font("Courier")
+        pdf.text("Synthetic payroll fixture — source pay is intentionally wrong", size: 6)
+        pdf.move_down(4)
+        pdf.text(header.join, size: 4)
+        rows.each do |row|
+          regular_hours = row.fetch(:regular_hours)
+          overtime_hours = row.fetch(:overtime_hours)
+          source_pay = row.fetch(:source_pay)
+          fields = [
+            row.fetch(:name).ljust(40),
+            "-".ljust(20),
+            "-".ljust(20),
+            "999.99".rjust(15).ljust(20),
+            format("%.2f", regular_hours).rjust(15).ljust(20),
+            format("%.2f", overtime_hours).rjust(15).ljust(20),
+            "-".ljust(20),
+            format("%.2f", source_pay).rjust(15).ljust(20),
+            "0.00".rjust(15).ljust(20),
+            "-".ljust(20),
+            format("%.2f", regular_hours + overtime_hours).rjust(15).ljust(20),
+            format("%.2f", source_pay).rjust(15).ljust(20),
+            "-".ljust(20)
+          ]
+          pdf.text(fields.join, size: 4)
+        end
+      end
+    end
+
+    def write_payroll_workbook!(path, rows)
+      package = Axlsx::Package.new
+      workbook = package.workbook
+
+      workbook.add_worksheet(name: "TIPS - FOH") do |sheet|
+        3.times { sheet.add_row([]) }
+        sheet.add_row([ nil, nil, "Last Name", "First Name", nil, "Tip Amount" ])
+        rows.each do |row|
+          sheet.add_row([ nil, nil, row.fetch(:last_name), row.fetch(:first_name), nil, row.fetch(:tips) ])
+        end
+      end
+      workbook.add_worksheet(name: "LOANS (NO INSTALLMENTS)") do |sheet|
+        3.times { sheet.add_row([]) }
+        sheet.add_row([ nil, nil, "Last Name", "First Name", nil, "Deduction" ])
+        rows.each do |row|
+          next if row.fetch(:deduction).zero?
+
+          sheet.add_row([ nil, nil, row.fetch(:last_name), row.fetch(:first_name), nil, row.fetch(:deduction) ])
+        end
+      end
+
+      package.serialize(path.to_s)
     end
   end
 end

@@ -17,6 +17,7 @@ RSpec.describe PayrollImport::NameMatcher do
       StubEmployee.new(6, "Maria",     "Robert",    "Maria Robert"),
       StubEmployee.new(7, "Natalie",   "Thomas",    "Natalie Thomas"),
       StubEmployee.new(8, "George",    "Setik",     "George Setik"),
+      StubEmployee.new(9, "Rosie",     "Petirus",   "Rosie Petirus")
     ]
   end
 
@@ -89,16 +90,24 @@ RSpec.describe PayrollImport::NameMatcher do
     it "matches minor typo 'Beleeza, Vincent' → Vincent Belleza" do
       result = matcher.match_pdf_name("Beleeza, Vincent")
       # Fuzzy match may or may not find it depending on edit distance — just ensure no crash
-      expect([nil, Hash]).to include(result.class)
+      expect([ nil, Hash ]).to include(result.class)
     end
 
     it "matches transposed first name 'Arthur, Juile R.' → Julie Arthur" do
-      julie_employees = [StubEmployee.new(10, "Julie", "Arthur", "Julie Arthur")]
+      julie_employees = [ StubEmployee.new(10, "Julie", "Arthur", "Julie Arthur") ]
       transposition_matcher = described_class.new(julie_employees)
       result = transposition_matcher.match_pdf_name("Arthur, Juile R.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(10)
       expect(result[:confidence]).to be >= 0.7
+    end
+
+    it "matches a transposed last-name typo without weakening the first-name safeguard" do
+      result = matcher.match_pdf_name("Petrius, Rosie")
+
+      expect(result).to include(employee_id: 9, matched_name: "Rosie Petirus")
+      expect(result[:confidence]).to be_between(0.9, 0.99)
+      expect(matcher.match_pdf_name("Petrius, Different")).to be_nil
     end
 
     it "returns nil for name with confidence below threshold" do
@@ -134,10 +143,10 @@ RSpec.describe PayrollImport::NameMatcher do
   describe "edge cases" do
     it "handles employees with no last name" do
       broken_emp = StubEmployee.new(99, "OnlyFirst", "", "OnlyFirst")
-      m = described_class.new([broken_emp])
+      m = described_class.new([ broken_emp ])
       result = m.match_pdf_name("OnlyFirst,")
       # Should not crash — result may be nil or a match
-      expect([nil, Hash]).to include(result.class)
+      expect([ nil, Hash ]).to include(result.class)
     end
 
     it "is not case-sensitive on last name" do

@@ -118,7 +118,7 @@ module PayrollImport
       "walter"  => %w[wally],
       "lenny"   => %w[leonard],
       "leonard" => %w[lenny],
-      "antonio" => %w[tony],
+      "antonio" => %w[tony]
     }.freeze
 
     attr_reader :employees
@@ -205,8 +205,11 @@ module PayrollImport
       end
 
       # Fuzzy match on base last names
-      dist = ld(input_base, emp_base)
-      max_len = [input_base.length, emp_base.length].max
+      # A transposed pair is a common payroll-file typo (for example,
+      # "Petrius" versus "Petirus"). Treat it as one edit while retaining
+      # the existing minimum score and first-name safeguards.
+      dist = dld(input_base, emp_base)
+      max_len = [ input_base.length, emp_base.length ].max
       return 0.0 if max_len.zero?
 
       score = 1.0 - (dist.to_f / max_len)
@@ -239,7 +242,7 @@ module PayrollImport
       # Fuzzy match on first tokens (handles typos like "Elaine" vs "Elain")
       if input_first.present? && emp_first.present?
         dist = dld(input_first, emp_first)
-        max_len = [input_first.length, emp_first.length].max
+        max_len = [ input_first.length, emp_first.length ].max
         if max_len > 0
           token_score = 1.0 - (dist.to_f / max_len)
           return token_score if token_score >= 0.7
@@ -248,7 +251,7 @@ module PayrollImport
 
       # Fuzzy match on full first name string
       dist = ld(input, employee)
-      max_len = [input.length, employee.length].max
+      max_len = [ input.length, employee.length ].max
       return 0.0 if max_len.zero?
 
       full_score = 1.0 - (dist.to_f / max_len)
@@ -290,7 +293,7 @@ module PayrollImport
         (1..m).each do |i|
           cost = s[i - 1] == t[j - 1] ? 0 : 1
           temp = d[i]
-          d[i] = [d[i] + 1, d[i - 1] + 1, prev + cost].min
+          d[i] = [ d[i] + 1, d[i - 1] + 1, prev + cost ].min
           prev = temp
         end
       end
@@ -308,9 +311,9 @@ module PayrollImport
       (1..m).each do |i|
         (1..n).each do |j|
           cost = s[i - 1] == t[j - 1] ? 0 : 1
-          d[i][j] = [d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost].min
+          d[i][j] = [ d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost ].min
           if i > 1 && j > 1 && s[i - 1] == t[j - 2] && s[i - 2] == t[j - 1]
-            d[i][j] = [d[i][j], d[i - 2][j - 2] + 1].min
+            d[i][j] = [ d[i][j], d[i - 2][j - 2] + 1 ].min
           end
         end
       end

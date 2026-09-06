@@ -18,8 +18,9 @@ module PayrollImport
   # - tips_boh (decimal)
   # - tips_foh (decimal)
   # - tip_pool (string): "boh", "foh", or "mixed"
-  # - loan_deduction (decimal): recurring_loan_deduction + installment_payment
-  # - recurring_loan_deduction (decimal)
+  # - loan_deduction (decimal): one-payroll deduction + installment payment
+  # - recurring_loan_deduction (decimal): legacy key for the one-payroll
+  #   LOANS (NO INSTALLMENTS) amount; this does not create a recurring setup
   # - installment_beginning_balance (decimal)
   # - installment_new_amount (decimal)
   # - installment_payment (decimal)
