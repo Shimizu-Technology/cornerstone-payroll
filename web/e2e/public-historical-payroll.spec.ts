@@ -503,6 +503,47 @@ test('keeps checking verification status after a temporary refresh failure', asy
   expect(detailRequestCount).toBeGreaterThanOrEqual(3);
 });
 
+test('shows a completed verification even when the batch-list refresh fails', async ({ page }) => {
+  await mockApplicationShell(page);
+  const pendingBatch: HistoricalImportDetail = {
+    ...detail(1),
+    status: 'applied',
+    cutover_review: pendingCutoverReview(),
+  };
+  const verifiedBatch: HistoricalImportDetail = {
+    ...pendingBatch,
+    cutover_review: cutoverReview('verified', false),
+  };
+  let listRequestCount = 0;
+  let detailRequestCount = 0;
+  let terminalDetailReturned = false;
+
+  await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
+    listRequestCount += 1;
+    if (terminalDetailReturned) {
+      await fulfillJson(route, { error: 'Temporary batch-list refresh failed.' }, 503);
+      return;
+    }
+    await fulfillJson(route, {
+      data: [withoutCutoverEvidence(pendingBatch)],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    detailRequestCount += 1;
+    terminalDetailReturned = detailRequestCount > 1;
+    await fulfillJson(route, {
+      data: terminalDetailReturned ? verifiedBatch : pendingBatch,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('2/2')).toBeVisible();
+  expect(listRequestCount).toBeGreaterThanOrEqual(2);
+});
+
 test('makes retained source verification and exact download clear to an administrator', async ({ page }) => {
   await mockApplicationShell(page);
   const retainedDetail = detailWithVerifiedSource(1);

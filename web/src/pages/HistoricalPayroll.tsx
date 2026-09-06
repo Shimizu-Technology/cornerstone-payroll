@@ -469,15 +469,15 @@ export function HistoricalPayroll(): ReactElement {
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
 
         shouldContinue = response.data.cutover_review?.status === 'pending';
+        setDetail(response.data);
+        setMeta(response.meta);
+        setCutoverPollingError(null);
+
         if (!shouldContinue) {
           startedListLoad = true;
           await loadList(batchPageRef.current, selectedBatchId);
         }
         if (cancelled || requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== selectedBatchId) return;
-
-        setDetail(response.data);
-        setMeta(response.meta);
-        setCutoverPollingError(null);
       } catch (err) {
         if (!cancelled) setCutoverPollingError(errorMessage(err, 'Cutover verification status could not be refreshed.'));
       } finally {

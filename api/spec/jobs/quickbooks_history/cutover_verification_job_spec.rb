@@ -33,12 +33,17 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
   it "persists a safe failed state when background verification raises" do
     review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
     allow(QuickbooksHistory::CutoverVerificationService).to receive(:new).and_raise(StandardError, "private adapter detail")
+    allow(Rails.logger).to receive(:error)
 
     described_class.perform_now(batch.id, actor.id, review.verification_started_at.iso8601(6))
 
     expect(review.reload.status).to eq("failed")
     expect(review.verification_error).to eq("Cutover verification could not be completed. Review the source files and try again.")
     expect(review.verification_error).not_to include("private adapter detail")
+    expect(Rails.logger).to have_received(:error).with(
+      include("Historical cutover verification failed for batch #{batch.id}", "StandardError", "job_id=")
+    )
+    expect(Rails.logger).not_to have_received(:error).with(include("private adapter detail"))
     expect(AuditLog.where(action: "historical_imports#cutover_verification_failed", record_id: review.id)).to exist
   end
 
@@ -49,7 +54,7 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
     described_class.perform_now(missing_batch_id, actor.id, Time.current.iso8601(6))
 
     expect(Rails.logger).to have_received(:error).with(
-      include("Historical cutover verification failed for batch #{missing_batch_id}", "ActiveRecord::RecordNotFound")
+      include("Historical cutover verification failed for batch #{missing_batch_id}", "ActiveRecord::RecordNotFound", "job_id=")
     )
   end
 

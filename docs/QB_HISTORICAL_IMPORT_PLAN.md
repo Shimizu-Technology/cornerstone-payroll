@@ -91,7 +91,7 @@ Every file is downloaded and checked against its recorded byte size and SHA-256 
 
 Filesystem-backed object storage is isolated by Rails environment. Test cleanup is confined to the test namespace and cannot remove a retained development rehearsal; production requires configured private R2 storage and never falls back to the local filesystem.
 
-After upgrading an existing local checkout to the environment-scoped storage layout, move any retained development objects from `api/tmp/local_r2_storage/` into `api/tmp/local_r2_storage/development/` without changing their relative keys. Confirm the staged batch still reports every source file as verified before removing any leftover copies from the old root.
+After upgrading an existing local checkout to the environment-scoped storage layout, migrate each retained development object from `api/tmp/local_r2_storage/` to `api/tmp/local_r2_storage/development/` without changing its relative key. Before writing, compare any existing destination object with the historical import record's byte size and SHA-256 digest. Skip an exact match; stop on any mismatch and never overwrite it. After copying the remaining objects, run **Verify all files** and confirm that every affected source file is verified. Remove legacy-root copies only after the full affected inventory passes that check.
 
 Application retention does not remove the need for an approved records-retention period, restricted object-store credentials, provider-side durability/backups, and a tested restore procedure. QuickBooks access must remain available until those operational controls and the final cutover evidence are approved.
 
