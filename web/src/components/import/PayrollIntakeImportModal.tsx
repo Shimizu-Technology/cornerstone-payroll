@@ -425,7 +425,11 @@ export function PayrollIntakeImportModal({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}
+        dismissOnEscape={!loading && step !== 'applying' && !creatingEmployee}
+      >
       <DialogContent className="dialog-top dialog-wide max-w-7xl max-h-[calc(100vh-5rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Spike Payroll Intake</DialogTitle>
@@ -682,7 +686,11 @@ export function PayrollIntakeImportModal({
       </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(createEmployeeRow)} onOpenChange={(nextOpen) => !nextOpen && setCreateEmployeeRow(null)}>
+      <Dialog
+        open={Boolean(createEmployeeRow)}
+        onOpenChange={(nextOpen) => !nextOpen && !creatingEmployee && setCreateEmployeeRow(null)}
+        dismissOnEscape={!creatingEmployee}
+      >
         <DialogContent className="max-w-2xl rounded-3xl">
           <DialogHeader>
             <DialogTitle>Create employee</DialogTitle>

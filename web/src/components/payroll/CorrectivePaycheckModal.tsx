@@ -205,7 +205,7 @@ export function CorrectivePaycheckModal({
   const employeeName = originalItem.employee_name ?? 'this employee';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!issuing}>
       <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Issue Corrective Paycheck</DialogTitle>

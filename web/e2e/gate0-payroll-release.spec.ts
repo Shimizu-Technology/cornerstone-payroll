@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type Route } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -174,6 +174,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   });
 
   test('refreshes a production-shaped recurring bonus for an accountant without duplicating it', async ({ browser }) => {
+    test.setTimeout(60_000);
     const accountantContext = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.accountant_email,
@@ -260,7 +261,54 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
     await expect(page.getByText('One-Time Bonus')).toBeVisible();
+    const firstAdjustmentLabel = page.getByPlaceholder('Label (e.g. Uniform repayment)').first();
+    const originalLabel = await firstAdjustmentLabel.inputValue();
+    await firstAdjustmentLabel.fill(`${originalLabel} edited`);
+    await firstAdjustmentLabel.fill(originalLabel);
 
+    let signalSaveStarted!: () => void;
+    let releaseSave!: () => void;
+    const saveStarted = new Promise<void>((resolve) => { signalSaveStarted = resolve; });
+    const saveReleased = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const payrollItemPattern = `**/payroll_items/${fixture.bonus_alpha_payroll_item_id}*`;
+    const holdAndRejectSave = async (route: Route): Promise<void> => {
+      if (route.request().method() !== 'PATCH') {
+        await route.continue();
+        return;
+      }
+
+      signalSaveStarted();
+      await saveReleased;
+      await route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Intentional busy-state regression response' }),
+      });
+    };
+    await page.route(payrollItemPattern, holdAndRejectSave);
+    try {
+      const rejectedResponse = page.waitForResponse((response) =>
+        response.request().method() === 'PATCH' &&
+        response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
+      );
+      await page.getByRole('button', { name: 'Save & Recalculate' }).click();
+      await saveStarted;
+      await page.keyboard.press('Escape');
+      try {
+        await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
+      } finally {
+        releaseSave();
+      }
+      expect((await rejectedResponse).ok()).toBeFalsy();
+      await expect(page.getByText('Intentional busy-state regression response')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).not.toBeVisible();
+    } finally {
+      releaseSave();
+      await page.unroute(payrollItemPattern, holdAndRejectSave);
+    }
+
+    await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     const saveAndCaptureUpdatePayload = async (): Promise<{ payroll_item: Record<string, unknown> }> => {
       const updateResponsePromise = page.waitForResponse((response) =>
         response.request().method() === 'PATCH' &&
@@ -272,8 +320,6 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       return updateResponse.request().postDataJSON() as { payroll_item: Record<string, unknown> };
     };
 
-    const firstAdjustmentLabel = page.getByPlaceholder('Label (e.g. Uniform repayment)').first();
-    const originalLabel = await firstAdjustmentLabel.inputValue();
     await firstAdjustmentLabel.fill(`${originalLabel} edited`);
     await firstAdjustmentLabel.fill(originalLabel);
     const revertedEditPayload = await saveAndCaptureUpdatePayload();

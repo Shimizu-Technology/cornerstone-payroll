@@ -4,7 +4,8 @@ require "rails_helper"
 
 RSpec.describe QuickbooksHistory::WorkerProfileParser do
   def worker(pay_info:, source_name: "Worker, Alice", source_status: "active", tax_info: nil, directory: {})
-    HistoricalWorker.new(
+    build(
+      :historical_worker,
       id: 41,
       source_name: source_name,
       source_status: source_status,
@@ -61,7 +62,8 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
 
   it "distinguishes a malformed employee directory snapshot from a missing one" do
     [ [ "not", "an", "object" ], "", false ].each do |malformed_directory|
-      malformed_worker = HistoricalWorker.new(
+      malformed_worker = build(
+        :historical_worker,
         id: 42,
         source_name: "Worker, Alice",
         source_status: "active",
@@ -91,7 +93,8 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
         "_employee_directory" => {}
       }
     ].each do |snapshot|
-      missing_worker = HistoricalWorker.new(
+      missing_worker = build(
+        :historical_worker,
         id: 43,
         source_name: "Worker, Alice",
         source_status: "active",
@@ -237,7 +240,8 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
   end
 
   it "treats non-object retained snapshots as missing setup instead of crashing" do
-    malformed_worker = HistoricalWorker.new(
+    malformed_worker = build(
+      :historical_worker,
       id: 42,
       source_name: "Worker, Alice",
       source_status: "active",
@@ -251,7 +255,8 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
   end
 
   it "turns malformed retained tax and pay sections into review errors" do
-    malformed_worker = HistoricalWorker.new(
+    malformed_worker = build(
+      :historical_worker,
       id: 43,
       source_name: "Worker, Alice",
       source_status: "active",

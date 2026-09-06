@@ -302,7 +302,7 @@ export function ReplaceCheckModal({
   const employeeName = payrollItem.employee_name ?? 'this employee';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!submitting}>
       <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Replace check (uncashed)</DialogTitle>

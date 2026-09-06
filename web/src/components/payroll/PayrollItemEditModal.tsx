@@ -359,7 +359,7 @@ export function PayrollItemEditModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!saving && !removing}>
       <DialogContent className="dialog-wide w-full max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>

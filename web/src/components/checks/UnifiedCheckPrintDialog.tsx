@@ -259,7 +259,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()}
+        dismissOnEscape={!loading && !action && !savingNumbers}
+      >
         <DialogContent className="dialog-wide flex max-h-[92vh] flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
           <div className="flex items-start justify-between gap-4 pr-8">

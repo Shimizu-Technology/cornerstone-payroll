@@ -105,14 +105,17 @@ interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  dismissOnEscape?: boolean;
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }: DialogProps) {
   const generatedTitleId = React.useId();
   const [titleId, setTitleId] = React.useState(generatedTitleId);
   const portalRef = React.useRef<HTMLDivElement>(null);
   const onOpenChangeRef = React.useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
+  const dismissOnEscapeRef = React.useRef(dismissOnEscape);
+  dismissOnEscapeRef.current = dismissOnEscape;
   const registerTitleId = React.useCallback((explicitId: string | null): (() => void) => {
     const resolvedId = explicitId || generatedTitleId;
     setTitleId(resolvedId);
@@ -143,6 +146,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (documentDialogStates.get(document)?.portals.at(-1)?.element !== portal) return;
       if (event.key === 'Escape') {
+        if (!dismissOnEscapeRef.current) return;
         event.preventDefault();
         onOpenChangeRef.current(false);
         return;
