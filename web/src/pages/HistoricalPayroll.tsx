@@ -154,9 +154,14 @@ export function HistoricalPayroll(): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+  const selectedBatchIdRef = useRef<number | null>(null);
+  const batchPageRef = useRef(1);
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
+  const [batchPage, setBatchPage] = useState(1);
+  const [batchMeta, setBatchMeta] = useState<PaginationMeta>(EMPTY_META);
+  const [batchListLoading, setBatchListLoading] = useState(false);
   const [detail, setDetail] = useState<HistoricalImportDetail | null>(null);
   const [meta, setMeta] = useState<PaginationMeta>(EMPTY_META);
   const [files, setFiles] = useState<File[]>([]);
@@ -189,59 +194,81 @@ export function HistoricalPayroll(): ReactElement {
     setError(errorMessage(err, fallback));
   }, []);
 
-  const loadList = useCallback(async (): Promise<void> => {
+  const selectBatch = useCallback((batchId: number | null): void => {
+    selectedBatchIdRef.current = batchId;
+    setSelectedBatchId(batchId);
+  }, []);
+
+  const selectBatchPage = useCallback((nextPage: number): void => {
+    batchPageRef.current = nextPage;
+    setBatchPage(nextPage);
+  }, []);
+
+  const loadList = useCallback(async (
+    requestedPage: number = batchPageRef.current,
+    preferredBatchId: number | null = selectedBatchIdRef.current,
+  ): Promise<void> => {
     const requestId = ++listRequestIdRef.current;
-    const response = await historicalImportsApi.list();
+    const response = await historicalImportsApi.list({ page: requestedPage, per_page: EMPTY_META.per_page });
     if (requestId !== listRequestIdRef.current) return;
 
     setBatches(response.data);
     setArchive(response.meta.archive);
-    setSelectedBatchId((current) => (
-      current && response.data.some((batch) => batch.id === current)
-        ? current
-        : response.data[0]?.id ?? null
-    ));
-  }, []);
+    setBatchMeta(response.meta);
+    selectBatchPage(response.meta.current_page);
+    selectBatch(
+      preferredBatchId && response.data.some((batch) => batch.id === preferredBatchId)
+        ? preferredBatchId
+        : response.data[0]?.id ?? null,
+    );
+  }, [selectBatch, selectBatchPage]);
 
-  const loadDetail = useCallback(async (): Promise<void> => {
+  const loadDetail = useCallback(async (
+    requestedBatchId: number | null = selectedBatchIdRef.current,
+  ): Promise<void> => {
     const requestId = ++detailRequestIdRef.current;
-    if (!selectedBatchId) {
+    if (!requestedBatchId) {
       setDetail(null);
       setMeta(EMPTY_META);
       return;
     }
     try {
-      const response = await historicalImportsApi.show(selectedBatchId, {
+      const response = await historicalImportsApi.show(requestedBatchId, {
         page,
         per_page: 50,
         period_id: periodId,
         search: search.trim() || undefined,
       });
-      if (requestId !== detailRequestIdRef.current) return;
+      if (requestId !== detailRequestIdRef.current || selectedBatchIdRef.current !== requestedBatchId) return;
 
       setDetail(response.data);
       setMeta(response.meta);
     } catch (err) {
-      if (requestId === detailRequestIdRef.current) {
+      if (requestId === detailRequestIdRef.current && selectedBatchIdRef.current === requestedBatchId) {
         handleError(err, 'Historical paychecks could not be loaded.');
       }
     }
-  }, [handleError, page, periodId, search, selectedBatchId]);
+  }, [handleError, page, periodId, search]);
 
   const refresh = useCallback(async (): Promise<void> => {
+    setBatchListLoading(true);
     setError(null);
     setValidationErrors({});
     try {
       await loadList();
     } catch (err) {
       handleError(err, 'Historical payroll could not be loaded.');
+    } finally {
+      setBatchListLoading(false);
     }
   }, [handleError, loadList]);
 
   useEffect(() => {
     listRequestIdRef.current += 1;
     detailRequestIdRef.current += 1;
-    setSelectedBatchId(null);
+    selectBatch(null);
+    selectBatchPage(1);
+    setBatchMeta(EMPTY_META);
     setDetail(null);
     setMeta(EMPTY_META);
     setValidationErrors({});
@@ -259,7 +286,7 @@ export function HistoricalPayroll(): ReactElement {
       listRequestIdRef.current += 1;
       detailRequestIdRef.current += 1;
     };
-  }, [activeCompanyId, refresh]);
+  }, [activeCompanyId, refresh, selectBatch, selectBatchPage]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -275,8 +302,8 @@ export function HistoricalPayroll(): ReactElement {
   }, [employeeSearchDraft]);
 
   useEffect(() => {
-    void loadDetail();
-  }, [loadDetail]);
+    void loadDetail(selectedBatchId);
+  }, [loadDetail, selectedBatchId]);
 
   useEffect(() => {
     if (!canMutate || !activeCompanyId) {
@@ -329,7 +356,8 @@ export function HistoricalPayroll(): ReactElement {
     setNotice(null);
     try {
       const response = await historicalImportsApi.preview(files);
-      setSelectedBatchId(response.data.id);
+      selectBatchPage(1);
+      selectBatch(response.data.id);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
       const hasImportErrors = response.data.errors.length > 0;
@@ -341,7 +369,7 @@ export function HistoricalPayroll(): ReactElement {
             ? 'This exact bundle was already staged. The existing preview was opened.'
             : 'QuickBooks history was staged. Review reconciliation and worker matches before applying it.',
       });
-      await loadList();
+      await loadList(1, response.data.id);
     } catch (err) {
       handleError(err, 'QuickBooks history could not be previewed.');
     } finally {
@@ -364,6 +392,22 @@ export function HistoricalPayroll(): ReactElement {
     setFiles(selected);
   };
 
+  const changeBatchPage = async (nextPage: number): Promise<void> => {
+    if (nextPage < 1 || nextPage > batchMeta.total_pages || nextPage === batchPageRef.current) return;
+
+    selectBatchPage(nextPage);
+    setBatchListLoading(true);
+    setError(null);
+    setValidationErrors({});
+    try {
+      await loadList(nextPage, null);
+    } catch (err) {
+      handleError(err, 'That page of historical imports could not be loaded.');
+    } finally {
+      setBatchListLoading(false);
+    }
+  };
+
   const runLifecycleAction = async (): Promise<void> => {
     if (!confirmation) return;
     const { action: confirmedAction, batchId } = confirmation;
@@ -375,43 +419,55 @@ export function HistoricalPayroll(): ReactElement {
       const response = confirmedAction === 'apply'
         ? await historicalImportsApi.apply(batchId)
         : await historicalImportsApi.lock(batchId);
-      setNotice({
-        tone: 'success',
-        message: confirmedAction === 'apply'
-          ? 'Historical payroll is now available in the archive. No payroll was recalculated.'
-          : 'The reconciled QuickBooks batch is locked against ordinary changes.',
-      });
       setConfirmation(null);
-      await loadList();
-      setDetail((current) => current?.id === response.data.id ? { ...current, ...response.data } : current);
+      if (selectedBatchIdRef.current === batchId) {
+        setNotice({
+          tone: 'success',
+          message: confirmedAction === 'apply'
+            ? 'Historical payroll is now available in the archive. No payroll was recalculated.'
+            : 'The reconciled QuickBooks batch is locked against ordinary changes.',
+        });
+        await loadList(batchPageRef.current, batchId);
+        setDetail((current) => current?.id === response.data.id ? { ...current, ...response.data } : current);
+      }
     } catch (err) {
-      handleError(err, 'The historical import action failed.');
+      if (selectedBatchIdRef.current === batchId) {
+        handleError(err, 'The historical import action failed.');
+      }
     } finally {
       setAction(null);
     }
   };
 
   const updateWorkerDisposition = async (workerId: number, value: string): Promise<void> => {
-    if (!selectedBatchId || !value) return;
+    const operationBatchId = selectedBatchIdRef.current;
+    if (!operationBatchId || !value) return;
 
     setMappingWorkerId(workerId);
     setError(null);
     setNotice(null);
     try {
       if (value === 'archive_only') {
-        await historicalImportsApi.keepWorkerArchiveOnly(selectedBatchId, workerId);
+        await historicalImportsApi.keepWorkerArchiveOnly(operationBatchId, workerId);
       } else {
-        await historicalImportsApi.mapWorker(selectedBatchId, workerId, Number(value));
+        await historicalImportsApi.mapWorker(operationBatchId, workerId, Number(value));
       }
+      if (selectedBatchIdRef.current !== operationBatchId) return;
+
       setNotice({
         tone: 'success',
         message: value === 'archive_only'
           ? 'Worker kept as archive-only history.'
           : 'QuickBooks worker linked to the selected live employee.',
       });
-      await Promise.all([loadDetail(), loadList()]);
+      await Promise.all([
+        loadDetail(operationBatchId),
+        loadList(batchPageRef.current, operationBatchId),
+      ]);
     } catch (err) {
-      handleError(err, 'The worker review choice could not be saved.');
+      if (selectedBatchIdRef.current === operationBatchId) {
+        handleError(err, 'The worker review choice could not be saved.');
+      }
     } finally {
       setMappingWorkerId(null);
     }
@@ -427,13 +483,20 @@ export function HistoricalPayroll(): ReactElement {
     try {
       const response = await historicalImportsApi.archiveUnlinkedWorkers(batchId);
       setArchiveWorkersConfirmation(null);
+      if (selectedBatchIdRef.current !== batchId) return;
+
       setNotice({
         tone: 'success',
         message: `${response.meta.reviewed_count} unlinked QuickBooks worker${response.meta.reviewed_count === 1 ? '' : 's'} marked archive-only.`,
       });
-      await Promise.all([loadDetail(), loadList()]);
+      await Promise.all([
+        loadDetail(batchId),
+        loadList(batchPageRef.current, batchId),
+      ]);
     } catch (err) {
-      handleError(err, 'Unlinked workers could not be marked archive-only.');
+      if (selectedBatchIdRef.current === batchId) {
+        handleError(err, 'Unlinked workers could not be marked archive-only.');
+      }
     } finally {
       setAction(null);
     }
@@ -450,7 +513,7 @@ export function HistoricalPayroll(): ReactElement {
       <Header
         title="Historical payroll"
         description="Import QuickBooks as locked source-of-record snapshots, reconcile every paycheck, and keep live payroll untouched."
-        actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>}
+        actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading || batchListLoading}><RefreshCw className={`mr-2 h-4 w-4 ${batchListLoading ? 'animate-spin' : ''}`} />Refresh</Button>}
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
@@ -544,11 +607,18 @@ export function HistoricalPayroll(): ReactElement {
               )}
 
               {batches.length > 0 && (
-                <div>
+                <div className="space-y-2">
                   <label htmlFor="historical-batch" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Review batch</label>
-                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => setSelectedBatchId(Number(event.target.value))} disabled={Boolean(confirmation || archiveWorkersConfirmation)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
+                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)} className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-neutral-500">Batch page {batchPage} of {Math.max(batchMeta.total_pages, 1)} · {batchMeta.total_count.toLocaleString()} total</p>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={batchListLoading || batchPage <= 1 || action !== null || mappingWorkerId !== null}><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={batchListLoading || batchPage >= batchMeta.total_pages || action !== null || mappingWorkerId !== null}><ChevronRight className="h-4 w-4" /></Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -619,7 +689,7 @@ export function HistoricalPayroll(): ReactElement {
                                 aria-label={`Disposition for ${worker.source_name}`}
                                 value={worker.employee_id ? String(worker.employee_id) : worker.mapping_status === 'archive_only' ? 'archive_only' : ''}
                                 onChange={(event) => void updateWorkerDisposition(worker.id, event.target.value)}
-                                disabled={mappingWorkerId === worker.id}
+                                disabled={mappingWorkerId !== null}
                                 className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
                               >
                                 <option value="" disabled>Needs review</option>
