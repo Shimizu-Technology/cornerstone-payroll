@@ -1,6 +1,6 @@
 # QuickBooks Historical Import Plan
 
-**Status:** core importer, protected source retention, and unified historical reporting are implemented and locally validated; cutover evidence remains before a production import
+**Status:** all four application releases are implemented; no production preview, import, approval, or QuickBooks cancellation has been authorized
 **Owner:** Leon / Shimizu Technology  
 **Last reviewed:** 2026-09-06
 
@@ -22,13 +22,14 @@ The historical import lane now:
 - lets accountants browse the archive while limiting preview, apply, lock, and employee mapping to managers and administrators;
 - never creates or changes live pay periods, payroll items, YTD aggregates, payments, tax filings, checks, reminders, or notifications.
 
-The archive uses five dedicated records:
+The archive uses six dedicated records:
 
 - `HistoricalImportBatch` records provenance, validation, reconciliation, lifecycle state, and operator attribution.
 - `HistoricalImportSourceFile` records immutable source metadata, private object location, verification state, and the user who uploaded it.
 - `HistoricalWorker` preserves the QuickBooks worker identity and an optional link to a current employee.
 - `HistoricalPayPeriod` groups source paychecks by period and pay date.
 - `HistoricalPaycheck` stores the authoritative money, hours, taxes, deductions, contributions, payment metadata, and source-row evidence.
+- `HistoricalImportCutoverReview` stores the sealed source-to-ledger verification, exception decisions, operational attestations, and attributed approval required before lock.
 
 This is intentionally an archive and reconciliation feature. It does not recreate old payroll as editable live payroll and does not backfill current YTD balances.
 
@@ -50,7 +51,7 @@ Opening summaries are always counted and totaled separately from detailed payche
 
 The read-only QuickBooks export collected on 2026-09-05 contains 45 files. The parser currently produces:
 
-- 113 historical workers, including workers with no paycheck in the exported range;
+- 114 historical workers, including workers with no paycheck in the exported range;
 - 59 historical period groups;
 - 2,881 paycheck snapshots from 2024-06-30 through 2026-08-27;
 - 2,833 native paycheck rows that match Payroll Details to Paycheck History exactly;
@@ -76,6 +77,8 @@ Verified bundle totals:
 
 The native Payroll Details and Paycheck History exports reconcile exactly at 2,833 rows, $3,970,837.34 gross, and $2,822,901.55 net. The 48 early records are only opening summaries because QuickBooks did not provide their original paycheck-level periods in these reports. The UI and API label them accordingly instead of pretending they are complete individual pay periods.
 
+The 114-worker count is the authoritative v3 result from the Employee Directory and Employee Details reports. An older local rehearsal contained 113 workers because it used an earlier name-normalization interpretation under the same v2 label. No production history was imported from that rehearsal. The v3 importer label prevents that older interpretation from satisfying the final cutover check.
+
 The totals above include two QuickBooks void/reversal rows. Employee taxes and deductions use a payroll-facing sign convention: normal withholding is positive and reversal withholding is negative. Employer taxes, employer contributions, gross, net, and total payroll cost retain their QuickBooks report direction. This makes the stored aggregates agree with the signed source report instead of inflating totals by taking absolute values.
 
 QuickBooks Paycheck History omits a check number on 2,578 of the 2,833 native paychecks; the 48 opening-balance rows also carry no check number. The archive preserves the 255 numbers that exist and reports the missing values as source-data warnings, not import failures.
@@ -88,9 +91,26 @@ Every file is downloaded and checked against its recorded byte size and SHA-256 
 
 Application retention does not remove the need for an approved records-retention period, restricted object-store credentials, provider-side durability/backups, and a tested restore procedure. QuickBooks access must remain available until those operational controls and the final cutover evidence are approved.
 
+## Final cutover gate
+
+An applied batch cannot be locked until a manager or administrator completes a separate cutover review. The application:
+
+1. downloads every retained original from private storage and verifies its byte count and SHA-256 fingerprint;
+2. parses the retained bundle again and compares its bundle identity, importer version, manifest, warnings, summary, and cross-report reconciliation with the accepted preview;
+3. compares stored worker, pay-period, paycheck, and yearly counts and money totals with the fresh source parse;
+4. independently fingerprints every source worker, pay period, paycheck, earning, tax, deduction, contribution, payment field, and source-metadata field and compares those fingerprints with the stored immutable ledger;
+5. requires a written disposition for every known source limitation;
+6. requires confirmation that an original opens without QuickBooks, all five historical report families were reviewed, database/private-storage recovery is approved, and a named owner understands the non-destructive rollback;
+7. exports an evidence workbook and records the verifier and approver in the audit log; and
+8. seals the approved review against update or deletion before permitting the batch lock.
+
+The row-level fingerprints deliberately exclude only the optional link from a QuickBooks worker to a current Cornerstone employee. That link is an operator-reviewed application decision, not a QuickBooks source fact. The evidence returned through the API contains hashes and aggregate values, not SSNs, encrypted employee snapshots, private object keys, or raw source rows.
+
+Rollback means turning off the isolated historical-payroll feature while retaining the accepted archive and evidence. It never means deleting or rewriting payroll. Canceling QuickBooks remains a separate business-owner decision after the final application approval and recovery controls are complete.
+
 ## Local operator runbook
 
-The task defaults to preview-only. `APPLY=1` is required to make the archive visible, and `LOCK=1` also requires `APPLY=1`. Every run requires `ACTOR_EMAIL`; that user must be a manager or administrator with access to the company.
+The task defaults to preview-only. `APPLY=1` is required to make the archive visible. Every run requires `ACTOR_EMAIL`; that user must be a manager or administrator with access to the company.
 
 ```sh
 DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \
@@ -100,16 +120,18 @@ ACTOR_EMAIL=<local-operator-email> \
 bundle exec rails quickbooks_history:import
 ```
 
-After reviewing the preview and reconciliation:
+After reviewing the preview and reconciliation, apply without locking:
 
 ```sh
 DATABASE_URL=postgres://localhost:5432/cornerstone_payroll_qbo_history_local \
 BUNDLE_DIR=/absolute/path/to/quickbooks-export \
 COMPANY_ID=<local-company-id> \
 ACTOR_EMAIL=<local-operator-email> \
-APPLY=1 LOCK=1 \
+APPLY=1 \
 bundle exec rails quickbooks_history:import
 ```
+
+Then use the Historical Payroll workspace to run final verification, resolve every displayed limitation, complete the no-QuickBooks checklist, download the evidence workbook, and approve the cutover. Lock from the workspace only after approval. A later command-line lock remains possible with `APPLY=1 LOCK=1`, but it intentionally fails until that same approved review exists.
 
 The command prints the import outcome, batch and company IDs, aggregate counts, state, warning and error counts, and a shortened digest. It does not print employee names, tax identifiers, addresses, or banking data.
 
@@ -119,11 +141,12 @@ Before any production import:
 
 1. Run all backend, frontend, security, migration, and browser checks against an isolated database.
 2. Confirm the MoSa local archive counts and totals above from both the database and the UI.
-3. Have Cornerstone review the opening-summary and missing-check-number warnings.
+3. Have Cornerstone record a disposition for the opening-summary and missing-check-number warnings.
 4. Confirm application source retention is complete, every fingerprint verifies, and the private object store has an approved retention policy, backup/durability control, and tested restore path.
 5. Deploy the feature through the normal reviewed pull-request and deployment process.
 6. Create a production preview only. Review its reconciliation before applying it.
-7. Apply and lock only after written approval from the responsible Cornerstone operator.
+7. Apply the preview, run the fresh source-to-ledger verification, complete the operational checklist, export the evidence workbook, and approve the cutover.
+8. Lock only after the approved review exists. Cancel QuickBooks only through a separate business-owner decision.
 
 No production preview, apply, or lock has been performed as part of the local implementation.
 
@@ -131,10 +154,10 @@ No production preview, apply, or lock has been performed as part of the local im
 
 The QuickBooks exit is deliberately split into four reviewable releases. Finishing the first release does not authorize a production import.
 
-1. **Importer safety and reconciliation:** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
-2. **Protected source retention (implemented; production verification pending):** application-managed private source-file storage, access controls, hashes, retention status, and integrity-checked downloads so the original evidence is not lost when QuickBooks access ends. Provider durability/backup and restore evidence remain operational cutover gates.
-3. **Unified read-only history and reports (implemented; production verification pending):** payroll register, employee summary, tax, deduction/contribution, retirement, loan, and check views read only accepted historical snapshots without writing to live YTD or recalculating historical values. UI and exports label their QuickBooks source, provenance, and opening-summary limitations.
-4. **Cutover evidence and signoff:** repeatable reconciliation artifacts, exception disposition, independent aggregate checks, operator approval, rollback rehearsal, and a final no-QuickBooks dependency checklist.
+1. **Importer safety and reconciliation (PR #150, deployed):** strict five-report contract, exact name-and-SSN auto-linking, explicit manual/archive-only review, feature gating, immutable lifecycle, and live-payroll isolation.
+2. **Protected source retention (PR #151, deployed):** application-managed private source-file storage, access controls, hashes, retention status, and integrity-checked downloads so the original evidence is not lost when QuickBooks access ends. Provider durability/backup and restore evidence remain operational cutover gates.
+3. **Unified read-only history and reports (PR #152, deployed):** payroll register, employee summary, tax, deduction/contribution, retirement, loan, and check views read only accepted historical snapshots without writing to live YTD or recalculating historical values. UI and exports label their QuickBooks source, provenance, and opening-summary limitations.
+4. **Cutover evidence and signoff (implemented):** fresh retained-source parsing, exact row and aggregate fingerprints, exception disposition, evidence workbook, attributed approval, recovery/rollback attestations, and lock enforcement.
 
 The production feature flag remains off until these releases are deployed and the cutover gate is signed. The first production action is a preview; apply and lock require separate operator approval.
 

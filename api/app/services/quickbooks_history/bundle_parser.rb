@@ -4,7 +4,7 @@ require "digest"
 
 module QuickbooksHistory
   class BundleParser
-    IMPORTER_VERSION = "quickbooks-online-payroll-v2"
+    IMPORTER_VERSION = "quickbooks-online-payroll-v3"
     REQUIRED_REPORTS = %w[
       payroll_details paycheck_history payroll_summary employee_details employee_directory
     ].freeze

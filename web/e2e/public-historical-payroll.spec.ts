@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
+import type { HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
 
 interface MockWorker {
   id: number;
@@ -175,17 +175,66 @@ function detail(id: number, workers: MockWorker[] = []): HistoricalImportDetail 
   return { ...batch(id, workers), periods: [], workers, paychecks: [] };
 }
 
+function cutoverReview(status: 'verified' | 'approved', readyForApproval: boolean): HistoricalCutoverReview {
+  const totals = batch(1).preview_summary.totals;
+  return {
+    id: 80,
+    status,
+    evidence: {
+      version: 1,
+      generated_at: '2026-09-06T02:00:00Z',
+      passed: true,
+      batch_id: 1,
+      bundle_digest: 'a'.repeat(64),
+      importer_version: 'test',
+      checks: [
+        { key: 'source_bundle', label: 'Retained originals reproduce the recorded bundle', passed: true },
+        { key: 'stored_totals', label: 'Stored payroll totals match the retained originals to the cent', passed: true },
+      ],
+      counts: { worker_count: 1, period_count: 2, paycheck_count: 2 },
+      totals,
+      years: [{ year: '2024', paycheck_count: 2, detailed_paycheck_count: 1, opening_summary_count: 1, totals }],
+      ledger_digests: {
+        workers: { source: 'c'.repeat(64), stored: 'c'.repeat(64) },
+        periods: { source: 'd'.repeat(64), stored: 'd'.repeat(64) },
+        paychecks: { source: 'e'.repeat(64), stored: 'e'.repeat(64) },
+      },
+      source_files: [{ filename: 'Payroll Details.xls', sha256: 'a'.repeat(64), byte_size: 2048, report_type: 'payroll_details', verified: true }],
+      exceptions: [{ key: 'opening-summary', message: 'Opening summaries preserve totals but are not original paycheck-level periods.' }],
+      fresh_source_label: 'MoSa 2024 history',
+    },
+    evidence_digest: 'b'.repeat(64),
+    verified_at: '2026-09-06T02:00:00Z',
+    verified_by_name: 'History Admin',
+    exception_dispositions: readyForApproval ? { 'opening-summary': 'Accepted; detailed coverage begins on the recorded date.' } : {},
+    attestations: readyForApproval
+      ? { source_restore: true, history_review: true, backup_restore: true, rollback_owner: true }
+      : {},
+    attestation_labels: {
+      source_restore: 'A retained original was downloaded and opened without signing in to QuickBooks.',
+      history_review: 'Register, employee, tax, deduction, and check history were reviewed in Cornerstone Payroll.',
+      backup_restore: 'The production database and private source-storage backup and restore procedure was rehearsed or approved.',
+      rollback_owner: 'A rollback owner can disable historical payroll without deleting the retained evidence.',
+    },
+    approval_notes: readyForApproval ? 'No remaining limitations.' : null,
+    ready_for_approval: readyForApproval,
+    approved_at: status === 'approved' ? '2026-09-06T02:05:00Z' : null,
+    approved_by_name: status === 'approved' ? 'History Admin' : null,
+    approval_acknowledgement: 'I approve this verified QuickBooks history for lock and QuickBooks cutover.',
+  };
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function mockApplicationShell(page: Page): Promise<void> {
+async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = 'admin'): Promise<void> {
   await page.route('**/api/v1/auth/me', (route) => fulfillJson(route, {
     user: {
       id: 1,
       email: 'admin@example.com',
       name: 'History Admin',
-      role: 'admin',
+      role,
       organization_id: 1,
       organization_name: 'Test Organization',
       company_id: 1,
@@ -204,8 +253,8 @@ async function mockApplicationShell(page: Page): Promise<void> {
       pay_frequency: 'biweekly',
       historical_payroll_enabled: true,
     }],
-    can_manage_clients: true,
-    can_view_client_management: true,
+    can_manage_clients: role === 'admin',
+    can_view_client_management: role === 'admin',
     can_switch_company: false,
     current_company_id: 1,
   }));
@@ -406,4 +455,110 @@ test('makes accepted QuickBooks history easy to filter, understand, and export',
   const download = page.waitForEvent('download');
   await page.getByRole('menuitem', { name: /Excel workbook/ }).click();
   await expect((await download).suggestedFilename()).toBe('historical-taxes.xlsx');
+});
+
+test('guides an administrator through the final no-QuickBooks cutover gate', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  let current: HistoricalImportDetail = { ...detailWithVerifiedSource(1), status: 'applied', cutover_review: null };
+
+  await page.route('**/api/v1/admin/historical_imports/1/verify_cutover', async (route) => {
+    current = { ...current, cutover_review: cutoverReview('verified', false) };
+    await fulfillJson(route, { data: current, meta: { passed: true } });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1/update_cutover_review', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      exception_dispositions: Record<string, string>;
+      attestations: Record<string, boolean>;
+      approval_notes: string;
+    };
+    expect(payload.exception_dispositions['opening-summary']).toContain('Accepted');
+    expect(Object.values(payload.attestations)).toEqual([true, true, true, true]);
+    expect(payload.approval_notes).toBe('No remaining limitations.');
+    current = { ...current, cutover_review: cutoverReview('verified', true) };
+    await fulfillJson(route, { data: current });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1/download_cutover_evidence', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    headers: { 'Content-Disposition': 'attachment; filename="quickbooks_cutover_evidence_batch_1.xlsx"' },
+    body: 'PK-test',
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1/approve_cutover', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      acknowledgement: 'I approve this verified QuickBooks history for lock and QuickBooks cutover.',
+    });
+    current = { ...current, cutover_review: cutoverReview('approved', true) };
+    await fulfillJson(route, { data: current });
+  });
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [current],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Complete cutover review' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Run final verification' }).click();
+  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('Checklist needed')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve cutover' })).toBeDisabled();
+
+  await page.getByLabel('Reviewed decision').fill('Accepted; detailed coverage begins on the recorded date.');
+  for (const checkbox of await page.getByRole('checkbox').all()) await checkbox.check();
+  await page.getByLabel('Final review notes').fill('No remaining limitations.');
+  await page.getByRole('button', { name: 'Save review' }).click();
+  await expect(page.getByText('Cutover review saved and ready for approval.')).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Evidence workbook' }).click();
+  await expect((await download).suggestedFilename()).toBe('quickbooks_cutover_evidence_batch_1.xlsx');
+
+  await page.getByRole('button', { name: 'Approve cutover' }).click();
+  await expect(page.getByRole('heading', { name: 'Approve QuickBooks cutover?' })).toBeVisible();
+  await expect(page.getByText('It does not cancel QuickBooks or change live payroll.')).toBeVisible();
+  await page.getByRole('button', { name: 'Approve verified cutover' }).click();
+
+  await expect(page.getByText('QuickBooks cutover is approved. The historical batch can now be locked.')).toBeVisible();
+  await expect(page.getByText('Approved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Lock batch' })).toBeEnabled();
+});
+
+test('gives an accountant the accepted evidence without import or source-file controls', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page, 'accountant');
+  const accepted: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'locked',
+    cutover_review: cutoverReview('approved', true),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [accepted],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: accepted,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.getByText('Accountants can review imported history and reconciliation.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks' })).toBeVisible();
+  await expect(page.getByText('Approved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/by History Admin/)).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Evidence workbook' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Build preview' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Verify all files' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download original' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Re-run verification' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save review' })).toHaveCount(0);
 });

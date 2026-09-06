@@ -70,7 +70,7 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/historical_imports",
         action_name: "index"
       )).to eq(:payroll_operations)
-      %w[preview apply lock archive_unlinked_workers update_worker].each do |action_name|
+      %w[preview apply lock archive_unlinked_workers update_worker verify_cutover update_cutover_review approve_cutover].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/historical_imports",
           action_name: action_name

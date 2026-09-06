@@ -20,7 +20,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
   it "previews, paginates, applies, and locks a reconciled QuickBooks bundle" do
     post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
 
-    expect(response).to have_http_status(:ok)
+    expect(response).to have_http_status(:ok), response.body
     preview_body = JSON.parse(response.body)
     batch_id = preview_body.dig("data", "id")
     expect(preview_body.dig("data", "preview_summary")).to include(
@@ -64,6 +64,39 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     }
     expect(response).to have_http_status(:ok)
     expect(JSON.parse(response.body).dig("data", "status")).to eq("applied")
+
+    post "/api/v1/admin/historical_imports/#{batch_id}/lock"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("Approve the verified QuickBooks cutover review")
+
+    post "/api/v1/admin/historical_imports/#{batch_id}/verify_cutover"
+    expect(response).to have_http_status(:ok)
+    cutover = response.parsed_body.dig("data", "cutover_review")
+    expect(response.parsed_body.dig("meta", "passed")).to be(true)
+    expect(cutover.dig("evidence", "checks")).to all(include("passed" => true))
+    expect(cutover.to_json).not_to include("000-00-0001", "private_snapshot", "storage_key")
+
+    dispositions = cutover.dig("evidence", "exceptions").to_h { |exception| [ exception.fetch("key"), "Accepted source limitation." ] }
+    attestations = cutover.fetch("attestation_labels").keys.index_with(true)
+    patch "/api/v1/admin/historical_imports/#{batch_id}/update_cutover_review", params: {
+      exception_dispositions: dispositions.merge("unverified-client-key" => "Must not be persisted."),
+      attestations: attestations,
+      approval_notes: "No remaining limitations."
+    }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "cutover_review", "ready_for_approval")).to be(true)
+    expect(response.parsed_body.dig("data", "cutover_review", "exception_dispositions")).not_to have_key("unverified-client-key")
+
+    get "/api/v1/admin/historical_imports/#{batch_id}/download_cutover_evidence"
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq(SpreadsheetReportExporter::CONTENT_TYPE)
+    expect(response.body.byteslice(0, 2)).to eq("PK")
+
+    post "/api/v1/admin/historical_imports/#{batch_id}/approve_cutover", params: {
+      acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT
+    }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("data", "cutover_review", "status")).to eq("approved")
 
     post "/api/v1/admin/historical_imports/#{batch_id}/lock"
     expect(response).to have_http_status(:ok)
@@ -145,6 +178,12 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     post "/api/v1/admin/historical_imports/#{batch.id}/lock"
     expect(response).to have_http_status(:forbidden)
     post "/api/v1/admin/historical_imports/#{batch.id}/verify_source_files"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/verify_cutover"
+    expect(response).to have_http_status(:forbidden)
+    patch "/api/v1/admin/historical_imports/#{batch.id}/update_cutover_review"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/historical_imports/#{batch.id}/approve_cutover"
     expect(response).to have_http_status(:forbidden)
     source_file = batch.historical_import_source_files.first
     get "/api/v1/admin/historical_imports/#{batch.id}/source_files/#{source_file.id}/download"

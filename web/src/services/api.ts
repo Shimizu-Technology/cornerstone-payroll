@@ -3638,6 +3638,46 @@ export interface HistoricalMoneyTotals {
   total_payroll_cost: string;
 }
 
+export interface HistoricalCutoverEvidence {
+  version: number;
+  generated_at: string;
+  passed: boolean;
+  batch_id: number;
+  bundle_digest: string;
+  importer_version: string;
+  checks: Array<{ key: string; label: string; passed: boolean }>;
+  counts: { worker_count: number; period_count: number; paycheck_count: number };
+  totals: HistoricalMoneyTotals;
+  years: Array<{
+    year: string;
+    paycheck_count: number;
+    detailed_paycheck_count: number;
+    opening_summary_count: number;
+    totals: HistoricalMoneyTotals;
+  }>;
+  ledger_digests: Record<'workers' | 'periods' | 'paychecks', { source: string; stored: string }>;
+  source_files: Array<{ filename: string; sha256: string; byte_size: number; report_type: string; verified: boolean }>;
+  exceptions: Array<{ key: string; message: string }>;
+  fresh_source_label: string;
+}
+
+export interface HistoricalCutoverReview {
+  id: number;
+  status: 'pending' | 'verified' | 'approved' | 'failed';
+  evidence: HistoricalCutoverEvidence;
+  evidence_digest?: string | null;
+  verified_at?: string | null;
+  verified_by_name?: string | null;
+  exception_dispositions: Record<string, string>;
+  attestations: Record<string, boolean>;
+  attestation_labels: Record<string, string>;
+  approval_notes?: string | null;
+  ready_for_approval: boolean;
+  approved_at?: string | null;
+  approved_by_name?: string | null;
+  approval_acknowledgement: string;
+}
+
 export interface HistoricalImportBatch {
   id: number;
   company_id: number;
@@ -3703,6 +3743,7 @@ export interface HistoricalImportBatch {
   applied_by_name?: string | null;
   locked_at?: string | null;
   locked_by_name?: string | null;
+  cutover_review?: HistoricalCutoverReview | null;
   created_at: string;
 }
 
@@ -3889,6 +3930,17 @@ export const historicalImportsApi = {
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
   archiveUnlinkedWorkers: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
+  verifyCutover: (batchId: number): Promise<{ data: HistoricalImportDetail; meta: { passed: boolean } }> =>
+    api.post<{ data: HistoricalImportDetail; meta: { passed: boolean } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
+  updateCutoverReview: (
+    batchId: number,
+    payload: { exception_dispositions: Record<string, string>; attestations: Record<string, boolean>; approval_notes: string },
+  ): Promise<{ data: HistoricalImportDetail }> =>
+    api.patch<{ data: HistoricalImportDetail }>(`/admin/historical_imports/${batchId}/update_cutover_review`, payload),
+  approveCutover: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportDetail }> =>
+    api.post<{ data: HistoricalImportDetail }>(`/admin/historical_imports/${batchId}/approve_cutover`, { acknowledgement }),
+  downloadCutoverEvidence: (batchId: number): Promise<Blob> =>
+    api.getBlob(`/admin/historical_imports/${batchId}/download_cutover_evidence`),
 };
 
 export const historicalReportsApi = {
