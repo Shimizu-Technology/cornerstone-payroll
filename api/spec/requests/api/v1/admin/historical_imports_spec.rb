@@ -266,6 +266,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body.fetch("error")).to include("Approved cutover evidence")
+    expect(response.parsed_body.fetch("details")).to eq({})
     expect(AuditLog.where(
       user: accountant,
       action: "historical_imports#download_cutover_evidence",
