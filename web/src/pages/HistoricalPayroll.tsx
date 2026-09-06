@@ -92,6 +92,11 @@ interface LifecycleConfirmation {
   batchId: number;
 }
 
+interface ArchiveWorkersConfirmation {
+  batchId: number;
+  batchLabel: string;
+}
+
 interface Notice {
   message: string;
   tone: 'success' | 'warning';
@@ -141,7 +146,7 @@ export function HistoricalPayroll(): ReactElement {
   const [confirmation, setConfirmation] = useState<LifecycleConfirmation | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
-  const [confirmArchiveUnlinked, setConfirmArchiveUnlinked] = useState(false);
+  const [archiveWorkersConfirmation, setArchiveWorkersConfirmation] = useState<ArchiveWorkersConfirmation | null>(null);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -341,17 +346,18 @@ export function HistoricalPayroll(): ReactElement {
   };
 
   const archiveUnlinkedWorkers = async (): Promise<void> => {
-    if (!selectedBatchId) return;
+    if (!archiveWorkersConfirmation) return;
+    const { batchId } = archiveWorkersConfirmation;
 
     setAction('worker_review');
     setError(null);
     setNotice(null);
     try {
-      const response = await historicalImportsApi.archiveUnlinkedWorkers(selectedBatchId);
-      setConfirmArchiveUnlinked(false);
+      const response = await historicalImportsApi.archiveUnlinkedWorkers(batchId);
+      setArchiveWorkersConfirmation(null);
       setNotice({
         tone: 'success',
-        message: `${response.reviewed_count} unlinked QuickBooks worker${response.reviewed_count === 1 ? '' : 's'} marked archive-only.`,
+        message: `${response.meta.reviewed_count} unlinked QuickBooks worker${response.meta.reviewed_count === 1 ? '' : 's'} marked archive-only.`,
       });
       await Promise.all([loadDetail(), loadList()]);
     } catch (err) {
@@ -468,7 +474,7 @@ export function HistoricalPayroll(): ReactElement {
               {batches.length > 0 && (
                 <div>
                   <label htmlFor="historical-batch" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Review batch</label>
-                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => setSelectedBatchId(Number(event.target.value))} disabled={Boolean(confirmation)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
+                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => setSelectedBatchId(Number(event.target.value))} disabled={Boolean(confirmation || archiveWorkersConfirmation)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
                 </div>
@@ -513,7 +519,7 @@ export function HistoricalPayroll(): ReactElement {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div><CardTitle>Worker review</CardTitle><CardDescription>Link a QuickBooks name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {canMutate && detail.status === 'previewed' && detail.worker_review_summary.needs_review > 0 && <Button size="sm" variant="outline" onClick={() => setConfirmArchiveUnlinked(true)}>Keep all unlinked archive-only</Button>}
+                  {canMutate && detail.status === 'previewed' && detail.worker_review_summary.needs_review > 0 && <Button size="sm" variant="outline" onClick={() => setArchiveWorkersConfirmation({ batchId: detail.id, batchLabel: detail.source_label })}>Keep all unlinked archive-only</Button>}
                   {workersReviewed ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />All reviewed</Badge> : <Badge variant="warning">{detail.worker_review_summary.needs_review} remaining</Badge>}
                 </div>
               </div>
@@ -628,11 +634,11 @@ export function HistoricalPayroll(): ReactElement {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmArchiveUnlinked} onOpenChange={setConfirmArchiveUnlinked}>
+      <Dialog open={archiveWorkersConfirmation !== null} onOpenChange={(open) => { if (!open) setArchiveWorkersConfirmation(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Keep every unlinked worker archive-only?</DialogTitle><DialogDescription>This applies only to workers still marked “Needs review.” Existing exact or manual links will stay unchanged.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Keep every unlinked worker archive-only?</DialogTitle><DialogDescription>This applies to “Needs review” workers in {archiveWorkersConfirmation?.batchLabel}. Existing exact or manual links will stay unchanged.</DialogDescription></DialogHeader>
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-800">Use this after confirming the remaining QuickBooks names should not attach to any live employee profile. You can still change individual choices until the batch is locked.</div>
-          <DialogFooter><Button variant="outline" onClick={() => setConfirmArchiveUnlinked(false)} disabled={action !== null}>Cancel</Button><Button onClick={() => void archiveUnlinkedWorkers()} disabled={action !== null}>{action === 'worker_review' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Keep unlinked archive-only</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setArchiveWorkersConfirmation(null)} disabled={action !== null}>Cancel</Button><Button onClick={() => void archiveUnlinkedWorkers()} disabled={action !== null}>{action === 'worker_review' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Keep unlinked archive-only</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -143,19 +143,21 @@ module QuickbooksHistory
       }
       return entry unless extension.in?(%w[.xls .xlsx])
 
-      begin
-        rows = SpreadsheetReader.read(path: file.path, extension: extension)
-        title = rows.first(6).flatten.compact.map(&:to_s).find { |value| value.downcase.include?("report") }.to_s
-        report_type = classify_report(title, file.original_filename)
-        entry.merge(
-          report_type: report_type,
-          company_name: rows.dig(0, 0).to_s.strip,
-          row_count: rows.size,
-          rows: parseable_report?(report_type) ? rows : nil
-        )
+      rows = begin
+        SpreadsheetReader.read(path: file.path, extension: extension)
       rescue StandardError
-        entry.merge(report_type: "unreadable_spreadsheet", parse_error: "Spreadsheet could not be read")
+        nil
       end
+      return entry.merge(report_type: "unreadable_spreadsheet", parse_error: "Spreadsheet could not be read") unless rows
+
+      title = rows.first(6).flatten.compact.map(&:to_s).find { |value| value.downcase.include?("report") }.to_s
+      report_type = classify_report(title, file.original_filename)
+      entry.merge(
+        report_type: report_type,
+        company_name: rows.dig(0, 0).to_s.strip,
+        row_count: rows.size,
+        rows: parseable_report?(report_type) ? rows : nil
+      )
     end
 
     def safe_filename(file)

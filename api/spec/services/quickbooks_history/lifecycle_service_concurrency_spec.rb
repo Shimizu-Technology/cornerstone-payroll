@@ -67,6 +67,28 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
     expect(HistoricalImportBatch.where(id: [ first_batch.id, second_batch.id ], status: "applied").count).to eq(1)
   end
 
+  it "rejects an update from a stale batch after another connection locks it" do
+    stale_batch = HistoricalImportBatch.find(first_batch.id)
+    results = Queue.new
+    thread = apply_and_lock_thread(first_batch.id, results)
+    Timeout.timeout(10) { thread.join }
+    expect(results.pop).to eq([ :ok, first_batch.id ])
+
+    expect(stale_batch.update(source_label: "Stale metadata")).to be(false)
+    expect(stale_batch.errors.full_messages).to include("Locked historical imports cannot be changed")
+  end
+
+  it "rejects a stale worker update after another connection locks its batch" do
+    stale_worker = first_batch.historical_workers.first
+    results = Queue.new
+    thread = apply_and_lock_thread(first_batch.id, results)
+    Timeout.timeout(10) { thread.join }
+    expect(results.pop).to eq([ :ok, first_batch.id ])
+
+    expect(stale_worker.update(source_name: "Stale worker")).to be(false)
+    expect(stale_worker.errors.full_messages).to include("Locked historical workers cannot be changed")
+  end
+
   private
 
   def apply_thread(batch_id, results)
@@ -77,6 +99,21 @@ RSpec.describe QuickbooksHistory::LifecycleService, :postgres_concurrency do
         described_class.new(batch: batch, actor: thread_actor).apply!(
           acknowledgement: described_class::ACKNOWLEDGEMENT
         )
+        results << [ :ok, batch_id ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+  end
+
+  def apply_and_lock_thread(batch_id, results)
+    Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do
+        batch = HistoricalImportBatch.find(batch_id)
+        thread_actor = User.find(actor.id)
+        service = described_class.new(batch: batch, actor: thread_actor)
+        service.apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
+        service.lock!
         results << [ :ok, batch_id ]
       rescue StandardError => e
         results << [ :error, e ]

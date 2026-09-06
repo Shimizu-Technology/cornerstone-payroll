@@ -9,9 +9,9 @@ class HistoricalImportBatch < ApplicationRecord
   belongs_to :applied_by, class_name: "User", optional: true
   belongs_to :locked_by, class_name: "User", optional: true
 
-  has_many :historical_paychecks, dependent: :destroy
-  has_many :historical_pay_periods, dependent: :destroy
-  has_many :historical_workers, dependent: :destroy
+  has_many :historical_paychecks, dependent: :restrict_with_error
+  has_many :historical_pay_periods, dependent: :restrict_with_error
+  has_many :historical_workers, dependent: :restrict_with_error
 
   validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
   validates :source_label, :bundle_digest, :importer_version, presence: true
@@ -21,7 +21,7 @@ class HistoricalImportBatch < ApplicationRecord
   scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :visible_history, -> { where(status: %w[applied locked]) }
 
-  before_destroy :prevent_visible_history_destroy, prepend: true
+  before_destroy :prevent_destroy, prepend: true
   before_update :prevent_locked_batch_update
 
   def previewed?
@@ -47,16 +47,15 @@ class HistoricalImportBatch < ApplicationRecord
   private
 
   def prevent_locked_batch_update
-    return unless status_in_database == "locked"
+    persisted_status = self.class.lock.where(id: id).pick(:status)
+    return unless persisted_status == "locked"
 
     errors.add(:base, "Locked historical imports cannot be changed")
     throw(:abort)
   end
 
-  def prevent_visible_history_destroy
-    return unless applied? || locked?
-
-    errors.add(:base, "Applied historical imports cannot be deleted")
+  def prevent_destroy
+    errors.add(:base, "Historical imports cannot be deleted; retain the source and review record")
     throw(:abort)
   end
 end

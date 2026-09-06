@@ -43,7 +43,8 @@ class HistoricalWorker < ApplicationRecord
   end
 
   def prevent_locked_batch_update
-    return unless historical_import_batch.locked?
+    current_batch = HistoricalImportBatch.lock.find(historical_import_batch_id)
+    return unless current_batch.locked?
 
     errors.add(:base, "Locked historical workers cannot be changed")
     throw(:abort)

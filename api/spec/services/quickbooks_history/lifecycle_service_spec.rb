@@ -63,12 +63,12 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     expect(paycheck.errors.full_messages).to include("Applied historical paychecks cannot be deleted")
   end
 
-  it "allows a rejected preview to be removed with all staged rows" do
-    expect { batch.destroy! }
-      .to change(HistoricalImportBatch, :count).by(-1)
-      .and change(HistoricalPaycheck, :count).by(-2)
-      .and change(HistoricalPayPeriod, :count).by(-2)
-      .and change(HistoricalWorker, :count).by(-3)
+  it "retains preview batches and their staged evidence" do
+    expect(batch.destroy).to be(false)
+    expect(batch.errors.full_messages).to include("Historical imports cannot be deleted; retain the source and review record")
+    expect(batch.historical_paychecks.count).to eq(2)
+    expect(batch.historical_pay_periods.count).to eq(2)
+    expect(batch.historical_workers.count).to eq(3)
   end
 
   it "prevents deleting an applied import batch" do
@@ -76,7 +76,7 @@ RSpec.describe QuickbooksHistory::LifecycleService do
     described_class.new(batch: batch, actor: actor).apply!(acknowledgement: described_class::ACKNOWLEDGEMENT)
 
     expect(batch.destroy).to be(false)
-    expect(batch.errors.full_messages).to include("Applied historical imports cannot be deleted")
+    expect(batch.errors.full_messages).to include("Historical imports cannot be deleted; retain the source and review record")
   end
 
   it "prevents batch metadata changes after lock" do

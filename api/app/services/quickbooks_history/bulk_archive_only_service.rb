@@ -2,6 +2,12 @@
 
 module QuickbooksHistory
   class BulkArchiveOnlyService
+    Result = Struct.new(:reviewed_count, :error, keyword_init: true) do
+      def success?
+        error.nil?
+      end
+    end
+
     def initialize(batch:, actor:)
       @batch = batch
       @actor = actor
@@ -23,8 +29,10 @@ module QuickbooksHistory
           match_confidence: nil,
           updated_at: Time.current
         )
-        count
+        Result.new(reviewed_count: count)
       end
+    rescue ArgumentError => e
+      Result.new(error: e)
     end
 
     private

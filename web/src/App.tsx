@@ -176,7 +176,11 @@ function StaffOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function HistoricalPayrollRoute({ children }: { children: React.ReactNode }) {
+interface HistoricalPayrollRouteProps {
+  children: React.ReactNode;
+}
+
+function HistoricalPayrollRoute({ children }: HistoricalPayrollRouteProps): ReactElement {
   const { activeCompany, loading } = useCompany();
 
   if (loading) return <PageLoader />;

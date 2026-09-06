@@ -3789,10 +3789,10 @@ export const historicalImportsApi = {
   lock: (id: number) => api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${id}/lock`),
   mapWorker: (batchId: number, workerId: number, employeeId: number) =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
-  keepWorkerArchiveOnly: (batchId: number, workerId: number) =>
+  keepWorkerArchiveOnly: (batchId: number, workerId: number): Promise<{ data: HistoricalWorker }> =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { archive_only: true }),
-  archiveUnlinkedWorkers: (batchId: number) =>
-    api.post<{ data: HistoricalImportBatch; reviewed_count: number }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
+  archiveUnlinkedWorkers: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }> =>
+    api.post<{ data: HistoricalImportBatch; meta: { reviewed_count: number } }>(`/admin/historical_imports/${batchId}/archive_unlinked_workers`),
 };
 
 // Auth

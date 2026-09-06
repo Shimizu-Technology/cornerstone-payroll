@@ -87,6 +87,29 @@ RSpec.describe QuickbooksHistory::ImportService do
     )
   end
 
+  it "requires review when more than one live employee has the same name and SSN" do
+    department = create(:department, company: company)
+    2.times do
+      create(
+        :employee,
+        company: company,
+        department: department,
+        first_name: "Alice",
+        last_name: "Worker",
+        ssn_encrypted: "000-00-0001"
+      )
+    end
+
+    batch = described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call.batch
+
+    expect(batch.historical_workers.find_by!(source_name: "Worker, Alice")).to have_attributes(
+      employee_id: nil,
+      mapping_status: "needs_review",
+      match_method: nil,
+      match_confidence: nil
+    )
+  end
+
   it "flags overlapping paychecks from a different bundle" do
     first = described_class.new(company: company, files: quickbooks_history_uploads, actor: actor).call
     review_historical_workers_as_archive_only(first.batch, actor: actor)

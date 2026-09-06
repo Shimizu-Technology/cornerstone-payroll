@@ -89,10 +89,16 @@ module Api
         end
 
         def archive_unlinked_workers
-          reviewed_count = QuickbooksHistory::BulkArchiveOnlyService.new(batch: @batch, actor: current_user).call
-          render json: { data: batch_json(@batch.reload), reviewed_count: reviewed_count }
-        rescue ArgumentError => e
-          render json: error_payload(e), status: :unprocessable_entity
+          result = QuickbooksHistory::BulkArchiveOnlyService.new(batch: @batch, actor: current_user).call
+          unless result.success?
+            render json: error_payload(result.error), status: :unprocessable_entity
+            return
+          end
+
+          render json: {
+            data: batch_json(@batch.reload),
+            meta: { reviewed_count: result.reviewed_count }
+          }
         end
 
         def update_worker
@@ -115,7 +121,10 @@ module Api
         def require_historical_payroll_enabled!
           return if current_company.historical_payroll_enabled?
 
-          render json: { error: "Historical payroll is not enabled for this client" }, status: :forbidden
+          render json: {
+            error: "Historical payroll is not enabled for this client",
+            details: {}
+          }, status: :forbidden
         end
 
         def set_batch

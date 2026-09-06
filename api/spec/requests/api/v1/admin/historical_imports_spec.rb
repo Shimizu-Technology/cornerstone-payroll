@@ -28,7 +28,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
     post "/api/v1/admin/historical_imports/#{batch_id}/archive_unlinked_workers"
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.fetch("reviewed_count")).to eq(3)
+    expect(response.parsed_body.dig("meta", "reviewed_count")).to eq(3)
     expect(response.parsed_body.dig("data", "worker_review_summary", "needs_review")).to eq(0)
 
     get "/api/v1/admin/historical_imports/#{batch_id}", params: { per_page: 1, search: "Alice" }
@@ -139,7 +139,10 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     get "/api/v1/admin/historical_imports"
 
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Historical payroll is not enabled for this client")
+    expect(response.parsed_body).to include(
+      "error" => "Historical payroll is not enabled for this client",
+      "details" => {}
+    )
   end
 
   it "returns structured validation details when preview persistence fails" do

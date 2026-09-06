@@ -17,7 +17,9 @@ RSpec.describe QuickbooksHistory::BulkArchiveOnlyService do
     QuickbooksHistory::MappingService.new(worker: worker, employee: employee, actor: admin).call
 
     expect do
-      expect(described_class.new(batch: batch, actor: admin).call).to eq(2)
+      result = described_class.new(batch: batch, actor: admin).call
+      expect(result).to be_success
+      expect(result.reviewed_count).to eq(2)
     end.not_to change(Employee, :count)
 
     expect(worker.reload.mapping_status).to eq("manual_match")
@@ -31,7 +33,10 @@ RSpec.describe QuickbooksHistory::BulkArchiveOnlyService do
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
     )
 
-    expect { described_class.new(batch: batch, actor: admin).call }
-      .to raise_error(ArgumentError, /only be bulk-reviewed while the batch is a preview/)
+    result = described_class.new(batch: batch, actor: admin).call
+
+    expect(result).not_to be_success
+    expect(result.error).to be_an(ArgumentError)
+    expect(result.error.message).to match(/only be bulk-reviewed while the batch is a preview/)
   end
 end
