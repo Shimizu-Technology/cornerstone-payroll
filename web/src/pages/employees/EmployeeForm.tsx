@@ -668,10 +668,12 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
-    if (!Number.isFinite(form.employer_retirement_match_rate) || form.employer_retirement_match_rate < 0 || form.employer_retirement_match_rate > 1) {
+    const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
+    const employerRothMatch = form.employer_roth_match_rate ?? 0;
+    if (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1) {
       newErrors.employer_retirement_match_rate = ['Employer pre-tax match must be between 0% and 100%'];
     }
-    if (!Number.isFinite(form.employer_roth_match_rate) || form.employer_roth_match_rate < 0 || form.employer_roth_match_rate > 1) {
+    if (!Number.isFinite(employerRothMatch) || employerRothMatch < 0 || employerRothMatch > 1) {
       newErrors.employer_roth_match_rate = ['Employer Roth match must be between 0% and 100%'];
     }
     const defaultAdjustments = normalizeDefaultPayrollAdjustments();
