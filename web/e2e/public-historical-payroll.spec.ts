@@ -431,6 +431,58 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
 });
 
+test('keeps checking verification status after a temporary refresh failure', async ({ page }) => {
+  await mockApplicationShell(page);
+  const pendingBatch: HistoricalImportDetail = {
+    ...detail(1),
+    status: 'applied',
+    cutover_review: pendingCutoverReview(),
+  };
+  const verifiedBatch: HistoricalImportDetail = {
+    ...pendingBatch,
+    cutover_review: cutoverReview('verified', false),
+  };
+  let listRequestCount = 0;
+  let failNextListRequest = false;
+  let pollFailureCount = 0;
+  let verificationComplete = false;
+  let markPollFailed: (() => void) | undefined;
+  const pollFailed = new Promise<void>((resolve) => { markPollFailed = resolve; });
+
+  await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
+    listRequestCount += 1;
+    if (failNextListRequest) {
+      failNextListRequest = false;
+      await fulfillJson(route, { error: 'Temporary status refresh failed.' }, 503);
+      pollFailureCount += 1;
+      markPollFailed?.();
+      return;
+    }
+    if (pollFailureCount > 0) verificationComplete = true;
+    await fulfillJson(route, {
+      data: [verificationComplete ? verifiedBatch : pendingBatch],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1?**', async (route) => {
+    await fulfillJson(route, {
+      data: verificationComplete ? verifiedBatch : pendingBatch,
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByText('Comparing the retained source with the archive')).toBeVisible();
+  failNextListRequest = true;
+  await pollFailed;
+  await expect(page.getByRole('alert')).toContainText('Temporary status refresh failed. Retrying automatically.');
+
+  await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(listRequestCount).toBeGreaterThanOrEqual(3);
+});
+
 test('makes retained source verification and exact download clear to an administrator', async ({ page }) => {
   await mockApplicationShell(page);
   const retainedDetail = detailWithVerifiedSource(1);

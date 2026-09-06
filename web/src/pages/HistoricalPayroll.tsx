@@ -218,6 +218,7 @@ export function HistoricalPayroll(): ReactElement {
   const [cutoverAttestations, setCutoverAttestations] = useState<Record<string, boolean>>({});
   const [cutoverNotes, setCutoverNotes] = useState('');
   const [cutoverApprovalOpen, setCutoverApprovalOpen] = useState(false);
+  const [cutoverPollingError, setCutoverPollingError] = useState<string | null>(null);
 
   const handleError = useCallback((err: unknown, fallback: string): void => {
     if (err instanceof ApiError) {
@@ -438,16 +439,26 @@ export function HistoricalPayroll(): ReactElement {
   }, [cutoverReviewSyncKey, selectedBatchId]);
 
   useEffect(() => {
-    if (!selectedBatchId || selectedBatch?.cutover_review?.status !== 'pending') return;
+    if (!selectedBatchId || selectedBatch?.cutover_review?.status !== 'pending') {
+      setCutoverPollingError(null);
+      return;
+    }
 
+    setCutoverPollingError(null);
     let cancelled = false;
     let timeoutId: number | undefined;
     const poll = async (): Promise<void> => {
-      await Promise.all([
-        loadDetail(selectedBatchId),
-        loadList(batchPageRef.current, selectedBatchId),
-      ]);
-      if (!cancelled) timeoutId = window.setTimeout(() => void poll(), 2_000);
+      try {
+        await Promise.all([
+          loadDetail(selectedBatchId),
+          loadList(batchPageRef.current, selectedBatchId),
+        ]);
+        if (!cancelled) setCutoverPollingError(null);
+      } catch (err) {
+        if (!cancelled) setCutoverPollingError(errorMessage(err, 'Cutover verification status could not be refreshed.'));
+      } finally {
+        if (!cancelled) timeoutId = window.setTimeout(() => void poll(), 2_000);
+      }
     };
     timeoutId = window.setTimeout(() => void poll(), 2_000);
 
@@ -973,10 +984,13 @@ export function HistoricalPayroll(): ReactElement {
                   {canMutate && <Button onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Run final verification</Button>}
                 </div>
               ) : cutoverReview.status === 'pending' ? (
-                <div className="flex items-start gap-4 rounded-2xl border border-primary-200 bg-primary-50 p-6">
-                  <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary-700" />
-                  <div><p className="font-semibold text-neutral-950">Comparing the retained source with the archive</p><p className="mt-2 text-sm leading-6 text-neutral-600">This page checks for the result automatically. You can leave and come back without interrupting verification.</p></div>
-                </div>
+                <>
+                  <div className="flex items-start gap-4 rounded-2xl border border-primary-200 bg-primary-50 p-6">
+                    <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary-700" />
+                    <div><p className="font-semibold text-neutral-950">Comparing the retained source with the archive</p><p className="mt-2 text-sm leading-6 text-neutral-600">This page checks for the result automatically. You can leave and come back without interrupting verification.</p></div>
+                  </div>
+                  {cutoverPollingError && <div role="alert" className="flex items-start gap-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{cutoverPollingError} Retrying automatically.</span></div>}
+                </>
               ) : (
                 <>
                   {cutoverReview.verification_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{cutoverReview.verification_error}</div>}
