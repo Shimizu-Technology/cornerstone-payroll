@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi } from '@/services/api';
-import { formatCurrency, formatDateRange } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 
@@ -16,33 +16,61 @@ export function ClientPayPeriodDetail(): ReactElement {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const [searchParams] = useSearchParams();
   const companyId = Number(companyIdParam);
+  const payPeriodId = Number(id);
+  const routeKey = `${companyId}:${payPeriodId}`;
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payPeriod, setPayPeriod] = useState<Awaited<ReturnType<typeof clientPayPeriodsApi.get>>['pay_period'] | null>(null);
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('');
+  const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
+  const loadRequestIdRef = useRef(0);
+  const resolvedPayPeriod = resolvedRouteKey === routeKey ? payPeriod : null;
+  const resolvedError = resolvedRouteKey === routeKey ? error : null;
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await clientPayPeriodsApi.get(Number(id));
-      setPayPeriod(response.pay_period);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load pay period');
-    } finally {
-      setLoading(false);
+  const load = useCallback(async (): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+
+    if (![companyId, payPeriodId].every((value) => Number.isInteger(value) && value > 0)) {
+      if (isCurrentRequest()) {
+        setPayPeriod(null);
+        setError('This pay-period link is invalid.');
+        setResolvedRouteKey(routeKey);
+        setLoading(false);
+      }
+      return;
     }
-  }, [id]);
+
+    setLoading(true);
+    setResolvedRouteKey(null);
+    setError(null);
+    setPayPeriod(null);
+    try {
+      const response = await clientPayPeriodsApi.get(payPeriodId, companyId);
+      if (!isCurrentRequest()) return;
+      setPayPeriod(response.pay_period);
+      setResolvedRouteKey(routeKey);
+    } catch (err) {
+      if (isCurrentRequest()) {
+        setError(err instanceof Error ? err.message : 'Failed to load pay period');
+        setResolvedRouteKey(routeKey);
+      }
+    } finally {
+      if (isCurrentRequest()) setLoading(false);
+    }
+  }, [companyId, payPeriodId, routeKey]);
 
   useEffect(() => {
     void load();
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   const visibleItems = useMemo(() => {
-    const items = payPeriod?.payroll_items || [];
+    const items = resolvedPayPeriod?.payroll_items || [];
     return items.filter((item) => {
       const matchesType = !employmentType || item.employment_type === employmentType;
       const haystack = [
@@ -55,28 +83,28 @@ export function ClientPayPeriodDetail(): ReactElement {
       const matchesSearch = !search.trim() || haystack.includes(search.toLowerCase());
       return matchesType && matchesSearch;
     });
-  }, [employmentType, payPeriod?.payroll_items, search]);
+  }, [employmentType, resolvedPayPeriod?.payroll_items, search]);
 
   return (
     <div>
       <Header
-        title={payPeriod ? `Pay Period: ${formatDateRange(payPeriod.start_date, payPeriod.end_date)}` : 'Pay Period'}
-        description={payPeriod ? `Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString()}` : 'Review employee payroll for this period.'}
+        title={resolvedPayPeriod ? `Pay Period: ${formatDateRange(resolvedPayPeriod.start_date, resolvedPayPeriod.end_date)}` : 'Pay Period'}
+        description={resolvedPayPeriod ? `Pay Date: ${formatDate(resolvedPayPeriod.pay_date)}` : 'Review employee payroll for this period.'}
         actions={<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button>}
       />
 
       <div className="p-6 lg:p-8 space-y-6">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {resolvedError && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{resolvedError}</div>}
 
-        {loading ? (
+        {loading || resolvedRouteKey !== routeKey ? (
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>
-        ) : payPeriod ? (
+        ) : resolvedPayPeriod ? (
           <>
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard label="Employees" value={String(payPeriod.employee_count ?? payPeriod.payroll_items?.length ?? 0)} />
-              <SummaryCard label="Gross Pay" value={formatCurrency(payPeriod.total_gross ?? 0)} />
-              <SummaryCard label="Net Pay" value={formatCurrency(payPeriod.total_net ?? 0)} />
-              <SummaryCard label="Status" value={payPeriod.status.charAt(0).toUpperCase() + payPeriod.status.slice(1)} />
+              <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
+              <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
+              <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
+              <SummaryCard label="Status" value={resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
             </div>
 
             <Card>

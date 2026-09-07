@@ -827,6 +827,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   test('discards a delayed pay-run mutation after switching clients', async ({ page }): Promise<void> => {
     const calculate = await adminApi.post(`admin/pay_periods/${fixture.mutation_race_pay_period_id}/run_payroll`);
     expect(calculate.ok()).toBeTruthy();
+    const calculatedPeriod = (await responseJson(calculate)).pay_period as Record<string, unknown>;
+    expect(calculatedPeriod.status).toBe('calculated');
 
     let markApprovalStarted: (() => void) | undefined;
     const approvalStarted = new Promise<void>((resolve): void => {
@@ -1604,6 +1606,84 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     ));
     await page.getByRole('button', { name: 'Back to List', exact: true }).click();
     await expect(page).toHaveURL(listUrl);
+
+    await context.close();
+  });
+
+  test('keeps the newest client pay-period route when an older response arrives late', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.client_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    const delayedPayPeriodId = 900001;
+    const currentPayPeriodId = 900002;
+    let markDelayedRequestStarted: (() => void) | undefined;
+    const delayedRequestStarted = new Promise<void>((resolve): void => {
+      markDelayedRequestStarted = resolve;
+    });
+    let releaseDelayedResponse: (() => void) | undefined;
+    const delayedResponseReleased = new Promise<void>((resolve): void => {
+      releaseDelayedResponse = resolve;
+    });
+    const responseBody = (payPeriodId: number, employeeName: string, payDate: string): string => JSON.stringify({
+      pay_period: {
+        id: payPeriodId,
+        start_date: payDate,
+        end_date: payDate,
+        pay_date: payDate,
+        status: 'committed',
+        employee_count: 1,
+        total_gross: '100.00',
+        total_net: '80.00',
+        payroll_items: [{
+          id: payPeriodId,
+          employee_name: employeeName,
+          employment_type: 'hourly',
+          total_hours: '1.0',
+          pay_rate: '100.00',
+          gross_pay: '100.00',
+          total_deductions: '20.00',
+          net_pay: '80.00',
+        }],
+      },
+    });
+
+    await page.route(`**/api/v1/client/pay_periods/${delayedPayPeriodId}`, async (route): Promise<void> => {
+      markDelayedRequestStarted?.();
+      await delayedResponseReleased;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: responseBody(delayedPayPeriodId, 'Delayed Route Employee', '2026-01-02'),
+      });
+    });
+    await page.route(`**/api/v1/client/pay_periods/${currentPayPeriodId}`, async (route): Promise<void> => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: responseBody(currentPayPeriodId, 'Current Route Employee', '2026-02-06'),
+      });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${delayedPayPeriodId}/overview`);
+    await delayedRequestStarted;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.company_id}/pay-runs/${currentPayPeriodId}/overview`);
+    await expect(page.getByText('Current Route Employee', { exact: true })).toBeVisible();
+
+    const delayedResponseDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === `/api/v1/client/pay_periods/${delayedPayPeriodId}`
+    ));
+    releaseDelayedResponse?.();
+    await delayedResponseDelivered;
+    await waitForUiCommit(page);
+    await expect(page.getByText('Current Route Employee', { exact: true })).toBeVisible();
+    await expect(page.getByText('Delayed Route Employee', { exact: true })).toHaveCount(0);
 
     await context.close();
   });

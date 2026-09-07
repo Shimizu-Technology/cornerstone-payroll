@@ -57,6 +57,13 @@ describe('getCompanySwitchRedirect', (): void => {
     });
   });
 
+  it('drops detail-page query state while switching companies', (): void => {
+    expect(getCompanySwitchRedirect('/companies/7/pay-runs/88/overview', 12, '?return_to=%2Fcompanies%2F7%2Fpay-runs%3Fstatus%3Ddraft')).toEqual({
+      notice: 'Switched clients. Showing pay periods for the selected client.',
+      to: '/companies/12/pay-runs',
+    });
+  });
+
   it('leaves company-independent pages in place', (): void => {
     expect(getCompanySwitchRedirect('/reports', 12)).toBeNull();
   });

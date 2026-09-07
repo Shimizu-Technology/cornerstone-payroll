@@ -40,7 +40,7 @@ export function CompanyScopedRoute(): ReactElement {
                 The link may be outdated, or your account may not have access to that client. No payroll record was loaded.
               </p>
               {fallbackCompanyId && (
-                <div className="mt-5 flex flex-wrap gap-3">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <Link
                     to={payRunsPath(fallbackCompanyId)}
                     className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"

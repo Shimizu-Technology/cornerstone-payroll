@@ -82,7 +82,7 @@ export function Layout() {
     displayedCompanyIdRef.current = displayedCompanyId;
   }, [displayedCompanyId]);
 
-  useLayoutEffect(() => {
+  useLayoutEffect((): void | (() => void) => {
     if (isFirstCompanyRender.current) {
       isFirstCompanyRender.current = false;
       displayedCompanyIdRef.current = activeCompanyId;
