@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
-import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router';
-import { Activity, ArrowRight, Banknote, ClipboardList, Loader2, Printer, UserPlus } from 'lucide-react';
-import { Header } from '@/components/layout/Header';
+import { Link, useParams, useLocation, useSearchParams } from 'react-router';
+import { ArrowRight, Loader2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,7 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
-import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
+import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
@@ -45,7 +44,6 @@ import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPane
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
-import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
@@ -261,18 +259,15 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
 };
 
 interface PayPeriodDetailProps {
-  embedded?: boolean;
   initialPayPeriod?: PayPeriod;
   onPayPeriodChange?: (payPeriod: PayPeriod) => void;
 }
 
 export function PayPeriodDetail({
-  embedded = false,
   initialPayPeriod,
   onPayPeriodChange,
-}: PayPeriodDetailProps = {}): ReactElement {
+}: PayPeriodDetailProps): ReactElement {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
-  const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const companyId = Number(companyIdParam);
@@ -937,20 +932,15 @@ export function PayPeriodDetail({
   };
 
   if (loading) {
-    return (
-      <WorkspaceLoader
-        label="Loading payroll processing tools"
-        minHeightClassName={embedded ? 'min-h-[24rem]' : 'min-h-[32rem]'}
-      />
-    );
+    return <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />;
   }
 
   if (!payPeriod) {
     return (
-      <div className={embedded ? 'rounded-2xl border border-danger-200 bg-danger-50 p-6' : 'p-8 text-center'} role="alert">
+      <div className="rounded-2xl border border-danger-200 bg-danger-50 p-6" role="alert">
         <p className="font-semibold text-danger-800">Pay period not found</p>
         {error && <p className="mt-1 text-sm text-danger-700">{error}</p>}
-        {embedded && <Button className="mt-4" variant="outline" onClick={() => void loadPayPeriod(payRunId)}>Try again</Button>}
+        <Button className="mt-4" variant="outline" onClick={() => void loadPayPeriod(payRunId)}>Try again</Button>
       </div>
     );
   }
@@ -1302,11 +1292,6 @@ export function PayPeriodDetail({
 
   const workflowActions = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-      {!embedded && (
-        <Button variant="outline" onClick={() => navigate(returnTo)}>
-          Back to List
-        </Button>
-      )}
       {isCommitted && !isVoided && (
         <>
           {canImportTimeTracking && (
@@ -1366,37 +1351,15 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      {!embedded && (
-        <Header
-          title={`Pay Period: ${formatDateRange(payPeriod.start_date, payPeriod.end_date)}`}
-          description={`Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`}
-          actions={workflowActions}
-        />
-      )}
+      <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
+        <div>
+          <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
+          <p className="mt-1 text-sm text-neutral-500">Import inputs, calculate the run, and advance it through approval.</p>
+        </div>
+        {workflowActions}
+      </section>
 
-      {embedded && (
-        <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
-          <div>
-            <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
-            <p className="mt-1 text-sm text-neutral-500">Import inputs, calculate the run, and advance it through approval.</p>
-          </div>
-          {workflowActions}
-        </section>
-      )}
-
-      {!embedded && (
-        <WorkspaceTabs
-          label="Pay-run workspace sections"
-          tabs={[
-            { id: 'overview', label: 'Overview', icon: ClipboardList, href: payRunPath(companyId, payRunId, 'overview', { returnTo }) },
-            { id: 'work', label: 'Process payroll', icon: Banknote, href: payRunPath(companyId, payRunId, 'work', { returnTo }) },
-            { id: 'checks', label: 'Checks', icon: Printer, href: payRunPath(companyId, payRunId, 'checks', { returnTo }), count: countActivePayrollChecks(payrollItems) },
-            { id: 'activity', label: 'Activity', icon: Activity, href: payRunPath(companyId, payRunId, 'activity', { returnTo }) },
-          ]}
-        />
-      )}
-
-      <div className={embedded ? 'space-y-6' : 'space-y-6 p-4 sm:p-6 lg:p-8'}>
+      <div className="space-y-6">
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}

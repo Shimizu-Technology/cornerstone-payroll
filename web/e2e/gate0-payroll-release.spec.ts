@@ -141,6 +141,43 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('keeps the current payroll item visible when route loads resolve out of order', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    let markDelayedItemStarted: (() => void) | undefined;
+    let releaseDelayedItem: (() => void) | undefined;
+    const delayedItemStarted = new Promise<void>((resolve): void => { markDelayedItemStarted = resolve; });
+    const delayedItemReleased = new Promise<void>((resolve): void => { releaseDelayedItem = resolve; });
+    const delayedItemPath = `/api/v1/admin/pay_periods/${fixture.workflow_pay_period_id}/payroll_items/${fixture.workflow_payroll_item_id}`;
+
+    await page.route(`**${delayedItemPath}`, async (route): Promise<void> => {
+      const response = await route.fetch();
+      markDelayedItemStarted?.();
+      await delayedItemReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
+    await delayedItemStarted;
+    const currentPath = `/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/payroll-items/${fixture.bonus_alpha_payroll_item_id}`;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, currentPath);
+    await expect(page.getByText(`Payroll item #${fixture.bonus_alpha_payroll_item_id}`)).toBeVisible();
+
+    releaseDelayedItem?.();
+    await waitForUiCommit(page);
+    await expect(page.getByText(`Payroll item #${fixture.bonus_alpha_payroll_item_id}`)).toBeVisible();
+    await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toHaveCount(0);
+    await context.close();
+  });
+
   test('keeps accountant payroll operations available while denying client configuration', async ({ browser }): Promise<void> => {
     const payrollPeriods = await accountantApi.get('admin/pay_periods');
     expect(payrollPeriods.ok()).toBeTruthy();
@@ -838,6 +875,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
     await page.goto('/pay-periods/123abc');
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
+
+    await page.goto('/employees/0');
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees`);
+
+    await page.goto('/pay-periods/-1');
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
     await context.close();

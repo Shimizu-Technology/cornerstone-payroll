@@ -38,13 +38,13 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
 
   if (destination === 'employees') target = employeesPath(activeCompanyId, location.search);
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
-  if (destination === 'employee' && Number.isInteger(recordId)) {
+  if (destination === 'employee' && Number.isInteger(recordId) && recordId > 0) {
     target = clientMode
       ? employeeEditPath(activeCompanyId, recordId, { returnTo })
       : employeePath(activeCompanyId, recordId, 'overview', { returnTo });
   }
   if (destination === 'pay-runs') target = payRunsPath(activeCompanyId, location.search);
-  if (destination === 'pay-run' && Number.isInteger(recordId)) {
+  if (destination === 'pay-run' && Number.isInteger(recordId) && recordId > 0) {
     target = payRunPath(activeCompanyId, recordId, clientMode ? 'overview' : 'work', { returnTo });
   }
 

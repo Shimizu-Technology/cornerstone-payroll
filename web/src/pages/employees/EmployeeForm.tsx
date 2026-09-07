@@ -241,6 +241,7 @@ export function EmployeeForm() {
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
   const employeeRequestIdRef = useRef(0);
   const employeePayrollFieldsRequestIdRef = useRef(0);
+  const payrollFieldsRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
   companyIdRef.current = companyId;
 
@@ -353,13 +354,19 @@ export function EmployeeForm() {
 
   const fetchPayrollFields = useCallback(async () => {
     if (isClient) return;
+    const requestId = ++payrollFieldsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      payrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = await payrollFieldsApi.list({ active: true });
-      setPayrollFields(response.payroll_fields);
+      if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
     } catch (err) {
-      console.error('Failed to load payroll fields:', err);
+      if (isCurrentRequest()) console.error('Failed to load payroll fields:', err);
     }
-  }, [isClient]);
+  }, [companyId, isClient]);
 
   const fetchEmployeePayrollFields = useCallback(async () => {
     if (!id || isClient) return;
@@ -404,6 +411,7 @@ export function EmployeeForm() {
     setInitialSsn('');
     setStoredSsnLastFour(null);
     setInitialEmploymentType('hourly');
+    setPayrollFields([]);
     setEmployeePayrollFields([]);
     setWageRates([defaultHourlyWageRate()]);
     setDefaultPayrollAdjustments([]);
@@ -428,6 +436,7 @@ export function EmployeeForm() {
     return (): void => {
       employeeRequestIdRef.current += 1;
       employeePayrollFieldsRequestIdRef.current += 1;
+      payrollFieldsRequestIdRef.current += 1;
     };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
