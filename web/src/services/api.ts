@@ -3769,7 +3769,7 @@ export interface HistoricalImportBatch {
     mismatched_summary_rows?: number;
     errors: string[];
   };
-  tax_wage_reconciliation: {
+  tax_wage_reconciliation?: {
     passed: boolean;
     report_count: number;
     not_available?: boolean;

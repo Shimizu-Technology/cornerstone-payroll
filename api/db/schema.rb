@@ -2653,7 +2653,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_121000) do
   add_foreign_key "historical_ytd_bridges", "historical_client_bootstraps"
   add_foreign_key "historical_ytd_bridges", "historical_import_batches"
   add_foreign_key "historical_ytd_bridges", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_ytd_bridges_batch_tenant"
-  add_foreign_key "historical_ytd_bridges", "users", column: "applied_by_id", on_delete: :nullify
+  add_foreign_key "historical_ytd_bridges", "users", column: "applied_by_id", on_delete: :restrict
   add_foreign_key "historical_ytd_bridges", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "invoice_artifacts", "invoices"
   add_foreign_key "invoice_artifacts", "organizations"
