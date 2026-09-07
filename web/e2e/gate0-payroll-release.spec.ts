@@ -662,6 +662,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   test('keeps the selected pay-run filter when an action finishes late', async ({ page }): Promise<void> => {
     const calculate = await adminApi.post(`admin/pay_periods/${fixture.filter_race_pay_period_id}/run_payroll`);
     expect(calculate.ok()).toBeTruthy();
+    expect((await calculate.json()).pay_period.status).toBe('calculated');
 
     let markApprovalStarted: (() => void) | undefined;
     const approvalStarted = new Promise<void>((resolve): void => {

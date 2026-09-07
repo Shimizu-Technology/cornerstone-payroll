@@ -77,7 +77,7 @@ export function EmployeeWorkspace(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -155,7 +155,7 @@ export function EmployeeWorkspace(): ReactElement {
             <p className="mt-2 text-sm leading-6 text-neutral-700">
               {error || 'The employee may have been removed, or the link may belong to another client.'}
             </p>
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="mt-4 flex flex-wrap gap-4">
               <Button onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>
               <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700" to={returnTo}>
                 <ArrowLeft className="h-4 w-4" />Back to employees
@@ -216,7 +216,7 @@ export function EmployeeWorkspace(): ReactElement {
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
         {payHistoryError && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
             <span>{payHistoryError}</span>
             <Button variant="outline" size="sm" onClick={() => void load()}>
               <RefreshCw className="mr-2 h-4 w-4" />Try again
@@ -244,19 +244,21 @@ export function EmployeeWorkspace(): ReactElement {
   );
 }
 
+interface EmployeeOverviewProps {
+  companyId: number;
+  employee: Employee;
+  latestPay: PayHistoryReport['history'][number] | undefined;
+  summary: Record<string, number>;
+  returnTo: string;
+}
+
 function EmployeeOverview({
   companyId,
   employee,
   latestPay,
   summary,
   returnTo,
-}: {
-  companyId: number;
-  employee: Employee;
-  latestPay: PayHistoryReport['history'][number] | undefined;
-  summary: Record<string, number>;
-  returnTo: string;
-}): ReactElement {
+}: EmployeeOverviewProps): ReactElement {
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -268,16 +270,16 @@ function EmployeeOverview({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-3">
-            <div><CardTitle>Recent payroll</CardTitle><p className="mt-1 text-sm text-neutral-500">Open the exact result or its source pay run.</p></div>
+          <CardHeader className="flex-row items-center justify-between gap-4">
+            <div><CardTitle>Recent payroll</CardTitle><p className="mt-2 text-sm text-neutral-500">Open the exact result or its source pay run.</p></div>
             <Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={employeePath(companyId, employee.id, 'pay-history', { returnTo })}>View all</Link>
           </CardHeader>
           <CardContent className="p-0">
             {latestPay ? (
-              <div className="grid gap-4 px-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
+              <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
                 <div>
                   <p className="font-display text-lg font-bold text-neutral-950">{latestPay.period_description}</p>
-                  <p className="mt-1 text-sm text-neutral-500">Pay date {formatDate(latestPay.pay_date)} · {formatCurrency(latestPay.net_pay)} net</p>
+                  <p className="mt-2 text-sm text-neutral-500">Pay date {formatDate(latestPay.pay_date)} · {formatCurrency(latestPay.net_pay)} net</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={payRunPath(companyId, latestPay.pay_period_id, 'overview', { returnTo })}>Pay run <ArrowRight className="h-4 w-4" /></Link>
@@ -302,14 +304,19 @@ function EmployeeOverview({
   );
 }
 
-function PaySetup({ employee, editHref }: { employee: Employee; editHref: string }): ReactElement {
+interface PaySetupProps {
+  employee: Employee;
+  editHref: string;
+}
+
+function PaySetup({ employee, editHref }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
       <Card>
-        <CardHeader><CardTitle>Payroll setup</CardTitle><p className="mt-1 text-sm text-neutral-500">A readable summary of the values used when this employee enters a pay run.</p></CardHeader>
-        <CardContent className="grid gap-5 sm:grid-cols-2">
+        <CardHeader><CardTitle>Payroll setup</CardTitle><p className="mt-2 text-sm text-neutral-500">A readable summary of the values used when this employee enters a pay run.</p></CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
           <ContextRow label="Worker type" value={employmentTypeLabels[employee.employment_type] || employee.employment_type} />
           <ContextRow label="Pay rate" value={formatCurrency(Number(employee.pay_rate) || 0)} />
           <ContextRow label="Pay frequency" value={payFrequencyLabels[employee.pay_frequency] || employee.pay_frequency} />
@@ -332,10 +339,16 @@ function PaySetup({ employee, editHref }: { employee: Employee; editHref: string
   );
 }
 
-function PayHistory({ companyId, report, returnTo }: { companyId: number; report: PayHistoryReport | null; returnTo: string }): ReactElement {
+interface PayHistoryProps {
+  companyId: number;
+  report: PayHistoryReport | null;
+  returnTo: string;
+}
+
+function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
   return (
     <Card>
-      <CardHeader><CardTitle>Pay history</CardTitle><p className="mt-1 text-sm text-neutral-500">Each row connects the employee, source pay run, exact payroll item, and check reference.</p></CardHeader>
+      <CardHeader><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Each row connects the employee, source pay run, exact payroll item, and check reference.</p></CardHeader>
       <CardContent className="p-0">
         {!report ? (
           <p className="px-6 py-10 text-center text-sm text-amber-800">Pay history could not be loaded. Use Try again above without leaving this employee.</p>
@@ -364,14 +377,20 @@ function PayHistory({ companyId, report, returnTo }: { companyId: number; report
   );
 }
 
-function EmployeeActivity({ companyId, employee, returnTo }: { companyId: number; employee: Employee; returnTo: string }): ReactElement {
+interface EmployeeActivityProps {
+  companyId: number;
+  employee: Employee;
+  returnTo: string;
+}
+
+function EmployeeActivity({ companyId, employee, returnTo }: EmployeeActivityProps): ReactElement {
   const events = employee.status_history || [];
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
       <Card>
-        <CardHeader><CardTitle>Employment activity</CardTitle><p className="mt-1 text-sm text-neutral-500">Authoritative lifecycle events recorded for this employee.</p></CardHeader>
+        <CardHeader><CardTitle>Employment activity</CardTitle><p className="mt-2 text-sm text-neutral-500">Authoritative lifecycle events recorded for this employee.</p></CardHeader>
         <CardContent>
-          {events.length ? <ol className="space-y-5">{events.map((event) => <li key={event.id} className="grid gap-3 border-l-2 border-primary-100 pl-4 sm:grid-cols-[minmax(0,1fr)_auto]"><div><p className="font-semibold capitalize text-neutral-950">{event.event_type.replace('_', ' ')}</p><p className="mt-1 text-sm text-neutral-600">{event.previous_status} to {event.resulting_status}{event.reason_category ? ` · ${event.reason_category.replace('_', ' ')}` : ''}</p>{event.internal_notes && <p className="mt-2 text-sm leading-6 text-neutral-500">{event.internal_notes}</p>}</div><div className="text-sm text-neutral-500 sm:text-right"><p className="font-semibold text-neutral-700">Effective {formatDate(event.effective_date)}</p><p>{formatGuamDateTime(event.created_at)}</p>{event.actor_name && <p>by {event.actor_name}</p>}</div></li>)}</ol> : <p className="text-sm text-neutral-500">No termination or reactivation events have been recorded.</p>}
+          {events.length ? <ol className="space-y-4">{events.map((event) => <li key={event.id} className="grid gap-4 border-l-2 border-primary-100 pl-4 sm:grid-cols-[minmax(0,1fr)_auto]"><div><p className="font-semibold capitalize text-neutral-950">{event.event_type.replace('_', ' ')}</p><p className="mt-2 text-sm text-neutral-600">{event.previous_status} to {event.resulting_status}{event.reason_category ? ` · ${event.reason_category.replace('_', ' ')}` : ''}</p>{event.internal_notes && <p className="mt-2 text-sm leading-6 text-neutral-500">{event.internal_notes}</p>}</div><div className="text-sm text-neutral-500 sm:text-right"><p className="font-semibold text-neutral-700">Effective {formatDate(event.effective_date)}</p><p>{formatGuamDateTime(event.created_at)}</p>{event.actor_name && <p>by {event.actor_name}</p>}</div></li>)}</ol> : <p className="text-sm text-neutral-500">No termination or reactivation events have been recorded.</p>}
         </CardContent>
       </Card>
       <Card>
@@ -386,15 +405,34 @@ function EmployeeActivity({ companyId, employee, returnTo }: { companyId: number
   );
 }
 
-function ClassificationLink({ label, companyId, employee, returnTo }: { label: string; companyId: number; employee: NonNullable<Employee['classification_history']>['previous_employee']; returnTo: string }): ReactElement | null {
+interface ClassificationLinkProps {
+  label: string;
+  companyId: number;
+  employee: NonNullable<Employee['classification_history']>['previous_employee'];
+  returnTo: string;
+}
+
+function ClassificationLink({ label, companyId, employee, returnTo }: ClassificationLinkProps): ReactElement | null {
   if (!employee) return null;
-  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-1 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-1 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
+  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-2 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-2 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
 }
 
-function Metric({ icon: Icon, label, value, detail }: { icon: typeof Banknote; label: string; value: string; detail: string }): ReactElement {
-  return <Card><CardContent className="p-5"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-1 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+interface MetricProps {
+  icon: typeof Banknote;
+  label: string;
+  value: string;
+  detail: string;
 }
 
-function ContextRow({ label, value }: { label: string; value: string }): ReactElement {
-  return <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-1 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
+function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+}
+
+interface ContextRowProps {
+  label: string;
+  value: string;
+}
+
+function ContextRow({ label, value }: ContextRowProps): ReactElement {
+  return <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
 }

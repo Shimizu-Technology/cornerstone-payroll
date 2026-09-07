@@ -57,7 +57,7 @@ export function PayrollItemDetail(): ReactElement {
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), fallback);
   const currentPath = currentAppPath(location.pathname, location.search);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
