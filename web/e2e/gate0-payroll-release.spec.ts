@@ -224,6 +224,32 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantContext.close();
   });
 
+  test('keeps employee details usable when pay history is unavailable', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    await page.route('**/api/v1/admin/reports/employee_pay_history**', async (route): Promise<void> => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Synthetic pay-history outage' }),
+      });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/overview`);
+    await expect(page.getByRole('heading', { name: 'Avery Example' })).toBeVisible();
+    await expect(page.getByText('Pay history is temporarily unavailable. Employee details are still available.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Edit employee' })).toBeVisible();
+
+    await page.getByRole('navigation', { name: 'Employee workspace sections' }).getByRole('link', { name: 'Pay setup' }).click();
+    await expect(page.getByRole('heading', { name: 'Payroll setup' })).toBeVisible();
+    await context.close();
+  });
+
   test('hides prior-company dashboard data while a company switch is loading', async ({ browser }): Promise<void> => {
     const primaryDashboardResponse = await adminApi.get('admin/reports/dashboard');
     const boundaryDashboardResponse = await adminApi.get('admin/reports/dashboard', {

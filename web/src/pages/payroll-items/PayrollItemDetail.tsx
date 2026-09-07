@@ -25,6 +25,7 @@ import {
   employeePath,
   payrollItemPath,
   payRunPath,
+  payRunsPath,
   safeInternalReturnPath,
 } from '@/lib/routes';
 import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
@@ -48,7 +49,11 @@ export function PayrollItemDetail(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
 
-  const fallback = payRunPath(companyId, payRunId, 'overview');
+  const hasValidCompanyId = Number.isInteger(companyId) && companyId > 0;
+  const hasValidPayRunId = Number.isInteger(payRunId) && payRunId > 0;
+  const fallback = hasValidCompanyId && hasValidPayRunId
+    ? payRunPath(companyId, payRunId, 'overview')
+    : hasValidCompanyId ? payRunsPath(companyId) : '/pay-periods';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), fallback);
   const currentPath = currentAppPath(location.pathname, location.search);
 
@@ -56,7 +61,7 @@ export function PayrollItemDetail(): ReactElement {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
-    if (![payRunId, payrollItemId].every((value) => Number.isInteger(value) && value > 0)) {
+    if (![companyId, payRunId, payrollItemId].every((value) => Number.isInteger(value) && value > 0)) {
       if (isCurrentRequest()) {
         setError('This payroll-item link is invalid.');
         setLoading(false);
@@ -92,7 +97,7 @@ export function PayrollItemDetail(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [payRunId, payrollItemId]);
+  }, [companyId, payRunId, payrollItemId]);
 
   useEffect(() => {
     void load();

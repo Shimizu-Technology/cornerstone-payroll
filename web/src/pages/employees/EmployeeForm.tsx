@@ -15,7 +15,7 @@ import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkPro
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
+import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
@@ -913,7 +913,9 @@ export function EmployeeForm() {
         ? '/change-requests'
         : isEditing
           ? returnTo
-          : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
+          : isClient
+            ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
+            : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
       navigate(saveDestination, {
         state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
