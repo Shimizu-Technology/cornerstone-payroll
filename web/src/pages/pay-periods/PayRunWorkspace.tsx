@@ -177,7 +177,6 @@ export function PayRunWorkspace(): ReactElement {
             <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
               <PayPeriodDetail
                 key={payRunId}
-                embedded
                 initialPayPeriod={payRun}
                 onPayPeriodChange={handlePayRunChange}
               />
