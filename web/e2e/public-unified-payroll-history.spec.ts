@@ -138,10 +138,10 @@ test('shows an explicit error instead of an empty imported payroll when detail l
   await expect(page.getByText('Locked source record')).toHaveCount(0);
 });
 
-test('keeps an imported run visible when a native run with the same numeric id is deleted', async ({ page }) => {
+test('keeps an imported run visible when a native run with the same numeric id is deleted', async ({ page }): Promise<void> => {
   await mockShell(page);
   let nativeDeleted = false;
-  await page.route('**/api/v1/admin/payroll_history**', async (route) => {
+  await page.route('**/api/v1/admin/payroll_history**', async (route): Promise<void> => {
     if (nativeDeleted) {
       await fulfillJson(route, { error: 'Synthetic refresh failure' }, 500);
       return;
@@ -174,11 +174,11 @@ test('keeps an imported run visible when a native run with the same numeric id i
       },
     });
   });
-  await page.route('**/api/v1/admin/pay_periods/77', (route) => {
+  await page.route('**/api/v1/admin/pay_periods/77', (route): Promise<void> => {
     nativeDeleted = true;
     return fulfillJson(route, {});
   });
-  page.on('dialog', (dialog) => dialog.accept());
+  page.on('dialog', (dialog): Promise<void> => dialog.accept());
 
   await page.goto('/companies/1/pay-runs');
 
