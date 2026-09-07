@@ -41,6 +41,7 @@ Rails.application.routes.draw do
         end
         resources :employee_change_requests, only: [ :index, :show ]
         resources :pay_periods, only: [ :index, :show ]
+        resources :imported_pay_periods, only: [ :show ]
 
         namespace :reports do
           get :dashboard

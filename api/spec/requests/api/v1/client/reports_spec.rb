@@ -84,6 +84,62 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(company.id)
   end
 
+  def create_client_historical_paycheck(employee:, suffix:, gross_pay: 400, net_pay: 290)
+    batch = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "QuickBooks #{suffix}",
+      bundle_digest: "client-reports-#{company.id}-#{suffix}",
+      importer_version: "quickbooks-online-payroll-v5",
+      status: "locked",
+      locked_at: Time.zone.parse("2026-03-25 09:00"),
+      locked_by: client_user
+    )
+    period = HistoricalPayPeriod.create!(
+      historical_import_batch: batch,
+      company: company,
+      external_key: "period-#{suffix}",
+      source_label: "Payroll #{suffix}",
+      start_date: Date.new(2026, 3, 1),
+      end_date: Date.new(2026, 3, 14),
+      pay_date: Date.new(2026, 3, 20),
+      paycheck_count: 1,
+      totals: { "gross_pay" => gross_pay.to_s, "net_pay" => net_pay.to_s }
+    )
+    worker = HistoricalWorker.create!(
+      historical_import_batch: batch,
+      company: company,
+      employee: employee,
+      external_key: "worker-#{suffix}",
+      source_name: employee&.full_name || "Unlinked Worker",
+      normalized_name: employee&.full_name&.downcase || "unlinked worker",
+      source_status: "active",
+      mapping_status: employee ? "exact_match" : "archive_only"
+    )
+    HistoricalPaycheck.create!(
+      historical_import_batch: batch,
+      historical_pay_period: period,
+      historical_worker: worker,
+      company: company,
+      employee: employee,
+      external_key: "check-#{suffix}",
+      source_employee_name: employee&.full_name || "Unlinked Worker",
+      source_row_number: 1,
+      source_status: "paid",
+      reconciliation_status: employee ? "matched" : "unmatched",
+      period_start: period.start_date,
+      period_end: period.end_date,
+      pay_date: period.pay_date,
+      gross_pay: gross_pay,
+      adjusted_gross: gross_pay,
+      employee_taxes: 80,
+      federal_income_tax: 50,
+      social_security_tax: 25,
+      medicare_tax: 5,
+      after_tax_deductions: 30,
+      net_pay: net_pay
+    )
+  end
+
   it "exposes the dashboard and read-only payroll register to client users" do
     get "/api/v1/client/reports/dashboard"
     expect(response).to have_http_status(:ok)
@@ -129,15 +185,18 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
   end
 
   it "limits ytd summary to committed pay periods" do
+    create_client_historical_paycheck(employee: employee, suffix: "linked")
+    create_client_historical_paycheck(employee: nil, suffix: "unlinked", gross_pay: 125, net_pay: 90)
+
     get "/api/v1/client/reports/ytd_summary", params: { year: 2026 }
 
     expect(response).to have_http_status(:ok)
     report = response.parsed_body.fetch("report")
-    expect(report.dig("company_totals", "gross_pay").to_f).to eq(1450.0)
+    expect(report.dig("company_totals", "gross_pay").to_f).to eq(1850.0)
     expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.0)
     expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(30.0)
     expect(report.dig("company_totals", "payroll_field_post_tax_deductions_total").to_f).to eq(75.0)
-    expect(report.fetch("employees").first.fetch("gross_pay").to_f).to eq(1450.0)
+    expect(report.fetch("employees").first.fetch("gross_pay").to_f).to eq(1850.0)
     expect(report.fetch("employees").first.fetch("custom_earnings_total").to_f).to eq(50.0)
     expect(report.fetch("employees").first.fetch("custom_deductions_total").to_f).to eq(30.0)
     expect(report.fetch("employees").first.fetch("payroll_field_post_tax_deductions_total").to_f).to eq(75.0)
@@ -149,6 +208,13 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       "source" => "manual"
     )
     expect(report.dig("payroll_fields", "entries", 0, "amount").to_f).to eq(75.0)
+    expect(report.dig("source_summary", "quickbooks")).to include(
+      "payroll_count" => 1,
+      "paycheck_count" => 1,
+      "excluded_unlinked_paycheck_count" => 1,
+      "excluded_unlinked_gross_pay" => 125.0
+    )
+    expect(report.dig("source_summary", "source_statement")).to include("not recalculated")
   end
 
   it "exports the client payroll summary as PDF, Excel, and CSV with matching totals" do
@@ -161,7 +227,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     get "/api/v1/client/reports/ytd_summary_xlsx", params: { year: 2026 }
     expect(response).to have_http_status(:ok)
     workbook = Roo::Excelx.new(StringIO.new(response.body))
-    expect(workbook.sheets).to include("Payroll Summary", "Company Totals", "Payroll Field Activity")
+    expect(workbook.sheets).to include("Payroll Summary", "Company Totals", "Payroll Sources", "Payroll Field Activity")
 
     get "/api/v1/client/reports/ytd_summary_pdf", params: { year: 2026 }
     expect(response).to have_http_status(:ok)

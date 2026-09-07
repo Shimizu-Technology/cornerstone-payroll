@@ -321,7 +321,7 @@ function AppRoutes() {
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
           <Route path="employees/:id/:tab?" element={isClient ? <EmployeeForm /> : <EmployeeWorkspace />} />
           <Route path="pay-runs" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
-          <Route path="pay-runs/imported/:id" element={<StaffOnlyRoute><ImportedPayRunDetail /></StaffOnlyRoute>} />
+          <Route path="pay-runs/imported/:id" element={<ImportedPayRunDetail audience={isClient ? 'client' : 'staff'} />} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
         </Route>
