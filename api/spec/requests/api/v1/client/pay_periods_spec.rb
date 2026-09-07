@@ -100,6 +100,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
   it "shows only reportable Cornerstone payrolls and locked QuickBooks payrolls" do
     _batch, imported_period, = create_imported_payroll(company: company)
     create_imported_payroll(company: company, status: "applied", suffix: "not-locked")
+    hidden_void = create(:pay_period, :committed, company: company, correction_status: "voided")
 
     get "/api/v1/client/pay_periods"
 
@@ -109,6 +110,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
       "native:#{committed_pay_period.id}",
       "imported:#{imported_period.id}"
     )
+    expect(records.map { |record| record.fetch("key") }).not_to include("native:#{hidden_void.id}")
     expect(records.find { |record| record.fetch("record_type") == "imported" }).to include(
       "status" => "locked",
       "total_gross" => 875.25,
@@ -153,7 +155,11 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     )
     expect(body.dig("data", "paychecks").sole).to include(
       "id" => paycheck.id,
+      "historical_pay_period_id" => imported_period.id,
+      "historical_worker_id" => paycheck.historical_worker_id,
       "employee_name" => "Nina Cruz",
+      "pay_date" => imported_period.pay_date.iso8601,
+      "period_type" => "regular",
       "payment_method" => "Direct deposit",
       "check_number" => nil
     )
@@ -172,6 +178,12 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response).to have_http_status(:not_found)
 
     get "/api/v1/client/imported_pay_periods/#{other_period.id}"
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "returns not found for a non-numeric imported payroll id" do
+    get "/api/v1/client/imported_pay_periods/not-a-number"
+
     expect(response).to have_http_status(:not_found)
   end
 

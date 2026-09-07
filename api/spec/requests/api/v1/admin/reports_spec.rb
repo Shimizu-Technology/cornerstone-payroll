@@ -6,6 +6,8 @@ require "pdf/reader"
 require "roo"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let!(:company) { create(:company) }
   let!(:department) { create(:department, company: company) }
   let!(:employee) { create(:employee, company: company, department: department) }
@@ -1615,6 +1617,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(employee_row.fetch("net_pay").to_f).to eq(1_243.5)
       expect(employee_row.fetch("retirement").to_f).to eq(40)
       expect(employee_row.fetch("roth_retirement").to_f).to eq(20)
+      expect(employee_row.fetch("tips").to_f).to eq(50)
+      expect(employee_row.fetch("tips_paid_out").to_f).to eq(0)
       expect(report.dig("company_totals", "gross_pay").to_f).to eq(1_700)
       expect(report.dig("company_totals", "employee_count")).to eq(1)
       expect(report.dig("source_summary", "cornerstone")).to include("payroll_count" => 1, "paycheck_count" => 1)
@@ -1655,8 +1659,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         suffix: "latest",
         pay_date: Date.new(2026, 6, 1)
       )
+      create_locked_historical_paycheck(
+        employee: nil,
+        suffix: "limit-unlinked",
+        pay_date: Date.new(2026, 6, 2)
+      )
 
-      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, limit: 1 }
+      travel_to Time.zone.local(2026, 6, 15) do
+        get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, limit: 1 }
+      end
 
       expect(response).to have_http_status(:ok), response.body
       report = response.parsed_body.fetch("report")
@@ -1664,6 +1675,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("summary", "gross_pay").to_f).to eq(500)
       expect(report.dig("source_summary", "cornerstone", "paycheck_count")).to eq(0)
       expect(report.dig("source_summary", "quickbooks", "paycheck_count")).to eq(1)
+      expect(report.dig("source_summary", "quickbooks", "excluded_unlinked_paycheck_count")).to eq(0)
     end
   end
 
@@ -2699,12 +2711,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           total_deductions: 261.50,
           custom_deductions_total: 15.00,
           net_pay: 738.50
+        },
+        source_summary: {
+          mode: "locked_quickbooks_plus_committed_cornerstone",
+          cornerstone: {},
+          quickbooks: {
+            excluded_unlinked_paycheck_count: 2,
+            excluded_unlinked_gross_pay: 250.00,
+            excluded_unlinked_net_pay: 180.00
+          },
+          historical_ytd_bridge: {}
         }
       })
 
       history_header = sheets.first.fetch(:rows).first
       expect(history_header).to include("Source", "Record Type", "Custom Earnings", "Custom Deductions")
       expect(sheets.map { |sheet| sheet.fetch(:name) }).to include("Payroll Sources")
+      source_rows = sheets.find { |sheet| sheet[:name] == "Payroll Sources" }.fetch(:rows)
+      expect(source_rows).to include([ "Excluded unlinked QuickBooks gross pay", 250.00 ])
+      expect(source_rows).to include([ "Excluded unlinked QuickBooks net pay", 180.00 ])
 
       ytd_rows = sheets.fetch(1).fetch(:rows)
       expect(ytd_rows).to include([ "Metric", "Amount" ])

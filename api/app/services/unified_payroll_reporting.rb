@@ -16,6 +16,10 @@ class UnifiedPayrollReporting
     scope.to_a
   end
 
+  def unlinked_historical_paychecks
+    historical_scope.where(employee_id: nil).to_a
+  end
+
   def add_historical_to_employee_row(row, paychecks)
     totals = historical_totals(paychecks)
     row.merge(
@@ -91,11 +95,10 @@ class UnifiedPayrollReporting
     }
   end
 
-  def source_summary(native_items:, historical_paychecks:)
-    all_imported = historical_scope
-    unlinked = all_imported.where(employee_id: nil)
+  def source_summary(native_items:, historical_paychecks:, excluded_unlinked_paychecks: [])
+    includes_quickbooks = historical_paychecks.any? || excluded_unlinked_paychecks.any?
     {
-      mode: historical_paychecks.any? ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      mode: includes_quickbooks ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
       source_statement: SOURCE_STATEMENT,
       cornerstone: {
         payroll_count: native_items.map(&:pay_period_id).uniq.length,
@@ -105,9 +108,9 @@ class UnifiedPayrollReporting
         payroll_count: regular_period_count(historical_paychecks),
         paycheck_count: historical_paychecks.length,
         opening_summary_count: opening_summary_count(historical_paychecks),
-        excluded_unlinked_paycheck_count: unlinked.count,
-        excluded_unlinked_gross_pay: unlinked.sum(:gross_pay).to_f,
-        excluded_unlinked_net_pay: unlinked.sum(:net_pay).to_f
+        excluded_unlinked_paycheck_count: excluded_unlinked_paychecks.length,
+        excluded_unlinked_gross_pay: sum(excluded_unlinked_paychecks, :gross_pay),
+        excluded_unlinked_net_pay: sum(excluded_unlinked_paychecks, :net_pay)
       },
       historical_ytd_bridge: bridge_summary
     }
@@ -136,7 +139,9 @@ class UnifiedPayrollReporting
       retirement: component_sum(paychecks, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX),
       roth_retirement: component_sum(paychecks, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH),
       tips: component_sum(paychecks, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
-      tips_paid_out: component_sum(paychecks, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
+      # QuickBooks history does not distinguish reported tips from tips that
+      # were paid out through payroll, so do not manufacture a paid-out value.
+      tips_paid_out: 0.0,
       total_deductions: paychecks.sum(0.to_d) { |paycheck| paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions }.to_f,
       net_pay: sum(paychecks, :net_pay)
     }

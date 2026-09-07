@@ -1727,10 +1727,19 @@ export interface EmployeePayHistoryRecord {
   historical_pay_period_id: number | null;
   pay_date: string;
   period_description: string;
+  scheduled_hours: number | null;
   hours_worked: number | null;
   overtime_hours: number | null;
+  holiday_hours: number | null;
+  pto_hours: number | null;
+  reported_tips: number;
+  tips_paid_out: number;
+  bonus: number;
   custom_earnings_total?: number;
   gross_pay: number;
+  withholding_tax: number;
+  social_security_tax: number;
+  medicare_tax: number;
   custom_deductions_total?: number;
   total_deductions: number;
   net_pay: number;
@@ -1743,12 +1752,43 @@ export interface EmployeePayHistoryRecord {
   capabilities: { view: boolean; edit: boolean };
 }
 
+export interface EmployeePayrollSummary {
+  employee_id?: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  employment_type?: string;
+  status?: string;
+  year?: number;
+  payroll_count: number;
+  imported_payroll_count: number;
+  imported_opening_summary_count: number;
+  gross_pay: number;
+  custom_earnings_total: number;
+  payroll_field_taxable_additions_total: number;
+  payroll_field_non_taxable_additions_total: number;
+  payroll_field_pre_tax_deductions_total: number;
+  payroll_field_post_tax_deductions_total: number;
+  payroll_field_employer_contributions_total: number;
+  withholding_tax: number;
+  social_security_tax: number;
+  medicare_tax: number;
+  retirement: number;
+  roth_retirement: number;
+  tips: number;
+  tips_paid_out: number;
+  bonus: number;
+  total_deductions: number;
+  custom_deductions_total: number;
+  net_pay: number;
+}
+
 export interface EmployeePayHistoryReport {
   period: PayrollReportPeriod;
   employee: { id: number; name: string; employment_type: string; pay_rate: number };
   history: EmployeePayHistoryRecord[];
-  ytd: Record<string, number>;
-  summary: Record<string, number>;
+  ytd: EmployeePayrollSummary;
+  summary: EmployeePayrollSummary;
   source_summary: PayrollSourceSummary;
   payroll_fields: PayrollFieldsDisclosure;
 }
