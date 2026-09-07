@@ -26,6 +26,7 @@ interface Gate0Fixture {
   workflow_pay_period_id: number;
   workflow_payroll_item_id: number;
   filter_race_pay_period_id: number;
+  mutation_race_pay_period_id: number;
   time_import_pay_period_id: number;
   time_tracking_source_id: number;
   first_time_import_id: number;
@@ -492,6 +493,56 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText('Delayed primary field', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toHaveCount(0);
     await context.close();
+  });
+
+  test('discards a delayed pay-run mutation after switching clients', async ({ page }): Promise<void> => {
+    const calculate = await adminApi.post(`admin/pay_periods/${fixture.mutation_race_pay_period_id}/run_payroll`);
+    expect(calculate.ok()).toBeTruthy();
+
+    let markApprovalStarted: (() => void) | undefined;
+    const approvalStarted = new Promise<void>((resolve): void => {
+      markApprovalStarted = resolve;
+    });
+    let releaseApproval: (() => void) | undefined;
+    const approvalReleased = new Promise<void>((resolve): void => {
+      releaseApproval = resolve;
+    });
+
+    await page.route(
+      `**/api/v1/admin/pay_periods/${fixture.mutation_race_pay_period_id}/approve`,
+      async (route): Promise<void> => {
+        markApprovalStarted?.();
+        await approvalReleased;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Synthetic delayed approval failure' }),
+        });
+      },
+    );
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
+    const delayedRow = page.getByRole('row').filter({ hasText: 'Jun 21 - Jul 4, 2026' });
+    await expect(delayedRow).toBeVisible();
+    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await approvalStarted;
+
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?status=calculated`);
+    await expect(page.getByText('No pay periods found. Create your first pay period to get started.')).toBeVisible();
+
+    const approvalDelivered = page.waitForResponse((response): boolean => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === `/api/v1/admin/pay_periods/${fixture.mutation_race_pay_period_id}/approve`
+    ));
+    releaseApproval?.();
+    await approvalDelivered;
+    await waitForUiCommit(page);
+
+    await expect(page.getByText('Synthetic delayed approval failure')).toHaveCount(0);
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?status=calculated`);
+    await expect(delayedRow).toHaveCount(0);
   });
 
   test('keeps the selected pay-run filter when an action finishes late', async ({ page }): Promise<void> => {
