@@ -1007,7 +1007,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const totalsRow = payrollTable.getByRole('row').filter({ hasText: /Totals \(\d+ employees?\)/ });
     const totalCells = totalsRow.getByRole('cell');
     expect(await totalCells.count()).toBe(headerLabels.length);
-    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('169');
+    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('169.00');
     const reconciliationFieldIndex = headerLabels.findIndex((label) => label.includes(fixture.register_reconciliation_field_name));
     expect(reconciliationFieldIndex).toBeGreaterThanOrEqual(0);
     expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim())
