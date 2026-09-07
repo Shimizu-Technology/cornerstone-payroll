@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -284,10 +284,11 @@ export function Dashboard(): ReactElement {
             <CardContent>
               <div className="space-y-3">
                 {stats.recent_payrolls.map((payroll) => (
-                  <div
+                  <Link
                     key={payroll.id}
+                    to={payRunHref(payroll.id)}
+                    aria-label={`Open payroll ${payroll.period_description}`}
                     className="-mx-2 flex cursor-pointer flex-col gap-2 rounded-xl border border-transparent px-3 py-3 transition-all hover:border-primary-200 hover:bg-primary-50/60 sm:flex-row sm:items-center sm:justify-between"
-                    onClick={() => navigate(payRunHref(payroll.id))}
                   >
                     <div>
                       <p className="font-medium text-neutral-900">{payroll.period_description}</p>
@@ -296,7 +297,7 @@ export function Dashboard(): ReactElement {
                       </p>
                     </div>
                     <p className="font-semibold text-success-600">{formatCurrency(payroll.total_net)}</p>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </CardContent>
