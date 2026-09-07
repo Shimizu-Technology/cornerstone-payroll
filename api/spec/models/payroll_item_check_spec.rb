@@ -297,6 +297,38 @@ RSpec.describe PayrollItem, type: :model do
       expect(built_item).to be_persisted
     end
 
+    it "calculates with the persisted pay period instead of dirty association state" do
+      persisted_start_date = calc_pay_period.start_date
+      built_item = calc_pay_period.payroll_items.build(
+        company: company,
+        employee: calc_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+      calc_pay_period.start_date = calc_pay_period.end_date + 1.day
+
+      built_item.calculate!
+
+      expect(built_item.pay_period.start_date).to eq(persisted_start_date)
+    end
+
+    it "rejects an invalid persisted pay period before invoking the calculator" do
+      invalid_period = create(:pay_period, company: company)
+      invalid_period.update_columns(start_date: invalid_period.end_date + 1.day)
+      built_item = invalid_period.payroll_items.build(
+        company: company,
+        employee: calc_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+
+      expect(PayrollCalculator).not_to receive(:for)
+      expect { built_item.calculate! }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(built_item).not_to be_persisted
+    end
+
     it "rolls back deduction and earning clears if save fails" do
       deduction_type = DeductionType.create!(
         company: company,

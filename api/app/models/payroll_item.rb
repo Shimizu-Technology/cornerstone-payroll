@@ -475,6 +475,7 @@ class PayrollItem < ApplicationRecord
       unless calculation_period.valid?(:payroll_calculation)
         raise ActiveRecord::RecordInvalid, calculation_period
       end
+      self.pay_period = calculation_period
 
       calculator = PayrollCalculator.for(employee, self)
       calculator.calculate
