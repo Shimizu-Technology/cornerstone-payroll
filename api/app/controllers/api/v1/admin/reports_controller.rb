@@ -1612,19 +1612,16 @@ module Api
                           .not_voided
                           .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
                           .order("pay_periods.pay_date DESC, payroll_items.id DESC")
-
-          return scope if params[:start_date].present? || params[:end_date].present? || params[:year].present?
-
-          limit = Integer(params[:limit].presence || 12, exception: false)
-          raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
-
-          scope.limit(limit)
+          scope
         end
 
         def build_period_summary_report(period)
           employees = filtered_ytd_employees
           items = reportable_payroll_items(period).to_a
           items_by_employee = items.group_by(&:employee_id)
+          unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
+          historical_paychecks = unified.historical_paychecks
+          historical_by_employee = historical_paychecks.group_by(&:employee_id)
           disclosure = PayrollFieldDisclosure.new(items)
 
           {
@@ -1632,8 +1629,16 @@ module Api
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
-            employees: sort_ytd_rows(employees.map { |employee| payroll_period_employee_row(employee, items_by_employee[employee.id] || []) }),
-            company_totals: payroll_period_company_totals(items, period),
+            employees: sort_ytd_rows(employees.map do |employee|
+              payroll_period_employee_row(
+                employee,
+                items_by_employee[employee.id] || [],
+                historical_by_employee[employee.id] || [],
+                unified: unified
+              )
+            end),
+            company_totals: payroll_period_company_totals(items, period, historical_paychecks, unified: unified),
+            source_summary: unified.source_summary(native_items: items, historical_paychecks: historical_paychecks),
             payroll_fields: {
               totals: disclosure.totals,
               entries: disclosure.rows,
@@ -1642,11 +1647,11 @@ module Api
           }
         end
 
-        def payroll_period_employee_row(employee, items)
+        def payroll_period_employee_row(employee, items, historical_paychecks = [], unified: nil)
           custom_totals = custom_ytd_totals_for_items(items)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
 
-          {
+          row = {
             employee_id: employee.id,
             first_name: employee.first_name,
             last_name: employee.last_name,
@@ -1673,12 +1678,16 @@ module Api
             custom_deductions_total: custom_totals[:custom_deductions_total],
             net_pay: items.sum { |item| item.net_pay.to_f }
           }
+          return row if historical_paychecks.empty?
+
+          (unified || UnifiedPayrollReporting.new(company_id: current_company_id, period: payroll_reporting_period))
+            .add_historical_to_employee_row(row, historical_paychecks)
         end
 
-        def payroll_period_company_totals(items, period)
+        def payroll_period_company_totals(items, period, historical_paychecks = [], unified: nil)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
 
-          {
+          row = {
             year: period.year,
             start_date: period.start_date,
             end_date: period.end_date,
@@ -1701,6 +1710,14 @@ module Api
             payroll_count: items.map(&:pay_period_id).uniq.length,
             employee_count: items.map(&:employee_id).uniq.length
           }
+          return row if historical_paychecks.empty?
+
+          (unified || UnifiedPayrollReporting.new(company_id: current_company_id, period: period))
+            .add_historical_to_company_totals(
+              row,
+              historical_paychecks,
+              native_employee_ids: items.map(&:employee_id)
+            )
         end
 
         def ytd_company_totals(year = Date.current.year)
@@ -1765,14 +1782,14 @@ module Api
             employment_type: item.employment_type,
             worker_classification: employment_type_label(item.employment_type),
             pay_rate: item.pay_rate,
-            scheduled_hours: item.scheduled_hours,
-            hours_worked: item.hours_worked,
-            overtime_hours: item.overtime_hours,
-            holiday_hours: item.holiday_hours,
-            pto_hours: item.pto_hours,
-            reported_tips: item.reported_tips,
-            tips_paid_out: item.tips_paid_out,
-            bonus: item.bonus,
+            scheduled_hours: item.scheduled_hours&.to_f,
+            hours_worked: item.hours_worked&.to_f,
+            overtime_hours: item.overtime_hours&.to_f,
+            holiday_hours: item.holiday_hours&.to_f,
+            pto_hours: item.pto_hours&.to_f,
+            reported_tips: item.reported_tips.to_f,
+            tips_paid_out: item.tips_paid_out.to_f,
+            bonus: item.bonus.to_f,
             non_taxable_pay: item.non_taxable_pay,
             total_additions: item.total_additions,
             custom_earnings: item.custom_earnings || [],
@@ -1818,8 +1835,11 @@ module Api
 
         def pay_history_item(item)
           {
+            key: "native:#{item.id}",
+            record_type: "native",
             payroll_item_id: item.id,
             pay_period_id: item.pay_period_id,
+            historical_pay_period_id: nil,
             pay_date: item.pay_period.pay_date,
             period_description: item.pay_period.period_description,
             scheduled_hours: item.scheduled_hours,
@@ -1832,15 +1852,21 @@ module Api
             bonus: item.bonus,
             custom_earnings_total: custom_earnings_total(item),
             custom_deductions_total: custom_deductions_total(item),
-            gross_pay: item.gross_pay,
-            withholding_tax: item.withholding_tax,
-            social_security_tax: item.social_security_tax,
-            medicare_tax: item.medicare_tax,
-            total_deductions: item.total_deductions,
-            net_pay: item.net_pay,
+            gross_pay: item.gross_pay.to_f,
+            withholding_tax: item.withholding_tax.to_f,
+            social_security_tax: item.social_security_tax.to_f,
+            medicare_tax: item.medicare_tax.to_f,
+            total_deductions: item.total_deductions.to_f,
+            net_pay: item.net_pay.to_f,
             check_number: item.check_number,
             payroll_field_entries: payroll_field_entry_rows(item),
-            payroll_field_totals: payroll_field_totals(item)
+            payroll_field_totals: payroll_field_totals(item),
+            source: {
+              system: "cornerstone",
+              label: "Cornerstone",
+              locked: true
+            },
+            capabilities: { view: true, edit: false }
           }
         end
 
@@ -1902,9 +1928,25 @@ module Api
         end
 
         def employee_pay_history_report(employee, items, period:)
+          unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
           item_rows = items.to_a
-          disclosure = PayrollFieldDisclosure.new(item_rows)
-          summary = payroll_period_employee_row(employee, item_rows)
+          historical_paychecks = unified.historical_paychecks(employee_id: employee.id)
+          entries = item_rows.map do |item|
+            { type: :native, record: item, pay_date: item.pay_period.pay_date, id: item.id }
+          end + historical_paychecks.map do |paycheck|
+            { type: :imported, record: paycheck, pay_date: paycheck.pay_date, id: paycheck.id }
+          end
+          entries.sort_by! { |entry| [ entry.fetch(:pay_date), entry.fetch(:type).to_s, entry.fetch(:id) ] }
+          entries.reverse!
+          limit = employee_pay_history_limit
+          entries = entries.first(limit) if limit
+          selected_items = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :native }
+          selected_historical = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :imported }
+          history = entries.map do |entry|
+            entry.fetch(:type) == :native ? pay_history_item(entry.fetch(:record)) : unified.history_row(entry.fetch(:record))
+          end
+          disclosure = PayrollFieldDisclosure.new(selected_items)
+          summary = payroll_period_employee_row(employee, selected_items, selected_historical, unified: unified)
 
           {
             type: "employee_pay_history",
@@ -1916,19 +1958,29 @@ module Api
               first_name: employee.first_name,
               last_name: employee.last_name,
               employment_type: employee.employment_type,
-              pay_rate: employee.pay_rate
+              pay_rate: employee.pay_rate.to_f
             },
-            history: item_rows.map { |item| pay_history_item(item) },
+            history: history,
             summary: summary,
             # Kept for older clients while they move from the YTD label to the
             # exact pay-date period summary.
             ytd: summary.merge(year: period.year),
+            source_summary: unified.source_summary(native_items: selected_items, historical_paychecks: selected_historical),
             payroll_fields: {
               totals: disclosure.totals,
               entries: disclosure.rows,
               treatment_totals: disclosure.treatment_totals
             }
           }
+        end
+
+        def employee_pay_history_limit
+          return nil if params[:start_date].present? || params[:end_date].present? || params[:year].present?
+
+          limit = Integer(params[:limit].presence || 12, exception: false)
+          raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
+
+          limit
         end
 
         def sorted_payroll_items(items)
@@ -3101,13 +3153,13 @@ module Api
 
         def employee_pay_history_sheets(report)
           rows = [ [
-            "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
+            "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
             "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
-              item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
+              item.dig(:source, :label), item[:record_type], item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
               item[:holiday_hours], item[:pto_hours], item[:reported_tips], item[:tips_paid_out],
               item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
               item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
@@ -3117,6 +3169,7 @@ module Api
           [
             { name: "Pay History", rows: rows },
             { name: "Period Summary", rows: employee_period_summary_rows(report) },
+            payroll_source_summary_sheet(report),
             employee_pay_history_field_breakdown_sheet(report),
             report_info_sheet(report, title: "Employee Pay History")
           ]
@@ -3258,10 +3311,34 @@ module Api
           [
             { name: "Payroll Summary", rows: rows },
             { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
+            payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),
             report_info_sheet(report, title: "Payroll Summary by Period")
           ]
+        end
+
+        def payroll_source_summary_sheet(report)
+          summary = report[:source_summary] || {}
+          cornerstone = summary[:cornerstone] || {}
+          quickbooks = summary[:quickbooks] || {}
+          bridge = summary[:historical_ytd_bridge] || {}
+          {
+            name: "Payroll Sources",
+            rows: [
+              [ "Field", "Value" ],
+              [ "Basis", summary[:mode] ],
+              [ "Cornerstone payrolls", cornerstone[:payroll_count] ],
+              [ "Cornerstone paychecks", cornerstone[:paycheck_count] ],
+              [ "QuickBooks payrolls", quickbooks[:payroll_count] ],
+              [ "QuickBooks paychecks", quickbooks[:paycheck_count] ],
+              [ "QuickBooks opening summaries", quickbooks[:opening_summary_count] ],
+              [ "Excluded unlinked QuickBooks paychecks", quickbooks[:excluded_unlinked_paycheck_count] ],
+              [ "Historical YTD bridge applied", bridge[:applied] ],
+              [ "Historical YTD through pay date", bridge[:through_pay_date] ],
+              [ "Source handling", summary[:source_statement] ]
+            ]
+          }
         end
 
         def payroll_field_totals_for_report_sheet(report)

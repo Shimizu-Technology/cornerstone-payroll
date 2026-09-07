@@ -6,13 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
-import { clientPayPeriodsApi, clientReportsApi } from '@/services/api';
+import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
+import { clientPayPeriodsApi, clientReportsApi, type PayrollHistoryRecord } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
-import type { PayPeriod } from '@/types';
 
 export function ClientReports() {
   const currentYear = new Date().getFullYear();
-  const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
+  const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string>('');
@@ -23,7 +23,7 @@ export function ClientReports() {
   const [exporting, setExporting] = useState<string | null>(null);
 
   const payPeriodOptions = useMemo(
-    () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: payPeriod.period_description || `${payPeriod.start_date} - ${payPeriod.end_date}` })),
+    () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: `${payPeriod.start_date} - ${payPeriod.end_date}` })),
     [payPeriods]
   );
 
@@ -32,7 +32,9 @@ export function ClientReports() {
       setLoading(true);
       setError(null);
       const response = await clientPayPeriodsApi.list();
-      const sorted = [...response.pay_periods].sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
+      const sorted = response.pay_periods
+        .filter((payPeriod) => payPeriod.record_type === 'native')
+        .sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
       setPayPeriods(sorted);
       if (sorted[0]) {
         setSelectedPayPeriodId(String(sorted[0].id));
@@ -206,6 +208,7 @@ export function ClientReports() {
                   </option>
                 ))}
               </Select>
+              <p className="text-sm leading-6 text-gray-500">The payroll register is available for Cornerstone payrolls. Open an imported payroll from Pay Periods to review its locked QuickBooks records.</p>
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" disabled={!selectedPayPeriodId} onClick={() => void loadPayrollRegister()}>
                   <Eye className="mr-2 h-4 w-4" />
@@ -250,6 +253,7 @@ export function ClientReports() {
                   ariaLabel="Export payroll summary"
                 />
               </div>
+              <PayrollSourceNotice summary={ytdSummary?.source_summary} mentionFieldScope />
               <Table stickyHeader containerClassName="max-h-[26rem]">
                 <TableHeader>
                   <TableRow>
@@ -286,7 +290,7 @@ export function ClientReports() {
                 <div className="space-y-4 rounded-xl border border-gray-200 p-4">
                   <div>
                     <p className="font-semibold text-gray-900">Payroll field reconciliation</p>
-                    <p className="text-sm text-gray-500">Historical field values for payrolls paid in this period, shown from each finalized payroll snapshot.</p>
+                    <p className="text-sm text-gray-500">Field values from finalized Cornerstone payroll snapshots in this period. Imported QuickBooks totals are included above but do not have Cornerstone payroll-field detail.</p>
                   </div>
                   <div className="overflow-hidden rounded-lg border border-gray-200">
                     <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3 text-sm"><span><span className="font-medium text-gray-900">{field.label}</span><span className="ml-2 text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'} · {field.employee_count ?? 0} employee{field.employee_count === 1 ? '' : 's'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>

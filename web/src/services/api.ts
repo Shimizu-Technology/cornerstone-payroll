@@ -1146,10 +1146,16 @@ export const payPeriodsApi = {
 };
 
 export const clientPayPeriodsApi = {
-  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<PayPeriodListResponse> =>
-    api.get<PayPeriodListResponse>('/client/pay_periods', params, { companyId }),
+  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<ClientPayrollHistoryResponse> =>
+    api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
+  importedPayPeriod: (
+    id: number,
+    params: { page?: number; per_page?: number },
+    companyId: number,
+  ): Promise<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }> =>
+    api.get<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }>(`/client/imported_pay_periods/${id}`, params, { companyId }),
 };
 
 // Timecard OCR import types
@@ -1690,6 +1696,63 @@ export interface PayrollFieldsDisclosure {
   treatment_totals: Record<string, number>;
 }
 
+export interface PayrollSourceSummary {
+  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone';
+  source_statement: string;
+  cornerstone: {
+    payroll_count: number;
+    paycheck_count: number;
+  };
+  quickbooks: {
+    payroll_count: number;
+    paycheck_count: number;
+    opening_summary_count: number;
+    excluded_unlinked_paycheck_count: number;
+    excluded_unlinked_gross_pay: number;
+    excluded_unlinked_net_pay: number;
+  };
+  historical_ytd_bridge: {
+    applied: boolean;
+    tax_years: number[];
+    through_pay_date?: string | null;
+    through_period_end?: string | null;
+  };
+}
+
+export interface EmployeePayHistoryRecord {
+  key: string;
+  record_type: 'native' | 'imported';
+  payroll_item_id: number | null;
+  pay_period_id: number | null;
+  historical_pay_period_id: number | null;
+  pay_date: string;
+  period_description: string;
+  hours_worked: number | null;
+  overtime_hours: number | null;
+  custom_earnings_total?: number;
+  gross_pay: number;
+  custom_deductions_total?: number;
+  total_deductions: number;
+  net_pay: number;
+  check_number: string | null;
+  source: {
+    system: 'cornerstone' | 'quickbooks_online';
+    label: string;
+    locked: boolean;
+  };
+  capabilities: { view: boolean; edit: boolean };
+}
+
+export interface EmployeePayHistoryReport {
+  period: PayrollReportPeriod;
+  employee: { id: number; name: string; employment_type: string; pay_rate: number };
+  history: EmployeePayHistoryRecord[];
+  ytd: Record<string, number>;
+  summary: Record<string, number>;
+  source_summary: PayrollSourceSummary;
+  payroll_fields: PayrollFieldsDisclosure;
+}
+
 export interface PayrollReportPeriodParams {
   [key: string]: string | number | boolean | undefined;
   year?: number;
@@ -1762,6 +1825,7 @@ export interface YtdSummaryReport {
       net_pay: number;
       payroll_count: number;
     };
+    source_summary: PayrollSourceSummary;
     payroll_fields: PayrollFieldsDisclosure;
   };
 }
@@ -2055,27 +2119,7 @@ export const reportsApi = {
   payrollRegisterXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
   employeePayHistory: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
-    api.get<{ report: {
-      employee: { id: number; name: string; employment_type: string; pay_rate: number };
-      history: {
-        payroll_item_id: number;
-        pay_period_id: number;
-        pay_date: string;
-        period_description: string;
-        hours_worked: number | null;
-        overtime_hours: number | null;
-        custom_earnings_total?: number;
-        gross_pay: number;
-        custom_deductions_total?: number;
-        total_deductions: number;
-        net_pay: number;
-        check_number: string | null;
-      }[];
-      period: PayrollReportPeriod;
-      summary: Record<string, number>;
-      ytd: Record<string, number>;
-      payroll_fields: PayrollFieldsDisclosure;
-    } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
+    api.get<{ report: EmployeePayHistoryReport }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
   employeePayHistoryXlsx: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
     api.getBlobWithParams('/admin/reports/employee_pay_history_xlsx', { employee_id: employeeId, ...period }),
   employeePayHistoryPdf: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
@@ -4011,6 +4055,15 @@ export interface PayrollHistoryRecord {
 export interface ImportedPayPeriodDetail extends PayrollHistoryRecord {
   record_type: 'imported';
   paychecks: HistoricalPaycheck[];
+}
+
+export interface ClientPayrollHistoryResponse {
+  pay_periods: PayrollHistoryRecord[];
+  meta: PaginationMeta & {
+    statuses: Record<string, number>;
+    sources: Record<string, number>;
+    years: number[];
+  };
 }
 
 export const payrollHistoryApi = {

@@ -18,7 +18,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
+import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
+import type { EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -970,26 +971,7 @@ function EmployeePayHistoryPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<{
-    period: { label: string; start_date: string; end_date: string };
-    employee: { id: number; name: string; employment_type: string; pay_rate: number };
-    history: {
-      pay_period_id: number;
-      pay_date: string;
-      period_description: string;
-      hours_worked: number | null;
-      overtime_hours: number | null;
-      custom_earnings_total?: number;
-      gross_pay: number;
-      custom_deductions_total?: number;
-      total_deductions: number;
-      net_pay: number;
-      check_number: string | null;
-    }[];
-    ytd: Record<string, number>;
-    summary: Record<string, number>;
-    payroll_fields: PayrollFieldsDisclosure;
-  } | null>(null);
+  const [report, setReport] = useState<EmployeePayHistoryReport | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const periodParams: PayrollReportPeriodParams = { start_date: startDate, end_date: endDate };
@@ -1144,7 +1126,8 @@ function EmployeePayHistoryPanel() {
                 {report.employee.employment_type} &bull; Rate: {fmt(report.employee.pay_rate)} &bull; Pay dates {report.period.label}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
+              <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
                 <TotalBox label="Custom Earnings" value={report.summary.custom_earnings_total ?? 0} />
@@ -1171,6 +1154,7 @@ function EmployeePayHistoryPanel() {
                   <tr className="border-b text-left text-gray-500">
                     <th className="pb-2 pr-4 font-medium">Pay Date</th>
                     <th className="pb-2 pr-4 font-medium">Period</th>
+                    <th className="pb-2 pr-4 font-medium">Source</th>
                     <th className="pb-2 pr-4 font-medium text-right">Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
@@ -1183,9 +1167,10 @@ function EmployeePayHistoryPanel() {
                 </thead>
                 <tbody>
                   {report.history.map((h) => (
-                    <tr key={h.pay_period_id} className="border-b last:border-0 hover:bg-gray-50">
+                    <tr key={h.key} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="py-2 pr-4">{h.pay_date}</td>
                       <td className="py-2 pr-4 text-gray-500">{h.period_description}</td>
+                      <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge></td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
@@ -1198,7 +1183,7 @@ function EmployeePayHistoryPanel() {
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-6 text-center text-gray-400">
+                      <td colSpan={11} className="py-6 text-center text-gray-400">
                         No pay history found.
                       </td>
                     </tr>
@@ -1424,7 +1409,8 @@ function YtdSummaryPanel() {
                 )}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
+              <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
