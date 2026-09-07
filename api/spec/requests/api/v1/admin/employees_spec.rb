@@ -286,7 +286,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         }.not_to change(Employee, :count)
 
         expect(response).to have_http_status(:unprocessable_entity)
-        expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
+        expect(JSON.parse(response.body).dig("details", "department_id")).to include("does not belong to this company")
       end
 
       it "creates a salaried employee with a multi-million-dollar annual rate" do
@@ -403,7 +403,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/admin/employees/:id" do
-    let!(:employee) { create(:employee, company: company, first_name: "Original") }
+    let!(:employee) { create(:employee, company: company, department: department, first_name: "Original") }
 
     context "with valid params" do
       it "updates the employee" do
@@ -474,6 +474,19 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "with invalid params" do
+      it "rejects a department from another company without changing the employee" do
+        original_department_id = employee.department_id
+        other_department = create(:department, company: create(:company))
+
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { department_id: other_department.id }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body).dig("details", "department_id")).to include("does not belong to this company")
+        expect(employee.reload.department_id).to eq(original_department_id)
+      end
+
       it "rejects an in-place W-2 to 1099 change" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {
