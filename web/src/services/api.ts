@@ -3966,6 +3966,67 @@ export interface HistoricalPaycheck {
   employer_contribution_breakdown: HistoricalBreakdownLine[];
 }
 
+export interface PayrollHistoryCapabilities {
+  view: boolean;
+  edit: boolean;
+  delete: boolean;
+  enter_hours: boolean;
+  run: boolean;
+  approve: boolean;
+  commit: boolean;
+}
+
+export interface PayrollHistoryRecord {
+  key: string;
+  record_type: 'native' | 'imported';
+  id: number;
+  company_id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  status: 'draft' | 'calculated' | 'approved' | 'committed' | 'locked';
+  run_purpose: import('@/types').PayRunPurpose;
+  includes_base_salary: boolean;
+  correction_status?: import('@/types').CorrectionStatus | null;
+  notes?: string | null;
+  compliance_warnings?: string[];
+  employee_count: number;
+  total_gross: number;
+  total_net: number;
+  processed_at?: string | null;
+  processed_by_name?: string | null;
+  source: {
+    system: 'cornerstone' | 'quickbooks_online';
+    label: string;
+    detail: string;
+    locked: boolean;
+    import_batch_id?: number;
+    importer_version?: string;
+    locked_at?: string | null;
+    locked_by_name?: string | null;
+  };
+  capabilities: PayrollHistoryCapabilities;
+}
+
+export interface ImportedPayPeriodDetail extends PayrollHistoryRecord {
+  record_type: 'imported';
+  paychecks: HistoricalPaycheck[];
+}
+
+export const payrollHistoryApi = {
+  list: (
+    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' },
+    companyId: number,
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[] } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[] } }>('/admin/payroll_history', params, { companyId }),
+  importedPayPeriod: (
+    id: number,
+    params: { page?: number; per_page?: number },
+    companyId: number,
+  ): Promise<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }> =>
+    api.get<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }>(`/admin/imported_pay_periods/${id}`, params, { companyId }),
+};
+
 export interface HistoricalImportDetail extends HistoricalImportBatch {
   client_bootstrap?: HistoricalClientBootstrap | null;
   ytd_bridge?: HistoricalYtdBridge | null;
