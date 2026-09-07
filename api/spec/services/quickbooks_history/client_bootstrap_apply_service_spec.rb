@@ -3,19 +3,24 @@
 require "rails_helper"
 
 RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
+  before { FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll")) }
+
   let!(:company) { create(:company) }
   let!(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let!(:batch) do
     QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: actor).call.batch
   end
 
-  before { FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll")) }
   after do
     cleanup_quickbooks_history_uploads
     FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll"))
   end
 
-  it "previews and atomically prepares every QuickBooks worker as a linked live employee" do
+  it "previews and atomically prepares every QuickBooks worker after history is applied" do
+    review_historical_workers_as_archive_only(batch, actor: actor)
+    QuickbooksHistory::LifecycleService.new(batch: batch, actor: actor).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
     bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
 
     expect(bootstrap).to be_ready_to_apply
@@ -37,7 +42,7 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
       .and change(EmployeePayrollField, :count).by(2)
 
     expect(bootstrap.reload).to be_applied
-    expect(batch.reload).to be_previewed
+    expect(batch.reload).to be_applied
     expect(batch.historical_workers.where(mapping_status: "exact_match").count).to eq(3)
     expect(batch.historical_paychecks.where(employee_id: nil)).to be_empty
 
@@ -197,6 +202,27 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
         acknowledgement: described_class::ACKNOWLEDGEMENT
       ).call
     end.to raise_error(ArgumentError, /preview changed/)
+    expect(company.employees).to be_empty
+  end
+
+  it "does not preview or apply employee setup after the archive is locked" do
+    batch.update!(status: "locked", locked_at: Time.current, locked_by: actor)
+
+    expect do
+      QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    end.to raise_error(ArgumentError, /previewed or applied, not locked/)
+
+    batch.update_columns(status: "previewed", locked_at: nil, locked_by_id: nil)
+    bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+    batch.update!(status: "locked", locked_at: Time.current, locked_by: actor)
+
+    expect do
+      described_class.new(
+        bootstrap: bootstrap,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      ).call
+    end.to raise_error(ArgumentError, /previewed or applied, not locked/)
     expect(company.employees).to be_empty
   end
 

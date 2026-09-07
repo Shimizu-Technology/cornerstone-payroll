@@ -1122,9 +1122,9 @@ test('makes retained source verification and exact download clear to an administ
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
 });
 
-test('previews and creates a clean current-payroll roster without running payroll', async ({ page }): Promise<void> => {
+test('previews and creates a clean current-payroll roster after history is applied without running payroll', async ({ page }): Promise<void> => {
   await mockApplicationShell(page);
-  let current: HistoricalImportDetail = detailWithVerifiedSource(1);
+  let current: HistoricalImportDetail = { ...detailWithVerifiedSource(1), status: 'applied' };
   let rosterApplied = false;
   let employeeListRequests = 0;
   let bootstrapPolls = 0;
@@ -1214,7 +1214,7 @@ test('previews and creates a clean current-payroll roster without running payrol
   await confirm.click();
 
   await expect(page.getByText('Employee preparation started. This page will update automatically when every record is ready.')).toBeVisible();
-  await expect(page.getByText('Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.')).toBeVisible();
+  await expect(page.getByText('Every QuickBooks worker now has a live employee record. Historical payroll was not recalculated and no payroll was run.')).toBeVisible();
   await expect(page.getByText('Employees prepared')).toBeVisible();
   await expect(page.getByText(/Prepared .* by History Admin/)).toBeVisible();
   await expect(page.getByRole('button', { name: /Historical Payroll Company 57 employees/ })).toBeVisible();

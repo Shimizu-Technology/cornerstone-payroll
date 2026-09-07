@@ -17,7 +17,9 @@ module QuickbooksHistory
         existing = batch.historical_client_bootstrap
         next existing if existing&.applied? || existing&.pending?
 
-        raise ArgumentError, "The QuickBooks history must still be a preview" unless batch.previewed?
+        unless batch.previewed? || batch.applied?
+          raise ArgumentError, "The QuickBooks history must be previewed or applied, not locked"
+        end
         plan = ClientBootstrapPlan.new(batch: batch).call
 
         bootstrap = existing || batch.build_historical_client_bootstrap(
