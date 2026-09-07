@@ -48,7 +48,7 @@ module QuickbooksHistory
     end
 
     def valid_bytes?(source_file, bytes)
-      bytes.present? && bytes.bytesize == source_file.byte_size &&
+      bytes && !bytes.empty? && bytes.bytesize == source_file.byte_size &&
         ActiveSupport::SecurityUtils.secure_compare(Digest::SHA256.hexdigest(bytes), source_file.sha256)
     end
 
