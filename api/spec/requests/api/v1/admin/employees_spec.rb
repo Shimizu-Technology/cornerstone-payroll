@@ -276,6 +276,19 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         )
       end
 
+      it "rejects a department from another company" do
+        other_department = create(:department, company: create(:company))
+        cross_company_params = valid_params.deep_dup
+        cross_company_params[:employee][:department_id] = other_department.id
+
+        expect {
+          post "/api/v1/admin/employees", params: cross_company_params
+        }.not_to change(Employee, :count)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
+      end
+
       it "creates a salaried employee with a multi-million-dollar annual rate" do
         salary_params = valid_params.deep_dup
         salary_params[:employee].merge!(
