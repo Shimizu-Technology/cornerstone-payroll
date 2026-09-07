@@ -137,3 +137,54 @@ test('shows an explicit error instead of an empty imported payroll when detail l
   await expect(page.getByRole('heading', { name: 'Payroll records' })).toHaveCount(0);
   await expect(page.getByText('Locked source record')).toHaveCount(0);
 });
+
+test('keeps an imported run visible when a native run with the same numeric id is deleted', async ({ page }) => {
+  await mockShell(page);
+  let nativeDeleted = false;
+  await page.route('**/api/v1/admin/payroll_history**', async (route) => {
+    if (nativeDeleted) {
+      await fulfillJson(route, { error: 'Synthetic refresh failure' }, 500);
+      return;
+    }
+
+    await fulfillJson(route, {
+      data: [
+        {
+          key: 'imported:77', record_type: 'imported', id: 77, company_id: 1,
+          start_date: '2024-01-01', end_date: '2024-01-14', pay_date: '2024-01-19',
+          status: 'locked', run_purpose: 'regular', includes_base_salary: true, correction_status: null,
+          employee_count: 1, total_gross: 1200.5, total_net: 925.25,
+          processed_at: '2024-01-20T00:00:00Z', processed_by_name: 'Payroll Admin',
+          source: { system: 'quickbooks_online', label: 'QuickBooks import', detail: 'MoSa Jan 1–14', locked: true },
+          capabilities,
+        },
+        {
+          key: 'native:77', record_type: 'native', id: 77, company_id: 1,
+          start_date: '2024-01-15', end_date: '2024-01-28', pay_date: '2024-02-02',
+          status: 'draft', run_purpose: 'regular', includes_base_salary: true, correction_status: null,
+          employee_count: 0, total_gross: 0, total_net: 0,
+          processed_at: null, processed_by_name: null,
+          source: { system: 'cornerstone', label: 'Cornerstone', detail: 'Cornerstone', locked: false },
+          capabilities: { ...capabilities, edit: true, delete: true, enter_hours: true, run: true },
+        },
+      ],
+      meta: {
+        current_page: 1, per_page: 50, total_count: 2, total_pages: 1,
+        statuses: { locked: 1, draft: 1 }, sources: { quickbooks_online: 1, cornerstone: 1 }, years: [2024],
+      },
+    });
+  });
+  await page.route('**/api/v1/admin/pay_periods/77', (route) => {
+    nativeDeleted = true;
+    return fulfillJson(route, {});
+  });
+  page.on('dialog', (dialog) => dialog.accept());
+
+  await page.goto('/companies/1/pay-runs');
+
+  const nativeRow = page.getByRole('row').filter({ hasText: 'Cornerstone' });
+  await nativeRow.getByRole('button', { name: 'Delete' }).click();
+
+  await expect(page.getByRole('row').filter({ hasText: 'QuickBooks import' })).toBeVisible();
+  await expect(page.getByText('Synthetic refresh failure')).toBeVisible();
+});
