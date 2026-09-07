@@ -29,7 +29,7 @@ export function formatPercent(value: number, decimals = 1): string {
  * Format a date string for display
  */
 export function formatDate(dateString: string, options?: Intl.DateTimeFormatOptions): string {
-  const date = new Date(dateString);
+  const date = new Date(dateString.includes('T') ? dateString : `${dateString}T00:00:00`);
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
@@ -71,8 +71,8 @@ export function formatGuamDateTimeShort(dateString?: string | null): string {
  * Format a date range (e.g., "Jan 1 - Jan 15, 2026")
  */
 export function formatDateRange(startDate: string, endDate: string): string {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const start = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
+  const end = new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`);
   
   const startMonth = start.toLocaleDateString('en-US', { month: 'short' });
   const endMonth = end.toLocaleDateString('en-US', { month: 'short' });

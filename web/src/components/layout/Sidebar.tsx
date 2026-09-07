@@ -240,7 +240,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     : clientNavigation.filter((item) => (
         item.href === '/historical-payroll' ? historicalPayrollEnabled : true
       ))
-  ).map((item) => {
+  ).map((item): NavItem => {
     if (isClient || !activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };

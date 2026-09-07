@@ -339,7 +339,7 @@ function PaySetup({ employee, editHref }: PaySetupProps): ReactElement {
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm"><Settings2 className="h-5 w-5" /></span>
           <h2 className="mt-4 font-display text-xl font-extrabold tracking-tight text-neutral-950">Edit source settings</h2>
           <p className="mt-2 text-sm leading-6 text-neutral-600">Changes happen on the existing validated employee form. Saving returns to this workspace.</p>
-          <Link className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
+          <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
         </CardContent>
       </Card>
     </div>
