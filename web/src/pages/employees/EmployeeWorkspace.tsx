@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
   employmentTypeLabels,
@@ -65,6 +66,7 @@ export function EmployeeWorkspace(): ReactElement {
   }>();
   const companyId = Number(companyIdParam);
   const employeeId = Number(idParam);
+  const { activeCompanyId } = useCompany();
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -79,7 +81,9 @@ export function EmployeeWorkspace(): ReactElement {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
-    if (!Number.isInteger(employeeId) || employeeId < 1) {
+    if (activeCompanyId !== companyId) return;
+
+    if (![companyId, employeeId].every((value) => Number.isInteger(value) && value > 0)) {
       if (isCurrentRequest()) {
         setError('This employee workspace link is invalid.');
         setLoading(false);
@@ -112,12 +116,14 @@ export function EmployeeWorkspace(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [employeeId]);
+  }, [activeCompanyId, companyId, employeeId]);
 
   useEffect(() => {
     setEmployee(null);
     setPayHistory(null);
     setPayHistoryError(null);
+    setError(null);
+    setLoading(true);
     void load();
     return (): void => {
       loadRequestIdRef.current += 1;

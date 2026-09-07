@@ -250,6 +250,35 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('reloads an employee workspace when only the company route changes', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/overview`);
+    await expect(page.getByRole('heading', { name: 'Avery Example' })).toBeVisible();
+
+    const boundaryPath = `/companies/${fixture.other_company_id}/employees/${fixture.employee_id}/overview`;
+    const boundaryEmployeeResponse = page.waitForResponse((response): boolean => (
+      response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}`
+    ));
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, boundaryPath);
+
+    await expect(page).toHaveURL(boundaryPath);
+    const boundaryResponse = await boundaryEmployeeResponse;
+    expect(boundaryResponse.request().headers()['x-company-id']).toBe(String(fixture.other_company_id));
+    expect(boundaryResponse.status()).toBe(404);
+    await expect(page.getByRole('heading', { name: 'This employee workspace could not be opened' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Avery Example' })).toHaveCount(0);
+    await context.close();
+  });
+
   test('hides prior-company dashboard data while a company switch is loading', async ({ browser }): Promise<void> => {
     const primaryDashboardResponse = await adminApi.get('admin/reports/dashboard');
     const boundaryDashboardResponse = await adminApi.get('admin/reports/dashboard', {
@@ -399,6 +428,65 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await waitForUiCommit(page);
     await expect(page.getByText('Employee not found', { exact: true })).toBeVisible();
     await expect(page.getByText('Avery Example', { exact: true })).toHaveCount(0);
+    await context.close();
+  });
+
+  test('discards a delayed employee save after switching clients', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    let markSaveStarted: (() => void) | undefined;
+    const saveStarted = new Promise<void>((resolve): void => {
+      markSaveStarted = resolve;
+    });
+    let releaseSave: (() => void) | undefined;
+    const saveReleased = new Promise<void>((resolve): void => {
+      releaseSave = resolve;
+    });
+
+    await page.route(`**/api/v1/admin/employees/${fixture.employee_id}`, async (route): Promise<void> => {
+      if (route.request().method() !== 'PATCH') {
+        await route.continue();
+        return;
+      }
+
+      markSaveStarted?.();
+      await saveReleased;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { id: fixture.employee_id } }),
+      });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Avery');
+    await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
+    await saveStarted;
+
+    const boundaryEditPath = `/companies/${fixture.other_company_id}/employees/${fixture.other_employee_id}/edit`;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, boundaryEditPath);
+    await expect(page).toHaveURL(boundaryEditPath);
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
+    await expect(page.getByRole('button', { name: 'Update Employee', exact: true })).toBeEnabled();
+
+    const saveDelivered = page.waitForResponse((response): boolean => (
+      response.request().method() === 'PATCH'
+      && new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}`
+    ));
+    releaseSave?.();
+    await saveDelivered;
+    await waitForUiCommit(page);
+
+    await expect(page).toHaveURL(boundaryEditPath);
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
+    await expect(page.getByText('Failed to save employee')).toHaveCount(0);
     await context.close();
   });
 
