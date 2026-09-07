@@ -211,6 +211,53 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('hides a loaded payroll item while the next route resolves', async ({ page }): Promise<void> => {
+    const firstPath = `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`;
+    await page.goto(firstPath);
+    await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toBeVisible();
+
+    const nextItemPath = `/api/v1/admin/pay_periods/${fixture.bonus_sync_pay_period_id}/payroll_items/${fixture.bonus_alpha_payroll_item_id}`;
+    let markNextItemStarted: (() => void) | undefined;
+    let releaseNextItem: (() => void) | undefined;
+    const nextItemStarted = new Promise<void>((resolve): void => { markNextItemStarted = resolve; });
+    const nextItemReleased = new Promise<void>((resolve): void => { releaseNextItem = resolve; });
+    await page.route(`**${nextItemPath}`, async (route): Promise<void> => {
+      const response = await route.fetch();
+      markNextItemStarted?.();
+      await nextItemReleased;
+      await route.fulfill({ response });
+    });
+
+    const destination = `/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/payroll-items/${fixture.bonus_alpha_payroll_item_id}`;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, destination);
+    await nextItemStarted;
+    await expect(page.getByText('Loading payroll item')).toBeVisible();
+    await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toHaveCount(0);
+
+    const nextItemDelivered = page.waitForResponse((response): boolean => new URL(response.url()).pathname === nextItemPath);
+    releaseNextItem?.();
+    await nextItemDelivered;
+    await expect(page.getByText(`Payroll item #${fixture.bonus_alpha_payroll_item_id}`)).toBeVisible();
+  });
+
+  test('closes a staged employee import when the company changes', async ({ page }): Promise<void> => {
+    await page.goto(`/companies/${fixture.company_id}/employees`);
+    await page.getByRole('button', { name: 'Bulk Import' }).click();
+    await expect(page.getByRole('heading', { name: 'Bulk Import Employees' })).toBeVisible();
+
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.other_company_id}/employees`);
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/employees`);
+    await expect(page.getByRole('heading', { name: 'Bulk Import Employees' })).toHaveCount(0);
+    await expect(page.getByRole('table').getByText('Jordan Boundary', { exact: true })).toBeVisible();
+    await expect(page.getByText('Avery Example', { exact: true })).toHaveCount(0);
+  });
+
   test('keeps accountant payroll operations available while denying client configuration', async ({ browser }): Promise<void> => {
     const payrollPeriods = await accountantApi.get('admin/pay_periods');
     expect(payrollPeriods.ok()).toBeTruthy();

@@ -94,6 +94,9 @@ export function EmployeeList() {
 
   useLayoutEffect((): void => {
     companyIdRef.current = companyId;
+    setShowBulkImport(false);
+    setIsLoading(true);
+    setError(null);
   }, [companyId]);
 
   const search = searchParams.get('search') || '';
@@ -537,6 +540,7 @@ export function EmployeeList() {
       </div>
 
       <EmployeeBulkImportModal
+        key={companyId}
         open={!isClient && showBulkImport}
         onClose={() => setShowBulkImport(false)}
         onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}

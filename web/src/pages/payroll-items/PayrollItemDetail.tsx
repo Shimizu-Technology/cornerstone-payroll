@@ -47,7 +47,9 @@ export function PayrollItemDetail(): ReactElement {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const routeKey = `${companyId}:${payRunId}:${payrollItemId}`;
 
   const hasValidCompanyId = Number.isInteger(companyId) && companyId > 0;
   const hasValidPayRunId = Number.isInteger(payRunId) && payRunId > 0;
@@ -64,12 +66,14 @@ export function PayrollItemDetail(): ReactElement {
     if (![companyId, payRunId, payrollItemId].every((value) => Number.isInteger(value) && value > 0)) {
       if (isCurrentRequest()) {
         setError('This payroll-item link is invalid.');
+        setResolvedRouteKey(routeKey);
         setLoading(false);
       }
       return;
     }
 
     setLoading(true);
+    setResolvedRouteKey(null);
     setError(null);
     setPayRun(null);
     setPayrollItem(null);
@@ -90,14 +94,16 @@ export function PayrollItemDetail(): ReactElement {
       setPayRun(payRunResponse.pay_period);
       setPayrollItem(mergedItem);
       setEmployee(employeeResponse.data);
+      setResolvedRouteKey(routeKey);
     } catch (loadError) {
       if (isCurrentRequest()) {
         setError(loadError instanceof Error ? loadError.message : 'Could not load this payroll item.');
+        setResolvedRouteKey(routeKey);
       }
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [companyId, payRunId, payrollItemId]);
+  }, [companyId, payRunId, payrollItemId, routeKey]);
 
   useEffect(() => {
     void load();
@@ -106,7 +112,7 @@ export function PayrollItemDetail(): ReactElement {
     };
   }, [load]);
 
-  if (loading) {
+  if (loading || resolvedRouteKey !== routeKey) {
     return <WorkspaceLoader label="Loading payroll item" />;
   }
 
