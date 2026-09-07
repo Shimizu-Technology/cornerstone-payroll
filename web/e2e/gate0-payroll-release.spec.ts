@@ -814,6 +814,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
     let approvalWasReleased = false;
     let staleCalculatedReloadSeen = false;
+    let currentDraftReloadSeen = false;
 
     await page.route('**/api/v1/admin/pay_periods**', async (route): Promise<void> => {
       const url = new URL(route.request().url());
@@ -836,9 +837,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         approvalWasReleased
         && route.request().method() === 'GET'
         && url.pathname === '/api/v1/admin/pay_periods'
-        && url.searchParams.get('status') === 'calculated'
       ) {
-        staleCalculatedReloadSeen = true;
+        if (url.searchParams.get('status') === 'calculated') staleCalculatedReloadSeen = true;
+        if (url.searchParams.get('status') === 'draft') currentDraftReloadSeen = true;
       }
       await route.continue();
     });
@@ -863,6 +864,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await waitForUiCommit(page);
 
     expect(staleCalculatedReloadSeen).toBe(false);
+    expect(currentDraftReloadSeen).toBe(true);
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
     await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
     await expect(delayedRow).toHaveCount(0);

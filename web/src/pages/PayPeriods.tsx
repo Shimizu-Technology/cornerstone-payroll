@@ -166,6 +166,7 @@ export function PayPeriods() {
   const defaultDatesRequestIdRef = useRef(0);
   const checkSettingsRequestIdRef = useRef(0);
   const mutationGenerationRef = useRef(0);
+  const loadPayPeriodsRef = useRef<(silent?: boolean) => Promise<void>>(async (): Promise<void> => undefined);
 
   useLayoutEffect((): void => {
     payPeriodViewKeyRef.current = payPeriodViewKey;
@@ -275,6 +276,7 @@ export function PayPeriods() {
       }
     }
   }, [activeCompanyId, payPeriodViewKey, statusFilter, yearFilter]);
+  loadPayPeriodsRef.current = loadPayPeriods;
 
   useEffect(() => {
     loadPayPeriods();
@@ -328,7 +330,7 @@ export function PayPeriods() {
       setIsCreateOpen(false);
       setCurrentNextCheckNumber(null);
       setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setCreateError(err instanceof Error ? err.message : 'Failed to create pay period');
@@ -344,7 +346,7 @@ export function PayPeriods() {
       setError(null);
       await payPeriodsApi.runPayroll(id);
       if (!isCurrentMutation()) return;
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
@@ -410,7 +412,7 @@ export function PayPeriods() {
       if (!isCurrentMutation()) return;
       setIsEditOpen(false);
       setEditingPayPeriod(null);
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setEditError(err instanceof Error ? err.message : 'Failed to update pay period');
@@ -426,7 +428,7 @@ export function PayPeriods() {
       setError(null);
       await payPeriodsApi.approve(id);
       if (!isCurrentMutation()) return;
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to approve pay period');
@@ -451,7 +453,7 @@ export function PayPeriods() {
       setError(null);
       await payPeriodsApi.commit(id);
       if (!isCurrentMutation()) return;
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
@@ -471,7 +473,7 @@ export function PayPeriods() {
       await payPeriodsApi.delete(id);
       if (!isCurrentMutation()) return;
       setPayPeriods((prev) => prev.filter((period) => period.id !== id));
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to delete pay period');
