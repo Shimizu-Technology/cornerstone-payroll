@@ -269,6 +269,10 @@ export function PayPeriods() {
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
       if (!isCurrentRequest()) return;
+      if (!silent) {
+        setPayPeriods([]);
+        setStatusCounts({});
+      }
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
       if (isCurrentRequest() && !silent) {

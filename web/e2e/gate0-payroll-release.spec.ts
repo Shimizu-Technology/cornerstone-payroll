@@ -1,4 +1,5 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type Page, type Route } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -142,6 +143,31 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
 
     await context.close();
+  });
+
+  test('opens a recent payroll from the dashboard by keyboard', async ({ page }): Promise<void> => {
+    await page.route('**/api/v1/admin/reports/dashboard', async (route): Promise<void> => {
+      const response = await route.fetch();
+      const body = await response.json() as { stats: Record<string, unknown> };
+      body.stats.recent_payrolls = [{
+        id: fixture.workflow_pay_period_id,
+        period_description: 'Keyboard test payroll',
+        pay_date: '2026-09-04',
+        employee_count: 1,
+        total_net: 1234.56,
+      }];
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/app');
+    const recentPayrollLink = page.getByRole('link', { name: /^Open payroll / }).first();
+    await expect(recentPayrollLink).toBeVisible();
+    const destination = await recentPayrollLink.getAttribute('href');
+    expect(destination).toMatch(new RegExp(`^/companies/${fixture.company_id}/pay-runs/\\d+/overview`));
+
+    await recentPayrollLink.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`${destination?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    await expect(page.getByRole('heading', { name: /^Pay Period:/ })).toBeVisible();
   });
 
   test('keeps the current payroll item visible when route loads resolve out of order', async ({ browser }): Promise<void> => {
@@ -726,7 +752,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await waitForUiCommit(page);
     await createClientFieldButton.click();
     await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toBeVisible();
-    await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill('Delayed primary field');
+    const delayedFieldName = `Delayed primary field ${randomUUID()}`;
+    await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill(delayedFieldName);
     await page.getByRole('button', { name: 'Create and assign' }).click();
     await quickFieldStarted;
     await page.evaluate((path): void => {
@@ -742,9 +769,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       && response.request().headers()['x-company-id'] === String(fixture.company_id)
     ));
     releaseQuickField?.();
-    await quickFieldDelivered;
+    const createdFieldResponse = await quickFieldDelivered;
+    expect(createdFieldResponse.ok()).toBe(true);
     await waitForUiCommit(page);
-    await expect(page.getByText('Delayed primary field', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(delayedFieldName, { exact: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toHaveCount(0);
     await context.close();
   });
@@ -839,7 +867,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         && url.pathname === '/api/v1/admin/pay_periods'
       ) {
         if (url.searchParams.get('status') === 'calculated') staleCalculatedReloadSeen = true;
-        if (url.searchParams.get('status') === 'draft') currentDraftReloadSeen = true;
+        if (url.searchParams.get('status') === 'draft') {
+          currentDraftReloadSeen = true;
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'Synthetic silent refresh failure' }),
+          });
+          return;
+        }
       }
       await route.continue();
     });
@@ -867,6 +903,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(currentDraftReloadSeen).toBe(true);
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
     await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
+    await expect(page.getByText('Synthetic silent refresh failure')).toBeVisible();
     await expect(delayedRow).toHaveCount(0);
   });
 
