@@ -1122,8 +1122,8 @@ export function HistoricalPayroll(): ReactElement {
   return (
     <div className="min-h-full bg-neutral-50/70">
       <Header
-        title="Historical payroll"
-        description="Import QuickBooks as locked source-of-record snapshots, reconcile every paycheck, and keep live payroll untouched."
+        title="Data Migration"
+        description="Import, reconcile, and lock source payroll before it appears alongside native payroll runs."
         actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading || batchListLoading}><RefreshCw className={`mr-2 h-4 w-4 ${batchListLoading ? 'animate-spin' : ''}`} />Refresh</Button>}
       />
 

@@ -15,6 +15,7 @@ const EmployeeWorkspace = lazy(() => import('@/pages/employees/EmployeeWorkspace
 const Departments = lazy(() => import('@/pages/Departments').then((module) => ({ default: module.Departments })));
 const PayPeriods = lazy(() => import('@/pages/PayPeriods').then((module) => ({ default: module.PayPeriods })));
 const PayRunWorkspace = lazy(() => import('@/pages/pay-periods/PayRunWorkspace').then((module) => ({ default: module.PayRunWorkspace })));
+const ImportedPayRunDetail = lazy(() => import('@/pages/pay-periods/ImportedPayRunDetail').then((module) => ({ default: module.ImportedPayRunDetail })));
 const PayrollItemDetail = lazy(() => import('@/pages/payroll-items/PayrollItemDetail').then((module) => ({ default: module.PayrollItemDetail })));
 const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
 const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
@@ -320,6 +321,7 @@ function AppRoutes() {
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
           <Route path="employees/:id/:tab?" element={isClient ? <EmployeeForm /> : <EmployeeWorkspace />} />
           <Route path="pay-runs" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
+          <Route path="pay-runs/imported/:id" element={<StaffOnlyRoute><ImportedPayRunDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
         </Route>

@@ -57,6 +57,8 @@ Rails.application.routes.draw do
 
       namespace :admin do
         resource :pay_schedule_settings, only: [ :show, :update ]
+        resources :payroll_history, only: [ :index ]
+        resources :imported_pay_periods, only: [ :show ]
 
         # CPR-66: Company check settings
         # These must appear before `resources :companies` so paths like

@@ -58,6 +58,10 @@ export function payRunPath(
   return withReturnContext(`${payRunsPath(companyId)}/${payRunId}/${tab}`, context);
 }
 
+export function importedPayRunPath(companyId: number, importedPayPeriodId: number, context: ReturnContext = {}): string {
+  return withReturnContext(`${companyPath(companyId)}/pay-runs/imported/${importedPayPeriodId}`, context);
+}
+
 export function correctionRunPath(
   companyId: number | undefined,
   payRunId: number,
