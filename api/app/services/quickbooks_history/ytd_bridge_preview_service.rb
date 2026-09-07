@@ -24,6 +24,13 @@ module QuickbooksHistory
         raise ArgumentError, "Apply the clean-client employee setup before preparing historical YTD" unless bootstrap&.applied?
 
         plan = YtdBridgePlan.new(batch: batch).call
+        missing_boundaries = HistoricalYtdBridge::BOUNDARY_KEYS.select { |key| plan.summary[key].blank? }
+        if missing_boundaries.any?
+          message = plan.errors.presence&.join(". ") ||
+            "The historical YTD boundary is incomplete; rebuild and review the QuickBooks archive"
+          raise ArgumentError, message
+        end
+
         bridge = existing || batch.build_historical_ytd_bridge(
           company: batch.company,
           historical_client_bootstrap: bootstrap,
