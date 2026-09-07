@@ -244,11 +244,14 @@ export function EmployeeForm() {
   const payrollFieldsRequestIdRef = useRef(0);
   const departmentsRequestIdRef = useRef(0);
   const quickPayrollFieldRequestIdRef = useRef(0);
+  const submissionGenerationRef = useRef(0);
   const companyIdRef = useRef(companyId);
 
   useLayoutEffect((): void => {
     companyIdRef.current = companyId;
-  }, [companyId]);
+    submissionGenerationRef.current += 1;
+    setIsSaving(false);
+  }, [companyId, id]);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -779,6 +782,12 @@ export function EmployeeForm() {
     
     if (!validateForm()) return;
 
+    const requestedCompanyId = companyId;
+    const submissionGeneration = ++submissionGenerationRef.current;
+    const isCurrentSubmission = (): boolean => (
+      requestedCompanyId === companyIdRef.current
+      && submissionGeneration === submissionGenerationRef.current
+    );
     setIsSaving(true);
     setGeneralError(null);
 
@@ -852,6 +861,7 @@ export function EmployeeForm() {
           savedEmployeeId = response.data.id;
         }
       }
+      if (!isCurrentSubmission()) return;
 
       if (!isClient && savedEmployeeId) {
         const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
@@ -872,11 +882,13 @@ export function EmployeeForm() {
 
         if (payrollFieldPayload.length > 0) {
           await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload);
+          if (!isCurrentSubmission()) return;
         }
       }
 
       if (!isClient && supportsMultipleHourlyRates) {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId);
+        if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
         const normalizedById = new Map(
           normalizedWageRates
@@ -889,6 +901,7 @@ export function EmployeeForm() {
             .filter((rate) => !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number))
         );
+        if (!isCurrentSubmission()) return;
 
         for (const rate of normalizedWageRates) {
           const payload = {
@@ -906,9 +919,11 @@ export function EmployeeForm() {
               ...payload,
             });
           }
+          if (!isCurrentSubmission()) return;
         }
       }
 
+      if (!isCurrentSubmission()) return;
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
         : isEditing
@@ -920,6 +935,7 @@ export function EmployeeForm() {
         state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
     } catch (err) {
+      if (!isCurrentSubmission()) return;
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
         focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
@@ -927,7 +943,7 @@ export function EmployeeForm() {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
       }
     } finally {
-      setIsSaving(false);
+      if (isCurrentSubmission()) setIsSaving(false);
     }
   };
 

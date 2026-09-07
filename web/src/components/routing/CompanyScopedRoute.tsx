@@ -1,4 +1,4 @@
-import { useEffect, type ReactElement } from 'react';
+import { useLayoutEffect, type ReactElement } from 'react';
 import { AlertTriangle, Building2 } from 'lucide-react';
 import { Link, Outlet, useParams } from 'react-router';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
@@ -15,7 +15,7 @@ export function CompanyScopedRoute(): ReactElement {
   const companyId = Number(companyIdParam);
   const company = companies.find((candidate) => candidate.id === companyId);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (loading || !company || activeCompanyId === companyId) return;
     switchCompany(companyId);
   }, [activeCompanyId, company, companyId, loading, switchCompany]);
