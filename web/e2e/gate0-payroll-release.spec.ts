@@ -1035,7 +1035,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
     await registerSearch.fill('Alpha');
     await expect(totalsRow).toContainText('Totals (1 employee)');
-    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80');
+    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80.00');
     expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim()).toBe('+$12.34');
     await expect(bonusAlphaRow).not.toContainText('Inactive legacy rate');
     await registerSearch.fill('');
