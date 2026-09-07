@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -245,7 +245,7 @@ export function EmployeeForm() {
   const departmentsRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
 
-  useEffect((): void => {
+  useLayoutEffect((): void => {
     companyIdRef.current = companyId;
   }, [companyId]);
 

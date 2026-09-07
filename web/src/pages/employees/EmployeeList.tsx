@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { 
   Plus, 
@@ -92,7 +92,7 @@ export function EmployeeList() {
   const employeeCompanyIdRef = useRef<number | null>(null);
   const departmentCompanyIdRef = useRef<number | null>(null);
 
-  useEffect((): void => {
+  useLayoutEffect((): void => {
     companyIdRef.current = companyId;
   }, [companyId]);
 
