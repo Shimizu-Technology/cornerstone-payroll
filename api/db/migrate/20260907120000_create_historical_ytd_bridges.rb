@@ -58,7 +58,7 @@ class CreateHistoricalYtdBridges < ActiveRecord::Migration[8.0]
       t.references :historical_import_batch, null: false, foreign_key: true, index: { unique: true }
       t.references :historical_client_bootstrap, null: false, foreign_key: true, index: { unique: true }
       t.references :created_by, foreign_key: { to_table: :users, on_delete: :nullify }
-      t.references :applied_by, foreign_key: { to_table: :users, on_delete: :nullify }
+      t.references :applied_by, foreign_key: { to_table: :users, on_delete: :restrict }
       t.string :status, null: false, default: "previewed"
       t.string :plan_digest, null: false
       t.jsonb :preview_summary, null: false, default: {}
