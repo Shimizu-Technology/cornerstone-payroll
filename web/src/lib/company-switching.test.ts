@@ -30,7 +30,7 @@ describe('getCompanySwitchRedirect', () => {
     });
   });
 
-  it('falls back to legacy lists when no selected company id is available', () => {
+  it('falls back to legacy lists when no selected company id is available', (): void => {
     expect(getCompanySwitchRedirect('/companies/7/pay-runs/88/checks')).toMatchObject({
       to: '/pay-periods',
     });
@@ -39,7 +39,7 @@ describe('getCompanySwitchRedirect', () => {
     });
   });
 
-  it('leaves canonical and legacy employee creation forms in place', () => {
+  it('leaves canonical and legacy employee creation forms in place', (): void => {
     expect(getCompanySwitchRedirect('/companies/7/employees/new', 12)).toBeNull();
     expect(getCompanySwitchRedirect('/employees/new', 12)).toBeNull();
   });
