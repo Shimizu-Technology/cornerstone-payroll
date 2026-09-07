@@ -1601,12 +1601,36 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(listUrl);
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Employees', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/employees`);
+    await expect(page.getByRole('link', { name: 'Pay Periods', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
     await page.getByRole('button', { name: 'View', exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp(
       `/companies/${fixture.company_id}/pay-runs/\\d+/overview\\?return_to=${encodeURIComponent(listUrl)}`,
     ));
     await page.getByRole('button', { name: 'Back to List', exact: true }).click();
     await expect(page).toHaveURL(listUrl);
+
+    await context.close();
+  });
+
+  test('rejects malformed client company routes without requesting payroll data', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.client_email,
+      },
+    });
+    const page = await context.newPage();
+    let payPeriodRequestCount = 0;
+    await page.route('**/api/v1/client/pay_periods**', async (route): Promise<void> => {
+      payPeriodRequestCount += 1;
+      await route.continue();
+    });
+
+    for (const invalidCompanyId of ['not-a-number', '0', '-1', '01', '1e3', '0x10']) {
+      await page.goto(`/companies/${invalidCompanyId}/pay-runs`);
+      await expect(page.getByRole('heading', { name: 'This client workspace could not be opened' })).toBeVisible();
+    }
+    expect(payPeriodRequestCount).toBe(0);
 
     await context.close();
   });

@@ -18,6 +18,7 @@ describe('countActivePayrollChecks', (): void => {
       { check_number: '1001', voided: false },
       { check_number: '1002', voided: true },
       { check_number: null, voided: false },
+      { check_number: '   ', voided: false },
     ])).toBe(1);
   });
 });
@@ -27,7 +28,7 @@ describe('parsePayRunId', (): void => {
     expect(parsePayRunId('123')).toBe(123);
   });
 
-  it.each([undefined, '', '0', '-1', '1.5', '123abc'])('rejects a malformed route ID: %s', (value): void => {
+  it.each([undefined, '', '0', '-1', '01', '1.5', '1e3', '0x10', '123abc'])('rejects a malformed route ID: %s', (value): void => {
     expect(parsePayRunId(value)).toBeUndefined();
   });
 });

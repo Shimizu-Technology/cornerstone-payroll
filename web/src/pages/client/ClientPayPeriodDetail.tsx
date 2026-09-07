@@ -10,15 +10,17 @@ import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 export function ClientPayPeriodDetail(): ReactElement {
   const navigate = useNavigate();
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const [searchParams] = useSearchParams();
-  const companyId = Number(companyIdParam);
-  const payPeriodId = Number(id);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
+  const payPeriodId = parsePositiveRouteId(id) ?? 0;
   const routeKey = `${companyId}:${payPeriodId}`;
-  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
+  const listFallback = companyId > 0 ? payRunsPath(companyId) : '/pay-periods';
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), listFallback);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payPeriod, setPayPeriod] = useState<Awaited<ReturnType<typeof clientPayPeriodsApi.get>>['pay_period'] | null>(null);

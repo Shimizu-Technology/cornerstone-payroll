@@ -30,6 +30,7 @@ import {
 } from '@/lib/routes';
 import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 export function PayrollItemDetail(): ReactElement {
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
@@ -37,9 +38,9 @@ export function PayrollItemDetail(): ReactElement {
     id: string;
     payrollItemId: string;
   }>();
-  const companyId = Number(companyIdParam);
-  const payRunId = Number(payRunIdParam);
-  const payrollItemId = Number(payrollItemIdParam);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
+  const payRunId = parsePositiveRouteId(payRunIdParam) ?? 0;
+  const payrollItemId = parsePositiveRouteId(payrollItemIdParam) ?? 0;
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [payRun, setPayRun] = useState<PayPeriod | null>(null);
@@ -80,8 +81,8 @@ export function PayrollItemDetail(): ReactElement {
     setEmployee(null);
     try {
       const [payRunResponse, payrollItemResponse] = await Promise.all([
-        payPeriodsApi.get(payRunId),
-        payrollItemsApi.get(payRunId, payrollItemId),
+        payPeriodsApi.get(payRunId, companyId),
+        payrollItemsApi.get(payRunId, payrollItemId, companyId),
       ]);
       if (!isCurrentRequest()) return;
       const summaryItem = payRunResponse.pay_period.payroll_items?.find((item) => item.id === payrollItemId);
@@ -89,7 +90,7 @@ export function PayrollItemDetail(): ReactElement {
       if (!Number.isInteger(mergedItem.employee_id) || mergedItem.employee_id < 1) {
         throw new Error('This payroll item is not linked to an employee record.');
       }
-      const employeeResponse = await employeesApi.get(mergedItem.employee_id);
+      const employeeResponse = await employeesApi.get(mergedItem.employee_id, companyId);
       if (!isCurrentRequest()) return;
       setPayRun(payRunResponse.pay_period);
       setPayrollItem(mergedItem);

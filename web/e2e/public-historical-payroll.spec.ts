@@ -34,6 +34,8 @@ const acceptedArchive = {
   net_pay: '2325.0',
 };
 
+const seededEmployeeEditPath = '/companies/1/employees/900/edit';
+
 function historicalReport(reportType: HistoricalReportType): HistoricalReport {
   return {
     report_type: reportType,
@@ -460,7 +462,7 @@ test('preserves decimal employer matches and explains every migrated setup revie
     await fulfillJson(route, { data: migratedEmployee() });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
 
   await expect(page.getByText('QuickBooks setup needs review')).toBeVisible();
   await expect(page.getByText('Confirm the effective hire date.')).toBeVisible();
@@ -483,7 +485,7 @@ test('hides QuickBooks setup review outside a migrated employee needing review',
   await mockEmployeeFormDependencies(page);
   await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: migratedEmployee('complete') }));
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
   await expect(page.getByText('QuickBooks setup needs review')).toHaveCount(0);
 
@@ -508,7 +510,7 @@ test('blocks an out-of-range imported employer match before employee submission'
     });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   await page.getByRole('button', { name: 'Update Employee' }).click();
 
   await expect(page.getByText('Employer pre-tax match must be between 0% and 100%')).toBeVisible();
@@ -535,7 +537,7 @@ test('does not validate hidden employer-match fields for a contractor', async ({
     await fulfillJson(route, { data: contractor });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   await expect(page.getByLabel('Employer Pre-Tax Match (%)')).toHaveCount(0);
   await page.getByRole('button', { name: 'Update Contractor' }).click();
 
@@ -558,7 +560,7 @@ test('uses today without an invented minimum when terminating a migrated employe
     await fulfillJson(route, { data: { ...employee, status: 'terminated' } });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   const today = await browserToday(page);
   const terminationTrigger = page.getByRole('button', { name: 'Terminate Employee' });
   await terminationTrigger.click();
@@ -594,7 +596,7 @@ test('keeps the page inert until the final overlapping dialog closes', async ({ 
   };
   await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   const terminationTrigger = page.getByRole('button', { name: 'Terminate Employee' });
   await terminationTrigger.click();
   const terminationDialog = page.locator('[role="dialog"]').filter({ hasText: 'Terminate Migrated' });
@@ -627,7 +629,7 @@ test('returns focus to a lower dialog when its child dialog closes', async ({ pa
   };
   await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, { data: employee }));
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   await page.getByRole('button', { name: 'Terminate Employee' }).click();
   const terminationDialog = page.getByRole('dialog', { name: /Terminate Migrated/ });
   await expect(terminationDialog).toBeVisible();
@@ -670,7 +672,7 @@ test('uses today without an invented minimum when reactivating a migrated employ
     await fulfillJson(route, { data: { ...employee, status: 'active' } });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   const today = await browserToday(page);
   await page.getByRole('button', { name: 'Reactivate' }).click();
   const dialog = page.getByRole('dialog', { name: /Reactivate Migrated/ });
@@ -697,7 +699,7 @@ test('initializes a migrated salary work profile today without inventing a hire-
     await fulfillJson(route, { data: { id: 77, ...submittedProfile } });
   });
 
-  await page.goto('/companies/1/employees/900/edit');
+  await page.goto(seededEmployeeEditPath);
   const today = await browserToday(page);
   await page.getByRole('button', { name: 'Set up profile' }).click();
   const dialog = page.getByRole('dialog', { name: 'Confirm a new salary work profile' });

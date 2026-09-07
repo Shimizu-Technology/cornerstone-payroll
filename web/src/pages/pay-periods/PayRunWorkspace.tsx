@@ -32,6 +32,7 @@ import {
   type PayRunWorkspaceTab,
 } from '@/lib/routes';
 import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
+import { parsePositiveRouteId } from '@/lib/route-params';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
@@ -61,7 +62,7 @@ export function PayRunWorkspace(): ReactElement {
     id: string;
     tab?: string;
   }>();
-  const companyId = Number(companyIdParam);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const payRunId = parsePayRunId(idParam) ?? 0;
   const activeTab = tabIds.has(tabParam as PayRunWorkspaceTab) ? tabParam as PayRunWorkspaceTab : 'overview';
   const location = useLocation();
@@ -72,6 +73,7 @@ export function PayRunWorkspace(): ReactElement {
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${payRunId}`;
+  const hasValidRouteIds = [companyId, payRunId].every((value) => Number.isInteger(value) && value > 0);
   const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
     activeTab === 'work' ? payRunId : null,
   );
@@ -80,7 +82,7 @@ export function PayRunWorkspace(): ReactElement {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
-    if (!Number.isInteger(payRunId) || payRunId < 1) {
+    if (!hasValidRouteIds) {
       setPayRun(null);
       setError('This pay-run workspace link is invalid.');
       setResolvedRouteKey(routeKey);
@@ -106,7 +108,7 @@ export function PayRunWorkspace(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [companyId, payRunId, routeKey]);
+  }, [companyId, hasValidRouteIds, payRunId, routeKey]);
 
   useEffect((): (() => void) => {
     void load();
@@ -126,10 +128,10 @@ export function PayRunWorkspace(): ReactElement {
       : current);
   }, []);
 
-  const payRunListFallback = payRunsPath(companyId);
+  const payRunListFallback = Number.isInteger(companyId) && companyId > 0 ? payRunsPath(companyId) : '/pay-periods';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunListFallback);
 
-  if (tabParam && !tabIds.has(tabParam as PayRunWorkspaceTab)) {
+  if (hasValidRouteIds && tabParam && !tabIds.has(tabParam as PayRunWorkspaceTab)) {
     return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
   }
 

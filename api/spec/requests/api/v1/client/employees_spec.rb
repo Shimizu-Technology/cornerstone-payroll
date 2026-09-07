@@ -194,7 +194,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       end.not_to change(EmployeeChangeRequest, :count)
 
       expect(response).to have_http_status(:ok), response.body
-      expect(employee.reload.email).to eq("jamie.updated@example.com")
+      employee.reload
+      expect(employee.email).to eq("jamie.updated@example.com")
       expect(employee.job_title).to eq("Senior Payroll Clerk")
       expect(employee.phone).to eq("671-555-0199")
       expect(employee.address_line1).to eq("42 Profile Ln")

@@ -280,7 +280,9 @@ export function PayPeriods() {
       }
     }
   }, [activeCompanyId, payPeriodViewKey, statusFilter, yearFilter]);
-  loadPayPeriodsRef.current = loadPayPeriods;
+  useEffect((): void => {
+    loadPayPeriodsRef.current = loadPayPeriods;
+  }, [loadPayPeriods]);
 
   useEffect(() => {
     loadPayPeriods();
