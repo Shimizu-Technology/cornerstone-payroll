@@ -142,12 +142,17 @@ export function EmployeeWorkspace(): ReactElement {
   const history = payHistory.history;
   const latestPay = history[0];
   const summary = payHistory.summary;
+  const employeeDescription = [
+    employmentTypeLabels[employee.employment_type] || employee.employment_type,
+    employee.department?.name || 'No department',
+    employee.hire_date ? `Hired ${formatDate(employee.hire_date)}` : 'Hire date not recorded',
+  ].join(' · ');
 
   return (
     <div>
       <Header
         title={employeeName}
-        description={`${employmentTypeLabels[employee.employment_type] || employee.employment_type} · ${employee.department?.name || 'No department'} · Hired ${formatDate(employee.hire_date)}`}
+        description={employeeDescription}
         actions={
           <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
             <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}>
