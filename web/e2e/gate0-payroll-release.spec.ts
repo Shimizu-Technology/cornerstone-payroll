@@ -16,6 +16,8 @@ interface Gate0Fixture {
   employee_id: number;
   client_employee_id: number;
   other_employee_id: number;
+  historical_import_batch_id: number;
+  historical_pay_period_id: number;
   bonus_sync_pay_period_id: number;
   bonus_alpha_employee_id: number;
   bonus_alpha_payroll_item_id: number;
@@ -1615,6 +1617,61 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('button', { name: 'Back to List', exact: true }).click();
     await expect(page).toHaveURL(listUrl);
 
+    await context.close();
+  });
+
+  test('serves locked QuickBooks payroll through client history, employee history, and payroll summary', async ({ browser }): Promise<void> => {
+    const clientList = await clientApi.get('client/pay_periods', { params: { year: 2025 } });
+    expect(clientList.ok()).toBeTruthy();
+    const clientListBody = await responseJson(clientList);
+    const importedPeriod = (clientListBody.pay_periods as Array<Record<string, unknown>>).find(
+      (period) => period.key === `imported:${fixture.historical_pay_period_id}`,
+    );
+    expect(importedPeriod).toMatchObject({
+      record_type: 'imported',
+      status: 'locked',
+      capabilities: { view: true, edit: false, delete: false, run: false, commit: false },
+    });
+
+    const clientDetail = await clientApi.get(`client/imported_pay_periods/${fixture.historical_pay_period_id}`);
+    expect(clientDetail.ok()).toBeTruthy();
+    const clientDetailBody = await responseJson(clientDetail);
+    const clientSource = (clientDetailBody.data as Record<string, unknown>).source as Record<string, unknown>;
+    const clientPaycheck = ((clientDetailBody.data as Record<string, unknown>).paychecks as Array<Record<string, unknown>>)[0];
+    expect(clientSource.import_batch_id).toBeUndefined();
+    expect(clientSource.importer_version).toBeUndefined();
+    expect(clientSource.locked_by_name).toBeUndefined();
+    expect(clientPaycheck.check_number).toBeNull();
+
+    const employeeHistory = await adminApi.get('admin/reports/employee_pay_history', {
+      params: { employee_id: fixture.employee_id, year: 2025 },
+    });
+    expect(employeeHistory.ok()).toBeTruthy();
+    const employeeReport = (await responseJson(employeeHistory)).report as Record<string, unknown>;
+    expect((employeeReport.history as Array<Record<string, unknown>>).some(
+      (record) => record.historical_pay_period_id === fixture.historical_pay_period_id && record.record_type === 'imported',
+    )).toBe(true);
+
+    const summary = await adminApi.get('admin/reports/ytd_summary', { params: { year: 2025 } });
+    expect(summary.ok()).toBeTruthy();
+    const sourceSummary = ((await responseJson(summary)).report as Record<string, unknown>).source_summary as Record<string, Record<string, unknown>>;
+    expect(sourceSummary.quickbooks.paycheck_count).toBe(1);
+
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.client_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    await page.goto(`/companies/${fixture.company_id}/pay-runs`);
+    const importedRow = page.getByRole('row').filter({ hasText: 'QuickBooks import' });
+    await expect(importedRow).toContainText('Locked');
+    await importedRow.getByRole('button', { name: 'View' }).click();
+    await expect(page).toHaveURL(new RegExp(`/companies/${fixture.company_id}/pay-runs/imported/${fixture.historical_pay_period_id}`));
+    await expect(page.getByText('This finalized payroll came from QuickBooks')).toBeVisible();
+    await expect(page.getByText('Import provenance')).toHaveCount(0);
+    await expect(page.getByText('QB-1201')).toHaveCount(0);
     await context.close();
   });
 

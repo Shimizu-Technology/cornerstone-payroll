@@ -6,6 +6,8 @@ require "pdf/reader"
 require "roo"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let!(:company) { create(:company) }
   let!(:department) { create(:department, company: company) }
   let!(:employee) { create(:employee, company: company, department: department) }
@@ -22,6 +24,70 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
+  end
+
+  def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300)
+    batch = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "QuickBooks #{suffix}",
+      bundle_digest: "reports-#{company.id}-#{suffix}",
+      importer_version: "quickbooks-online-payroll-v5",
+      status: "locked",
+      locked_at: Time.zone.parse("2026-06-01 09:00"),
+      locked_by: admin_user
+    )
+    start_date = period_type == "opening_summary" ? pay_date - 119.days : pay_date - 13.days
+    period = HistoricalPayPeriod.create!(
+      historical_import_batch: batch,
+      company: company,
+      external_key: "period-#{suffix}",
+      source_label: "Payroll #{suffix}",
+      start_date: start_date,
+      end_date: pay_date - 5.days,
+      pay_date: pay_date,
+      period_type: period_type,
+      paycheck_count: 1,
+      totals: { "gross_pay" => gross_pay.to_s, "net_pay" => net_pay.to_s }
+    )
+    worker = HistoricalWorker.create!(
+      historical_import_batch: batch,
+      company: company,
+      employee: employee,
+      external_key: "worker-#{suffix}",
+      source_name: employee&.full_name || "Unlinked Worker",
+      normalized_name: employee&.full_name&.downcase || "unlinked worker",
+      source_status: "active",
+      mapping_status: employee ? "exact_match" : "archive_only"
+    )
+    paycheck = HistoricalPaycheck.create!(
+      historical_import_batch: batch,
+      historical_pay_period: period,
+      historical_worker: worker,
+      company: company,
+      employee: employee,
+      external_key: "check-#{suffix}",
+      source_employee_name: employee&.full_name || "Unlinked Worker",
+      source_row_number: 1,
+      source_status: period_type == "opening_summary" ? "historical_summary" : "paid",
+      reconciliation_status: employee ? (period_type == "opening_summary" ? "opening_summary" : "matched") : "unmatched",
+      period_start: period.start_date,
+      period_end: period.end_date,
+      pay_date: period.pay_date,
+      hours_total: period_type == "regular" ? 40 : 0,
+      gross_pay: gross_pay,
+      adjusted_gross: gross_pay,
+      pretax_deductions: 20,
+      employee_taxes: 150,
+      federal_income_tax: 90,
+      social_security_tax: 50,
+      medicare_tax: 10,
+      after_tax_deductions: 30,
+      net_pay: net_pay,
+      earnings_breakdown: [ { "label" => "Reported Tips", "amount" => "25.00" } ],
+      pretax_deduction_breakdown: [ { "label" => "401(k) pre-tax", "amount" => "20.00" } ],
+      after_tax_deduction_breakdown: [ { "label" => "Roth 401(k)", "amount" => "10.00" } ]
+    )
+    [ batch, period, paycheck ]
   end
 
   describe "GET /api/v1/admin/reports/transmittal_preview" do
@@ -1494,6 +1560,125 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "locked QuickBooks payroll visibility" do
+    let!(:native_period) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 5, 1),
+        end_date: Date.new(2026, 5, 14),
+        pay_date: Date.new(2026, 5, 16))
+    end
+    let!(:native_item) do
+      create(:payroll_item,
+        pay_period: native_period,
+        employee: employee,
+        company: company,
+        gross_pay: 1_000,
+        withholding_tax: 100,
+        social_security_tax: 62,
+        medicare_tax: 14.5,
+        total_deductions: 176.5,
+        net_pay: 823.5)
+    end
+
+    it "combines linked snapshots with committed payroll and discloses excluded rows" do
+      _batch, historical_period, historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "linked",
+        pay_date: Date.new(2026, 4, 18)
+      )
+      create_locked_historical_paycheck(
+        employee: nil,
+        suffix: "unlinked",
+        pay_date: Date.new(2026, 4, 18),
+        gross_pay: 250,
+        net_pay: 180
+      )
+      _opening_batch, _opening_period, opening_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "opening",
+        pay_date: Date.new(2026, 4, 1),
+        period_type: "opening_summary",
+        gross_pay: 200,
+        net_pay: 120
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      employee_row = report.fetch("employees").find { |row| row.fetch("employee_id") == employee.id }
+      expect(employee_row).to include(
+        "payroll_count" => 2,
+        "imported_payroll_count" => 1,
+        "imported_opening_summary_count" => 1
+      )
+      expect(employee_row.fetch("gross_pay").to_f).to eq(1_700)
+      expect(employee_row.fetch("net_pay").to_f).to eq(1_243.5)
+      expect(employee_row.fetch("retirement").to_f).to eq(40)
+      expect(employee_row.fetch("roth_retirement").to_f).to eq(20)
+      expect(employee_row.fetch("tips").to_f).to eq(50)
+      expect(employee_row.fetch("tips_paid_out").to_f).to eq(0)
+      expect(report.dig("company_totals", "gross_pay").to_f).to eq(1_700)
+      expect(report.dig("company_totals", "employee_count")).to eq(1)
+      expect(report.dig("source_summary", "cornerstone")).to include("payroll_count" => 1, "paycheck_count" => 1)
+      expect(report.dig("source_summary", "quickbooks")).to include(
+        "payroll_count" => 1,
+        "paycheck_count" => 2,
+        "opening_summary_count" => 1,
+        "excluded_unlinked_paycheck_count" => 1,
+        "excluded_unlinked_gross_pay" => 250.0,
+        "excluded_unlinked_net_pay" => 180.0
+      )
+      expect(report.dig("source_summary", "source_statement")).to include("not recalculated")
+
+      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      history_report = response.parsed_body.fetch("report")
+      expect(history_report.fetch("history").map { |row| row.fetch("key") }).to eq([
+        "native:#{native_item.id}",
+        "imported:#{historical_paycheck.id}",
+        "imported:#{opening_paycheck.id}"
+      ])
+      imported_row = history_report.fetch("history").find { |row| row.fetch("historical_pay_period_id") == historical_period.id }
+      expect(imported_row).to include(
+        "record_type" => "imported",
+        "payroll_item_id" => nil,
+        "pay_period_id" => nil,
+        "gross_pay" => 500.0,
+        "capabilities" => { "view" => true, "edit" => false }
+      )
+      expect(imported_row.dig("source", "label")).to eq("QuickBooks import")
+      expect(history_report.dig("summary", "gross_pay").to_f).to eq(1_700)
+    end
+
+    it "applies the history limit across both sources" do
+      _batch, _historical_period, historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "latest",
+        pay_date: Date.new(2026, 6, 1)
+      )
+      create_locked_historical_paycheck(
+        employee: nil,
+        suffix: "limit-unlinked",
+        pay_date: Date.new(2026, 6, 2)
+      )
+
+      travel_to Time.zone.local(2026, 6, 15) do
+        get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, limit: 1 }
+      end
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.fetch("history").map { |row| row.fetch("key") }).to eq([ "imported:#{historical_paycheck.id}" ])
+      expect(report.dig("summary", "gross_pay").to_f).to eq(500)
+      expect(report.dig("source_summary", "cornerstone", "paycheck_count")).to eq(0)
+      expect(report.dig("source_summary", "quickbooks", "paycheck_count")).to eq(1)
+      expect(report.dig("source_summary", "quickbooks", "excluded_unlinked_paycheck_count")).to eq(0)
+    end
+  end
+
   describe "custom pay-date reporting periods and payroll field disclosure" do
     let!(:inside_period) do
       create(:pay_period, :committed, company: company, start_date: Date.new(2026, 5, 1), end_date: Date.new(2026, 5, 14), pay_date: Date.new(2026, 5, 16))
@@ -2526,11 +2711,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           total_deductions: 261.50,
           custom_deductions_total: 15.00,
           net_pay: 738.50
+        },
+        source_summary: {
+          mode: "locked_quickbooks_plus_committed_cornerstone",
+          cornerstone: {},
+          quickbooks: {
+            excluded_unlinked_paycheck_count: 2,
+            excluded_unlinked_gross_pay: 250.00,
+            excluded_unlinked_net_pay: 180.00
+          },
+          historical_ytd_bridge: {}
         }
       })
 
       history_header = sheets.first.fetch(:rows).first
-      expect(history_header).to include("Custom Earnings", "Custom Deductions")
+      expect(history_header).to include("Source", "Record Type", "Custom Earnings", "Custom Deductions")
+      expect(sheets.map { |sheet| sheet.fetch(:name) }).to include("Payroll Sources")
+      source_rows = sheets.find { |sheet| sheet[:name] == "Payroll Sources" }.fetch(:rows)
+      expect(source_rows).to include([ "Excluded unlinked QuickBooks gross pay", 250.00 ])
+      expect(source_rows).to include([ "Excluded unlinked QuickBooks net pay", 180.00 ])
 
       ytd_rows = sheets.fetch(1).fetch(:rows)
       expect(ytd_rows).to include([ "Metric", "Amount" ])

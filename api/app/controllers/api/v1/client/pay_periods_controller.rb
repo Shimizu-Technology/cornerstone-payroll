@@ -7,19 +7,14 @@ module Api
         before_action :set_pay_period, only: :show
 
         def index
-          pay_periods = PayPeriod.reportable_committed
-                                 .where(company_id: current_company_id)
-                                 .includes(payroll_items: :employee)
-                                 .period_chronological
-
-          pay_periods = pay_periods.for_year(params[:year].to_i) if params[:year].present?
-
+          result = PayrollHistoryQuery.new(
+            company_id: current_company_id,
+            params: params,
+            audience: :client
+          ).call
           render json: {
-            pay_periods: pay_periods.map { |pay_period| pay_period_summary(pay_period) },
-            meta: {
-              total: pay_periods.size,
-              statuses: { "committed" => pay_periods.size }
-            }
+            pay_periods: result.data,
+            meta: result.meta
           }
         end
 
