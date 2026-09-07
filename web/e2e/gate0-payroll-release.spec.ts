@@ -900,12 +900,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     let staleCalculatedReloadSeen = false;
     let currentDraftReloadSeen = false;
 
-    await page.route('**/api/v1/admin/pay_periods**', async (route): Promise<void> => {
-      const url = new URL(route.request().url());
-      const isDelayedApproval = route.request().method() === 'POST'
-        && url.pathname === `/api/v1/admin/pay_periods/${fixture.filter_race_pay_period_id}/approve`;
-
-      if (isDelayedApproval) {
+    await page.route(
+      `**/api/v1/admin/pay_periods/${fixture.filter_race_pay_period_id}/approve`,
+      async (route): Promise<void> => {
         markApprovalStarted?.();
         await approvalReleased;
         approvalWasReleased = true;
@@ -914,13 +911,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
           contentType: 'application/json',
           body: JSON.stringify({ status: 'approved' }),
         });
-        return;
-      }
+      },
+    );
 
+    await page.route('**/api/v1/admin/payroll_history**', async (route): Promise<void> => {
+      const url = new URL(route.request().url());
       if (
         approvalWasReleased
         && route.request().method() === 'GET'
-        && url.pathname === '/api/v1/admin/pay_periods'
+        && url.pathname === '/api/v1/admin/payroll_history'
       ) {
         if (url.searchParams.get('status') === 'calculated') staleCalculatedReloadSeen = true;
         if (url.searchParams.get('status') === 'draft') {
@@ -1285,7 +1284,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const delayedResponseReleased = new Promise<void>((resolve): void => { releaseDelayedResponse = resolve; });
     const delayedRequestFinished = new Promise<void>((resolve): void => { markDelayedRequestFinished = resolve; });
 
-    await page.route('**/api/v1/admin/pay_periods**', async (route): Promise<void> => {
+    await page.route('**/api/v1/admin/payroll_history**', async (route): Promise<void> => {
       if (rejectNextBoundaryResponse && route.request().headers()['x-company-id'] === String(fixture.other_company_id)) {
         rejectNextBoundaryResponse = false;
         await route.fulfill({
@@ -1329,7 +1328,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
 
     const delayedPayRunResponseDelivered = page.waitForResponse((response): boolean => (
-      new URL(response.url()).pathname === '/api/v1/admin/pay_periods'
+      new URL(response.url()).pathname === '/api/v1/admin/payroll_history'
       && response.request().headers()['x-company-id'] === String(fixture.company_id)
     ));
     releaseDelayedResponse?.();

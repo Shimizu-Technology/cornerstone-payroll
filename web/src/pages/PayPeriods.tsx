@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
-import { AlertCircle, Search } from 'lucide-react';
+import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,11 +26,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
-import { correctionRunPath, currentAppPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
-import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
+import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
+import { companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
@@ -44,7 +44,7 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
 };
 
 interface PayPeriodMobileCardProps {
-  period: PayPeriod;
+  period: PayrollHistoryRecord;
   actionInFlight: string | null;
   onView: () => void;
   onEdit: () => void;
@@ -66,7 +66,7 @@ function PayPeriodMobileCard({
   onCommit,
   onEnterHours,
 }: PayPeriodMobileCardProps): ReactElement {
-  const statusConfig = payPeriodStatusConfig[period.status];
+  const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
 
   return (
     <MobileRecordCard>
@@ -80,12 +80,12 @@ function PayPeriodMobileCard({
         <Badge
           variant={
             period.correction_status === 'voided' ? 'danger' :
-              period.status === 'committed' ? 'success' :
+              period.status === 'committed' || period.status === 'locked' ? 'success' :
                 period.status === 'approved' ? 'info' :
                   period.status === 'calculated' ? 'warning' : 'default'
           }
         >
-          {period.correction_status === 'voided' ? 'Voided' : (statusConfig?.label || period.status)}
+          {period.correction_status === 'voided' ? 'Voided' : statusLabel}
         </Badge>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -93,6 +93,9 @@ function PayPeriodMobileCard({
           {RUN_PURPOSE_LABELS[period.run_purpose] || period.run_purpose}
         </Badge>
         {!period.includes_base_salary && <Badge variant="info">No base salary</Badge>}
+        <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
+          {period.record_type === 'imported' ? <><LockKeyhole className="mr-1 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
+        </Badge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -105,20 +108,16 @@ function PayPeriodMobileCard({
       </div>
       <MobileCardActions>
         <Button variant="outline" size="sm" onClick={onView}>View</Button>
-        {period.status !== 'committed' && (
-          <>
-            <Button variant="ghost" size="sm" onClick={onEdit}>Edit</Button>
-            <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>
-          </>
-        )}
-        {period.status === 'draft' && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
-        {period.status === 'calculated' && (
+        {period.capabilities.edit && <Button variant="ghost" size="sm" onClick={onEdit}>Edit</Button>}
+        {period.capabilities.delete && <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>}
+        {period.capabilities.enter_hours && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
+        {period.capabilities.run && period.status === 'calculated' && (
           <>
             <Button variant="outline" size="sm" onClick={onRun} disabled={actionInFlight !== null}>Recalculate</Button>
-            <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>
+            {period.capabilities.approve && <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>}
           </>
         )}
-        {period.status === 'approved' && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+        {period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
       </MobileCardActions>
     </MobileRecordCard>
   );
@@ -135,7 +134,7 @@ export function PayPeriods() {
       ? payRunPath(activeCompanyId, payRunId, tab, { returnTo })
       : correctionRunPath(undefined, payRunId, { returnTo })
   );
-  const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
+  const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
@@ -143,20 +142,26 @@ export function PayPeriods() {
     return state?.companySwitchNotice ?? null;
   });
   const statusParam = searchParams.get('status') || '';
-  const statusFilter = ['draft', 'calculated', 'approved', 'committed'].includes(statusParam) ? statusParam : undefined;
+  const statusFilter = ['draft', 'calculated', 'approved', 'committed', 'locked'].includes(statusParam) ? statusParam : undefined;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [payPeriodCompanyId, setPayPeriodCompanyId] = useState<number | null>(null);
   const searchTerm = searchParams.get('search') || '';
+  const sourceParam = searchParams.get('source') || 'all';
+  const sourceFilter = (['all', 'cornerstone', 'quickbooks'].includes(sourceParam) ? sourceParam : 'all') as 'all' | 'cornerstone' | 'quickbooks';
+  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [years, setYears] = useState<number[]>([]);
   const requestedSort = searchParams.get('sort');
-  const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
-    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status';
+  const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
+    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status' | 'source';
   const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
   const yearFilter = searchParams.get('year') || '';
-  const payPeriodViewKey = `${statusFilter ?? ''}\u0000${yearFilter}`;
+  const payPeriodViewKey = `${statusFilter ?? ''}\u0000${yearFilter}\u0000${searchTerm}\u0000${sortBy}\u0000${sortDirection}\u0000${sourceFilter}\u0000${page}`;
   const updateViewParam = (key: string, value?: string, replace = false): void => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
+    if (key !== 'page') next.delete('page');
     setSearchParams(next, { replace });
   };
   const loadRequestIdRef = useRef(0);
@@ -174,6 +179,8 @@ export function PayPeriods() {
     setLoading(true);
     setPayPeriods([]);
     setStatusCounts({});
+    setTotalPages(0);
+    setYears([]);
     setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
 
@@ -256,15 +263,29 @@ export function PayPeriods() {
       setPayPeriodCompanyId(null);
       setPayPeriods([]);
       setStatusCounts({});
+      setTotalPages(0);
+      setYears([]);
     }
 
     try {
       if (!silent) setLoading(true);
       setError(null);
-      const response = await payPeriodsApi.list({ status: statusFilter, year: parsePayRunYear(yearFilter) });
+      if (!requestedCompanyId) throw new Error('Select a company to view payroll.');
+      const response = await payrollHistoryApi.list({
+        page,
+        per_page: 50,
+        status: statusFilter,
+        year: parsePayRunYear(yearFilter),
+        search: searchTerm.trim() || undefined,
+        sort: sortBy,
+        direction: sortDirection,
+        source: sourceFilter,
+      }, requestedCompanyId);
       if (!isCurrentRequest()) return;
-      setPayPeriods(response.pay_periods);
+      setPayPeriods(response.data);
       setStatusCounts(response.meta.statuses);
+      setTotalPages(response.meta.total_pages);
+      setYears(response.meta.years);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
@@ -272,6 +293,8 @@ export function PayPeriods() {
       if (!silent) {
         setPayPeriods([]);
         setStatusCounts({});
+        setTotalPages(0);
+        setYears([]);
       }
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -279,7 +302,7 @@ export function PayPeriods() {
         setLoading(false);
       }
     }
-  }, [activeCompanyId, payPeriodViewKey, statusFilter, yearFilter]);
+  }, [activeCompanyId, page, payPeriodViewKey, searchTerm, sortBy, sortDirection, sourceFilter, statusFilter, yearFilter]);
   useEffect((): void => {
     loadPayPeriodsRef.current = loadPayPeriods;
   }, [loadPayPeriods]);
@@ -445,7 +468,7 @@ export function PayPeriods() {
 
   const handleCommit = async (id: number) => {
     const period = payPeriodCompanyId === activeCompanyId
-      ? payPeriods.find((candidate) => candidate.id === id)
+      ? payPeriods.find((candidate) => candidate.record_type === 'native' && candidate.id === id)
       : undefined;
     const warningText = period?.compliance_warnings?.length
       ? `\n\nAttention:\n${period.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
@@ -624,75 +647,23 @@ export function PayPeriods() {
   };
 
   const companyPayPeriods = useMemo(
-    (): PayPeriod[] => payPeriodCompanyId === activeCompanyId ? payPeriods : [],
+    (): PayrollHistoryRecord[] => payPeriodCompanyId === activeCompanyId ? payPeriods : [],
     [activeCompanyId, payPeriodCompanyId, payPeriods],
   );
   const companyStatusCounts = payPeriodCompanyId === activeCompanyId ? statusCounts : {};
-  const visiblePayPeriods = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-    const filtered = normalizedSearch
-      ? companyPayPeriods.filter((period) => {
-          const haystack = [
-            formatDateRange(period.start_date, period.end_date),
-            new Date(period.pay_date).toLocaleDateString('en-US'),
-            period.status,
-            payPeriodStatusConfig[period.status]?.label,
-            period.processed_by_name,
-            period.processed_at ? formatGuamDateTimeShort(period.processed_at) : '',
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-
-          return haystack.includes(normalizedSearch);
-        })
-      : companyPayPeriods;
-
-    const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
-    return [...filtered].sort((left, right) => {
-      const compareStrings = (a: string, b: string) => a.localeCompare(b) * directionMultiplier;
-      const compareNumbers = (a: number, b: number) => (a - b) * directionMultiplier;
-
-      switch (sortBy) {
-      case 'pay_period':
-        return comparePayPeriodsByPeriod(left, right, sortDirection);
-      case 'employees':
-        return compareNumbers(left.employee_count || 0, right.employee_count || 0);
-      case 'gross':
-        return compareNumbers(left.total_gross || 0, right.total_gross || 0);
-      case 'net':
-        return compareNumbers(left.total_net || 0, right.total_net || 0);
-      case 'status':
-        return compareStrings(
-          payPeriodStatusConfig[left.status]?.label || left.status,
-          payPeriodStatusConfig[right.status]?.label || right.status
-        );
-      case 'processed':
-        return compareNumbers(
-          left.processed_at ? new Date(left.processed_at).getTime() : 0,
-          right.processed_at ? new Date(right.processed_at).getTime() : 0
-        );
-      case 'pay_date':
-      default:
-        return compareNumbers(
-          new Date(left.pay_date).getTime(),
-          new Date(right.pay_date).getTime()
-        ) || compareNumbers(
-          new Date(left.end_date).getTime(),
-          new Date(right.end_date).getTime()
-        ) || compareNumbers(
-          new Date(left.start_date).getTime(),
-          new Date(right.start_date).getTime()
-        ) || compareNumbers(left.id, right.id);
-      }
-    });
-  }, [companyPayPeriods, searchTerm, sortBy, sortDirection]);
+  const visiblePayPeriods = companyPayPeriods;
+  const recordDestination = (period: PayrollHistoryRecord, tab: PayRunWorkspaceTab): string => {
+    if (period.record_type === 'imported' && activeCompanyId) {
+      return importedPayRunPath(activeCompanyId, period.id, { returnTo });
+    }
+    return payRunDestination(period.id, tab);
+  };
 
   return (
     <div>
       <Header
         title="Pay Periods"
-        description="Manage payroll periods and processing"
+        description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
         actions={
           <Button onClick={openCreateModal}>
             New Pay Period
@@ -733,14 +704,14 @@ export function PayPeriods() {
           >
             All ({Object.values(companyStatusCounts).reduce((a, b) => a + b, 0)})
           </Button>
-          {(['draft', 'calculated', 'approved', 'committed'] as const).map((status) => (
+          {(['draft', 'calculated', 'approved', 'committed', 'locked'] as const).map((status) => (
             <Button
               key={status}
               variant={statusFilter === status ? 'primary' : 'outline'}
               size="sm"
               onClick={() => updateViewParam('status', status)}
             >
-              {payPeriodStatusConfig[status]?.label || status} ({companyStatusCounts[status] || 0})
+              {status === 'locked' ? 'Imported & locked' : payPeriodStatusConfig[status]?.label || status} ({companyStatusCounts[status] || 0})
             </Button>
           ))}
         </div>
@@ -756,6 +727,17 @@ export function PayPeriods() {
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
+            <Label htmlFor="pay-period-source-filter" className="sr-only">Filter pay periods by source</Label>
+            <Select
+              id="pay-period-source-filter"
+              value={sourceFilter}
+              onChange={(e) => updateViewParam('source', e.target.value)}
+              className="w-full sm:w-44"
+            >
+              <option value="all">All sources</option>
+              <option value="cornerstone">Cornerstone</option>
+              <option value="quickbooks">QuickBooks imports</option>
+            </Select>
             <Select
               value={sortBy}
               onChange={(e) => updateViewParam('sort', e.target.value)}
@@ -768,6 +750,7 @@ export function PayPeriods() {
               <option value="gross">Sort: Gross Pay</option>
               <option value="net">Sort: Net Pay</option>
               <option value="status">Sort: Status</option>
+              <option value="source">Sort: Source</option>
             </Select>
             <Label htmlFor="pay-period-year-filter" className="sr-only">Filter pay periods by year</Label>
             <Select
@@ -777,7 +760,7 @@ export function PayPeriods() {
               className="w-full sm:w-32"
             >
               <option value="">All years</option>
-              {Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index).map((year) => <option key={year} value={year}>{year}</option>)}
+              {years.map((year) => <option key={year} value={year}>{year}</option>)}
             </Select>
             <Select
               value={sortDirection}
@@ -803,12 +786,12 @@ export function PayPeriods() {
               <div className="space-y-3 p-3 sm:hidden">
                 {visiblePayPeriods.map((period) => (
                   <PayPeriodMobileCard
-                    key={period.id}
+                    key={period.key}
                     period={period}
                     actionInFlight={actionInFlight}
-                    onView={() => navigate(payRunDestination(period.id, 'overview'))}
-                    onEnterHours={() => navigate(payRunDestination(period.id, 'work'))}
-                    onEdit={() => openEditModal(period)}
+                    onView={() => navigate(recordDestination(period, 'overview'))}
+                    onEnterHours={() => navigate(recordDestination(period, 'work'))}
+                    onEdit={() => openEditModal(period as PayPeriod)}
                     onDelete={() => handleDelete(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
                     onApprove={() => handleApprove(period.id)}
@@ -833,10 +816,10 @@ export function PayPeriods() {
               </TableHeader>
               <TableBody>
                 {visiblePayPeriods.map((period, index) => {
-                  const statusConfig = payPeriodStatusConfig[period.status];
+                  const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
                   const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
                   return (
-                    <TableRow key={period.id} className={rowTone}>
+                    <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
                         <span className="font-medium text-gray-900">
                           {formatDateRange(period.start_date, period.end_date)}
@@ -857,6 +840,9 @@ export function PayPeriods() {
                             {RUN_PURPOSE_LABELS[period.run_purpose] || period.run_purpose}
                           </Badge>
                           {!period.includes_base_salary && <span className="text-xs font-medium text-primary-700">No base salary</span>}
+                          <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
+                            {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
@@ -879,13 +865,13 @@ export function PayPeriods() {
                           <Badge
                             variant={
                               period.correction_status === 'voided' ? 'danger' :
-                              period.status === 'committed' ? 'success' :
+                              period.status === 'committed' || period.status === 'locked' ? 'success' :
                               period.status === 'approved' ? 'info' :
                               period.status === 'calculated' ? 'warning' :
                               'default'
                             }
                           >
-                            {period.correction_status === 'voided' ? 'Voided' : (statusConfig?.label || period.status)}
+                            {period.correction_status === 'voided' ? 'Voided' : statusLabel}
                           </Badge>
                           {period.correction_status === 'correction' && (
                             <Badge variant="warning">Correction</Badge>
@@ -911,41 +897,24 @@ export function PayPeriods() {
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"
-                              onClick={() => navigate(payRunDestination(period.id, 'overview'))}
+                              onClick={() => navigate(recordDestination(period, 'overview'))}
                             >
                               View
                             </button>
-                            {period.status !== 'committed' && (
-                              <>
-                                <span className="text-gray-300">·</span>
-                                <button
-                                  className="text-gray-500 hover:text-gray-800 hover:underline"
-                                  onClick={() => openEditModal(period)}
-                                >
-                                  Edit
-                                </button>
-                                <span className="text-gray-300">·</span>
-                                <button
-                                  className="text-red-400 hover:text-red-600 hover:underline"
-                                  onClick={() => handleDelete(period.id)}
-                                  disabled={actionInFlight !== null}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            )}
+                            {period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
-                          {period.status === 'draft' && (
+                          {period.capabilities.enter_hours && (
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => navigate(payRunDestination(period.id, 'work'))}
+                              onClick={() => navigate(recordDestination(period, 'work'))}
                             >
                               Enter Hours
                             </Button>
                           )}
-                          {period.status === 'calculated' && (
+                          {period.capabilities.run && period.status === 'calculated' && (
                             <div className="flex items-center gap-1.5">
                               <Button
                                 variant="outline"
@@ -955,16 +924,16 @@ export function PayPeriods() {
                               >
                                 Recalculate
                               </Button>
-                              <Button
+                              {period.capabilities.approve && <Button
                                 size="sm"
                                 onClick={() => handleApprove(period.id)}
                                 disabled={actionInFlight !== null}
                               >
                                 Approve
-                              </Button>
+                              </Button>}
                             </div>
                           )}
-                          {period.status === 'approved' && (
+                          {period.capabilities.commit && (
                             <Button
                               size="sm"
                               variant="primary"
@@ -985,6 +954,16 @@ export function PayPeriods() {
             </>
           )}
         </Card>
+
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-sm text-neutral-500">Page {page} of {totalPages}</p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => updateViewParam('page', String(page - 1))}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages || loading} onClick={() => updateViewParam('page', String(page + 1))}>Next</Button>
+            </div>
+          </div>
+        )}
 
         {/* Workflow explanation */}
         <Card className="mt-8">

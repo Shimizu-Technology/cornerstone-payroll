@@ -27,6 +27,8 @@ class StaffRolePolicy
     "api/v1/admin/audit_logs" => :view_audit_history,
     "api/v1/admin/historical_imports" => :payroll_operations,
     "api/v1/admin/historical_reports" => :payroll_operations,
+    "api/v1/admin/payroll_history" => :payroll_operations,
+    "api/v1/admin/imported_pay_periods" => :payroll_operations,
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
@@ -80,7 +82,9 @@ class StaffRolePolicy
     "api/v1/admin/historical_imports#archive_unlinked_workers" => :manage_client_configuration,
     "api/v1/admin/historical_imports#preview_client_bootstrap" => :manage_client_configuration,
     "api/v1/admin/historical_imports#apply_client_bootstrap" => :manage_client_configuration,
-    "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration
+    "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#preview_ytd_bridge" => :manage_client_configuration,
+    "api/v1/admin/historical_imports#apply_ytd_bridge" => :manage_client_configuration
   }.freeze
 
   def self.capability_for(controller_path:, action_name:)
