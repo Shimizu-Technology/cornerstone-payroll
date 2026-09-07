@@ -19,7 +19,7 @@ export function WorkspaceTabs({ label, tabs }: WorkspaceTabsProps): ReactElement
   return (
     <nav aria-label={label} className="overflow-x-auto border-b border-neutral-200 bg-white px-4 sm:px-6 lg:px-8">
       <div className="flex min-w-max gap-2">
-        {tabs.map(({ id, label: tabLabel, href, icon: Icon, count }) => (
+        {tabs.map(({ id, label: tabLabel, href, icon: Icon, count }): ReactElement => (
           <NavLink
             key={id}
             to={href}

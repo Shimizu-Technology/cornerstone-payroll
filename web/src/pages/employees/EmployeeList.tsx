@@ -91,7 +91,10 @@ export function EmployeeList() {
   const companyIdRef = useRef(companyId);
   const employeeCompanyIdRef = useRef<number | null>(null);
   const departmentCompanyIdRef = useRef<number | null>(null);
-  companyIdRef.current = companyId;
+
+  useEffect((): void => {
+    companyIdRef.current = companyId;
+  }, [companyId]);
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') ?? 'active';

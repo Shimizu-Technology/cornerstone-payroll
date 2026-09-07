@@ -1029,11 +1029,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   });
 
   test('preserves a filtered pay-run return path when opening a correction workspace', async ({ page }): Promise<void> => {
-    const voidResponse = await adminApi.post(
-      `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
-      { data: { reason: 'Verify filtered correction navigation' } },
-    );
-    expect(voidResponse.ok()).toBeTruthy();
+    const payPeriodResponse = await adminApi.get(`admin/pay_periods/${fixture.workflow_pay_period_id}`);
+    expect(payPeriodResponse.ok()).toBeTruthy();
+    const payPeriod = (await responseJson(payPeriodResponse)).pay_period as Record<string, unknown>;
+    if (payPeriod.correction_status !== 'voided') {
+      const voidResponse = await adminApi.post(
+        `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
+        { data: { reason: 'Verify filtered correction navigation' } },
+      );
+      expect(voidResponse.ok()).toBeTruthy();
+    }
 
     const filteredReturnTo = `/companies/${fixture.company_id}/pay-runs?status=committed&year=2026`;
     await page.goto(
