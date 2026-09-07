@@ -310,8 +310,8 @@ function PaySetup({ employee, editHref }: { employee: Employee; editHref: string
           <ContextRow label="Salary treatment" value={employee.salary_type?.replace('_', ' ') || 'Not applicable'} />
           <ContextRow label="Active wage rates" value={String(wageRateCount || 1)} />
           <ContextRow label="Recurring adjustments" value={String(adjustmentCount)} />
-          <ContextRow label="Traditional retirement" value={`${Number(employee.retirement_rate || 0).toFixed(2)}%`} />
-          <ContextRow label="Roth retirement" value={`${Number(employee.roth_retirement_rate || 0).toFixed(2)}%`} />
+          <ContextRow label="Traditional retirement" value={`${(Number(employee.retirement_rate || 0) * 100).toFixed(2)}%`} />
+          <ContextRow label="Roth retirement" value={`${(Number(employee.roth_retirement_rate || 0) * 100).toFixed(2)}%`} />
         </CardContent>
       </Card>
       <Card className="border-primary-100 bg-primary-50/50">

@@ -592,11 +592,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         && url.pathname === `/api/v1/admin/pay_periods/${fixture.filter_race_pay_period_id}/approve`;
 
       if (isDelayedApproval) {
-        const response = await route.fetch();
         markApprovalStarted?.();
         await approvalReleased;
         approvalWasReleased = true;
-        await route.fulfill({ response });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'approved' }),
+        });
         return;
       }
 
