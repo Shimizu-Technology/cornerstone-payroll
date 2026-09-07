@@ -242,6 +242,7 @@ export function EmployeeForm() {
   const employeeRequestIdRef = useRef(0);
   const employeePayrollFieldsRequestIdRef = useRef(0);
   const payrollFieldsRequestIdRef = useRef(0);
+  const departmentsRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
   companyIdRef.current = companyId;
 
@@ -395,13 +396,19 @@ export function EmployeeForm() {
   }, [companyId, id, isClient]);
 
   const fetchDepartments = useCallback(async () => {
+    const requestId = ++departmentsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      departmentsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = isClient
         ? await clientDepartmentsApi.list({ active: true })
         : await departmentsApi.list({ company_id: companyId, active: true });
-      setDepartments(response.data);
+      if (isCurrentRequest()) setDepartments(response.data);
     } catch (err) {
-      console.error('Failed to load departments:', err);
+      if (isCurrentRequest()) console.error('Failed to load departments:', err);
     }
   }, [companyId, isClient]);
 
@@ -413,6 +420,7 @@ export function EmployeeForm() {
     setInitialEmploymentType('hourly');
     setPayrollFields([]);
     setEmployeePayrollFields([]);
+    setDepartments([]);
     setWageRates([defaultHourlyWageRate()]);
     setDefaultPayrollAdjustments([]);
     setW4CurrencyDrafts({
@@ -437,6 +445,7 @@ export function EmployeeForm() {
       employeeRequestIdRef.current += 1;
       employeePayrollFieldsRequestIdRef.current += 1;
       payrollFieldsRequestIdRef.current += 1;
+      departmentsRequestIdRef.current += 1;
     };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 

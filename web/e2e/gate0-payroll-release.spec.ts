@@ -362,7 +362,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }, `/companies/${fixture.other_company_id}/employees/${fixture.employee_id}/edit`);
     await expect(page.getByText('Employee not found', { exact: true })).toBeVisible();
 
+    const primaryEmployeeResponseDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}`
+      && response.request().headers()['x-company-id'] === String(fixture.company_id)
+    ));
     releasePrimaryResponse?.();
+    await primaryEmployeeResponseDelivered;
     await waitForUiCommit(page);
     await expect(page.getByText('Employee not found', { exact: true })).toBeVisible();
     await expect(page.getByText('Avery Example', { exact: true })).toHaveCount(0);
