@@ -611,6 +611,18 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
     await expect(page.locator('input[name="first_name"]')).toHaveValue('Avery');
+    let captureOldCompanyDependents = false;
+    const oldCompanyDependentRequests: string[] = [];
+    page.on('request', (request): void => {
+      if (!captureOldCompanyDependents) return;
+      const url = new URL(request.url());
+      const isOldPayrollFieldRequest = url.pathname.startsWith(`/api/v1/admin/employees/${fixture.employee_id}/payroll_fields`);
+      const isOldWageRateRequest = url.pathname === '/api/v1/admin/employee_wage_rates'
+        && url.searchParams.get('employee_id') === String(fixture.employee_id);
+      if (isOldPayrollFieldRequest || isOldWageRateRequest) {
+        oldCompanyDependentRequests.push(`${request.method()} ${url.pathname}${url.search}`);
+      }
+    });
     await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
     await saveStarted;
 
@@ -627,18 +639,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       response.request().method() === 'PATCH'
       && new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}`
     ));
-    const dependentRatesLoaded = page.waitForResponse((response): boolean => {
-      const url = new URL(response.url());
-      return response.request().method() === 'GET'
-        && url.pathname === '/api/v1/admin/employee_wage_rates'
-        && url.searchParams.get('employee_id') === String(fixture.employee_id);
-    });
+    captureOldCompanyDependents = true;
     releaseSave?.();
     await saveDelivered;
-    const ratesResponse = await dependentRatesLoaded;
-    expect(ratesResponse.request().headers()['x-company-id']).toBe(String(fixture.company_id));
     await waitForUiCommit(page);
 
+    expect(oldCompanyDependentRequests).toEqual([]);
     await expect(page).toHaveURL(boundaryEditPath);
     await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
     await expect(page.getByText('Failed to save employee')).toHaveCount(0);
