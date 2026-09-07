@@ -75,7 +75,9 @@ export function EmployeeWorkspace(): ReactElement {
   const [payHistoryError, setPayHistoryError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const routeKey = `${companyId}:${employeeId}`;
 
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
@@ -86,12 +88,14 @@ export function EmployeeWorkspace(): ReactElement {
     if (![companyId, employeeId].every((value) => Number.isInteger(value) && value > 0)) {
       if (isCurrentRequest()) {
         setError('This employee workspace link is invalid.');
+        setResolvedRouteKey(routeKey);
         setLoading(false);
       }
       return;
     }
 
     setLoading(true);
+    setResolvedRouteKey(null);
     setError(null);
     setPayHistoryError(null);
     try {
@@ -103,6 +107,7 @@ export function EmployeeWorkspace(): ReactElement {
       if (employeeResult.status === 'rejected') throw employeeResult.reason;
 
       setEmployee(employeeResult.value.data);
+      setResolvedRouteKey(routeKey);
       if (historyResult.status === 'fulfilled') {
         setPayHistory(historyResult.value.report);
       } else {
@@ -112,17 +117,19 @@ export function EmployeeWorkspace(): ReactElement {
     } catch (loadError) {
       if (isCurrentRequest()) {
         setError(loadError instanceof Error ? loadError.message : 'Could not load this employee workspace.');
+        setResolvedRouteKey(routeKey);
       }
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [activeCompanyId, companyId, employeeId]);
+  }, [activeCompanyId, companyId, employeeId, routeKey]);
 
   useEffect(() => {
     setEmployee(null);
     setPayHistory(null);
     setPayHistoryError(null);
     setError(null);
+    setResolvedRouteKey(null);
     setLoading(true);
     void load();
     return (): void => {
@@ -139,7 +146,7 @@ export function EmployeeWorkspace(): ReactElement {
 
   const currentPath = currentAppPath(location.pathname, location.search);
 
-  if (loading) {
+  if (loading || activeCompanyId !== companyId || resolvedRouteKey !== routeKey) {
     return <WorkspaceLoader label="Loading employee workspace" />;
   }
 

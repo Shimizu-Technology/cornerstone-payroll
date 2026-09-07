@@ -7,6 +7,7 @@ interface Gate0Fixture {
   company_id: number;
   other_company_id: number;
   admin_email: string;
+  super_admin_email: string;
   manager_email: string;
   accountant_email: string;
   client_email: string;
@@ -260,6 +261,24 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/overview`);
     await expect(page.getByRole('heading', { name: 'Avery Example' })).toBeVisible();
 
+    let markBoundaryLoadStarted: (() => void) | undefined;
+    const boundaryLoadStarted = new Promise<void>((resolve): void => {
+      markBoundaryLoadStarted = resolve;
+    });
+    let releaseBoundaryLoad: (() => void) | undefined;
+    const boundaryLoadReleased = new Promise<void>((resolve): void => {
+      releaseBoundaryLoad = resolve;
+    });
+    await page.route(`**/api/v1/admin/employees/${fixture.employee_id}`, async (route): Promise<void> => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      markBoundaryLoadStarted?.();
+      await boundaryLoadReleased;
+      await route.continue();
+    });
+
     const boundaryPath = `/companies/${fixture.other_company_id}/employees/${fixture.employee_id}/overview`;
     const boundaryEmployeeResponse = page.waitForResponse((response): boolean => (
       response.request().method() === 'GET'
@@ -271,6 +290,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }, boundaryPath);
 
     await expect(page).toHaveURL(boundaryPath);
+    await boundaryLoadStarted;
+    await expect(page.getByText('Loading employee workspace')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Avery Example' })).toHaveCount(0);
+    releaseBoundaryLoad?.();
     const boundaryResponse = await boundaryEmployeeResponse;
     expect(boundaryResponse.request().headers()['x-company-id']).toBe(String(fixture.other_company_id));
     expect(boundaryResponse.status()).toBe(404);
@@ -480,13 +503,79 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       response.request().method() === 'PATCH'
       && new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}`
     ));
+    const dependentRatesLoaded = page.waitForResponse((response): boolean => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/employee_wage_rates'
+        && url.searchParams.get('employee_id') === String(fixture.employee_id);
+    });
     releaseSave?.();
     await saveDelivered;
+    const ratesResponse = await dependentRatesLoaded;
+    expect(ratesResponse.request().headers()['x-company-id']).toBe(String(fixture.company_id));
     await waitForUiCommit(page);
 
     await expect(page).toHaveURL(boundaryEditPath);
     await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
     await expect(page.getByText('Failed to save employee')).toHaveCount(0);
+    await context.close();
+  });
+
+  test('discards a delayed classification transition after switching clients', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.super_admin_email,
+      },
+    });
+    const page = await context.newPage();
+    let markTransitionStarted: (() => void) | undefined;
+    const transitionStarted = new Promise<void>((resolve): void => {
+      markTransitionStarted = resolve;
+    });
+    let releaseTransition: (() => void) | undefined;
+    const transitionReleased = new Promise<void>((resolve): void => {
+      releaseTransition = resolve;
+    });
+
+    await page.route(
+      `**/api/v1/admin/employees/${fixture.employee_id}/transition_tax_classification`,
+      async (route): Promise<void> => {
+        markTransitionStarted?.();
+        await transitionReleased;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { id: 999_999 } }),
+        });
+      },
+    );
+
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
+    await page.getByRole('button', { name: 'Create new classification record' }).click();
+    await page.getByLabel('Reason for transition *').fill('Confirmed worker classification change');
+    await page.getByRole('button', { name: 'Create linked record' }).click();
+    await transitionStarted;
+
+    const boundaryEditPath = `/companies/${fixture.other_company_id}/employees/${fixture.other_employee_id}/edit`;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, boundaryEditPath);
+    await expect(page).toHaveURL(boundaryEditPath);
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
+
+    const transitionDelivered = page.waitForResponse((response): boolean => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === `/api/v1/admin/employees/${fixture.employee_id}/transition_tax_classification`
+    ));
+    releaseTransition?.();
+    const transitionResponse = await transitionDelivered;
+    expect(transitionResponse.request().headers()['x-company-id']).toBe(String(fixture.company_id));
+    await waitForUiCommit(page);
+
+    await expect(page).toHaveURL(boundaryEditPath);
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
+    await expect(page.getByText('Create a new tax-classification record')).toHaveCount(0);
     await context.close();
   });
 
