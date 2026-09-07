@@ -22,7 +22,13 @@ npx eslint src --ext .ts,.tsx --max-warnings 0
 echo "✅ ESLint: OK"
 echo ""
 
-# 3. Build
+# 3. Unit tests
+echo "🧪 Unit tests..."
+npm test
+echo "✅ Unit tests: OK"
+echo ""
+
+# 4. Build
 echo "🏗️  Building..."
 npm run build
 echo "✅ Build: OK"

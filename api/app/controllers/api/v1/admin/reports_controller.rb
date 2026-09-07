@@ -1818,6 +1818,7 @@ module Api
 
         def pay_history_item(item)
           {
+            payroll_item_id: item.id,
             pay_period_id: item.pay_period_id,
             pay_date: item.pay_period.pay_date,
             period_description: item.pay_period.period_description,

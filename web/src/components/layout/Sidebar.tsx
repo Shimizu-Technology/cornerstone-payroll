@@ -38,6 +38,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
+import { employeesPath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -221,7 +222,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const { user, isAccountant, signOut } = useAuth();
-  const { activeCompany, canViewClientManagement } = useCompany();
+  const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const canManageClientConfiguration = isAdmin || user?.role === 'manager';
@@ -234,11 +235,17 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const historicalPayrollEnabled = activeCompany?.historical_payroll_enabled === true;
-  const primaryNavigation = isClient
+  const primaryNavigation = (isClient
     ? portalNavigation
     : clientNavigation.filter((item) => (
         item.href === '/historical-payroll' ? historicalPayrollEnabled : true
-      ));
+      ))
+  ).map((item): NavItem => {
+    if (!activeCompanyId) return item;
+    if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
+    if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
+    return item;
+  });
 
   useEffect(() => {
     if (!userMenuOpen) return;

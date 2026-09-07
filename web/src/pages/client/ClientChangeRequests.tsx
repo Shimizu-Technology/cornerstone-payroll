@@ -50,8 +50,8 @@ export function ClientChangeRequests() {
 
   useEffect(() => {
     if (!routeState) return;
-    navigate('.', { replace: true, state: null });
-  }, [navigate, routeState]);
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+  }, [location.pathname, location.search, navigate, routeState]);
 
   const loadRequest = async (id: number) => {
     const response = await clientEmployeeChangeRequestsApi.get(id);

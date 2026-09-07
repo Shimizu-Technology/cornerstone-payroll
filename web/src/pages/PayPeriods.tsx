@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,8 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { parsePayRunYear } from '@/lib/pay-run-filters';
+import { correctionRunPath, currentAppPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
@@ -41,6 +43,18 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
   adjustment: 'Adjustment',
 };
 
+interface PayPeriodMobileCardProps {
+  period: PayPeriod;
+  actionInFlight: string | null;
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRun: () => void;
+  onApprove: () => void;
+  onCommit: () => void;
+  onEnterHours: () => void;
+}
+
 function PayPeriodMobileCard({
   period,
   actionInFlight,
@@ -50,16 +64,8 @@ function PayPeriodMobileCard({
   onRun,
   onApprove,
   onCommit,
-}: {
-  period: PayPeriod;
-  actionInFlight: string | null;
-  onView: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRun: () => void;
-  onApprove: () => void;
-  onCommit: () => void;
-}) {
+  onEnterHours,
+}: PayPeriodMobileCardProps): ReactElement {
   const statusConfig = payPeriodStatusConfig[period.status];
 
   return (
@@ -105,7 +111,7 @@ function PayPeriodMobileCard({
             <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>
           </>
         )}
-        {period.status === 'draft' && <Button size="sm" onClick={onView}>Enter hours</Button>}
+        {period.status === 'draft' && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
         {period.status === 'calculated' && (
           <>
             <Button variant="outline" size="sm" onClick={onRun} disabled={actionInFlight !== null}>Recalculate</Button>
@@ -121,7 +127,14 @@ function PayPeriodMobileCard({
 export function PayPeriods() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId } = useCompany();
+  const returnTo = currentAppPath(location.pathname, location.search);
+  const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
+    activeCompanyId
+      ? payRunPath(activeCompanyId, payRunId, tab, { returnTo })
+      : correctionRunPath(undefined, payRunId, { returnTo })
+  );
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,13 +142,59 @@ export function PayPeriods() {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
   });
-  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const statusParam = searchParams.get('status') || '';
+  const statusFilter = ['draft', 'calculated', 'approved', 'committed'].includes(statusParam) ? statusParam : undefined;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<
-    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status'
-  >('pay_period');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [payPeriodCompanyId, setPayPeriodCompanyId] = useState<number | null>(null);
+  const searchTerm = searchParams.get('search') || '';
+  const requestedSort = searchParams.get('sort');
+  const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
+    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status';
+  const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
+  const yearFilter = searchParams.get('year') || '';
+  const payPeriodViewKey = `${statusFilter ?? ''}\u0000${yearFilter}`;
+  const updateViewParam = (key: string, value?: string, replace = false): void => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next, { replace });
+  };
+  const loadRequestIdRef = useRef(0);
+  const activeCompanyIdRef = useRef(activeCompanyId);
+  const payPeriodViewKeyRef = useRef(payPeriodViewKey);
+  const payPeriodCompanyIdRef = useRef<number | null>(null);
+  const defaultDatesRequestIdRef = useRef(0);
+  const checkSettingsRequestIdRef = useRef(0);
+  const mutationGenerationRef = useRef(0);
+  const loadPayPeriodsRef = useRef<(silent?: boolean) => Promise<void>>(async (): Promise<void> => undefined);
+
+  useLayoutEffect((): void => {
+    payPeriodViewKeyRef.current = payPeriodViewKey;
+    loadRequestIdRef.current += 1;
+    setLoading(true);
+    setPayPeriods([]);
+    setStatusCounts({});
+    setPayPeriodCompanyId(null);
+  }, [payPeriodViewKey]);
+
+  useLayoutEffect((): void => {
+    activeCompanyIdRef.current = activeCompanyId;
+    defaultDatesRequestIdRef.current += 1;
+    checkSettingsRequestIdRef.current += 1;
+    mutationGenerationRef.current += 1;
+    setIsCreateOpen(false);
+    setIsEditOpen(false);
+    setIsSubmitting(false);
+    setIsEditSubmitting(false);
+    setActionInFlight(null);
+    setEditingPayPeriod(null);
+    setError(null);
+    setCreateError(null);
+    setEditError(null);
+    setCurrentNextCheckNumber(null);
+    setCheckSettingsError(null);
+    setLoadingCheckSettings(false);
+  }, [activeCompanyId]);
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -168,20 +227,62 @@ export function PayPeriods() {
     includes_base_salary: true,
   });
 
+  const currentMutationGuard = (): (() => boolean) => {
+    const requestedCompanyId = activeCompanyId;
+    const requestedGeneration = mutationGenerationRef.current;
+    return (): boolean => (
+      requestedCompanyId === activeCompanyIdRef.current
+      && requestedGeneration === mutationGenerationRef.current
+    );
+  };
+
   // Load pay periods
-  const loadPayPeriods = useCallback(async (silent = false) => {
+  const loadPayPeriods = useCallback(async (silent = false): Promise<void> => {
+    const requestedCompanyId = activeCompanyId;
+    const requestedViewKey = payPeriodViewKey;
+    if (
+      requestedCompanyId !== activeCompanyIdRef.current
+      || requestedViewKey !== payPeriodViewKeyRef.current
+    ) return;
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => (
+      requestId === loadRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+      && requestedViewKey === payPeriodViewKeyRef.current
+    );
+
+    if (payPeriodCompanyIdRef.current !== requestedCompanyId) {
+      payPeriodCompanyIdRef.current = null;
+      setPayPeriodCompanyId(null);
+      setPayPeriods([]);
+      setStatusCounts({});
+    }
+
     try {
       if (!silent) setLoading(true);
       setError(null);
-      const response = await payPeriodsApi.list({ status: statusFilter });
+      const response = await payPeriodsApi.list({ status: statusFilter, year: parsePayRunYear(yearFilter) });
+      if (!isCurrentRequest()) return;
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
+      payPeriodCompanyIdRef.current = requestedCompanyId;
+      setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
+      if (!isCurrentRequest()) return;
+      if (!silent) {
+        setPayPeriods([]);
+        setStatusCounts({});
+      }
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      if (!silent) setLoading(false);
+      if (isCurrentRequest() && !silent) {
+        setLoading(false);
+      }
     }
-  }, [statusFilter]);
+  }, [activeCompanyId, payPeriodViewKey, statusFilter, yearFilter]);
+  useEffect((): void => {
+    loadPayPeriodsRef.current = loadPayPeriods;
+  }, [loadPayPeriods]);
 
   useEffect(() => {
     loadPayPeriods();
@@ -192,8 +293,8 @@ export function PayPeriods() {
     if (!state?.companySwitchNotice) return;
 
     setSwitchNotice(state.companySwitchNotice);
-    navigate('.', { replace: true, state: null });
-  }, [location.state, navigate]);
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     if (!switchNotice) return;
@@ -222,6 +323,7 @@ export function PayPeriods() {
       return;
     }
 
+    const isCurrentMutation = currentMutationGuard();
     try {
       setIsSubmitting(true);
       setCreateError(null);
@@ -230,27 +332,32 @@ export function PayPeriods() {
         ...formData,
         starting_check_number: startingCheckNumber,
       });
+      if (!isCurrentMutation()) return;
       setIsCreateOpen(false);
       setCurrentNextCheckNumber(null);
       setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setCreateError(err instanceof Error ? err.message : 'Failed to create pay period');
     } finally {
-      setIsSubmitting(false);
+      if (isCurrentMutation()) setIsSubmitting(false);
     }
   };
 
   const handleRunPayroll = async (id: number) => {
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`run-${id}`);
       setError(null);
       await payPeriodsApi.runPayroll(id);
-      loadPayPeriods(true);
+      if (!isCurrentMutation()) return;
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -292,6 +399,7 @@ export function PayPeriods() {
       return;
     }
 
+    const isCurrentMutation = currentMutationGuard();
     try {
       setIsEditSubmitting(true);
       setEditError(null);
@@ -307,46 +415,56 @@ export function PayPeriods() {
               notes: editFormData.notes,
             }
       );
+      if (!isCurrentMutation()) return;
       setIsEditOpen(false);
       setEditingPayPeriod(null);
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setEditError(err instanceof Error ? err.message : 'Failed to update pay period');
     } finally {
-      setIsEditSubmitting(false);
+      if (isCurrentMutation()) setIsEditSubmitting(false);
     }
   };
 
   const handleApprove = async (id: number) => {
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`approve-${id}`);
       setError(null);
       await payPeriodsApi.approve(id);
-      loadPayPeriods(true);
+      if (!isCurrentMutation()) return;
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to approve pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
   const handleCommit = async (id: number) => {
-    const period = payPeriods.find((candidate) => candidate.id === id);
+    const period = payPeriodCompanyId === activeCompanyId
+      ? payPeriods.find((candidate) => candidate.id === id)
+      : undefined;
     const warningText = period?.compliance_warnings?.length
       ? `\n\nAttention:\n${period.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
       : '';
     if (!confirm(`Are you sure you want to commit this pay period? This action cannot be undone.${warningText}`)) {
       return;
     }
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`commit-${id}`);
       setError(null);
       await payPeriodsApi.commit(id);
-      loadPayPeriods(true);
+      if (!isCurrentMutation()) return;
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -354,16 +472,19 @@ export function PayPeriods() {
     if (!confirm('Are you sure you want to delete this pay period?')) {
       return;
     }
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`delete-${id}`);
       setError(null);
       await payPeriodsApi.delete(id);
+      if (!isCurrentMutation()) return;
       setPayPeriods((prev) => prev.filter((period) => period.id !== id));
-      loadPayPeriods(true);
+      void loadPayPeriodsRef.current(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to delete pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -372,10 +493,17 @@ export function PayPeriods() {
   // Suggest dates only when the client has an explicit boundary rule. Manual
   // schedules intentionally start blank so a legacy assumption is never
   // presented as a confirmed payroll calendar.
-  const setDefaultDates = async () => {
+  const setDefaultDates = async (): Promise<void> => {
+    const requestId = ++defaultDatesRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === defaultDatesRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+    );
     setScheduleContext('Loading this client’s pay-schedule rules…');
     try {
       const response = await payScheduleSettingsApi.get();
+      if (!isCurrentRequest()) return;
       const schedule = response.pay_schedule_settings.pay_schedule;
       const confirmation = schedule.confirmation_status === 'confirmed' ? 'Confirmed' : 'Needs confirmation';
 
@@ -429,13 +557,21 @@ export function PayPeriods() {
       }));
       setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
       setScheduleContext('Schedule settings could not be loaded. Enter and verify all dates manually.');
     }
   };
 
-  const loadCurrentNextCheckNumber = async () => {
-    if (!activeCompanyId) {
+  const loadCurrentNextCheckNumber = async (): Promise<void> => {
+    const requestId = ++checkSettingsRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === checkSettingsRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+    );
+
+    if (!requestedCompanyId) {
       setCurrentNextCheckNumber(null);
       setCheckSettingsError(null);
       setLoadingCheckSettings(false);
@@ -445,14 +581,16 @@ export function PayPeriods() {
     try {
       setLoadingCheckSettings(true);
       setCheckSettingsError(null);
-      const response = await companiesApi.get(activeCompanyId);
+      const response = await companiesApi.get(requestedCompanyId);
+      if (!isCurrentRequest()) return;
       setCurrentNextCheckNumber(response.company.next_check_number ?? null);
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setCurrentNextCheckNumber(null);
       const message = err instanceof Error ? err.message : 'Unable to load current check settings.';
       setCheckSettingsError(message);
     } finally {
-      setLoadingCheckSettings(false);
+      if (isCurrentRequest()) setLoadingCheckSettings(false);
     }
   };
 
@@ -485,10 +623,15 @@ export function PayPeriods() {
     }
   };
 
+  const companyPayPeriods = useMemo(
+    (): PayPeriod[] => payPeriodCompanyId === activeCompanyId ? payPeriods : [],
+    [activeCompanyId, payPeriodCompanyId, payPeriods],
+  );
+  const companyStatusCounts = payPeriodCompanyId === activeCompanyId ? statusCounts : {};
   const visiblePayPeriods = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const filtered = normalizedSearch
-      ? payPeriods.filter((period) => {
+      ? companyPayPeriods.filter((period) => {
           const haystack = [
             formatDateRange(period.start_date, period.end_date),
             new Date(period.pay_date).toLocaleDateString('en-US'),
@@ -503,7 +646,7 @@ export function PayPeriods() {
 
           return haystack.includes(normalizedSearch);
         })
-      : payPeriods;
+      : companyPayPeriods;
 
     const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
     return [...filtered].sort((left, right) => {
@@ -543,7 +686,7 @@ export function PayPeriods() {
         ) || compareNumbers(left.id, right.id);
       }
     });
-  }, [payPeriods, searchTerm, sortBy, sortDirection]);
+  }, [companyPayPeriods, searchTerm, sortBy, sortDirection]);
 
   return (
     <div>
@@ -586,18 +729,18 @@ export function PayPeriods() {
           <Button
             variant={statusFilter === undefined ? 'primary' : 'outline'}
             size="sm"
-            onClick={() => setStatusFilter(undefined)}
+            onClick={() => updateViewParam('status')}
           >
-            All ({Object.values(statusCounts).reduce((a, b) => a + b, 0)})
+            All ({Object.values(companyStatusCounts).reduce((a, b) => a + b, 0)})
           </Button>
           {(['draft', 'calculated', 'approved', 'committed'] as const).map((status) => (
             <Button
               key={status}
               variant={statusFilter === status ? 'primary' : 'outline'}
               size="sm"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => updateViewParam('status', status)}
             >
-              {payPeriodStatusConfig[status]?.label || status} ({statusCounts[status] || 0})
+              {payPeriodStatusConfig[status]?.label || status} ({companyStatusCounts[status] || 0})
             </Button>
           ))}
         </div>
@@ -608,14 +751,14 @@ export function PayPeriods() {
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => updateViewParam('search', e.target.value, true)}
               className="pl-10"
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
             <Select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              onChange={(e) => updateViewParam('sort', e.target.value)}
               className="w-full sm:w-44"
             >
               <option value="pay_period">Sort: Pay Period</option>
@@ -626,9 +769,19 @@ export function PayPeriods() {
               <option value="net">Sort: Net Pay</option>
               <option value="status">Sort: Status</option>
             </Select>
+            <Label htmlFor="pay-period-year-filter" className="sr-only">Filter pay periods by year</Label>
+            <Select
+              id="pay-period-year-filter"
+              value={yearFilter}
+              onChange={(e) => updateViewParam('year', e.target.value)}
+              className="w-full sm:w-32"
+            >
+              <option value="">All years</option>
+              {Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index).map((year) => <option key={year} value={year}>{year}</option>)}
+            </Select>
             <Select
               value={sortDirection}
-              onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
+              onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"
             >
               <option value="desc">Newest / High</option>
@@ -653,7 +806,8 @@ export function PayPeriods() {
                     key={period.id}
                     period={period}
                     actionInFlight={actionInFlight}
-                    onView={() => navigate(`/pay-periods/${period.id}`)}
+                    onView={() => navigate(payRunDestination(period.id, 'overview'))}
+                    onEnterHours={() => navigate(payRunDestination(period.id, 'work'))}
                     onEdit={() => openEditModal(period)}
                     onDelete={() => handleDelete(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
@@ -757,7 +911,7 @@ export function PayPeriods() {
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"
-                              onClick={() => navigate(`/pay-periods/${period.id}`)}
+                              onClick={() => navigate(payRunDestination(period.id, 'overview'))}
                             >
                               View
                             </button>
@@ -786,7 +940,7 @@ export function PayPeriods() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => navigate(`/pay-periods/${period.id}`)}
+                              onClick={() => navigate(payRunDestination(period.id, 'work'))}
                             >
                               Enter Hours
                             </Button>
