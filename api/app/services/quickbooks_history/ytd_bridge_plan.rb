@@ -60,6 +60,9 @@ module QuickbooksHistory
 
     def eligibility_errors
       errors = []
+      unless batch.importer_version.in?(HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS)
+        errors << "Re-import this archive with a YTD-bridge-compatible QuickBooks importer before preparing historical YTD"
+      end
       errors << "Lock the approved QuickBooks history before preparing historical YTD" unless batch.locked?
       errors << "Apply the clean-client employee setup before preparing historical YTD" unless batch.historical_client_bootstrap&.applied?
       errors << "Approve the cutover review before preparing historical YTD" unless batch.historical_import_cutover_review&.approved?

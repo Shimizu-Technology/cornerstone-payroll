@@ -316,6 +316,55 @@ RSpec.describe "QuickBooks historical YTD bridge" do
     expect(batch.reload.historical_ytd_bridge).to be_nil
   end
 
+  it "surfaces plan errors when an empty archive cannot provide a YTD boundary" do
+    batch = create(
+      :historical_import_batch,
+      company: company,
+      status: "locked",
+      locked_at: Time.current,
+      tax_wage_reconciliation: { "passed" => true }
+    )
+    create(
+      :historical_client_bootstrap,
+      company: company,
+      historical_import_batch: batch,
+      status: "applied"
+    )
+    approve_historical_cutover(batch, actor: actor)
+
+    expect do
+      QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
+    end.to raise_error(ArgumentError, /no employee balances to carry forward/i)
+    expect(batch.reload.historical_ytd_bridge).to be_nil
+  end
+
+  it "does not block live payroll for a locked archive that cannot activate a bridge" do
+    existing_period = build_next_period(company)
+    existing_period.save!
+    create(
+      :historical_import_batch,
+      company: company,
+      status: "locked",
+      locked_at: Time.current,
+      tax_wage_reconciliation: { "passed" => true }
+    )
+
+    expect(existing_period.update(status: "calculated")).to be(true)
+    expect(build_next_period(company)).to be_valid
+  end
+
+  it "does not require a YTD bridge for a legacy locked archive" do
+    create(
+      :historical_import_batch,
+      company: company,
+      status: "locked",
+      locked_at: Time.current,
+      importer_version: "quickbooks-online-payroll-v4"
+    )
+
+    expect(build_next_period(company)).to be_valid
+  end
+
   it "refuses activation if live payroll appears after the bridge preview" do
     bridge = prepare_previewed_bridge
     build_next_period(company).save!(validate: false)

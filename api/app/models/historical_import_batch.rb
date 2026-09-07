@@ -3,6 +3,7 @@
 class HistoricalImportBatch < ApplicationRecord
   STATUSES = %w[previewed applied locked failed].freeze
   SOURCE_SYSTEMS = %w[quickbooks_online].freeze
+  YTD_BRIDGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
 
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true

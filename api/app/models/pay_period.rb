@@ -332,16 +332,22 @@ class PayPeriod < ApplicationRecord
   def starts_after_historical_ytd_boundary
     return if company_id.blank?
 
-    batches = HistoricalImportBatch.where(company_id: company_id, status: "locked")
+    batches = HistoricalImportBatch.where(
+      company_id: company_id,
+      status: "locked",
+      importer_version: HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS
+    )
                                    .includes(:historical_ytd_bridge)
                                    .to_a
     return if batches.empty?
 
-    bridges = batches.map(&:historical_ytd_bridge)
-    unless bridges.all? { |bridge| bridge&.applied? }
-      errors.add(:base, "Activate the verified historical YTD opening balances before creating the first live pay period")
+    bridges = batches.filter_map(&:historical_ytd_bridge).select(&:applied?)
+    unbridged_batch = batches.any? { |batch| !batch.historical_ytd_bridge&.applied? }
+    if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
+      errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return
     end
+    return if bridges.empty?
 
     boundaries = bridges.map do |bridge|
       summary = bridge.preview_summary.to_h

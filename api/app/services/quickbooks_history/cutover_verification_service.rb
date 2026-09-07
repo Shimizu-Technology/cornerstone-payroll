@@ -13,7 +13,7 @@ module QuickbooksHistory
       quickbooks-online-payroll-v4
       quickbooks-online-payroll-v5
     ].freeze
-    TAX_WAGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
+    TAX_WAGE_IMPORTER_VERSIONS = HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS
     LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS = %w[
       quickbooks-online-payroll-v2
       quickbooks-online-payroll-v3
