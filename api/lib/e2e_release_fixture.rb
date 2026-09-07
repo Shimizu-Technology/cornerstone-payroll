@@ -345,6 +345,16 @@ class E2eReleaseFixture
         notes: "Gate 0 pay-run filter race scenario"
       )
 
+      mutation_race_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 6, 21),
+        end_date: Date.new(2026, 7, 4),
+        pay_date: Date.new(2026, 7, 10),
+        notes: "Gate 0 pay-run mutation race scenario"
+      )
+
       time_import_period = create_pay_period!(
         company: company,
         pay_schedule: pay_schedule,
@@ -441,6 +451,7 @@ class E2eReleaseFixture
         workflow_pay_period_id: workflow_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
         filter_race_pay_period_id: filter_race_period.id,
+        mutation_race_pay_period_id: mutation_race_period.id,
         time_import_pay_period_id: time_import_period.id,
         time_tracking_source_id: source.id,
         first_time_import_id: first_import.id,

@@ -161,6 +161,7 @@ export function PayPeriods() {
   const payPeriodCompanyIdRef = useRef<number | null>(null);
   const defaultDatesRequestIdRef = useRef(0);
   const checkSettingsRequestIdRef = useRef(0);
+  const mutationGenerationRef = useRef(0);
 
   useLayoutEffect((): void => {
     payPeriodViewKeyRef.current = payPeriodViewKey;
@@ -171,9 +172,14 @@ export function PayPeriods() {
     activeCompanyIdRef.current = activeCompanyId;
     defaultDatesRequestIdRef.current += 1;
     checkSettingsRequestIdRef.current += 1;
+    mutationGenerationRef.current += 1;
     setIsCreateOpen(false);
     setIsEditOpen(false);
+    setIsSubmitting(false);
+    setIsEditSubmitting(false);
+    setActionInFlight(null);
     setEditingPayPeriod(null);
+    setError(null);
     setCreateError(null);
     setEditError(null);
     setCurrentNextCheckNumber(null);
@@ -211,6 +217,15 @@ export function PayPeriods() {
     run_purpose: 'regular' as PayRunPurpose,
     includes_base_salary: true,
   });
+
+  const currentMutationGuard = (): (() => boolean) => {
+    const requestedCompanyId = activeCompanyId;
+    const requestedGeneration = mutationGenerationRef.current;
+    return (): boolean => (
+      requestedCompanyId === activeCompanyIdRef.current
+      && requestedGeneration === mutationGenerationRef.current
+    );
+  };
 
   // Load pay periods
   const loadPayPeriods = useCallback(async (silent = false): Promise<void> => {
@@ -292,6 +307,7 @@ export function PayPeriods() {
       return;
     }
 
+    const isCurrentMutation = currentMutationGuard();
     try {
       setIsSubmitting(true);
       setCreateError(null);
@@ -300,27 +316,32 @@ export function PayPeriods() {
         ...formData,
         starting_check_number: startingCheckNumber,
       });
+      if (!isCurrentMutation()) return;
       setIsCreateOpen(false);
       setCurrentNextCheckNumber(null);
       setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setCreateError(err instanceof Error ? err.message : 'Failed to create pay period');
     } finally {
-      setIsSubmitting(false);
+      if (isCurrentMutation()) setIsSubmitting(false);
     }
   };
 
   const handleRunPayroll = async (id: number) => {
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`run-${id}`);
       setError(null);
       await payPeriodsApi.runPayroll(id);
+      if (!isCurrentMutation()) return;
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -362,6 +383,7 @@ export function PayPeriods() {
       return;
     }
 
+    const isCurrentMutation = currentMutationGuard();
     try {
       setIsEditSubmitting(true);
       setEditError(null);
@@ -377,26 +399,31 @@ export function PayPeriods() {
               notes: editFormData.notes,
             }
       );
+      if (!isCurrentMutation()) return;
       setIsEditOpen(false);
       setEditingPayPeriod(null);
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setEditError(err instanceof Error ? err.message : 'Failed to update pay period');
     } finally {
-      setIsEditSubmitting(false);
+      if (isCurrentMutation()) setIsEditSubmitting(false);
     }
   };
 
   const handleApprove = async (id: number) => {
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`approve-${id}`);
       setError(null);
       await payPeriodsApi.approve(id);
+      if (!isCurrentMutation()) return;
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to approve pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -410,15 +437,18 @@ export function PayPeriods() {
     if (!confirm(`Are you sure you want to commit this pay period? This action cannot be undone.${warningText}`)) {
       return;
     }
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`commit-${id}`);
       setError(null);
       await payPeriodsApi.commit(id);
+      if (!isCurrentMutation()) return;
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -426,16 +456,19 @@ export function PayPeriods() {
     if (!confirm('Are you sure you want to delete this pay period?')) {
       return;
     }
+    const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`delete-${id}`);
       setError(null);
       await payPeriodsApi.delete(id);
+      if (!isCurrentMutation()) return;
       setPayPeriods((prev) => prev.filter((period) => period.id !== id));
       loadPayPeriods(true);
     } catch (err) {
+      if (!isCurrentMutation()) return;
       setError(err instanceof Error ? err.message : 'Failed to delete pay period');
     } finally {
-      setActionInFlight(null);
+      if (isCurrentMutation()) setActionInFlight(null);
     }
   };
 
@@ -720,7 +753,13 @@ export function PayPeriods() {
               <option value="net">Sort: Net Pay</option>
               <option value="status">Sort: Status</option>
             </Select>
-            <Select value={yearFilter} onChange={(e) => updateViewParam('year', e.target.value)} className="w-full sm:w-32">
+            <Label htmlFor="pay-period-year-filter" className="sr-only">Filter pay periods by year</Label>
+            <Select
+              id="pay-period-year-filter"
+              value={yearFilter}
+              onChange={(e) => updateViewParam('year', e.target.value)}
+              className="w-full sm:w-32"
+            >
               <option value="">All years</option>
               {Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index).map((year) => <option key={year} value={year}>{year}</option>)}
             </Select>

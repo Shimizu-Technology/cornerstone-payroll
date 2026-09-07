@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useOutlet } from 'react-router';
 import { Menu, PanelLeftOpen, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -82,7 +82,7 @@ export function Layout() {
     displayedCompanyIdRef.current = displayedCompanyId;
   }, [displayedCompanyId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isFirstCompanyRender.current) {
       isFirstCompanyRender.current = false;
       displayedCompanyIdRef.current = activeCompanyId;
@@ -92,15 +92,10 @@ export function Layout() {
     const currentDisplayedCompanyId = displayedCompanyIdRef.current;
 
     if (activeCompanyId == null || currentDisplayedCompanyId == null) {
-      const resetTimer = window.setTimeout(() => {
-        setDisplayedCompanyId(activeCompanyId);
-        displayedCompanyIdRef.current = activeCompanyId;
-        setIsSwitchingCompany(false);
-      }, 0);
-
-      return () => {
-        window.clearTimeout(resetTimer);
-      };
+      setDisplayedCompanyId(activeCompanyId);
+      displayedCompanyIdRef.current = activeCompanyId;
+      setIsSwitchingCompany(false);
+      return;
     }
 
     if (activeCompanyId === currentDisplayedCompanyId) {
@@ -113,22 +108,15 @@ export function Layout() {
       };
     }
 
-    const startTimer = window.setTimeout(() => {
-      setIsSwitchingCompany(true);
-    }, 0);
-
-    const swapTimer = window.setTimeout(() => {
-      setDisplayedCompanyId(activeCompanyId);
-      displayedCompanyIdRef.current = activeCompanyId;
-    }, 140);
+    setIsSwitchingCompany(true);
+    setDisplayedCompanyId(activeCompanyId);
+    displayedCompanyIdRef.current = activeCompanyId;
 
     const settleTimer = window.setTimeout(() => {
       setIsSwitchingCompany(false);
     }, 520);
 
     return () => {
-      window.clearTimeout(startTimer);
-      window.clearTimeout(swapTimer);
       window.clearTimeout(settleTimer);
     };
   }, [activeCompanyId]);
