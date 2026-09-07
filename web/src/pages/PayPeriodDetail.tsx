@@ -2803,7 +2803,7 @@ export function PayPeriodDetail({
                       <TableRow className="bg-slate-100 font-bold hover:bg-slate-100">
                         <TableCell stickyLeft className="!z-40 bg-slate-100">Totals ({sortPayrollItems.length} {sortPayrollItems.length === 1 ? 'employee' : 'employees'})</TableCell>
                         <TableCell className="bg-slate-100" aria-label="First name total not applicable">—</TableCell>
-                        <TableCell className="bg-slate-100 text-right">{Number(registerTotals.hours.toFixed(2))}</TableCell>
+                        <TableCell className="bg-slate-100 text-right">{registerTotals.hours.toFixed(2)}</TableCell>
                         <TableCell className="bg-slate-100 text-right" aria-label="Pay rate total not applicable">—</TableCell>
                         <TableCell className="bg-slate-100 text-right">{formatCurrency(registerTotals.gross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="bg-slate-100 text-right">{registerTotals.customEarnings > 0 ? formatCurrency(registerTotals.customEarnings) : '—'}</TableCell>}
