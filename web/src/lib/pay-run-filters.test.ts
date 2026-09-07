@@ -7,7 +7,7 @@ describe('parsePayRunYear', () => {
     expect(parsePayRunYear('1900')).toBe(1900);
   });
 
-  it.each([null, '', 'not-a-year', '2026abc', '26', '1899', '10000'])('omits an invalid year filter: %s', (value) => {
+  it.each([null, '', 'not-a-year', '2026abc', '26', '1899', '10000'])('omits an invalid year filter: %s', (value): void => {
     expect(parsePayRunYear(value)).toBeUndefined();
   });
 });
