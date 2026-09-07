@@ -17,5 +17,5 @@ interface PayrollCheckStatus {
 }
 
 export function countActivePayrollChecks(items: PayrollCheckStatus[]): number {
-  return items.filter((item) => Boolean(item.check_number?.trim()) && !item.voided).length;
+  return items.filter((item): boolean => Boolean(item.check_number?.trim()) && !item.voided).length;
 }

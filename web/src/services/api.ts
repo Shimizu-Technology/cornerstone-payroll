@@ -389,7 +389,7 @@ export const employeesApi = {
     group_by?: string;
   }, signal?: AbortSignal): Promise<{ data: Employee[]; meta: PaginationMeta }> =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
-  get: (id: number, companyId?: number) =>
+  get: (id: number, companyId?: number): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
@@ -1525,7 +1525,7 @@ export interface PayrollItemsListResponse {
 export const payrollItemsApi = {
   list: (payPeriodId: number) =>
     api.get<PayrollItemsListResponse>(`/admin/pay_periods/${payPeriodId}/payroll_items`),
-  get: (payPeriodId: number, id: number, companyId?: number) =>
+  get: (payPeriodId: number, id: number, companyId?: number): Promise<{ payroll_item: PayrollItem }> =>
     api.get<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, undefined, { companyId }),
   create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { payroll_item: data, auto_calculate: data.auto_calculate }),

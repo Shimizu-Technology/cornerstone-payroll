@@ -1197,7 +1197,7 @@ export function EmployeeForm() {
                 </Select>
               </div>
               <div>
-                <label htmlFor="job_title" className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="job_title" className="mb-2 block text-sm font-medium text-gray-700">
                   Job Title
                 </label>
                 <Input
