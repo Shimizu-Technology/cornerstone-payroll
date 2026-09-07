@@ -523,18 +523,18 @@ export const employeePayrollFieldsApi = {
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
     api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`),
-  bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[], companyId?: number) =>
+  bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[], companyId?: number): Promise<{ employee_payroll_fields: EmployeePayrollField[] }> =>
     api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }, { companyId }),
 };
 
 export const employeeWageRatesApi = {
-  list: (employeeId: number, companyId?: number) =>
+  list: (employeeId: number, companyId?: number): Promise<{ wage_rates: EmployeeWageRate[] }> =>
     api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
-  create: (data: EmployeeWageRate & { employee_id: number }, companyId?: number) =>
+  create: (data: EmployeeWageRate & { employee_id: number }, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
     api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
-  update: (id: number, data: Partial<EmployeeWageRate>, companyId?: number) =>
+  update: (id: number, data: Partial<EmployeeWageRate>, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
     api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
-  delete: (id: number, companyId?: number) =>
+  delete: (id: number, companyId?: number): Promise<{ message: string }> =>
     api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`, { companyId }),
 };
 
@@ -1019,9 +1019,9 @@ export interface RunPayrollFieldInputEntry {
 }
 
 export const payPeriodsApi = {
-  list: (params?: { status?: string; year?: number }, companyId?: number) =>
+  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<PayPeriodListResponse> =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params, { companyId }),
-  get: (id: number, companyId?: number) =>
+  get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`, undefined, { companyId }),
   payrollFieldInputs: (id: number) =>
     api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
@@ -1146,9 +1146,9 @@ export const payPeriodsApi = {
 };
 
 export const clientPayPeriodsApi = {
-  list: (params?: { status?: string; year?: number }, companyId?: number) =>
+  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<PayPeriodListResponse> =>
     api.get<PayPeriodListResponse>('/client/pay_periods', params, { companyId }),
-  get: (id: number, companyId?: number) =>
+  get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
 };
 
