@@ -69,7 +69,9 @@ export function PayRunWorkspace(): ReactElement {
   const [payRun, setPayRun] = useState<(PayPeriod & { payroll_items?: PayrollItem[] }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const routeKey = `${companyId}:${payRunId}`;
   const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
     activeTab === 'work' ? payRunId : null,
   );
@@ -81,24 +83,30 @@ export function PayRunWorkspace(): ReactElement {
     if (!Number.isInteger(payRunId) || payRunId < 1) {
       setPayRun(null);
       setError('This pay-run workspace link is invalid.');
+      setResolvedRouteKey(routeKey);
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setResolvedRouteKey(null);
     setError(null);
     setPayRun(null);
     try {
-      const response = await payPeriodsApi.get(payRunId);
-      if (isCurrentRequest()) setPayRun(response.pay_period);
+      const response = await payPeriodsApi.get(payRunId, companyId);
+      if (isCurrentRequest()) {
+        setPayRun(response.pay_period);
+        setResolvedRouteKey(routeKey);
+      }
     } catch (loadError) {
       if (isCurrentRequest()) {
         setError(loadError instanceof Error ? loadError.message : 'Could not load this pay-run workspace.');
+        setResolvedRouteKey(routeKey);
       }
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [payRunId]);
+  }, [companyId, payRunId, routeKey]);
 
   useEffect((): (() => void) => {
     void load();
@@ -127,7 +135,7 @@ export function PayRunWorkspace(): ReactElement {
 
   const currentPath = currentAppPath(location.pathname, location.search);
 
-  if (loading) {
+  if (loading || resolvedRouteKey !== routeKey) {
     return <WorkspaceLoader label="Loading pay-run workspace" />;
   }
 
@@ -176,7 +184,7 @@ export function PayRunWorkspace(): ReactElement {
           <section hidden={activeTab !== 'work'} aria-label="Process payroll workspace">
             <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
               <PayPeriodDetail
-                key={payRunId}
+                key={`${companyId}:${payRunId}`}
                 initialPayPeriod={payRun}
                 onPayPeriodChange={handlePayRunChange}
               />

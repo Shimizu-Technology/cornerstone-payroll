@@ -1193,10 +1193,11 @@ export function EmployeeForm() {
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="job_title" className="block text-sm font-medium text-gray-700 mb-1">
                   Job Title
                 </label>
                 <Input
+                  id="job_title"
                   name="job_title"
                   value={form.job_title || ''}
                   onChange={(e) => handleChange('job_title', e.target.value)}

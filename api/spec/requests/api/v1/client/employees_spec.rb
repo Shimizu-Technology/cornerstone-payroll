@@ -38,7 +38,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       get "/api/v1/client/employees"
 
       expect(response).to have_http_status(:ok), response.body
-      data = response.parsed_body.fetch("data")
+      json = JSON.parse(response.body)
+      data = json.fetch("data")
       expect(data.map { |row| row.fetch("id") }).to contain_exactly(employee.id)
       expect(data.first.fetch("job_title")).to eq("Payroll Clerk")
     end
@@ -72,10 +73,11 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       end.to change(Employee, :count).by(1).and change(EmployeeChangeRequest, :count).by(1)
 
       expect(response).to have_http_status(:created)
+      json = JSON.parse(response.body)
       created = Employee.order(:id).last
       expect(created.company_id).to eq(company.id)
       expect(created.job_title).to eq("Bookkeeper")
-      expect(response.parsed_body.dig("data", "job_title")).to eq("Bookkeeper")
+      expect(json.dig("data", "job_title")).to eq("Bookkeeper")
       expect(created.status).to eq("inactive")
       expect(created.portal_pending_approval).to eq(true)
       expect(created.pay_rate.to_f).to eq(0.0)
@@ -386,9 +388,10 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       get "/api/v1/client/employees/#{employee.id}"
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("data", "ssn")).to be_nil
-      expect(response.parsed_body.dig("data", "ssn_last_four")).to eq("6789")
-      expect(response.parsed_body.dig("data", "job_title")).to eq("Payroll Clerk")
+      json = JSON.parse(response.body)
+      expect(json.dig("data", "ssn")).to be_nil
+      expect(json.dig("data", "ssn_last_four")).to eq("6789")
+      expect(json.dig("data", "job_title")).to eq("Payroll Clerk")
     end
   end
 end

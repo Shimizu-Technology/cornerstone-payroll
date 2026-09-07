@@ -410,6 +410,57 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('link', { name: 'Open processing' })).toHaveCount(0);
   });
 
+  test('reloads a pay-run workspace when only the company route changes', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    const payRunId = fixture.workflow_pay_period_id;
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${payRunId}/overview`);
+    await expect(page.getByText(`Pay run #${payRunId}`, { exact: true })).toBeVisible();
+
+    let markBoundaryLoadStarted: (() => void) | undefined;
+    const boundaryLoadStarted = new Promise<void>((resolve): void => {
+      markBoundaryLoadStarted = resolve;
+    });
+    let releaseBoundaryLoad: (() => void) | undefined;
+    const boundaryLoadReleased = new Promise<void>((resolve): void => {
+      releaseBoundaryLoad = resolve;
+    });
+    await page.route(`**/api/v1/admin/pay_periods/${payRunId}`, async (route): Promise<void> => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      markBoundaryLoadStarted?.();
+      await boundaryLoadReleased;
+      await route.continue();
+    });
+
+    const boundaryPath = `/companies/${fixture.other_company_id}/pay-runs/${payRunId}/overview`;
+    const boundaryResponsePromise = page.waitForResponse((response): boolean => (
+      response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/v1/admin/pay_periods/${payRunId}`
+    ));
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, boundaryPath);
+
+    await expect(page).toHaveURL(boundaryPath);
+    await boundaryLoadStarted;
+    await expect(page.getByText('Loading pay-run workspace')).toBeVisible();
+    await expect(page.getByText(`Pay run #${payRunId}`, { exact: true })).toHaveCount(0);
+    releaseBoundaryLoad?.();
+    const boundaryResponse = await boundaryResponsePromise;
+    expect(boundaryResponse.request().headers()['x-company-id']).toBe(String(fixture.other_company_id));
+    expect(boundaryResponse.status()).toBe(404);
+    await expect(page.getByRole('heading', { name: 'This pay-run workspace could not be opened' })).toBeVisible();
+    await context.close();
+  });
+
   test('does not reveal a prior company employee when an edit load finishes late', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
