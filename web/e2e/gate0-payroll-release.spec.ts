@@ -182,6 +182,17 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   });
 
   test('hides prior-company dashboard data while a company switch is loading', async ({ browser }): Promise<void> => {
+    const primaryDashboardResponse = await adminApi.get('admin/reports/dashboard');
+    const boundaryDashboardResponse = await adminApi.get('admin/reports/dashboard', {
+      headers: { 'X-Company-Id': String(fixture.other_company_id) },
+    });
+    expect(primaryDashboardResponse.ok()).toBeTruthy();
+    expect(boundaryDashboardResponse.ok()).toBeTruthy();
+    const primaryStats = (await responseJson(primaryDashboardResponse)).stats as { total_employees: number };
+    const boundaryStats = (await responseJson(boundaryDashboardResponse)).stats as { total_employees: number };
+    const primaryTotalLabel = `${primaryStats.total_employees} total records`;
+    const boundaryTotalLabel = `${boundaryStats.total_employees} total records`;
+
     const context = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email,
@@ -206,15 +217,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
 
     await page.goto('/app');
-    await expect(page.getByText('2 total records')).toBeVisible();
+    await expect(page.getByText(primaryTotalLabel)).toBeVisible();
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await boundaryRequestStarted;
-    await expect(page.getByText('2 total records')).toHaveCount(0);
-    await expect(page.getByText('1 total records')).toHaveCount(0);
+    await expect(page.getByText(primaryTotalLabel)).toHaveCount(0);
+    await expect(page.getByText(boundaryTotalLabel)).toHaveCount(0);
 
     releaseBoundaryResponse?.();
-    await expect(page.getByText('1 total records')).toBeVisible();
+    await expect(page.getByText(boundaryTotalLabel)).toBeVisible();
     await context.close();
   });
 
@@ -879,6 +890,18 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.reload();
     await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Reports & Documents')).toBeVisible();
+
+    const employeeHistoryUrl = `/companies/${fixture.company_id}/employees/${fixture.employee_id}/pay-history`;
+    await page.goto(employeeHistoryUrl);
+    const historyPayrollItemLink = page.getByRole('link', { name: /Open payroll item for/ }).first();
+    const historyPayrollItemHref = await historyPayrollItemLink.getAttribute('href');
+    expect(historyPayrollItemHref).toBeTruthy();
+    expect(new URL(historyPayrollItemHref!, page.url()).searchParams.get('return_to')).toBe(employeeHistoryUrl);
+    await historyPayrollItemLink.click();
+    await expect(page).toHaveURL(new URL(historyPayrollItemHref!, page.url()).href);
+    await expect(page.getByText(/Payroll item #\d+/)).toBeVisible();
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(employeeHistoryUrl);
   });
 
   test('preserves the client pay-run list context when returning from detail', async ({ browser }): Promise<void> => {
