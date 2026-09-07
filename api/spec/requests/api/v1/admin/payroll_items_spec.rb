@@ -47,6 +47,15 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response.body).not_to include(other_employee.full_name)
     end
 
+    it "does not return an item through a different pay run in the same company" do
+      other_pay_period = create(:pay_period, company: company, status: "calculated")
+
+      get "/api/v1/admin/pay_periods/#{other_pay_period.id}/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:not_found)
+      expect(JSON.parse(response.body)).to eq("error" => "Payroll item not found", "details" => {})
+    end
+
     it "returns not found when the parent pay period does not exist" do
       get "/api/v1/admin/pay_periods/0/payroll_items/#{payroll_item.id}"
 

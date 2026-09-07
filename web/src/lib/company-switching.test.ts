@@ -30,6 +30,20 @@ describe('getCompanySwitchRedirect', () => {
     });
   });
 
+  it('falls back to legacy lists when no selected company id is available', () => {
+    expect(getCompanySwitchRedirect('/companies/7/pay-runs/88/checks')).toMatchObject({
+      to: '/pay-periods',
+    });
+    expect(getCompanySwitchRedirect('/companies/7/employees/55/pay-history')).toMatchObject({
+      to: '/employees',
+    });
+  });
+
+  it('leaves canonical and legacy employee creation forms in place', () => {
+    expect(getCompanySwitchRedirect('/companies/7/employees/new', 12)).toBeNull();
+    expect(getCompanySwitchRedirect('/employees/new', 12)).toBeNull();
+  });
+
   it('preserves queue filters while switching companies', () => {
     expect(getCompanySwitchRedirect('/companies/7/pay-runs', 12, '?status=draft&sort=pay_date&direction=asc')).toEqual({
       notice: 'Switched clients. Showing pay periods for the selected client.',

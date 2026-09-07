@@ -154,7 +154,10 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = @pay_period.payroll_items.includes(:payroll_item_field_entries).find(params[:id])
+          @payroll_item = @pay_period.payroll_items.includes(:payroll_item_field_entries).find_by(id: params[:id])
+          return if @payroll_item
+
+          render json: { error: "Payroll item not found", details: {} }, status: :not_found
         end
 
         def payroll_item_params

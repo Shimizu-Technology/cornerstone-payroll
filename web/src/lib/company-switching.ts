@@ -17,8 +17,9 @@ export function getCompanySwitchRedirect(pathname: string, nextCompanyId?: numbe
   }
 
   const canonicalEmployeeList = matchPath('/companies/:companyId/employees', pathname);
+  const canonicalEmployeeCreate = matchPath('/companies/:companyId/employees/new', pathname);
   const legacyEmployeeList = pathname === '/employees';
-  if (canonicalEmployeeList || legacyEmployeeList || matchPath('/companies/:companyId/employees/*', pathname) || (pathname !== '/employees/new' && matchPath('/employees/:id', pathname))) {
+  if (canonicalEmployeeList || legacyEmployeeList || (!canonicalEmployeeCreate && matchPath('/companies/:companyId/employees/*', pathname)) || (pathname !== '/employees/new' && matchPath('/employees/:id', pathname))) {
     return {
       notice: 'Switched clients. Showing employees for the selected client.',
       to: nextCompanyId ? employeesPath(nextCompanyId, canonicalEmployeeList || legacyEmployeeList ? search : '') : '/employees',

@@ -171,7 +171,11 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }, currentPath);
     await expect(page.getByText(`Payroll item #${fixture.bonus_alpha_payroll_item_id}`)).toBeVisible();
 
+    const delayedItemResponseDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === delayedItemPath
+    ));
     releaseDelayedItem?.();
+    await delayedItemResponseDelivered;
     await waitForUiCommit(page);
     await expect(page.getByText(`Payroll item #${fixture.bonus_alpha_payroll_item_id}`)).toBeVisible();
     await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toHaveCount(0);
@@ -730,7 +734,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
     await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
 
+    const delayedPayRunResponseDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === '/api/v1/admin/pay_periods'
+      && response.request().headers()['x-company-id'] === String(fixture.company_id)
+    ));
     releaseDelayedResponse?.();
+    await delayedPayRunResponseDelivered;
     await delayedRequestFinished;
     await waitForUiCommit(page);
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
@@ -823,7 +832,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
     await expect(page.getByText('Avery Example')).toHaveCount(0);
 
+    const delayedEmployeeResponseDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === '/api/v1/admin/employees'
+      && response.request().headers()['x-company-id'] === String(fixture.company_id)
+    ));
     releaseDelayedEmployeeResponse?.();
+    await delayedEmployeeResponseDelivered;
     await delayedEmployeeRequestFinished;
     await waitForUiCommit(page);
     await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
