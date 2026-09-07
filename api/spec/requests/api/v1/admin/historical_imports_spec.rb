@@ -18,7 +18,9 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
   end
 
   it "previews, paginates, applies, and locks a reconciled QuickBooks bundle" do
-    post "/api/v1/admin/historical_imports/preview", params: { files: quickbooks_history_uploads }
+    post "/api/v1/admin/historical_imports/preview", params: {
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads
+    }
 
     expect(response).to have_http_status(:ok), response.body
     preview_body = JSON.parse(response.body)
@@ -29,13 +31,13 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     )
     expect(preview_body.fetch("meta")).to eq("idempotent" => false)
     expect(preview_body.dig("data", "source_retention_summary")).to include(
-      "expected_file_count" => 5,
-      "retained_file_count" => 5,
-      "verified_file_count" => 5,
+      "expected_file_count" => 10,
+      "retained_file_count" => 10,
+      "verified_file_count" => 10,
       "failed_file_count" => 0,
       "ready" => true
     )
-    expect(preview_body.dig("data", "source_files").size).to eq(5)
+    expect(preview_body.dig("data", "source_files").size).to eq(10)
     expect(preview_body.to_json).not_to include("storage_key")
     expect(PayPeriod.count).to eq(0)
     expect(PayrollItem.count).to eq(0)
@@ -192,7 +194,11 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
   end
 
   it "previews and applies clean-client employee preparation without applying historical payroll" do
-    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    batch = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: admin
+    ).call.batch
 
     post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
     expect(response).to have_http_status(:ok), response.body
@@ -340,7 +346,11 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
   end
 
   it "lets accountants download approved cutover evidence without granting source-file access" do
-    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    batch = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: admin
+    ).call.batch
     review_historical_workers_as_archive_only(batch, actor: admin)
     QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT

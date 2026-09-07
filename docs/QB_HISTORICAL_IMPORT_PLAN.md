@@ -1,6 +1,6 @@
 # QuickBooks Historical Import Plan
 
-**Status:** the historical archive, source retention, reports, cutover gate, and import hardening are deployed; clean-client employee preparation is in review; YTD bridging and the production MoSa cutover remain incomplete
+**Status:** the historical archive, source retention, reports, cutover gate, and clean-client employee preparation are deployed; exact Tax and Wage Summary reconciliation and the historical YTD bridge are in review; the production MoSa cutover remains incomplete
 **Owner:** Leon / Shimizu Technology  
 **Last reviewed:** 2026-09-07
 
@@ -17,12 +17,12 @@ The historical import lane now:
 - encrypts the private Employee Details snapshot at rest;
 - stages the bundle as a preview, requires an explicit acknowledgement before apply, and locks a reconciled import against later edits;
 - requires an attributed manager or administrator with access to the company for every apply, lock, and manual worker mapping, including command-line operations;
-- detects an identical bundle and reuses the prior batch instead of importing it twice;
+- detects an identical bundle under the same importer version and reuses the prior batch instead of importing it twice; a newer importer creates a separate auditable preview rather than silently reusing or mutating an older interpretation;
 - blocks missing or duplicate required reports, mixed-company bundles, unmatched native paychecks, ambiguous duplicate paycheck signatures, altered staged totals, and overlap with already-applied history;
 - lets accountants browse the archive while limiting preview, apply, lock, and employee mapping to managers and administrators;
 - never creates or changes live pay periods, payroll items, YTD aggregates, payments, tax filings, checks, reminders, or notifications.
 
-The archive and clean-client preparation use eight dedicated records:
+The archive, clean-client preparation, and YTD bridge use eleven dedicated records:
 
 - `HistoricalImportBatch` records provenance, validation, reconciliation, lifecycle state, and operator attribution.
 - `HistoricalImportSourceFile` records immutable source metadata, private object location, verification state, and the user who uploaded it.
@@ -32,8 +32,11 @@ The archive and clean-client preparation use eight dedicated records:
 - `HistoricalImportCutoverReview` stores the sealed source-to-ledger verification, exception decisions, operational attestations, and attributed approval required before lock.
 - `HistoricalClientBootstrap` stores the reviewed, fingerprinted plan used to create a clean client roster and link it to the archive.
 - `HistoricalClientBootstrapDispatch` is the durable queue outbox for a specific preparation attempt, allowing automatic recovery if queue submission is interrupted after the database commit.
+- `HistoricalTaxWageReport` preserves each parsed annual, year-to-date, quarterly, or multi-year Tax and Wage Summary and its source fingerprint.
+- `HistoricalYtdBridge` stores the reviewed, fingerprinted one-time opening-balance plan and attributed activation.
+- `HistoricalEmployeeYtdBalance` stores an immutable balance for one linked employee and source pay year.
 
-This is intentionally an archive and reconciliation feature. It does not recreate old payroll as editable live payroll and does not backfill current YTD balances.
+The imported paychecks remain an archive and are never recreated as editable live payroll. A separate bridge can carry verified employee YTD balances into future calculations only after the archive is approved and locked.
 
 ## Clean-client employee preparation
 
@@ -62,7 +65,24 @@ The parser uses QuickBooks Employee Details and Employee Directory as the source
 
 The real local MoSa rehearsal produced 114 employees—57 active and 57 inactive—244 wage-rate records, 32 recurring payroll-field assignments, 114 linked historical workers, and 2,881 linked historical paychecks. The historical batch remained a preview. The step created zero live pay periods, payroll items, YTD rows, payments, checks, or filings. All 114 employee records remain visibly marked for setup review because at least their hire date must be confirmed. Employer retirement matches are visible and editable on the employee screen alongside employee retirement deductions.
 
-This release does **not** make the client ready for a midyear live payroll by itself. The current-year historical balances still need the controlled YTD bridge below, and the first draft pay period must not be created until that bridge is reconciled and protected against double counting.
+This employee-preparation step does **not** make the client ready for a midyear live payroll by itself. The first draft pay period must not be created until the controlled YTD bridge below is reconciled and activated.
+
+## Exact tax-and-wage reconciliation and YTD bridge
+
+The current importer parses the retained QuickBooks Tax and Wage Summary files as first-class evidence. For MoSa, it independently derives and checks, by source pay year:
+
+- FIT wages and FIT withheld;
+- Social Security total wages, excess wages, capped taxable wages, employee tax, and employer tax;
+- Medicare wages, employee tax including Additional Medicare, and employer tax; and
+- every available quarterly rollup against the authoritative annual or year-to-date report.
+
+The 15 retained MoSa reports pass all checks for 2024, 2025, and 2026. The calculation recognizes the source's explicit non-taxable reimbursement, rent, loan, and allotment earnings; subtracts Section 125/cafeteria deductions from FICA wages while leaving 401(k) deductions in FICA wages; and applies the annual employee Social Security wage bases of $168,600, $176,100, and $184,500 respectively. Unrecognized years stop with an actionable annual-tax-configuration error. It preserves QuickBooks tax amounts; it does not recompute old withholding.
+
+After the clean employee roster is applied and the verified archive is approved and locked, a manager or administrator can build a YTD preview. The preview groups every historical paycheck by linked employee and pay year, carries the source money and itemized components forward, and reconciles the employee allocations back to the Tax and Wage Summary checks. Preview creates no live payroll or YTD rows.
+
+Activation requires the exact confirmation `ACTIVATE VERIFIED HISTORICAL YTD`. One transaction inserts immutable employee-year balances and seals the bridge. The balances keep QuickBooks PayTip amounts as distinct reported, paid-out, and Social Security-taxable tip evidence while retaining the correct combined Social Security taxable total. The live employee YTD aggregate then combines that opening balance with only committed, non-voided live payroll. This feeds pay-stub YTD values, the Social Security wage-base limit, and the Additional Medicare threshold without changing `EmployeeYtdTotal` or `CompanyYtdTotal`, which remain live-payroll snapshots.
+
+For a company with locked imported history, pay-period creation is blocked until the bridge is active. After activation, the first and every later live pay period must start after the imported period end and have a pay date after the final imported pay date. This prevents both an omitted opening balance and historical/live double counting.
 
 ## Historical report boundary
 
@@ -143,7 +163,7 @@ The row-level fingerprints deliberately exclude only the optional link from a Qu
 
 The final verification runs as a durable background job because supported source bundles can be large. The workspace shows a running state and polls for the saved result with bounded backoff, so an operator can leave and return without interrupting the comparison or create constant request load. A transient status-refresh failure is shown and retried automatically. Repeated requests reuse a recent pending review instead of creating duplicate jobs; a stale or failed review can be retried. A queue or verification failure is saved as a safe failed state and continues to block approval and lock. Stored paycheck fingerprints and yearly totals share one SQL-ordered, batched pass so the verifier does not materialize duplicate stored-ledger collections at the supported bundle ceiling.
 
-Importer compatibility is explicit rather than inferred from a version string. The current verification parser accepts v2, v3, and v4 recorded batches only when a fresh parse of every retained original reproduces the stored manifest, reconciliation, counts, money totals, yearly totals, and worker/period/paycheck fingerprints exactly. v4 adds the retained Employee Directory setup needed for clean-client preparation. Verification strips that new private sub-snapshot when checking older v2/v3 worker fingerprints, so deployed archives remain verifiable; older batches cannot prepare employees until they are re-imported through the current parser. The regression suite creates an older-version batch contract and verifies it through the current parser instead of merely changing a version label. Evidence records both the batch's importer version and the parser version that performed the check. Any other recorded version remains preserved but blocked until an intentionally reviewed source migration is added.
+Importer compatibility is explicit rather than inferred from a version string. The current verification parser accepts v2, v3, v4, and v5 recorded batches only when a fresh parse of every retained original reproduces the stored manifest, reconciliation, counts, money totals, yearly totals, and worker/period/paycheck fingerprints exactly. v4 adds the retained Employee Directory setup needed for clean-client preparation. v5 requires retained Tax and Wage Summary evidence, fingerprints every report, and rechecks its reconciliation; verification fails closed when that evidence is absent. Verification strips the newer private worker sub-snapshot when checking older v2/v3 worker fingerprints, so deployed archives remain verifiable; older batches cannot prepare employees or activate the verified YTD bridge until they are re-imported through the required current path. The regression suite creates an older-version batch contract and verifies it through the current parser instead of merely changing a version label. Evidence records both the batch's importer version and the parser version that performed the check. Any other recorded version remains preserved but blocked until an intentionally reviewed source migration is added.
 
 Rollback means turning off the isolated historical-payroll feature while retaining the accepted archive and evidence. It never means deleting or rewriting payroll. Canceling QuickBooks remains a separate business-owner decision after the final application approval and recovery controls are complete.
 
@@ -185,7 +205,8 @@ Before any production import:
 5. Deploy the feature through the normal reviewed pull-request and deployment process.
 6. Create a production preview only. Review its reconciliation before applying it.
 7. Apply the preview, run the fresh source-to-ledger verification, complete the operational checklist, export the evidence workbook, and approve the cutover.
-8. Lock only after the approved review exists. Cancel QuickBooks only through a separate business-owner decision.
+8. Lock only after the approved review exists, then preview and activate the YTD bridge before creating the first live pay period.
+9. Confirm the first live period starts after the imported period end and its pay date is after the final imported pay date. Cancel QuickBooks only through a separate business-owner decision.
 
 No production preview, apply, or lock has been performed as part of the local implementation.
 
@@ -198,8 +219,8 @@ The QuickBooks exit is deliberately split into eight reviewable releases. Finish
 3. **Unified read-only history and reports (PR #152, deployed):** payroll register, employee summary, tax, deduction/contribution, retirement, loan, and check views read only accepted historical snapshots without writing to live YTD or recalculating historical values. UI and exports label their QuickBooks source, provenance, and opening-summary limitations.
 4. **Cutover evidence and signoff (PR #153, deployed):** fresh retained-source parsing, exact row and aggregate fingerprints, exception disposition, evidence workbook, attributed approval, recovery/rollback attestations, and lock enforcement.
 5. **Import and deployment hardening (PR #154, deployed):** production-shaped importer ceilings and regressions, environment-isolated local retention, backward-compatible source verification, and safe worker deployment configuration.
-6. **Clean-client employee preparation (in review):** fingerprinted preview, atomic employee/setup creation, historical linking, visible review items, and no payroll or YTD side effects.
-7. **Current-year YTD bridge (pending):** immutable imported balances used by payroll tax caps, paystubs, reports, and year-end forms, with overlap and double-count protection.
+6. **Clean-client employee preparation (PR #155, deployed):** fingerprinted preview, atomic employee/setup creation, historical linking, visible review items, and no payroll or YTD side effects.
+7. **Current-year YTD bridge (in review):** immutable imported balances used by payroll tax caps, paystubs, reports, and year-end forms, with overlap and double-count protection.
 8. **Atomic production cutover (pending):** production preview/apply/verification, reviewer evidence, old-client retirement and EIN transfer, first-draft readiness, and rollback evidence.
 
 The production feature flag remains off until these releases are deployed and the cutover gate is signed. The first production action is a preview; apply and lock require separate operator approval.

@@ -8,7 +8,11 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
   let!(:company) { create(:company, historical_payroll_enabled: true) }
   let!(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let!(:batch) do
-    imported = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: actor).call.batch
+    imported = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: actor
+    ).call.batch
     review_historical_workers_as_archive_only(imported, actor: actor)
     QuickbooksHistory::LifecycleService.new(batch: imported, actor: actor).apply!(
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
@@ -40,6 +44,7 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
       "opening_summary_count" => 1
     )
     expect(review.evidence.fetch("ledger_digests").values).to all(satisfy { |digests| digests.fetch("source") == digests.fetch("stored") })
+    expect(review.evidence.fetch("tax_wage_reconciliation")).to include("passed" => true, "not_available" => false)
     expect(review.evidence_digest).to match(/\A[0-9a-f]{64}\z/)
     expect(review.to_json).not_to include("000-00-0001", "private_snapshot", "storage_key")
     expect(AuditLog.where(action: "historical_imports#verify_cutover", record_id: review.id)).to exist
@@ -137,6 +142,10 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
           worker.update!(private_snapshot: JSON.generate(worker.private_snapshot_data.except("_employee_directory")))
         end
       end
+      compatible_batch.update_column(
+        :preview_summary,
+        compatible_batch.preview_summary.except("tax_wage_report_count")
+      )
       review_historical_workers_as_archive_only(compatible_batch, actor: compatible_actor)
       QuickbooksHistory::LifecycleService.new(batch: compatible_batch, actor: compatible_actor).apply!(
         acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
@@ -150,6 +159,87 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
         "verification_parser_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION
       )
     end
+  end
+
+  it "does not apply v5 tax parser errors to a legacy v4 payroll reconciliation" do
+    compatible_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
+    compatible_actor = create(:user, company: compatible_company, organization: company.organization, role: "admin")
+    compatible_batch = nil
+    RSpec::Mocks.with_temporary_scope do
+      stub_const("QuickbooksHistory::BundleParser::IMPORTER_VERSION", "quickbooks-online-payroll-v4")
+      allow_any_instance_of(QuickbooksHistory::BundleParser).to receive(:call).and_wrap_original do |method|
+        parsed = method.call
+        parsed.summary = parsed.summary.except("tax_wage_report_count")
+        parsed
+      end
+      compatible_batch = QuickbooksHistory::ImportService.new(
+        company: compatible_company,
+        files: quickbooks_history_uploads(suffix: " quickbooks-online-payroll-v4"),
+        actor: compatible_actor
+      ).call.batch
+    end
+    review_historical_workers_as_archive_only(compatible_batch, actor: compatible_actor)
+    QuickbooksHistory::LifecycleService.new(batch: compatible_batch, actor: compatible_actor).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
+    allow_any_instance_of(QuickbooksHistory::BundleParser).to receive(:call).and_wrap_original do |method|
+      parsed = method.call
+      parsed.errors = parsed.errors + [ "A v5-only tax evidence error" ]
+      parsed.tax_wage_reconciliation = parsed.tax_wage_reconciliation.merge(
+        "errors" => [ "A v5-only tax evidence error" ]
+      )
+      parsed
+    end
+
+    result = described_class.new(batch: compatible_batch, actor: compatible_actor).call
+
+    expect(result.passed).to be(true)
+    expect(result.review.evidence).not_to have_key("tax_wage_reconciliation")
+    expect(result.review.evidence.fetch("checks")).to include(
+      include("key" => "source_reconciliation", "passed" => true)
+    )
+  end
+
+  it "retains strict tax evidence validation for v5 batches" do
+    allow_any_instance_of(QuickbooksHistory::BundleParser).to receive(:call).and_wrap_original do |method|
+      parsed = method.call
+      parsed.tax_wage_reconciliation = parsed.tax_wage_reconciliation.merge(
+        "errors" => [ "A v5 tax evidence error" ]
+      )
+      parsed
+    end
+
+    result = described_class.new(batch: batch, actor: actor).call
+
+    expect(result.passed).to be(false)
+    expect(result.review.evidence.fetch("checks")).to include(
+      include("key" => "tax_wage_reconciliation_contract", "passed" => false)
+    )
+  end
+
+  it "fails closed when a v5 batch has no retained Tax and Wage Summary evidence" do
+    no_tax_company = create(:company, organization: company.organization, historical_payroll_enabled: true)
+    no_tax_actor = create(:user, company: no_tax_company, organization: company.organization, role: "admin")
+    no_tax_batch = QuickbooksHistory::ImportService.new(
+      company: no_tax_company,
+      files: quickbooks_history_uploads(suffix: " without tax evidence"),
+      actor: no_tax_actor
+    ).call.batch
+    review_historical_workers_as_archive_only(no_tax_batch, actor: no_tax_actor)
+    QuickbooksHistory::LifecycleService.new(batch: no_tax_batch, actor: no_tax_actor).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
+
+    result = described_class.new(batch: no_tax_batch, actor: no_tax_actor).call
+
+    expect(result.passed).to be(false)
+    expect(result.review.evidence.fetch("tax_wage_reconciliation")).to include(
+      "passed" => false,
+      "not_available" => true
+    )
+    expect(result.review.evidence.fetch("checks")).to include(
+      include("key" => "tax_wage_evidence_available", "passed" => false)
+    )
   end
 
   it "rejects an importer version outside the explicit compatibility set" do

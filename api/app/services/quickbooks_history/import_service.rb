@@ -60,10 +60,15 @@ module QuickbooksHistory
           source_file_manifest: parsed.manifest,
           preview_summary: parsed.summary,
           reconciliation_summary: parsed.reconciliation,
+          tax_wage_reconciliation: parsed.tax_wage_reconciliation,
           warnings: parsed.warnings,
           validation_errors: errors
         )
         attach_source_files!(batch, stored_source_files)
+        # A blocked preview still retains every original file and the exact
+        # reconciliation errors. Do not normalize conflicting report periods
+        # into a ledger whose uniqueness constraints would hide that preview.
+        create_tax_wage_reports!(batch, parsed.tax_wage_reports) if errors.empty?
 
         workers_by_name = create_workers!(batch, parsed.workers)
         periods_by_key = create_periods!(batch, parsed.periods)
@@ -74,6 +79,20 @@ module QuickbooksHistory
       Result.new(batch: batch, idempotent: false)
     rescue ActiveRecord::RecordNotUnique => e
       existing = find_existing_batch(parsed)
+      if existing.nil?
+        # The legacy bundle-only index may still exist until migration
+        # 20260907121000 runs. Never report an older importer as this upload.
+        other_version = find_existing_bundle(parsed)
+        if other_version
+          return Result.new(
+            idempotent: false,
+            error: ArgumentError.new(
+              "This bundle was already imported as #{other_version.importer_version}. " \
+              "Complete the importer-version migration before re-importing it."
+            )
+          )
+        end
+      end
       raise e unless existing&.source_files_complete_and_verified?
 
       Result.new(batch: existing, idempotent: true)
@@ -89,6 +108,15 @@ module QuickbooksHistory
     attr_reader :company, :files, :actor
 
     def find_existing_batch(parsed)
+      HistoricalImportBatch.find_by(
+        company: company,
+        source_system: "quickbooks_online",
+        bundle_digest: parsed.bundle_digest,
+        importer_version: BundleParser::IMPORTER_VERSION
+      )
+    end
+
+    def find_existing_bundle(parsed)
       HistoricalImportBatch.find_by(
         company: company,
         source_system: "quickbooks_online",
@@ -137,6 +165,25 @@ module QuickbooksHistory
           mapping_status: employee ? "exact_match" : "needs_review",
           match_confidence: employee ? 1 : nil,
           private_snapshot: row[:private_snapshot].present? ? JSON.generate(row.fetch(:private_snapshot)) : nil
+        )
+      end
+    end
+
+    def create_tax_wage_reports!(batch, report_rows)
+      source_files = batch.historical_import_source_files.index_by(&:position)
+      report_rows.each do |row|
+        source_file = source_files.fetch(row.fetch(:source_position)) do
+          raise ArgumentError, "Tax and Wage Summary evidence is missing its stored source file"
+        end
+        batch.historical_tax_wage_reports.create!(
+          historical_import_source_file: source_file,
+          company: company,
+          source_position: row.fetch(:source_position),
+          scope: row.fetch(:scope),
+          period_start: row.fetch(:period_start),
+          period_end: row.fetch(:period_end),
+          tax_lines: row.fetch(:tax_lines),
+          report_digest: row.fetch(:report_digest)
         )
       end
     end

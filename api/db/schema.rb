@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_07_121000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -828,6 +828,48 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'pending'::character varying::text, 'applied'::character varying::text, 'failed'::character varying::text])", name: "historical_client_bootstraps_status_check"
   end
 
+  create_table "historical_employee_ytd_balances", force: :cascade do |t|
+    t.decimal "additional_withholding", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "after_tax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "employee_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "employer_contributions", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "employer_medicare_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "employer_social_security_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "employer_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "federal_income_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "fit_taxable_wages", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "gross_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.bigint "historical_ytd_bridge_id", null: false
+    t.decimal "insurance", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "loans", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "medicare_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "medicare_taxable_wages", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "net_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "non_taxable_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "pretax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "reported_tips", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "retirement", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "roth_retirement", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "social_security_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "social_security_taxable_tips", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "social_security_taxable_wages", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "source_breakdown", default: {}, null: false
+    t.integer "tax_year", null: false
+    t.date "through_pay_date", null: false
+    t.date "through_period_end", null: false
+    t.decimal "tips_paid_out", precision: 15, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "employee_id", "tax_year"], name: "idx_on_company_id_employee_id_tax_year_ee7e837958"
+    t.index ["employee_id", "tax_year"], name: "idx_historical_ytd_balances_employee_year"
+    t.index ["historical_ytd_bridge_id", "employee_id", "tax_year"], name: "idx_historical_ytd_balances_unique_employee_year", unique: true
+    t.check_constraint "jsonb_typeof(source_breakdown) = 'object'::text", name: "historical_ytd_balances_source_object"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "historical_ytd_balances_tax_year_check"
+    t.check_constraint "through_pay_date >= through_period_end", name: "historical_ytd_balances_boundary_order"
+  end
+
   create_table "historical_import_batches", force: :cascade do |t|
     t.datetime "applied_at"
     t.bigint "applied_by_id"
@@ -845,15 +887,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
     t.string "source_label", null: false
     t.string "source_system", default: "quickbooks_online", null: false
     t.string "status", default: "previewed", null: false
+    t.jsonb "tax_wage_reconciliation", default: {}, null: false
     t.datetime "updated_at", null: false
     t.jsonb "validation_errors", default: [], null: false
     t.jsonb "warnings", default: [], null: false
     t.index ["applied_by_id"], name: "index_historical_import_batches_on_applied_by_id"
-    t.index ["company_id", "source_system", "bundle_digest"], name: "idx_historical_batches_unique_bundle", unique: true
+    t.index ["company_id", "source_system", "bundle_digest", "importer_version"], name: "idx_historical_batches_unique_bundle_version", unique: true
     t.index ["company_id"], name: "index_historical_import_batches_on_company_id"
     t.index ["created_by_id"], name: "index_historical_import_batches_on_created_by_id"
     t.index ["id", "company_id"], name: "idx_historical_import_batches_tenant_key", unique: true
     t.index ["locked_by_id"], name: "index_historical_import_batches_on_locked_by_id"
+    t.check_constraint "jsonb_typeof(tax_wage_reconciliation) = 'object'::text", name: "historical_import_batches_tax_wage_object"
     t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
   end
@@ -981,6 +1025,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
     t.check_constraint "reconciliation_status::text = ANY (ARRAY['matched'::character varying::text, 'opening_summary'::character varying::text, 'unmatched'::character varying::text])", name: "historical_paychecks_reconciliation_status"
   end
 
+  create_table "historical_tax_wage_reports", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.bigint "historical_import_source_file_id", null: false
+    t.date "period_end", null: false
+    t.date "period_start", null: false
+    t.string "report_digest", null: false
+    t.string "scope", null: false
+    t.integer "source_position", null: false
+    t.jsonb "tax_lines", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "period_end"], name: "index_historical_tax_wage_reports_on_company_id_and_period_end"
+    t.index ["historical_import_batch_id", "period_start", "period_end"], name: "idx_historical_tax_reports_unique_period", unique: true
+    t.index ["historical_import_source_file_id"], name: "idx_historical_tax_reports_unique_source", unique: true
+    t.check_constraint "jsonb_typeof(tax_lines) = 'object'::text", name: "historical_tax_wage_reports_lines_object"
+    t.check_constraint "period_end >= period_start", name: "historical_tax_wage_reports_date_order"
+    t.check_constraint "scope::text = ANY (ARRAY['quarterly'::character varying::text, 'quarterly_year_to_date'::character varying::text, 'annual'::character varying::text, 'year_to_date'::character varying::text, 'multi_year'::character varying::text])", name: "historical_tax_wage_reports_scope_check"
+  end
+
   create_table "historical_workers", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -1003,6 +1067,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
     t.index ["historical_import_batch_id"], name: "index_historical_workers_on_historical_import_batch_id"
     t.check_constraint "mapping_status::text = ANY (ARRAY['needs_review'::character varying::text, 'exact_match'::character varying::text, 'manual_match'::character varying::text, 'archive_only'::character varying::text])", name: "historical_workers_mapping_status"
     t.check_constraint "source_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'unknown'::character varying::text])", name: "historical_workers_source_status"
+  end
+
+  create_table "historical_ytd_bridges", force: :cascade do |t|
+    t.datetime "applied_at"
+    t.bigint "applied_by_id"
+    t.text "apply_acknowledgement"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.bigint "historical_client_bootstrap_id", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.string "plan_digest", null: false
+    t.jsonb "preview_summary", default: {}, null: false
+    t.jsonb "reconciliation_summary", default: {}, null: false
+    t.string "status", default: "previewed", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: [], null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["applied_by_id"], name: "index_historical_ytd_bridges_on_applied_by_id"
+    t.index ["company_id", "status"], name: "index_historical_ytd_bridges_on_company_id_and_status"
+    t.index ["created_by_id"], name: "index_historical_ytd_bridges_on_created_by_id"
+    t.index ["historical_client_bootstrap_id"], name: "index_historical_ytd_bridges_on_historical_client_bootstrap_id", unique: true
+    t.index ["historical_import_batch_id"], name: "index_historical_ytd_bridges_on_historical_import_batch_id", unique: true
+    t.index ["id", "company_id"], name: "idx_historical_ytd_bridges_tenant_key", unique: true
+    t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text AND jsonb_typeof(reconciliation_summary) = 'object'::text", name: "historical_ytd_bridges_summary_objects"
+    t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text", name: "historical_ytd_bridges_arrays"
+    t.check_constraint "preview_summary ? 'through_period_end'::text AND preview_summary ? 'through_pay_date'::text AND (preview_summary ->> 'through_period_end'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) >= (preview_summary ->> 'through_period_end'::text)", name: "historical_ytd_bridges_boundary_order"
+    t.check_constraint "status::text = 'applied'::text AND applied_at IS NOT NULL AND applied_by_id IS NOT NULL AND apply_acknowledgement IS NOT NULL OR status::text = 'previewed'::text AND applied_at IS NULL AND applied_by_id IS NULL AND apply_acknowledgement IS NULL", name: "historical_ytd_bridges_status_audit_fields"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text])", name: "historical_ytd_bridges_status_check"
   end
 
   create_table "information_return_thresholds", force: :cascade do |t|
@@ -2526,6 +2619,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
   add_foreign_key "historical_client_bootstraps", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_client_bootstraps_batch_tenant"
   add_foreign_key "historical_client_bootstraps", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_client_bootstraps", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "historical_employee_ytd_balances", "companies"
+  add_foreign_key "historical_employee_ytd_balances", "employees"
+  add_foreign_key "historical_employee_ytd_balances", "historical_ytd_bridges"
+  add_foreign_key "historical_employee_ytd_balances", "historical_ytd_bridges", column: ["historical_ytd_bridge_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_ytd_balances_bridge_tenant"
   add_foreign_key "historical_import_batches", "companies"
   add_foreign_key "historical_import_batches", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "historical_import_batches", "users", column: "created_by_id", on_delete: :nullify
@@ -2545,9 +2642,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_010200) do
   add_foreign_key "historical_paychecks", "historical_import_batches"
   add_foreign_key "historical_paychecks", "historical_pay_periods"
   add_foreign_key "historical_paychecks", "historical_workers"
+  add_foreign_key "historical_tax_wage_reports", "companies"
+  add_foreign_key "historical_tax_wage_reports", "historical_import_batches"
+  add_foreign_key "historical_tax_wage_reports", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_tax_reports_batch_tenant"
+  add_foreign_key "historical_tax_wage_reports", "historical_import_source_files"
   add_foreign_key "historical_workers", "companies"
   add_foreign_key "historical_workers", "employees"
   add_foreign_key "historical_workers", "historical_import_batches"
+  add_foreign_key "historical_ytd_bridges", "companies"
+  add_foreign_key "historical_ytd_bridges", "historical_client_bootstraps"
+  add_foreign_key "historical_ytd_bridges", "historical_import_batches"
+  add_foreign_key "historical_ytd_bridges", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_ytd_bridges_batch_tenant"
+  add_foreign_key "historical_ytd_bridges", "users", column: "applied_by_id", on_delete: :restrict
+  add_foreign_key "historical_ytd_bridges", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "invoice_artifacts", "invoices"
   add_foreign_key "invoice_artifacts", "organizations"
   add_foreign_key "invoice_artifacts", "users", column: "created_by_id"

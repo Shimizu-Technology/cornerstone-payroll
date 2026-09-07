@@ -46,6 +46,36 @@ RSpec.describe QuickbooksHistory::ImportService do
     )
   end
 
+  it "stores parsed Tax and Wage Summary reports as immutable source evidence" do
+    result = described_class.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: actor
+    ).call
+
+    expect(result).to be_success
+    expect(result.batch.tax_wage_reconciliation).to include("passed" => true, "report_count" => 5)
+    expect(result.batch.historical_tax_wage_reports.count).to eq(5)
+    annual = result.batch.historical_tax_wage_reports.find_by!(scope: "annual")
+    expect(annual.tax_lines.dig("federal_income_tax", "taxable_wages")).to eq("2950.0")
+    expect(annual.update(period_end: Date.new(2024, 12, 30))).to be(false)
+  end
+
+  it "retains a blocked duplicate-period preview without violating the report ledger constraint" do
+    files = quickbooks_history_uploads + quickbooks_tax_wage_uploads
+    files << build_quickbooks_xls(
+      "Tax_and_Wage_Summary_2024_duplicate_Q1.xls",
+      empty_tax_wage_summary_rows("Jan 01, 2024", "Mar 31, 2024")
+    )
+
+    result = described_class.new(company: company, files: files, actor: actor).call
+
+    expect(result).to be_success
+    expect(result.batch.validation_errors.join(" ")).to match(/more than one Tax and Wage Summary for Q1/)
+    expect(result.batch.historical_tax_wage_reports).to be_empty
+    expect(result.batch.historical_import_source_files.count).to eq(files.size)
+  end
+
   it "returns the existing batch when the same bundle is uploaded again" do
     files = quickbooks_history_uploads
     first = described_class.new(company: company, files: files, actor: actor).call
@@ -56,6 +86,38 @@ RSpec.describe QuickbooksHistory::ImportService do
     expect(HistoricalImportBatch.count).to eq(1)
     expect(HistoricalPaycheck.count).to eq(2)
     expect(HistoricalImportSourceFile.count).to eq(5)
+  end
+
+  it "creates a fresh auditable preview when the importer version changes" do
+    files = quickbooks_history_uploads + quickbooks_tax_wage_uploads
+    first = described_class.new(company: company, files: files, actor: actor).call
+    first.batch.update_column(:importer_version, "quickbooks-online-payroll-v4")
+
+    second = described_class.new(company: company, files: files, actor: actor).call
+
+    expect(second).to be_success
+    expect(second.idempotent).to be(false)
+    expect(second.batch).not_to eq(first.batch)
+    expect(second.batch).to have_attributes(
+      bundle_digest: first.batch.bundle_digest,
+      importer_version: QuickbooksHistory::BundleParser::IMPORTER_VERSION
+    )
+    expect(second.batch.tax_wage_reconciliation).to include("passed" => true, "report_count" => 5)
+    expect(second.batch.historical_tax_wage_reports.count).to eq(5)
+    expect(HistoricalImportBatch.count).to eq(2)
+  end
+
+  it "fails clearly instead of returning an older importer during the legacy-index rollout" do
+    files = quickbooks_history_uploads
+    first = described_class.new(company: company, files: files, actor: actor).call
+    first.batch.update_column(:importer_version, "quickbooks-online-payroll-v4")
+    allow(HistoricalImportBatch).to receive(:create!).and_raise(ActiveRecord::RecordNotUnique)
+
+    result = described_class.new(company: company, files: files, actor: actor).call
+
+    expect(result).not_to be_success
+    expect(result.idempotent).to be(false)
+    expect(result.error.message).to match(/already imported as quickbooks-online-payroll-v4.*importer-version migration/i)
   end
 
   it "automatically links only an unambiguous name-and-SSN identity match" do

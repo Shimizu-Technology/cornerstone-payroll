@@ -3,6 +3,7 @@
 class HistoricalImportBatch < ApplicationRecord
   STATUSES = %w[previewed applied locked failed].freeze
   SOURCE_SYSTEMS = %w[quickbooks_online].freeze
+  YTD_BRIDGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
 
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
@@ -13,13 +14,15 @@ class HistoricalImportBatch < ApplicationRecord
   has_many :historical_pay_periods, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_import_source_files, dependent: :restrict_with_error
+  has_many :historical_tax_wage_reports, dependent: :restrict_with_error
   has_one :historical_import_cutover_review, dependent: :restrict_with_error
   has_one :historical_client_bootstrap, dependent: :restrict_with_error
+  has_one :historical_ytd_bridge, dependent: :restrict_with_error
 
   validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
   validates :source_label, :bundle_digest, :importer_version, presence: true
   validates :status, inclusion: { in: STATUSES }
-  validates :bundle_digest, uniqueness: { scope: %i[company_id source_system] }
+  validates :bundle_digest, uniqueness: { scope: %i[company_id source_system importer_version] }
 
   scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :visible_history, -> { where(status: %w[applied locked]) }
