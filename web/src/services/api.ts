@@ -1019,10 +1019,10 @@ export interface RunPayrollFieldInputEntry {
 }
 
 export const payPeriodsApi = {
-  list: (params?: { status?: string; year?: number }) =>
-    api.get<PayPeriodListResponse>('/admin/pay_periods', params),
-  get: (id: number) =>
-    api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`),
+  list: (params?: { status?: string; year?: number }, companyId?: number) =>
+    api.get<PayPeriodListResponse>('/admin/pay_periods', params, { companyId }),
+  get: (id: number, companyId?: number) =>
+    api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`, undefined, { companyId }),
   payrollFieldInputs: (id: number) =>
     api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
   comparison: (id: number) =>
@@ -1146,10 +1146,10 @@ export const payPeriodsApi = {
 };
 
 export const clientPayPeriodsApi = {
-  list: (params?: { status?: string; year?: number }) =>
-    api.get<PayPeriodListResponse>('/client/pay_periods', params),
-  get: (id: number) =>
-    api.get<PayPeriodResponse>(`/client/pay_periods/${id}`),
+  list: (params?: { status?: string; year?: number }, companyId?: number) =>
+    api.get<PayPeriodListResponse>('/client/pay_periods', params, { companyId }),
+  get: (id: number, companyId?: number) =>
+    api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
 };
 
 // Timecard OCR import types

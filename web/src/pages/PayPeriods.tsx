@@ -170,6 +170,10 @@ export function PayPeriods() {
   useLayoutEffect((): void => {
     payPeriodViewKeyRef.current = payPeriodViewKey;
     loadRequestIdRef.current += 1;
+    setLoading(true);
+    setPayPeriods([]);
+    setStatusCounts({});
+    setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
 
   useLayoutEffect((): void => {

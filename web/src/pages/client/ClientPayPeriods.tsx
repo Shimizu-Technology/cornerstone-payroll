@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -22,22 +22,35 @@ export function ClientPayPeriods(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const loadRequestIdRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
     try {
       setLoading(true);
       setError(null);
-      const response = await clientPayPeriodsApi.list();
-      setPayPeriods(response.pay_periods);
+      const response = await clientPayPeriodsApi.list(undefined, companyId);
+      if (isCurrentRequest()) setPayPeriods(response.pay_periods);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load pay periods');
+      if (isCurrentRequest()) setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
-  }, []);
+  }, [companyId]);
 
-  useEffect(() => {
+  useLayoutEffect((): void => {
+    loadRequestIdRef.current += 1;
+    setPayPeriods([]);
+    setError(null);
+    setLoading(true);
+  }, [companyId]);
+
+  useEffect((): (() => void) => {
     void load();
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   const visiblePayPeriods = useMemo(() => {
