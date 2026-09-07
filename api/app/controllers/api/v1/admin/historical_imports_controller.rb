@@ -12,6 +12,7 @@ module Api
           show apply lock verify_source_files download_source_file archive_unlinked_workers update_worker
           verify_cutover update_cutover_review approve_cutover download_cutover_evidence
           preview_client_bootstrap apply_client_bootstrap
+          preview_ytd_bridge apply_ytd_bridge
         ]
 
         def index
@@ -23,6 +24,7 @@ module Api
                       :locked_by,
                       :historical_import_source_files,
                       historical_client_bootstrap: :applied_by,
+                      historical_ytd_bridge: :applied_by,
                       historical_import_cutover_review: %i[verified_by approved_by]
                     )
                     .recent_first
@@ -35,7 +37,9 @@ module Api
               batch_json(
                 batch,
                 mapping_counts: mapping_counts.fetch(batch.id, {}),
-                include_client_bootstrap_details: false
+                include_client_bootstrap_details: false,
+                include_ytd_bridge_details: false,
+                include_tax_wage_reconciliation: false
               )
             end,
             meta: {
@@ -192,6 +196,29 @@ module Api
           render json: error_payload(e), status: :unprocessable_entity
         end
 
+        def preview_ytd_bridge
+          bridge = QuickbooksHistory::YtdBridgePreviewService.new(batch: @batch, actor: current_user).call
+          render json: { data: ytd_bridge_json(bridge, include_details: true) }
+        rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
+          render json: error_payload(e), status: :forbidden
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
+        def apply_ytd_bridge
+          bridge = @batch.historical_ytd_bridge || raise(ArgumentError, "Build and review the historical YTD preview first")
+          QuickbooksHistory::YtdBridgeApplyService.new(
+            bridge: bridge,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement]
+          ).call
+          render json: { data: batch_json(@batch.reload, include_source_files: true, include_cutover_evidence: true) }
+        rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized => e
+          render json: error_payload(e), status: :forbidden
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: error_payload(e), status: :unprocessable_entity
+        end
+
         def update_worker
           worker = @batch.historical_workers.find(params[:worker_id])
           archive_only = ActiveModel::Type::Boolean.new.cast(params[:archive_only])
@@ -299,7 +326,11 @@ module Api
 
         def set_batch
           @batch = HistoricalImportBatch.where(company_id: current_company_id)
-                                        .includes(historical_import_cutover_review: %i[verified_by approved_by])
+                                        .includes(
+                                          historical_client_bootstrap: :applied_by,
+                                          historical_ytd_bridge: :applied_by,
+                                          historical_import_cutover_review: %i[verified_by approved_by]
+                                        )
                                         .find(params[:id])
         end
 
@@ -353,7 +384,9 @@ module Api
           mapping_counts: nil,
           include_source_files: false,
           include_cutover_evidence: false,
-          include_client_bootstrap_details: true
+          include_client_bootstrap_details: true,
+          include_ytd_bridge_details: true,
+          include_tax_wage_reconciliation: true
         )
           mapping_counts ||= batch.historical_workers.group(:mapping_status).count
           source_files = if batch.association(:historical_import_source_files).loaded?
@@ -400,8 +433,13 @@ module Api
               batch.historical_client_bootstrap,
               include_details: include_client_bootstrap_details
             ),
+            ytd_bridge: ytd_bridge_json(
+              batch.historical_ytd_bridge,
+              include_details: include_ytd_bridge_details
+            ),
             created_at: batch.created_at
           }
+          payload[:tax_wage_reconciliation] = batch.tax_wage_reconciliation if include_tax_wage_reconciliation
           payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
           payload
         end
@@ -470,6 +508,26 @@ module Api
               review_items: bootstrap.review_items
             )
           end
+          payload
+        end
+
+        def ytd_bridge_json(bridge, include_details:)
+          return nil unless bridge
+
+          payload = {
+            id: bridge.id,
+            status: bridge.status,
+            plan_digest: bridge.plan_digest,
+            preview_summary: bridge.preview_summary,
+            reconciliation_summary: bridge.reconciliation_summary,
+            ready_to_apply: bridge.ready_to_apply?,
+            applied_at: bridge.applied_at,
+            applied_by_name: bridge.applied_by&.name,
+            acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
+            created_at: bridge.created_at,
+            updated_at: bridge.updated_at
+          }
+          payload.merge!(warnings: bridge.warnings, errors: bridge.validation_errors) if include_details
           payload
         end
 

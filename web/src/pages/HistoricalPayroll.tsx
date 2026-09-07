@@ -39,12 +39,16 @@ import {
   employeesApi,
   type HistoricalArchiveSummary,
   type HistoricalBreakdownLine,
+  type HistoricalClientBootstrap,
+  type HistoricalClientBootstrapSummary,
   type HistoricalImportBatch,
   type HistoricalImportDetail,
   type HistoricalPaycheck,
   type HistoricalReport,
   type HistoricalReportColumn,
   type HistoricalReportType,
+  type HistoricalYtdBridge,
+  type HistoricalYtdBridgeSummary,
 } from '@/services/api';
 import type { Employee, PaginationMeta } from '@/types';
 
@@ -72,17 +76,42 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function mergeNullableUpdate<T extends object, U extends Partial<T>>(
+  current: T | null,
+  update: U | null | undefined,
+  fallback: (availableUpdate: U) => T,
+): T | null {
+  if (update === null) return null;
+  if (update === undefined) return current;
+  const seed = current || fallback(update);
+  return { ...seed, ...update };
+}
+
 function mergeBatchSummaryIntoDetail(
   current: HistoricalImportDetail,
   update: HistoricalImportBatch,
 ): HistoricalImportDetail {
-  const clientBootstrap = update.client_bootstrap === null
-    ? null
-    : current.client_bootstrap && update.client_bootstrap
-      ? { ...current.client_bootstrap, ...update.client_bootstrap }
-      : current.client_bootstrap;
+  const clientBootstrap = mergeNullableUpdate<HistoricalClientBootstrap, HistoricalClientBootstrapSummary>(
+    current.client_bootstrap ?? null,
+    update.client_bootstrap,
+    (availableUpdate) => ({
+      ...availableUpdate,
+      warnings: [],
+      errors: [],
+      review_items: [],
+    }),
+  );
+  const ytdBridge = mergeNullableUpdate<HistoricalYtdBridge, HistoricalYtdBridgeSummary>(
+    current.ytd_bridge ?? null,
+    update.ytd_bridge,
+    (availableUpdate) => ({
+      ...availableUpdate,
+      warnings: [],
+      errors: availableUpdate.reconciliation_summary?.errors || [],
+    }),
+  );
 
-  return { ...current, ...update, client_bootstrap: clientBootstrap };
+  return { ...current, ...update, client_bootstrap: clientBootstrap, ytd_bridge: ytdBridge };
 }
 
 function fieldLabel(field: string): string {
@@ -140,6 +169,22 @@ interface Notice {
   message: string;
   tone: 'success' | 'warning';
 }
+
+type HistoricalAction =
+  | 'preview'
+  | 'apply'
+  | 'lock'
+  | 'verify'
+  | 'source_download'
+  | 'worker_review'
+  | 'bootstrap_preview'
+  | 'bootstrap_apply'
+  | 'ytd_preview'
+  | 'ytd_apply'
+  | 'cutover_verify'
+  | 'cutover_save'
+  | 'cutover_download'
+  | 'cutover_approve';
 
 function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactElement | null {
   if (lines.length === 0) return null;
@@ -211,7 +256,7 @@ export function HistoricalPayroll(): ReactElement {
   const [periodId, setPeriodId] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'preview' | 'apply' | 'lock' | 'verify' | 'source_download' | 'worker_review' | 'bootstrap_preview' | 'bootstrap_apply' | 'cutover_verify' | 'cutover_save' | 'cutover_download' | 'cutover_approve' | null>(null);
+  const [action, setAction] = useState<HistoricalAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -225,8 +270,13 @@ export function HistoricalPayroll(): ReactElement {
   const [mappingWorkerId, setMappingWorkerId] = useState<number | null>(null);
   const [archiveWorkersConfirmation, setArchiveWorkersConfirmation] = useState<ArchiveWorkersConfirmation | null>(null);
   const [bootstrapApplyOpen, setBootstrapApplyOpen] = useState(false);
+  const [bootstrapApplyBatchId, setBootstrapApplyBatchId] = useState<number | null>(null);
   const [bootstrapAcknowledgement, setBootstrapAcknowledgement] = useState('');
   const [bootstrapApplyError, setBootstrapApplyError] = useState<string | null>(null);
+  const [ytdApplyOpen, setYtdApplyOpen] = useState(false);
+  const [ytdApplyBatchId, setYtdApplyBatchId] = useState<number | null>(null);
+  const [ytdAcknowledgement, setYtdAcknowledgement] = useState('');
+  const [ytdApplyError, setYtdApplyError] = useState<string | null>(null);
   const [reportType, setReportType] = useState<HistoricalReportType>('register');
   const [reportYear, setReportYear] = useState<number | undefined>();
   const [reportWorker, setReportWorker] = useState<string | undefined>();
@@ -364,9 +414,14 @@ export function HistoricalPayroll(): ReactElement {
     setEmployeeSearchDraft('');
     setEmployeeSearch('');
     setBootstrapApplyOpen(false);
+    setBootstrapApplyBatchId(null);
     setBootstrapAcknowledgement('');
     setBootstrapApplyError(null);
     setBootstrapPollingError(null);
+    setYtdApplyOpen(false);
+    setYtdApplyBatchId(null);
+    setYtdAcknowledgement('');
+    setYtdApplyError(null);
     setLoading(true);
     let current = true;
     void refresh().finally(() => {
@@ -826,9 +881,12 @@ export function HistoricalPayroll(): ReactElement {
   };
 
   const applyClientBootstrap = async (): Promise<void> => {
-    const batchId = selectedBatchIdRef.current;
-    const bootstrap = selectedBatch?.client_bootstrap;
-    if (!batchId || !bootstrap) return;
+    const batchId = bootstrapApplyBatchId;
+    const bootstrap = selectedBatch?.id === batchId ? selectedBatch.client_bootstrap : null;
+    if (!batchId || selectedBatchIdRef.current !== batchId || !bootstrap) {
+      setBootstrapApplyError('The selected QuickBooks batch changed. Close this dialog and review the batch before creating employees.');
+      return;
+    }
     setAction('bootstrap_apply');
     setBootstrapApplyError(null);
     setError(null);
@@ -838,6 +896,7 @@ export function HistoricalPayroll(): ReactElement {
       const response = await historicalImportsApi.applyClientBootstrap(batchId, bootstrapAcknowledgement);
       if (selectedBatchIdRef.current !== batchId) return;
       setBootstrapApplyOpen(false);
+      setBootstrapApplyBatchId(null);
       setBootstrapAcknowledgement('');
       setBootstrapApplyError(null);
       setDetail((current) => current?.id === batchId ? mergeBatchSummaryIntoDetail(current, response.data) : current);
@@ -847,13 +906,76 @@ export function HistoricalPayroll(): ReactElement {
           ? 'Employee preparation started. This page will update automatically when every record is ready.'
           : 'Employee preparation is safely queued or already running. This page will update automatically.',
       });
-      await loadList(batchPageRef.current, batchId);
     } catch (err) {
       if (selectedBatchIdRef.current === batchId) {
         setBootstrapApplyError(errorMessage(err, 'The clean-client employee setup could not be created.'));
       }
+      return;
     } finally {
       setAction(null);
+    }
+    try {
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      handleError(err, 'Employee preparation started, but the batch list could not be refreshed.');
+    }
+  };
+
+  const previewYtdBridge = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('ytd_preview');
+    setError(null);
+    setValidationErrors({});
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.previewYtdBridge(batchId);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setDetail((current) => current?.id === batchId ? { ...current, ytd_bridge: response.data } : current);
+      setNotice({
+        tone: response.data.ready_to_apply ? 'success' : 'warning',
+        message: response.data.ready_to_apply
+          ? 'Historical YTD opening balances match the retained QuickBooks tax and wage reports. No live payroll was changed.'
+          : 'Historical YTD preparation is blocked. Review the exact reconciliation errors below.',
+      });
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) handleError(err, 'Historical YTD opening balances could not be prepared.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const applyYtdBridge = async (): Promise<void> => {
+    const batchId = ytdApplyBatchId;
+    const bridge = selectedBatch?.id === batchId ? selectedBatch.ytd_bridge : null;
+    if (!batchId || selectedBatchIdRef.current !== batchId || !bridge) {
+      setYtdApplyError('The selected QuickBooks batch changed. Close this dialog and review the batch before activating historical YTD.');
+      return;
+    }
+    setAction('ytd_apply');
+    setYtdApplyError(null);
+    setError(null);
+    setValidationErrors({});
+    setNotice(null);
+    try {
+      const response = await historicalImportsApi.applyYtdBridge(batchId, ytdAcknowledgement);
+      if (selectedBatchIdRef.current !== batchId) return;
+      setYtdApplyOpen(false);
+      setYtdApplyBatchId(null);
+      setYtdAcknowledgement('');
+      setDetail((current) => current?.id === batchId ? mergeBatchSummaryIntoDetail(current, response.data) : current);
+      setNotice({ tone: 'success', message: 'Historical YTD is active. The next live payroll will start after the imported boundary and use the verified balances for YTD and tax caps.' });
+    } catch (err) {
+      if (selectedBatchIdRef.current === batchId) setYtdApplyError(errorMessage(err, 'Historical YTD could not be activated.'));
+      return;
+    } finally {
+      setAction(null);
+    }
+    try {
+      await loadList(batchPageRef.current, batchId);
+    } catch (err) {
+      handleError(err, 'Historical YTD was activated, but the batch list could not be refreshed.');
     }
   };
 
@@ -977,6 +1099,8 @@ export function HistoricalPayroll(): ReactElement {
   const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
   const clientBootstrap = selectedBatch?.client_bootstrap;
+  const clientBootstrapApplied = clientBootstrap?.status === 'applied';
+  const ytdBridge = selectedBatch?.ytd_bridge;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
   const cutoverApproved = cutoverReview?.status === 'approved';
@@ -1095,14 +1219,14 @@ export function HistoricalPayroll(): ReactElement {
               {batches.length > 0 && (
                 <div className="space-y-2">
                   <label htmlFor="historical-batch" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Review batch</label>
-                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)} className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
+                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)} className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs text-neutral-500">Batch page {batchPage} of {Math.max(batchMeta.total_pages, 1)} · {batchMeta.total_count.toLocaleString()} total</p>
                     <div className="flex gap-2">
-                      <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={Boolean(batchListLoading || batchPage <= 1 || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)}><ChevronLeft className="h-4 w-4" /></Button>
-                      <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={Boolean(batchListLoading || batchPage >= batchMeta.total_pages || action || mappingWorkerId || confirmation || archiveWorkersConfirmation)}><ChevronRight className="h-4 w-4" /></Button>
+                      <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={Boolean(batchListLoading || batchPage <= 1 || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)}><ChevronLeft className="h-4 w-4" /></Button>
+                      <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={Boolean(batchListLoading || batchPage >= batchMeta.total_pages || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)}><ChevronRight className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 </div>
@@ -1221,7 +1345,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
                     <div className="flex flex-wrap gap-2">
                       {canMutate && selectedBatch.status === 'previewed' && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
-                      {canMutate && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
+                      {canMutate && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyBatchId(selectedBatch.id); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
                       {clientBootstrap.status === 'pending' && <p className="flex items-center text-sm font-semibold text-neutral-700"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Creating employee records…</p>}
                       {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {shortDate(clientBootstrap.applied_at?.slice(0, 10))}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
                     </div>
@@ -1330,6 +1454,67 @@ export function HistoricalPayroll(): ReactElement {
                       {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
                       {canMutate && cutoverReview.status === 'verified' && <Button variant="outline" onClick={() => void saveCutoverReview()} disabled={action !== null}>{action === 'cutover_save' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Save review</Button>}
                       {canMutate && cutoverReview.status === 'verified' && <Button onClick={() => setCutoverApprovalOpen(true)} disabled={!cutoverReview.ready_for_approval || action !== null}><ShieldCheck className="mr-2 h-4 w-4" />Approve cutover</Button>}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {selectedBatch?.status === 'locked' && (
+          <Card className="overflow-hidden" data-testid="historical-ytd-bridge-card">
+            <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.9),rgba(255,255,255,0.98)_55%,rgba(239,246,255,0.8))]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge</div>
+                  <CardTitle className="mt-2">Carry verified history into the next payroll</CardTitle>
+                  <CardDescription className="mt-2">This creates immutable opening balances from the linked QuickBooks paychecks. Future payroll uses them for pay-stub YTD totals, Social Security caps, and Medicare thresholds without turning imported history into live payroll.</CardDescription>
+                </div>
+                {ytdBridge?.status === 'applied'
+                  ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Active</Badge>
+                  : ytdBridge?.ready_to_apply
+                    ? <Badge variant="warning">Ready to activate</Badge>
+                    : ytdBridge
+                      ? <Badge variant="danger">Blocked</Badge>
+                      : <Badge variant="default">Preview needed</Badge>}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 p-4 sm:p-6">
+              {!ytdBridge ? (
+                <div className="flex flex-col gap-4 rounded-2xl border border-dashed border-primary-300 bg-primary-50/40 p-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-neutral-950">Build the opening-balance preview</p>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">The preview groups every source paycheck by employee and year, applies the correct Social Security wage base, and must match the retained annual and quarterly Tax and Wage Summary reports to the cent.</p>
+                    {!clientBootstrapApplied && <p id="historical-ytd-preview-requirement" role="status" className="mt-3 text-sm font-semibold text-warning-800">Prepare this client’s employee records before building historical YTD.</p>}
+                  </div>
+                  {canMutate && <Button aria-describedby={!clientBootstrapApplied ? 'historical-ytd-preview-requirement' : undefined} onClick={() => void previewYtdBridge()} disabled={action !== null || !clientBootstrapApplied}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Prepare YTD preview</Button>}
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employee-year balances</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.balance_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Historical gross</p><p className="mt-1 text-xl font-bold text-neutral-950">{dollars(ytdBridge.preview_summary.gross_pay)}</p></div>
+                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-500">Paid through</p><p className="mt-1 text-lg font-bold text-neutral-950">{shortDate(ytdBridge.preview_summary.through_pay_date)}</p></div>
+                  </div>
+                  <div className={`rounded-xl border p-4 ${ytdBridge.reconciliation_summary.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
+                    <p className="text-sm font-semibold">{ytdBridge.reconciliation_summary.passed ? 'Every tax and wage total matches to the cent' : 'The opening balances do not reconcile'}</p>
+                    <p className="mt-1 text-sm leading-6">{ytdBridge.reconciliation_summary.checks.filter((check) => check.passed).length}/{ytdBridge.reconciliation_summary.checks.length} employee-allocation checks passed across {ytdBridge.preview_summary.tax_years.join(', ') || 'no tax years'}.</p>
+                  </div>
+                  {ytdBridge.warnings.length > 0 && (
+                    <div role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
+                      <p className="font-semibold">{ytdBridge.status === 'applied' ? 'Accepted source limitations in these active balances' : 'Source limitations to review before activation'}</p>
+                      <ul className="mt-2 space-y-1">{ytdBridge.warnings.map((message) => <li key={message}>• {message}</li>)}</ul>
+                    </div>
+                  )}
+                  {ytdBridge.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"><ul className="space-y-1">{ytdBridge.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
+                  <div className="flex flex-col gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">After activation, the application blocks any pay period that overlaps QuickBooks history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {canMutate && ytdBridge.status === 'previewed' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
+                      {canMutate && ytdBridge.status === 'previewed' && ytdBridge.ready_to_apply && <Button onClick={() => { setYtdAcknowledgement(''); setYtdApplyError(null); setYtdApplyBatchId(selectedBatch.id); setYtdApplyOpen(true); }} disabled={action !== null}><CheckCircle2 className="mr-2 h-4 w-4" />Activate historical YTD</Button>}
+                      {ytdBridge.status === 'applied' && <p className="text-sm font-semibold text-success-700">Active {shortDate(ytdBridge.applied_at?.slice(0, 10))}{ytdBridge.applied_by_name ? ` by ${ytdBridge.applied_by_name}` : ''}</p>}
                     </div>
                   </div>
                 </>
@@ -1595,7 +1780,7 @@ export function HistoricalPayroll(): ReactElement {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={bootstrapApplyOpen} onOpenChange={(open) => { if (!open && action !== 'bootstrap_apply') { setBootstrapApplyOpen(false); setBootstrapAcknowledgement(''); setBootstrapApplyError(null); } }}>
+      <Dialog open={bootstrapApplyOpen} onOpenChange={(open) => { if (!open && action !== 'bootstrap_apply') { setBootstrapApplyOpen(false); setBootstrapApplyBatchId(null); setBootstrapAcknowledgement(''); setBootstrapApplyError(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle id="client-bootstrap-confirmation-title">Create this client’s employee records?</DialogTitle>
@@ -1611,8 +1796,30 @@ export function HistoricalPayroll(): ReactElement {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setBootstrapApplyOpen(false); setBootstrapAcknowledgement(''); setBootstrapApplyError(null); }} disabled={action === 'bootstrap_apply'}>Cancel</Button>
-            <Button onClick={() => void applyClientBootstrap()} disabled={action === 'bootstrap_apply' || bootstrapAcknowledgement !== clientBootstrap?.acknowledgement}>{action === 'bootstrap_apply' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <UsersRound className="mr-2 h-4 w-4" />}Create employees</Button>
+            <Button variant="outline" onClick={() => { setBootstrapApplyOpen(false); setBootstrapApplyBatchId(null); setBootstrapAcknowledgement(''); setBootstrapApplyError(null); }} disabled={action === 'bootstrap_apply'}>Cancel</Button>
+            <Button onClick={() => void applyClientBootstrap()} disabled={action === 'bootstrap_apply' || bootstrapApplyBatchId !== selectedBatch?.id || bootstrapAcknowledgement !== clientBootstrap?.acknowledgement}>{action === 'bootstrap_apply' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <UsersRound className="mr-2 h-4 w-4" />}Create employees</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={ytdApplyOpen} onOpenChange={(open) => { if (!open && action !== 'ytd_apply') { setYtdApplyOpen(false); setYtdApplyBatchId(null); setYtdAcknowledgement(''); setYtdApplyError(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Activate verified historical YTD?</DialogTitle>
+            <DialogDescription>This one-time step stores immutable employee opening balances and unlocks the first non-overlapping live pay period.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">This does not create historical payroll runs or recalculate QuickBooks checks. Future payroll and pay stubs will include these source-backed balances.</div>
+            {ytdApplyError && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm leading-6 text-danger-800">{ytdApplyError}</div>}
+            <div>
+              <label htmlFor="ytd-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
+              <p className="mt-1 font-mono text-xs text-neutral-600">{ytdBridge?.acknowledgement}</p>
+              <Input id="ytd-acknowledgement" className="mt-2" value={ytdAcknowledgement} onChange={(event) => setYtdAcknowledgement(event.target.value)} autoComplete="off" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setYtdApplyOpen(false); setYtdApplyBatchId(null); setYtdAcknowledgement(''); setYtdApplyError(null); }} disabled={action === 'ytd_apply'}>Cancel</Button>
+            <Button onClick={() => void applyYtdBridge()} disabled={action === 'ytd_apply' || ytdApplyBatchId !== selectedBatch?.id || ytdAcknowledgement !== ytdBridge?.acknowledgement}>{action === 'ytd_apply' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}Activate historical YTD</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

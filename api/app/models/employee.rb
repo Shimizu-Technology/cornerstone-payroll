@@ -93,6 +93,7 @@ class Employee < ApplicationRecord
   has_many :employee_change_requests, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
+  has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
@@ -352,9 +353,10 @@ class Employee < ApplicationRecord
     select_list = columns.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
     row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
 
-    columns.keys.each_with_object({}) do |key, totals|
+    live_totals = columns.keys.each_with_object({}) do |key, totals|
       totals[key] = row[key.to_s].to_f
     end
+    merge_historical_ytd(live_totals, tax_year)
   end
 
   # Calculate YTD gross from payroll items.
@@ -369,7 +371,7 @@ class Employee < ApplicationRecord
       return ytd_totals_before(year: year, pay_date: as_of_pay_date, pay_period_id: before_pay_period_id)[:gross_pay]
     end
 
-    payroll_items
+    live_total = payroll_items
       .joins(:pay_period)
       .not_voided
       .where(pay_periods: {
@@ -378,6 +380,7 @@ class Employee < ApplicationRecord
           .select(:id)
       })
       .sum(:gross_pay)
+    live_total + historical_ytd_value(year, :gross_pay)
   end
 
   # Calculate YTD Social Security tax withheld.
@@ -392,7 +395,7 @@ class Employee < ApplicationRecord
       return ytd_totals_before(year: year, pay_date: as_of_pay_date, pay_period_id: before_pay_period_id)[:social_security_tax]
     end
 
-    payroll_items
+    live_total = payroll_items
       .joins(:pay_period)
       .not_voided
       .where(pay_periods: {
@@ -401,6 +404,7 @@ class Employee < ApplicationRecord
           .select(:id)
       })
       .sum(:social_security_tax)
+    live_total + historical_ytd_value(year, :social_security_tax)
   end
 
   # Returns last 4 digits of SSN for display purposes
@@ -416,6 +420,17 @@ class Employee < ApplicationRecord
 
   def valid_filing_ssn?
     ssn_digits&.length == 9
+  end
+
+  def merge_historical_ytd(live_totals, year, historical_balance: nil, preloaded: false)
+    balance = preloaded ? historical_balance : applied_historical_ytd_balance(year)
+    return live_totals unless balance
+    raise ArgumentError, "historical balance tax year does not match" if balance.tax_year != year
+
+    historical = balance.ytd_aggregate_totals
+    live_totals.each_with_object({}) do |(key, value), totals|
+      totals[key] = value.to_f + historical.fetch(key, 0).to_f
+    end
   end
 
   private
@@ -601,6 +616,26 @@ class Employee < ApplicationRecord
     )
 
     ytd_totals_for_scope(scope, tax_year: year)
+  end
+
+  def historical_ytd_value(year, field)
+    balance = applied_historical_ytd_balance(year)
+    return 0.to_d unless balance
+
+    balance.public_send(field).to_d
+  end
+
+  def applied_historical_ytd_balance(year)
+    historical_employee_ytd_balances
+      .joins(:historical_ytd_bridge)
+      .where(tax_year: year, historical_ytd_bridges: { status: "applied" })
+      .order(
+        through_pay_date: :desc,
+        "historical_ytd_bridges.applied_at" => :desc,
+        "historical_ytd_bridges.id" => :desc,
+        id: :desc
+      )
+      .first
   end
 
   def pay_date_range_for_year(year)

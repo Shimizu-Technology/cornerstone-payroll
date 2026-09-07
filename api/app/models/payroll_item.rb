@@ -467,6 +467,10 @@ class PayrollItem < ApplicationRecord
   # Calculate and store all values
   def calculate!
     ApplicationRecord.transaction do
+      unless pay_period.valid?(:payroll_calculation)
+        raise ActiveRecord::RecordInvalid, pay_period
+      end
+
       calculator = PayrollCalculator.for(employee, self)
       calculator.calculate
       save!

@@ -193,7 +193,7 @@ RSpec.describe "Golden payroll regression", type: :request do
 
     batch = QuickbooksHistory::ImportService.new(
       company: company,
-      files: quickbooks_history_uploads,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
       actor: admin_user
     ).call.batch
     review_historical_workers_as_archive_only(batch, actor: admin_user)

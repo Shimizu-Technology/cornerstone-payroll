@@ -4,7 +4,7 @@ require "digest"
 
 module QuickbooksHistory
   class BundleParser
-    IMPORTER_VERSION = "quickbooks-online-payroll-v4"
+    IMPORTER_VERSION = "quickbooks-online-payroll-v5"
     REQUIRED_REPORTS = %w[
       payroll_details paycheck_history payroll_summary employee_details employee_directory
     ].freeze
@@ -26,6 +26,8 @@ module QuickbooksHistory
       :paychecks,
       :summary,
       :reconciliation,
+      :tax_wage_reports,
+      :tax_wage_reconciliation,
       :warnings,
       :errors,
       :source_files,
@@ -52,7 +54,7 @@ module QuickbooksHistory
       end
       required_entries = report_entries.select { |entry| REQUIRED_REPORTS.include?(entry.fetch(:report_type)) }
       errors << "Every required QuickBooks report must identify its company" if required_entries.any? { |entry| entry[:company_name].blank? }
-      errors << "Required QuickBooks reports name more than one company" if multiple_source_companies?(report_entries)
+      errors << "Required QuickBooks reports name more than one company" if multiple_source_companies?(required_entries)
       inventory.select do |entry|
         entry[:report_type] == "unreadable_spreadsheet" && REQUIRED_REPORTS.include?(entry[:expected_report_type])
       end.each do |entry|
@@ -75,9 +77,36 @@ module QuickbooksHistory
       periods = build_periods(detail.fetch(:paychecks))
       validate_record_counts!(workers, periods, detail.fetch(:paychecks))
       reconciliation = build_reconciliation(detail.fetch(:paychecks), history, payroll_summary)
-      warnings = build_warnings(detail.fetch(:paychecks), history, inventory)
       company_name = inventory.find { |entry| entry[:report_type] == "payroll_details" }.fetch(:company_name)
+      tax_wage_parse_errors = inventory.filter_map do |entry|
+        next unless entry[:report_type] == "unreadable_spreadsheet" && entry[:expected_report_type] == "tax_and_wage_summary"
+
+        "#{entry.fetch(:filename)} could not be read as a Tax and Wage Summary spreadsheet"
+      end
+      tax_wage_reports = inventory.each_with_index.filter_map do |entry, position|
+        next unless entry[:report_type] == "tax_and_wage_summary" && entry[:rows].present?
+
+        begin
+          parse_tax_wage_report(entry, position: position)
+        rescue ArgumentError => e
+          tax_wage_parse_errors << e.message
+          nil
+        end
+      end
+      tax_wage_reconciliation = build_tax_wage_reconciliation(
+        detail.fetch(:paychecks),
+        tax_wage_reports,
+        company_name: company_name,
+        parse_errors: tax_wage_parse_errors
+      )
+      warnings = build_warnings(detail.fetch(:paychecks), history, inventory)
+      if tax_wage_reconciliation["not_available"]
+        warnings << "Tax and Wage Summary evidence is not available. Historical YTD activation and v5 cutover verification remain blocked until those reports are imported."
+      end
       max_pay_date = detail.fetch(:paychecks).map { |row| row.fetch(:pay_date) }.max
+      all_errors = reconciliation.fetch("errors") + tax_wage_reconciliation.fetch("errors")
+      summary = build_summary(detail.fetch(:paychecks), workers, periods, inventory)
+      summary["tax_wage_report_count"] = tax_wage_reports.size
 
       Result.new(
         bundle_digest: bundle_digest,
@@ -87,10 +116,12 @@ module QuickbooksHistory
         workers: workers,
         periods: periods,
         paychecks: detail.fetch(:paychecks),
-        summary: build_summary(detail.fetch(:paychecks), workers, periods, inventory),
+        summary: summary,
         reconciliation: reconciliation,
+        tax_wage_reports: tax_wage_reports,
+        tax_wage_reconciliation: tax_wage_reconciliation,
         warnings: warnings,
-        errors: reconciliation.fetch("errors"),
+        errors: all_errors,
         source_files: files
       )
     end
@@ -225,7 +256,7 @@ module QuickbooksHistory
     end
 
     def parseable_report?(type)
-      REQUIRED_REPORTS.include?(type)
+      REQUIRED_REPORTS.include?(type) || type == "tax_and_wage_summary"
     end
 
     def parse_payroll_details(rows)
@@ -543,6 +574,398 @@ module QuickbooksHistory
       }
     end
 
+    TAX_LINE_LABELS = {
+      "federal income tax" => "federal_income_tax",
+      "social security" => "social_security",
+      "social security employer" => "social_security_employer",
+      "medicare" => "medicare",
+      "medicare employer" => "medicare_employer",
+      "futa employer" => "futa_employer"
+    }.freeze
+    REQUIRED_TAX_LINES = %w[
+      federal_income_tax social_security social_security_employer medicare medicare_employer
+    ].freeze
+    # These labels are the reviewed boundary between taxable and excluded historical wages.
+    # Unmatched earnings remain taxable. NON_TAXABLE_EARNING_LABEL affects FIT and FICA;
+    # FICA_EXEMPT_PRETAX_DEDUCTION_LABEL affects only FICA because FIT already subtracts
+    # all pre-tax deductions. Expanding either pattern changes reconciliation and persisted
+    # YTD balances and requires payroll review.
+    NON_TAXABLE_EARNING_LABEL = /\A(?:(?:auto\s+(?:insurance|loan)\s+)?reimb(?:ursement|ursem)?|medicare\s+reimb\s+diffe|(?:rent|allotment)(?:\s*[-–—(].*)?|loan(?:\s*[-–—(].*|\s+pay\s+to\b.*)?)\z/i
+    FICA_EXEMPT_PRETAX_DEDUCTION_LABEL = /\bsection\s*125\b|\bcafeteria\b|\b(?:health|medical|dental|vision)\b.*\bpre.?tax\b/i
+    def parse_tax_wage_report(entry, position:)
+      rows = entry.fetch(:rows)
+      header_index = rows.index { |row| row.map { |cell| cell.to_s.squish }.include?("Tax types") }
+      raise ArgumentError, "#{entry.fetch(:filename)} is missing Tax and Wage Summary headers" unless header_index
+
+      range_text = rows.first(header_index).flatten.compact.map(&:to_s).find { |value| value.match?(/From .+ to .+ from all locations/i) }
+      dates = range_text.to_s.scan(/[A-Z][a-z]{2} \d{1,2}, \d{4}/).map { |value| Date.strptime(value, "%b %d, %Y") }
+      raise ArgumentError, "#{entry.fetch(:filename)} is missing its reporting period" unless dates.size == 2
+
+      period_start, period_end = dates
+      headers = rows.fetch(header_index).map { |header| header.to_s.squish }
+      required_headers = [ "Tax types", "Total wages", "Excess wages", "Taxable wages", "Tax amount" ]
+      require_headers!(headers, "#{entry.fetch(:filename)} Tax and Wage Summary", required_headers)
+      tax_lines = rows.drop(header_index + 1).each_with_object({}) do |row, lines|
+        label = cell(row, headers, "Tax types").to_s.squish
+        next if label.blank?
+
+        key = tax_line_key(label)
+        if lines.key?(key)
+          existing_label = lines.fetch(key).fetch("source_label")
+          raise ArgumentError, "#{entry.fetch(:filename)} reports the same tax line twice: #{existing_label} and #{label}"
+        end
+
+        lines[key] = {
+          "source_label" => label,
+          "total_wages" => money(cell(row, headers, "Total wages"), context: "#{entry.fetch(:filename)} #{label} total wages").to_s("F"),
+          "excess_wages" => money(cell(row, headers, "Excess wages"), context: "#{entry.fetch(:filename)} #{label} excess wages").to_s("F"),
+          "taxable_wages" => money(cell(row, headers, "Taxable wages"), context: "#{entry.fetch(:filename)} #{label} taxable wages").to_s("F"),
+          "tax_amount" => money(cell(row, headers, "Tax amount"), context: "#{entry.fetch(:filename)} #{label} tax amount").to_s("F")
+        }
+      end
+      scope = tax_report_scope(entry.fetch(:filename), period_start, period_end)
+      payload = {
+        filename: entry.fetch(:filename),
+        source_position: position,
+        company_name: entry.fetch(:company_name),
+        scope: scope,
+        period_start: period_start,
+        period_end: period_end,
+        tax_lines: tax_lines
+      }
+      report_content = payload.except(:filename, :source_position)
+      payload.merge(report_digest: Digest::SHA256.hexdigest(JSON.generate(canonical_digest_value(report_content))))
+    rescue Date::Error
+      raise ArgumentError, "#{entry.fetch(:filename)} has an invalid reporting period"
+    end
+
+    def tax_report_scope(filename, period_start, period_end)
+      return "multi_year" if period_start.year != period_end.year
+      quarter_start = Date.new(period_start.year, (((period_start.month - 1) / 3) * 3) + 1, 1)
+      quarter_end = quarter_start.next_month(3) - 1.day
+      if period_start == Date.new(period_start.year, 1, 1) && period_end == Date.new(period_start.year, 3, 31)
+        return "quarterly_year_to_date"
+      end
+      return "quarterly" if period_start == quarter_start && period_end == quarter_end
+      return "annual" if period_start == Date.new(period_start.year, 1, 1) && period_end == Date.new(period_end.year, 12, 31)
+      return "quarterly" if filename.match?(/(?:\A|[\s_-])Q[1-4](?:\z|[\s_.-])/i)
+
+      "year_to_date"
+    end
+
+    def tax_line_key(label)
+      TAX_LINE_LABELS[label.downcase] ||
+        ("state_unemployment_employer" if label.match?(/\A(?:[A-Z]{2}|Guam) Unemployment Insurance Tax Employer\z/i)) ||
+        "unmapped_#{Digest::SHA256.hexdigest(label.downcase)[0, 16]}"
+    end
+
+    def build_tax_wage_reconciliation(paychecks, reports, company_name:, parse_errors: [])
+      if reports.empty?
+        return {
+          "passed" => false,
+          "report_count" => 0,
+          "checks" => [],
+          "errors" => parse_errors,
+          "not_available" => parse_errors.empty?
+        }
+      end
+
+      errors = parse_errors.dup
+      checks = []
+      handled_source_positions = {}
+      authoritative_by_year = {}
+      normalized_company = NameNormalizer.call(company_name)
+      reports.each do |report|
+        next if NameNormalizer.call(report.fetch(:company_name)) == normalized_company
+
+        errors << "#{report.fetch(:filename)} names a different company than the required QuickBooks reports"
+      end
+      reports.group_by { |report| [ report.fetch(:period_start), report.fetch(:period_end) ] }
+             .select { |_period, grouped| grouped.many? }
+             .each_key do |period_start, period_end|
+        errors << "Tax and Wage Summary reporting period #{period_start.strftime('%m/%d/%Y')} through #{period_end.strftime('%m/%d/%Y')} was supplied more than once"
+      end
+
+      paychecks.group_by { |row| row.fetch(:pay_date).year }.sort.each do |year, year_rows|
+        authoritative = reports.select do |report|
+          report.fetch(:period_start) == Date.new(year, 1, 1) &&
+            report.fetch(:period_end).year == year &&
+            report.fetch(:scope).in?(%w[annual year_to_date quarterly_year_to_date])
+        end.max_by { |report| report.fetch(:period_end) }
+        unless authoritative
+          errors << "Missing authoritative #{year} Tax and Wage Summary"
+          next
+        end
+        authoritative_by_year[year] = authoritative
+        handled_source_positions[authoritative.fetch(:source_position)] = true
+        if authoritative.fetch(:period_end) < year_rows.map { |row| row.fetch(:pay_date) }.max
+          errors << "#{authoritative.fetch(:filename)} ends before the final #{year} paycheck"
+          next
+        end
+
+        missing_lines = REQUIRED_TAX_LINES - authoritative.fetch(:tax_lines).keys
+        if missing_lines.any?
+          errors << "#{authoritative.fetch(:filename)} is missing required tax line(s): #{missing_lines.join(', ')}"
+          next
+        end
+
+        ss_wage_base = social_security_wage_base(year)
+        unless ss_wage_base
+          errors << "No Social Security wage base is configured for #{year}; add the annual tax configuration before accepting this history"
+          next
+        end
+
+        derived = derived_tax_wage_totals(year_rows, ss_wage_base: ss_wage_base)
+        year_checks = tax_wage_checks(authoritative.fetch(:tax_lines), derived)
+        checks.concat(year_checks.map do |check|
+          check.merge(
+            "year" => year,
+            "source" => authoritative.fetch(:filename),
+            "social_security_wage_base" => ss_wage_base.to_s("F")
+          )
+        end)
+        year_checks.reject { |check| check.fetch("passed") }.each do |check|
+          errors << "#{year} #{check.fetch('label')} does not match the Tax and Wage Summary"
+        end
+
+        quarter_reports = reports.select do |report|
+          report.fetch(:scope).in?(%w[quarterly quarterly_year_to_date]) && report.fetch(:period_start).year == year &&
+            report.fetch(:period_end) <= authoritative.fetch(:period_end) &&
+            report.fetch(:source_position) != authoritative.fetch(:source_position)
+        end
+        next if authoritative.fetch(:scope) == "quarterly_year_to_date" && quarter_reports.empty?
+        quarter_ends = [
+          Date.new(year, 3, 31),
+          Date.new(year, 6, 30),
+          Date.new(year, 9, 30),
+          Date.new(year, 12, 31)
+        ]
+        completed_quarter_end = quarter_ends.select { |quarter_end| quarter_end <= authoritative.fetch(:period_end) }.max
+        partial_quarter = quarter_reports.find { |report| report.fetch(:period_end) == authoritative.fetch(:period_end) }
+        rollup_end = partial_quarter ? authoritative.fetch(:period_end) : completed_quarter_end
+        required_quarters = rollup_end ? ((rollup_end.month - 1) / 3) + 1 : 0
+        quarter_reports = quarter_reports.select { |report| rollup_end && report.fetch(:period_end) <= rollup_end }
+        quarter_reports.each { |report| handled_source_positions[report.fetch(:source_position)] = true }
+        quarter_groups = quarter_reports.group_by { |report| ((report.fetch(:period_start).month - 1) / 3) + 1 }
+        duplicate_quarters = quarter_groups.select { |_quarter, grouped| grouped.many? }.keys.sort
+        if duplicate_quarters.any?
+          checks << failed_quarterly_check(year, authoritative, "Quarterly tax-and-wage evidence has one report per quarter")
+          errors << "#{year} has more than one Tax and Wage Summary for Q#{duplicate_quarters.join(', Q')}"
+          next
+        end
+        quarter_numbers = quarter_groups.keys.sort
+        required_quarter_numbers = (1..required_quarters).to_a
+        unless (required_quarter_numbers - quarter_numbers).empty?
+          checks << failed_quarterly_check(year, authoritative, "Quarterly tax-and-wage reports include every completed quarter")
+          errors << "#{year} Tax and Wage Summary is missing one or more quarterly reports through Q#{required_quarters}"
+          next
+        end
+        next if required_quarters.zero?
+
+        rollup_reports = quarter_groups.values.map(&:first)
+        unless quarterly_coverage_complete?(rollup_reports, through_date: rollup_end)
+          checks << failed_quarterly_check(year, authoritative, "Quarterly tax-and-wage reports cover the authoritative period without gaps")
+          errors << "#{year} quarterly Tax and Wage Summary reports do not cover the authoritative year report contiguously"
+          next
+        end
+
+        quarter_check = if rollup_end == authoritative.fetch(:period_end)
+          quarterly_tax_reports_match?(rollup_reports, authoritative)
+        else
+          completed_rows = year_rows.select { |row| row.fetch(:pay_date) <= rollup_end }
+          quarterly_tax_reports_match_derived?(
+            rollup_reports,
+            derived_tax_wage_totals(completed_rows, ss_wage_base: ss_wage_base)
+          )
+        end
+        checks << {
+          "key" => "#{year}_quarterly_rollup",
+          "year" => year,
+          "label" => "Quarterly tax-and-wage reports sum to the authoritative year report",
+          "source" => authoritative.fetch(:filename),
+          "passed" => quarter_check
+        }
+        errors << "#{year} quarterly Tax and Wage Summary reports do not sum to the authoritative year report" unless quarter_check
+      end
+
+      reports.select { |report| report.fetch(:scope) == "multi_year" }.each do |report|
+        handled_source_positions[report.fetch(:source_position)] = true
+        sources = authoritative_by_year.values.select do |source|
+          source.fetch(:period_start) >= report.fetch(:period_start) &&
+            source.fetch(:period_end) <= report.fetch(:period_end)
+        end.sort_by { |source| source.fetch(:period_start) }
+        expected_start = report.fetch(:period_start)
+        contiguous = sources.any? && sources.all? do |source|
+          matches = source.fetch(:period_start) == expected_start
+          expected_start = source.fetch(:period_end) + 1.day
+          matches
+        end && expected_start == report.fetch(:period_end) + 1.day
+        matches = contiguous && tax_reports_sum_to_report?(sources, report)
+        checks << {
+          "key" => "multi_year_rollup_#{report.fetch(:period_start).iso8601}_#{report.fetch(:period_end).iso8601}",
+          "label" => "Annual and YTD tax-and-wage reports sum to the multi-year report",
+          "source" => report.fetch(:filename),
+          "passed" => matches
+        }
+        errors << "#{report.fetch(:filename)} is not fully reconciled by the authoritative annual and YTD reports" unless matches
+      end
+
+      paycheck_years = paychecks.map { |row| row.fetch(:pay_date).year }.uniq
+      reports.reject { |report| handled_source_positions[report.fetch(:source_position)] }.each do |report|
+        covered_years = (report.fetch(:period_start).year..report.fetch(:period_end).year)
+        errors << if covered_years.none? { |year| paycheck_years.include?(year) }
+          "#{report.fetch(:filename)} reporting period contains no imported QuickBooks paychecks"
+        else
+          "#{report.fetch(:filename)} is not associated with a reconciled QuickBooks payroll year or reporting window"
+        end
+      end
+
+      {
+        "passed" => errors.empty?,
+        "report_count" => reports.size,
+        "checks" => checks,
+        "errors" => errors,
+        "not_available" => false
+      }
+    end
+
+    def tax_wage_checks(lines, derived)
+      expected = {
+        "fit_total_wages" => [ "FIT total wages", lines.dig("federal_income_tax", "total_wages"), derived.fetch("fit_taxable_wages") ],
+        "fit_tax" => [ "Federal income tax withheld", lines.dig("federal_income_tax", "tax_amount"), derived.fetch("federal_income_tax") ],
+        "ss_total_wages" => [ "Social Security total wages", lines.dig("social_security", "total_wages"), derived.fetch("fica_total_wages") ],
+        "ss_excess_wages" => [ "Social Security excess wages", lines.dig("social_security", "excess_wages"), derived.fetch("social_security_excess_wages") ],
+        "ss_taxable_wages" => [ "Social Security taxable wages", lines.dig("social_security", "taxable_wages"), derived.fetch("social_security_taxable_wages") ],
+        "ss_tax" => [ "Social Security tax withheld", lines.dig("social_security", "tax_amount"), derived.fetch("social_security_tax") ],
+        "employer_ss_tax" => [ "Employer Social Security tax", lines.dig("social_security_employer", "tax_amount"), derived.fetch("employer_social_security_tax") ],
+        "medicare_wages" => [ "Medicare taxable wages", lines.dig("medicare", "taxable_wages"), derived.fetch("medicare_taxable_wages") ],
+        "medicare_tax" => [ "Medicare tax withheld", lines.dig("medicare", "tax_amount"), derived.fetch("medicare_tax") ],
+        "employer_medicare_tax" => [ "Employer Medicare tax", lines.dig("medicare_employer", "tax_amount"), derived.fetch("employer_medicare_tax") ]
+      }
+      expected.map do |key, (label, source, calculated)|
+        {
+          "key" => key,
+          "label" => label,
+          "source_amount" => money(source).to_s("F"),
+          "calculated_amount" => money(calculated).to_s("F"),
+          "passed" => money(source) == money(calculated)
+        }
+      end
+    end
+
+    def derived_tax_wage_totals(rows, ss_wage_base:)
+      wages = WageDerivation.call(
+        rows: rows.map do |row|
+          {
+            employee_key: row.fetch(:normalized_name),
+            gross_pay: row.fetch(:gross_pay),
+            pretax_deductions: row.fetch(:pretax_deductions),
+            non_taxable_earnings: non_taxable_earnings(row),
+            fica_exempt_pretax_deductions: fica_exempt_pretax_deductions(row)
+          }
+        end,
+        social_security_wage_base: ss_wage_base
+      )
+      {
+        "fit_taxable_wages" => wages.fetch(:fit_taxable_wages),
+        "fica_total_wages" => wages.fetch(:fica_total_wages),
+        "social_security_excess_wages" => wages.fetch(:social_security_excess_wages),
+        "social_security_taxable_wages" => wages.fetch(:social_security_taxable_wages),
+        "medicare_taxable_wages" => wages.fetch(:medicare_taxable_wages),
+        "federal_income_tax" => rows.sum(0.to_d) { |row| row.fetch(:federal_income_tax) }.round(2),
+        "social_security_tax" => rows.sum(0.to_d) { |row| row.fetch(:social_security_tax) }.round(2),
+        "medicare_tax" => rows.sum(0.to_d) { |row| row.fetch(:medicare_tax) }.round(2),
+        "employer_social_security_tax" => breakdown_total(rows, :employer_tax_breakdown, /\A(?:SS|Social Security(?: Employer)?)\z/i),
+        "employer_medicare_tax" => breakdown_total(rows, :employer_tax_breakdown, /\A(?:Med|Medicare(?: Employer)?)\z/i)
+      }
+    end
+
+    def non_taxable_earnings(row)
+      Array(row.fetch(:earnings_breakdown)).sum(0.to_d) do |entry|
+        non_taxable_earning_label?(entry.fetch("label")) ? money(entry.fetch("amount")) : 0.to_d
+      end.round(2)
+    end
+
+    def non_taxable_earning_label?(label)
+      label.to_s.squish.match?(NON_TAXABLE_EARNING_LABEL)
+    end
+
+    def fica_exempt_pretax_deductions(row)
+      Array(row.fetch(:pretax_deduction_breakdown)).sum(0.to_d) do |entry|
+        entry.fetch("label").match?(FICA_EXEMPT_PRETAX_DEDUCTION_LABEL) ? money(entry.fetch("amount")) : 0.to_d
+      end.round(2)
+    end
+
+    def social_security_wage_base(year)
+      AnnualTaxConfig.historical_ss_wage_base(year)
+    end
+
+    def breakdown_total(rows, field, label_pattern)
+      rows.sum(0.to_d) do |row|
+        Array(row.fetch(field)).sum(0.to_d) do |entry|
+          entry.fetch("label").match?(label_pattern) ? money(entry.fetch("amount")) : 0.to_d
+        end
+      end.round(2)
+    end
+
+    def quarterly_tax_reports_match?(quarters, authoritative)
+      tax_reports_sum_to_report?(quarters, authoritative)
+    end
+
+    def tax_reports_sum_to_report?(reports, authoritative)
+      REQUIRED_TAX_LINES.all? do |line|
+        %w[total_wages excess_wages taxable_wages tax_amount].all? do |field|
+          source = money(authoritative.dig(:tax_lines, line, field))
+          total = reports.sum(0.to_d) { |report| money(report.dig(:tax_lines, line, field)) }
+          source == total.round(2)
+        end
+      end
+    end
+
+    def quarterly_coverage_complete?(quarters, through_date:)
+      expected_start = Date.new(through_date.year, 1, 1)
+      # all? advances the expected start through the entire contiguous sequence;
+      # only a complete pass makes the trailing authoritative-end comparison meaningful.
+      quarters.sort_by { |report| report.fetch(:period_start) }.all? do |report|
+        contiguous = report.fetch(:period_start) == expected_start
+        expected_start = report.fetch(:period_end) + 1.day
+        contiguous
+      end && expected_start == through_date + 1.day
+    end
+
+    def quarterly_tax_reports_match_derived?(quarters, derived)
+      comparisons = {
+        [ "federal_income_tax", "total_wages" ] => "fit_taxable_wages",
+        [ "federal_income_tax", "tax_amount" ] => "federal_income_tax",
+        [ "social_security", "total_wages" ] => "fica_total_wages",
+        [ "social_security", "excess_wages" ] => "social_security_excess_wages",
+        [ "social_security", "taxable_wages" ] => "social_security_taxable_wages",
+        [ "social_security", "tax_amount" ] => "social_security_tax",
+        [ "social_security_employer", "tax_amount" ] => "employer_social_security_tax",
+        [ "medicare", "taxable_wages" ] => "medicare_taxable_wages",
+        [ "medicare", "tax_amount" ] => "medicare_tax",
+        [ "medicare_employer", "tax_amount" ] => "employer_medicare_tax"
+      }
+      comparisons.all? do |(line, field), derived_key|
+        source = quarters.sum(0.to_d) { |report| money(report.dig(:tax_lines, line, field)) }.round(2)
+        source == money(derived.fetch(derived_key))
+      end
+    end
+
+    def failed_quarterly_check(year, authoritative, label)
+      {
+        "key" => "#{year}_quarterly_rollup",
+        "year" => year,
+        "label" => label,
+        "source" => authoritative.fetch(:filename),
+        "passed" => false
+      }
+    end
+
+    def canonical_digest_value(value)
+      CanonicalJson.normalize(value)
+    end
+
     def build_warnings(paychecks, history, inventory)
       opening_rows = paychecks.select { |row| row.fetch(:period_type) == "opening_summary" }
       opening_count = opening_rows.size
@@ -724,6 +1147,14 @@ module QuickbooksHistory
         paychecks: [],
         summary: { "file_count" => inventory.size, "worker_count" => 0, "period_count" => 0, "paycheck_count" => 0, "totals" => {} },
         reconciliation: { "passed" => false, "errors" => errors },
+        tax_wage_reports: [],
+        tax_wage_reconciliation: {
+          "passed" => false,
+          "report_count" => 0,
+          "checks" => [],
+          "errors" => [],
+          "not_available" => inventory.none? { |entry| entry[:report_type] == "tax_and_wage_summary" }
+        },
         warnings: [],
         errors: errors,
         source_files: files

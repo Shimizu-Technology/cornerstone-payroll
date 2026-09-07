@@ -45,6 +45,407 @@ RSpec.describe QuickbooksHistory::BundleParser do
     )
   end
 
+  it "reconciles annual and quarterly Tax and Wage Summary evidence to the paycheck ledger" do
+    result = described_class.new(files: quickbooks_history_uploads + quickbooks_tax_wage_uploads).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reports.size).to eq(5)
+    expect(result.tax_wage_reconciliation).to include("passed" => true, "report_count" => 5)
+    expect(result.tax_wage_reconciliation.fetch("checks")).to all(include("passed" => true))
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include(
+        "key" => "fit_total_wages",
+        "label" => "FIT total wages",
+        "year" => 2024,
+        "source_amount" => "2950.0",
+        "social_security_wage_base" => "168600.0"
+      ),
+      include("key" => "employer_ss_tax", "label" => "Employer Social Security tax", "year" => 2024),
+      include("key" => "2024_quarterly_rollup", "passed" => true)
+    )
+  end
+
+  it "marks absent Tax and Wage Summary evidence as unavailable" do
+    result = described_class.new(files: quickbooks_history_uploads).call
+
+    expect(result.tax_wage_reconciliation).to include(
+      "passed" => false,
+      "report_count" => 0,
+      "not_available" => true,
+      "errors" => []
+    )
+    expect(result.warnings).to include(match(/Tax and Wage Summary evidence is not available/))
+  end
+
+  it "treats an unreadable Tax and Wage Summary as failed evidence, not missing evidence" do
+    file = Tempfile.new([ "broken-tax-and-wage", ".xls" ])
+    file.write("not a spreadsheet")
+    file.rewind
+    upload = Rack::Test::UploadedFile.new(
+      file.path,
+      "application/vnd.ms-excel",
+      true,
+      original_filename: "Tax and Wage Summary 2024.xls"
+    )
+
+    result = described_class.new(files: quickbooks_history_uploads + [ upload ]).call
+
+    expect(result.tax_wage_reconciliation).to include(
+      "passed" => false,
+      "report_count" => 0,
+      "not_available" => false
+    )
+    expect(result.errors).to include("Tax and Wage Summary 2024.xls could not be read as a Tax and Wage Summary spreadsheet")
+  ensure
+    file&.close!
+  end
+
+  it "matches only the reviewed non-taxable earning-label contract" do
+    reviewed_non_taxable_label = described_class::NON_TAXABLE_EARNING_LABEL
+
+    expect("Reimbursable overtime").not_to match(reviewed_non_taxable_label)
+    expect("Reimb").to match(reviewed_non_taxable_label)
+    expect("Auto Insurance Reimb").to match(reviewed_non_taxable_label)
+    expect("Auto Loan Reimbursem").to match(reviewed_non_taxable_label)
+    expect("Medicare Reimb Diffe").to match(reviewed_non_taxable_label)
+    expect("Rent - Charlie").to match(reviewed_non_taxable_label)
+    expect("Loan pay to SP").to match(reviewed_non_taxable_label)
+  end
+
+  it "blocks a Tax and Wage Summary that names a different company" do
+    rows = annual_tax_wage_rows
+    rows.fetch(0)[0] = "Different Company"
+    wrong_company = build_quickbooks_xls("Tax_and_Wage_Summary_wrong_company.xls", rows)
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads.drop(1) + [ wrong_company ]
+    ).call
+
+    expect(result.errors).to include(
+      "Tax_and_Wage_Summary_wrong_company.xls names a different company than the required QuickBooks reports"
+    )
+  end
+
+  it "maps Guam unemployment and fingerprints otherwise unknown tax rows" do
+    rows = annual_tax_wage_rows
+    rows << [ "GU Unemployment Insurance Tax Employer", 3_000, 0, 3_000, 45 ]
+    rows << [ "Local payroll assessment", 3_000, 0, 3_000, 12 ]
+    annual = build_quickbooks_xls("Tax_and_Wage_Summary_with_local_tax.xls", rows)
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads.drop(1) + [ annual ]
+    ).call
+    lines = result.tax_wage_reports.find { |report| report.fetch(:scope) == "annual" }.fetch(:tax_lines)
+    unknown = lines.values.find { |line| line["source_label"] == "Local payroll assessment" }
+
+    expect(result.errors).to be_empty
+    expect(lines.fetch("state_unemployment_employer")).to include(
+      "source_label" => "GU Unemployment Insurance Tax Employer",
+      "tax_amount" => "45.0"
+    )
+    expect(unknown).to include("taxable_wages" => "3000.0", "tax_amount" => "12.0")
+  end
+
+  it "classifies a full calendar year as annual even when its filename contains a quarter token" do
+    annual = build_quickbooks_xls(
+      "Tax and Wage Summary Q4 annual.xls",
+      annual_tax_wage_rows
+    )
+
+    result = described_class.new(files: quickbooks_history_uploads + [ annual ]).call
+
+    expect(result.tax_wage_reports.find { |report| report.fetch(:scope) == "annual" }).to include(scope: "annual")
+  end
+
+  it "uses an exact Q1 report as both quarterly evidence and the authoritative YTD report" do
+    q1 = build_quickbooks_xls(
+      "Tax_and_Wage_Summary_2024_Q1.xls",
+      tax_wage_summary_rows(
+        start_date: "Jan 01, 2024", end_date: "Mar 31, 2024", fit_wages: 2_950, fit_tax: 300,
+        ss_wages: 3_000, ss_tax: 240, medicare_wages: 3_000, medicare_tax: 60, employer_medicare_tax: 60
+      )
+    )
+
+    result = described_class.new(files: quickbooks_q1_history_uploads + [ q1 ]).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reports).to contain_exactly(include(scope: "quarterly_year_to_date"))
+    expect(result.tax_wage_reconciliation.fetch("checks")).not_to include(
+      include("key" => "2024_quarterly_rollup")
+    )
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "fit_total_wages", "passed" => true)
+    )
+  end
+
+  it "keeps an unreconciled Tax and Wage Summary visible as a blocking preview error" do
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads(q3_fit_wages: 949)
+    ).call
+
+    expect(result.tax_wage_reconciliation.fetch("passed")).to be(false)
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "2024_quarterly_rollup", "passed" => false)
+    )
+    expect(result.errors.join(" ")).to match(/quarterly Tax and Wage Summary reports do not sum/)
+  end
+
+  it "records duplicate quarterly evidence as an explicit failed reconciliation check" do
+    duplicate_q1 = build_quickbooks_xls(
+      "Tax and Wage Summary Q1 duplicate.xls",
+      empty_tax_wage_summary_rows("Jan 01, 2024", "Mar 31, 2024")
+    )
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads + [ duplicate_q1 ]
+    ).call
+
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "2024_quarterly_rollup", "passed" => false)
+    )
+    expect(result.errors.join(" ")).to match(/more than one Tax and Wage Summary for Q1/)
+  end
+
+  it "blocks duplicate annual reporting periods before persistence" do
+    duplicate_annual = build_quickbooks_xls(
+      "Tax and Wage Summary annual duplicate.xls",
+      annual_tax_wage_rows
+    )
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads + [ duplicate_annual ]
+    ).call
+
+    expect(result.tax_wage_reconciliation.fetch("passed")).to be(false)
+    expect(result.errors).to include(
+      "Tax and Wage Summary reporting period 01/01/2024 through 12/31/2024 was supplied more than once"
+    )
+  end
+
+  it "blocks a tax report for a year with no imported payroll" do
+    orphan = build_quickbooks_xls(
+      "Tax and Wage Summary 2023.xls",
+      empty_tax_wage_summary_rows("Jan 01, 2023", "Dec 31, 2023")
+    )
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads + [ orphan ]
+    ).call
+
+    expect(result.tax_wage_reconciliation.fetch("passed")).to be(false)
+    expect(result.errors).to include(
+      "Tax and Wage Summary 2023.xls reporting period contains no imported QuickBooks paychecks"
+    )
+  end
+
+  it "reconciles a multi-year Tax and Wage Summary through public bundle parsing" do
+    result = described_class.new(
+      files: quickbooks_two_year_history_uploads + quickbooks_two_year_tax_wage_uploads
+    ).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include(
+        "key" => "multi_year_rollup_2024-01-01_2025-12-31",
+        "passed" => true
+      )
+    )
+  end
+
+  it "blocks a multi-year Tax and Wage Summary that does not equal its annual reports" do
+    result = described_class.new(
+      files: quickbooks_two_year_history_uploads +
+        quickbooks_two_year_tax_wage_uploads(multi_year_fit_wages: 2_949)
+    ).call
+
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include(
+        "key" => "multi_year_rollup_2024-01-01_2025-12-31",
+        "passed" => false
+      )
+    )
+    expect(result.errors).to include(
+      "Tax_and_Wage_Summary_2024_2025.xls is not fully reconciled by the authoritative annual and YTD reports"
+    )
+  end
+
+  it "records missing completed-quarter coverage as an explicit failed reconciliation check" do
+    reports = quickbooks_tax_wage_uploads.reject { |file| file.original_filename.include?("Q2") }
+
+    result = described_class.new(files: quickbooks_history_uploads + reports).call
+
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "2024_quarterly_rollup", "passed" => false)
+    )
+    expect(result.errors.join(" ")).to match(/missing one or more quarterly reports through Q4/)
+  end
+
+  it "records a malformed optional Tax and Wage Summary without aborting the payroll preview" do
+    malformed = build_quickbooks_xls(
+      "Tax_and_Wage_Summary_Broken.xls",
+      [ [ "Example Company" ], [ "Payroll tax and wage summary report" ], [], [ "No reporting period" ],
+        [ "Tax types", "Total wages", "Excess wages", "Taxable wages", "Tax amount" ] ]
+    )
+
+    result = described_class.new(files: quickbooks_history_uploads + [ malformed ]).call
+
+    expect(result.paychecks.size).to eq(2)
+    expect(result.tax_wage_reconciliation).to include("passed" => false, "not_available" => false)
+    expect(result.tax_wage_reconciliation.fetch("errors").join(" ")).to match(/missing its reporting period/)
+    expect(result.warnings.join(" ")).not_to match(/Tax and Wage Summary needs review/)
+  end
+
+  it "does not classify ordinary parental leave or loan-forgiveness bonuses as non-taxable" do
+    result = described_class.new(
+      files: quickbooks_history_uploads_with_non_taxable_labels + quickbooks_tax_wage_uploads(
+        fit_wages: 2_880,
+        ss_wages: 2_930,
+        q3_fit_wages: 880,
+        q3_ss_wages: 930
+      )
+    ).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "fit_total_wages", "source_amount" => "2880.0", "passed" => true),
+      include("key" => "ss_total_wages", "source_amount" => "2930.0", "passed" => true)
+    )
+  end
+
+  it "subtracts Section 125 deductions from FICA wages while keeping 401(k) deductions in FICA wages" do
+    result = described_class.new(
+      files: quickbooks_history_uploads_with_section_125 + quickbooks_tax_wage_uploads(
+        fit_wages: 2_925,
+        ss_wages: 2_975,
+        q3_fit_wages: 925,
+        q3_ss_wages: 975
+      )
+    ).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "fit_total_wages", "source_amount" => "2925.0", "passed" => true),
+      include("key" => "ss_total_wages", "source_amount" => "2975.0", "passed" => true)
+    )
+  end
+
+  it "surfaces a missing Social Security wage base as an actionable preview error" do
+    stub_const("AnnualTaxConfig::HISTORICAL_SS_WAGE_BASES", {})
+
+    result = described_class.new(files: quickbooks_history_uploads + quickbooks_tax_wage_uploads).call
+
+    expect(result.paychecks.size).to eq(2)
+    expect(result.tax_wage_reconciliation.fetch("passed")).to be(false)
+    expect(result.errors.join(" ")).to match(/No Social Security wage base is configured for 2024/)
+  end
+
+  it "rejects duplicate tax-type rows without aborting the payroll preview" do
+    rows = annual_tax_wage_rows(start_date: "Jan 1, 2024")
+    federal_income_tax_row = rows.find { |row| row.first.to_s.match?(/federal income tax/i) }
+    rows << federal_income_tax_row.dup.tap { |row| row[0] = "fEdErAl InCoMe TaX" }
+    duplicate = build_quickbooks_xls("Tax and Wage Summary - 2024.xls", rows)
+
+    result = described_class.new(files: quickbooks_history_uploads + [ duplicate ]).call
+
+    expect(result.paychecks.size).to eq(2)
+    expect(result.tax_wage_reconciliation.fetch("errors").join(" ")).to match(
+      /same tax line twice: Federal Income Tax and fEdErAl InCoMe TaX/
+    )
+  end
+
+  it "recognizes explicit quarter tokens without guessing from month prose" do
+    filenames = [
+      "Tax and Wage Summary Q1.xls",
+      "Tax-and-Wage-Summary-Q1.xls",
+      "Tax and Wage Summary Jan through Mar.xls"
+    ]
+    reports = filenames.map do |filename|
+      build_quickbooks_xls(
+        filename,
+        empty_tax_wage_summary_rows("Jan 02, 2024", "Mar 30, 2024")
+      )
+    end
+
+    result = described_class.new(files: quickbooks_history_uploads + reports).call
+
+    expect(result.tax_wage_reports.pluck(:scope)).to contain_exactly("quarterly", "quarterly", "year_to_date")
+  end
+
+  it "reconciles completed quarters when the authoritative report ends mid-quarter" do
+    reports = quickbooks_tax_wage_uploads.first(3)
+    reports[0] = build_quickbooks_xls(
+      "Tax_and_Wage_Summary_2024_YTD.xls",
+      tax_wage_summary_rows(
+        start_date: "Jan 01, 2024", end_date: "Jul 31, 2024", fit_wages: 2_950, fit_tax: 300,
+        ss_wages: 3_000, ss_tax: 240, medicare_wages: 3_000, medicare_tax: 60, employer_medicare_tax: 60
+      )
+    )
+
+    result = described_class.new(files: quickbooks_history_uploads + reports).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reconciliation).to include("passed" => true, "not_available" => false)
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "2024_quarterly_rollup", "passed" => true)
+    )
+  end
+
+  it "rejects a quarter-labeled partial report excluded from the authoritative rollup" do
+    reports = quickbooks_tax_wage_uploads.first(3)
+    reports[0] = build_quickbooks_xls(
+      "Tax_and_Wage_Summary_2024_YTD.xls",
+      tax_wage_summary_rows(
+        start_date: "Jan 01, 2024", end_date: "Jul 31, 2024", fit_wages: 2_950, fit_tax: 300,
+        ss_wages: 3_000, ss_tax: 240, medicare_wages: 3_000, medicare_tax: 60, employer_medicare_tax: 60
+      )
+    )
+    reports << build_quickbooks_xls(
+      "Tax_and_Wage_Summary_2024_Q3_partial.xls",
+      empty_tax_wage_summary_rows("Jul 01, 2024", "Jul 15, 2024")
+    )
+
+    result = described_class.new(files: quickbooks_history_uploads + reports).call
+
+    expect(result.errors).to include(
+      "Tax_and_Wage_Summary_2024_Q3_partial.xls is not associated with a reconciled QuickBooks payroll year or reporting window"
+    )
+  end
+
+  it "keeps Social Security caps distinct from uncapped Medicare wages" do
+    details = payroll_details_rows
+    headers = details.fetch(4)
+    details.fetch(5)[headers.index("Gross pay - total")] = 169_600
+    details.fetch(5)[headers.index("Gross pay - Regular")] = 169_500
+    details.fetch(5)[headers.index("Adjusted gross")] = 169_550
+    history = paycheck_history_rows
+    history.fetch(5)[history.fetch(4).index("Total pay")] = 169_600
+    files = authoritative_quickbooks_files(details: details, history: history)
+    files << build_quickbooks_xls("Tax_and_Wage_Summary_2024.xls", tax_wage_summary_rows(
+      start_date: "Jan 01, 2024", end_date: "Dec 31, 2024", fit_wages: 171_550, fit_tax: 300,
+      ss_wages: 171_600, ss_excess_wages: 1_000, ss_taxable_wages: 170_600, ss_tax: 240,
+      medicare_wages: 171_600, medicare_tax: 60, employer_medicare_tax: 60
+    ))
+    files << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q1.xls", empty_tax_wage_summary_rows("Jan 01, 2024", "Mar 31, 2024"))
+    files << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q2.xls", tax_wage_summary_rows(
+      start_date: "Apr 01, 2024", end_date: "Jun 30, 2024", fit_wages: 2_000, fit_tax: 200,
+      ss_wages: 2_000, ss_tax: 160, medicare_wages: 2_000, medicare_tax: 40, employer_medicare_tax: 40
+    ))
+    files << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q3.xls", tax_wage_summary_rows(
+      start_date: "Jul 01, 2024", end_date: "Sep 30, 2024", fit_wages: 169_550, fit_tax: 100,
+      ss_wages: 169_600, ss_excess_wages: 1_000, ss_taxable_wages: 168_600, ss_tax: 80,
+      medicare_wages: 169_600, medicare_tax: 20, employer_medicare_tax: 20
+    ))
+    files << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q4.xls", empty_tax_wage_summary_rows("Oct 01, 2024", "Dec 31, 2024"))
+
+    result = described_class.new(files: files).call
+
+    expect(result.errors).to be_empty
+    expect(result.tax_wage_reconciliation.fetch("checks")).to include(
+      include("key" => "ss_excess_wages", "source_amount" => "1000.0", "passed" => true),
+      include("key" => "medicare_wages", "source_amount" => "171600.0", "passed" => true)
+    )
+  end
+
   it "requires all five authoritative source reports" do
     result = described_class.new(files: quickbooks_history_uploads.first(2)).call
 

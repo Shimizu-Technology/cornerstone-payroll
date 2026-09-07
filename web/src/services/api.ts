@@ -3769,6 +3769,21 @@ export interface HistoricalImportBatch {
     mismatched_summary_rows?: number;
     errors: string[];
   };
+  tax_wage_reconciliation: {
+    passed: boolean;
+    report_count: number;
+    not_available?: boolean;
+    checks: Array<{
+      key: string;
+      year?: number;
+      label: string;
+      source?: string;
+      source_amount?: string;
+      calculated_amount?: string;
+      passed: boolean;
+    }>;
+    errors: string[];
+  };
   worker_review_summary: {
     total: number;
     needs_review: number;
@@ -3783,7 +3798,46 @@ export interface HistoricalImportBatch {
   locked_by_name?: string | null;
   cutover_review?: HistoricalCutoverReview | null;
   client_bootstrap?: HistoricalClientBootstrapSummary | null;
+  ytd_bridge?: HistoricalYtdBridgeSummary | null;
   created_at: string;
+}
+
+export interface HistoricalYtdBridgeSummary {
+  id: number;
+  status: 'previewed' | 'applied';
+  plan_digest: string;
+  preview_summary: {
+    employee_count: number;
+    balance_count: number;
+    tax_years: number[];
+    through_pay_date: string;
+    through_period_end?: string | null;
+    gross_pay: string;
+    net_pay: string;
+  };
+  reconciliation_summary: {
+    passed: boolean;
+    checks: Array<{
+      key: string;
+      year: number;
+      label: string;
+      source_amount: string | null;
+      bridge_amount: string | null;
+      passed: boolean;
+    }>;
+    errors: string[];
+  };
+  ready_to_apply: boolean;
+  applied_at?: string | null;
+  applied_by_name?: string | null;
+  acknowledgement: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoricalYtdBridge extends HistoricalYtdBridgeSummary {
+  warnings: string[];
+  errors: string[];
 }
 
 export interface HistoricalClientBootstrapSummary {
@@ -3903,6 +3957,7 @@ export interface HistoricalPaycheck {
 
 export interface HistoricalImportDetail extends HistoricalImportBatch {
   client_bootstrap?: HistoricalClientBootstrap | null;
+  ytd_bridge?: HistoricalYtdBridge | null;
   periods: HistoricalPayPeriod[];
   workers: HistoricalWorker[];
   paychecks: HistoricalPaycheck[];
@@ -4011,6 +4066,10 @@ export const historicalImportsApi = {
     api.post<{ data: HistoricalClientBootstrap }>(`/admin/historical_imports/${batchId}/preview_client_bootstrap`),
   applyClientBootstrap: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean } }>(`/admin/historical_imports/${batchId}/apply_client_bootstrap`, { acknowledgement }),
+  previewYtdBridge: (batchId: number): Promise<{ data: HistoricalYtdBridge }> =>
+    api.post<{ data: HistoricalYtdBridge }>(`/admin/historical_imports/${batchId}/preview_ytd_bridge`),
+  applyYtdBridge: (batchId: number, acknowledgement: string): Promise<{ data: HistoricalImportBatch }> =>
+    api.post<{ data: HistoricalImportBatch }>(`/admin/historical_imports/${batchId}/apply_ytd_bridge`, { acknowledgement }),
   verifyCutover: (batchId: number): Promise<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }> =>
     api.post<{ data: HistoricalImportBatch; meta: { enqueued: boolean; status: HistoricalCutoverReview['status'] } }>(`/admin/historical_imports/${batchId}/verify_cutover`),
   updateCutoverReview: (
