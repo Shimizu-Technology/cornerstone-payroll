@@ -377,6 +377,7 @@ export interface EmployeeFormData {
   first_name: string;
   middle_name?: string;
   last_name: string;
+  job_title?: string;
   email?: string;
   ssn?: string;
   ssn_confirmation?: string;

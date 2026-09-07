@@ -22,6 +22,7 @@ const initialFormData: EmployeeFormData = {
   first_name: '',
   middle_name: '',
   last_name: '',
+  job_title: '',
   ssn: '',
   ssn_confirmation: '',
   date_of_birth: '',
@@ -280,6 +281,7 @@ export function EmployeeForm() {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
+        job_title: employee.job_title || '',
         ssn: loadedSsn,
         ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
@@ -1186,6 +1188,17 @@ export function EmployeeForm() {
                     </option>
                   ))}
                 </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Job Title
+                </label>
+                <Input
+                  name="job_title"
+                  value={form.job_title || ''}
+                  onChange={(e) => handleChange('job_title', e.target.value)}
+                  placeholder="e.g. Payroll Specialist"
+                />
               </div>
             </div>
 

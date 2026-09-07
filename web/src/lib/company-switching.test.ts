@@ -39,8 +39,14 @@ describe('getCompanySwitchRedirect', (): void => {
     });
   });
 
-  it('leaves canonical and legacy employee creation forms in place', (): void => {
-    expect(getCompanySwitchRedirect('/companies/7/employees/new', 12)).toBeNull();
+  it('moves canonical employee creation to the selected company', (): void => {
+    expect(getCompanySwitchRedirect('/companies/7/employees/new', 12)).toEqual({
+      notice: 'Switched clients. Starting a new employee for the selected client.',
+      to: '/companies/12/employees/new',
+    });
+  });
+
+  it('leaves legacy employee creation in place', (): void => {
     expect(getCompanySwitchRedirect('/employees/new', 12)).toBeNull();
   });
 
