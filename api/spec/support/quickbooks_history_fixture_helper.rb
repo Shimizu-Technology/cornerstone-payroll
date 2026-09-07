@@ -61,6 +61,156 @@ module QuickbooksHistoryFixtureHelper
     authoritative_quickbooks_files(details: details, history: paycheck_history_rows, summary: summary)
   end
 
+  def quickbooks_history_uploads_with_section_125
+    quickbooks_history_uploads_with_extra_deduction(
+      label: "Pretax deductions - Section 125 Health Pre-Tax",
+      amount: -25,
+      total_column: "Pretax deductions - total",
+      deduction_total: -75,
+      adjusted_gross: 925,
+      net_pay: 700
+    )
+  end
+
+  def quickbooks_history_uploads_with_non_taxable_labels
+    details = payroll_details_rows
+    labels = [
+      "Gross pay - Parental Leave",
+      "Gross pay - Loan Forgiveness Bonus",
+      "Gross pay - Auto Loan Reimbursement",
+      "Gross pay - Loan - Charlie"
+    ]
+    columns = labels.map do |label|
+      column = details.fetch(4).length
+      details.fetch(4) << label
+      column
+    end
+    details.fetch(5)[details.fetch(4).index("Gross pay - Regular")] = 800
+    columns.zip([ 10, 20, 30, 40 ]).each { |column, value| details.fetch(5)[column] = value }
+    columns.each { |column| details.fetch(6)[column] = 0 }
+    columns.each { |column| details.fetch(7)[column] = 0 }
+    columns.zip([ 10, 20, 30, 40 ]).each { |column, value| details.fetch(8)[column] = value }
+
+    authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
+  end
+
+  def quickbooks_history_uploads_with_roth_and_loan
+    quickbooks_history_uploads_with_extra_deduction(
+      label: "Employee Aftertax deductions - Roth 401(k) Loan",
+      amount: -50,
+      total_column: "Employee Aftertax deductions - total",
+      deduction_total: -75,
+      net_pay: 675
+    )
+  end
+
+  def quickbooks_history_uploads_with_tip_label(label)
+    details = payroll_details_rows
+    headers = details.fetch(4)
+    headers[headers.index("Gross pay - Bonus")] = "Gross pay - #{label}"
+
+    authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
+  end
+
+  # Q1 and Q4 are empty and Q2 is fixed at 2,000. Annual FIT and SS wages
+  # reconcile only when they equal Q2 plus the matching Q3 value.
+  def quickbooks_tax_wage_uploads(
+    fit_wages: 2_950,
+    ss_wages: 3_000,
+    q3_fit_wages: 950,
+    q3_ss_wages: 1_000
+  )
+    [
+      build_quickbooks_xls(
+        "Tax_and_Wage_Summary_2024.xls",
+        annual_tax_wage_rows(fit_wages: fit_wages, ss_wages: ss_wages, medicare_wages: ss_wages)
+      ),
+      build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q1.xls", empty_tax_wage_summary_rows("Jan 01, 2024", "Mar 31, 2024")),
+      build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q2.xls", tax_wage_summary_rows(
+        start_date: "Apr 01, 2024", end_date: "Jun 30, 2024", fit_wages: 2_000, fit_tax: 200,
+        ss_wages: 2_000, ss_tax: 160, medicare_wages: 2_000, medicare_tax: 40, employer_medicare_tax: 40
+      )),
+      build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q3.xls", tax_wage_summary_rows(
+        start_date: "Jul 01, 2024", end_date: "Sep 30, 2024", fit_wages: q3_fit_wages, fit_tax: 100,
+        ss_wages: q3_ss_wages, ss_tax: 80, medicare_wages: q3_ss_wages, medicare_tax: 20, employer_medicare_tax: 20
+      )),
+      build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q4.xls", empty_tax_wage_summary_rows("Oct 01, 2024", "Dec 31, 2024"))
+    ]
+  end
+
+  def quickbooks_two_year_history_uploads
+    details = payroll_details_rows
+    details.fetch(3)[0] = "From Jan 01, 2024 to Dec 31, 2025"
+    bob = details.find { |row| row[0] == "*Worker, Bob" }
+    bob[1] = "06/30/2025"
+    bob[2] = "01/01/2025 - 06/27/2025"
+    history = paycheck_history_rows
+    history.fetch(3)[0] = "Paychecks from Jan 01, 2024 to Dec 31, 2025"
+
+    authoritative_quickbooks_files(details: details, history: history)
+  end
+
+  def quickbooks_q1_history_uploads
+    details = payroll_details_rows
+    details.fetch(3)[0] = "From Jan 01, 2024 to Mar 31, 2024"
+    alice = details.find { |row| row[0] == "Worker, Alice" }
+    alice[1] = "03/15/2024"
+    alice[2] = "03/01/2024 - 03/14/2024"
+    bob = details.find { |row| row[0] == "*Worker, Bob" }
+    bob[1] = "03/31/2024"
+    bob[2] = "01/01/2024 - 03/30/2024"
+    history = paycheck_history_rows
+    history.fetch(3)[0] = "Paychecks from Jan 01, 2024 to Mar 31, 2024"
+    history.fetch(5)[0] = "03/15/2024"
+
+    authoritative_quickbooks_files(details: details, history: history)
+  end
+
+  def quickbooks_two_year_tax_wage_uploads(multi_year_fit_wages: 2_950)
+    reports = []
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024.xls", tax_wage_summary_rows(
+      start_date: "Jan 01, 2024", end_date: "Dec 31, 2024", fit_wages: 950, fit_tax: 100,
+      ss_wages: 1_000, ss_tax: 80, medicare_wages: 1_000, medicare_tax: 20, employer_medicare_tax: 20
+    ))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q1.xls", empty_tax_wage_summary_rows("Jan 01, 2024", "Mar 31, 2024"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q2.xls", empty_tax_wage_summary_rows("Apr 01, 2024", "Jun 30, 2024"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q3.xls", tax_wage_summary_rows(
+      start_date: "Jul 01, 2024", end_date: "Sep 30, 2024", fit_wages: 950, fit_tax: 100,
+      ss_wages: 1_000, ss_tax: 80, medicare_wages: 1_000, medicare_tax: 20, employer_medicare_tax: 20
+    ))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024_Q4.xls", empty_tax_wage_summary_rows("Oct 01, 2024", "Dec 31, 2024"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2025.xls", tax_wage_summary_rows(
+      start_date: "Jan 01, 2025", end_date: "Dec 31, 2025", fit_wages: 2_000, fit_tax: 200,
+      ss_wages: 2_000, ss_tax: 160, medicare_wages: 2_000, medicare_tax: 40, employer_medicare_tax: 40
+    ))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2025_Q1.xls", empty_tax_wage_summary_rows("Jan 01, 2025", "Mar 31, 2025"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2025_Q2.xls", tax_wage_summary_rows(
+      start_date: "Apr 01, 2025", end_date: "Jun 30, 2025", fit_wages: 2_000, fit_tax: 200,
+      ss_wages: 2_000, ss_tax: 160, medicare_wages: 2_000, medicare_tax: 40, employer_medicare_tax: 40
+    ))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2025_Q3.xls", empty_tax_wage_summary_rows("Jul 01, 2025", "Sep 30, 2025"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2025_Q4.xls", empty_tax_wage_summary_rows("Oct 01, 2025", "Dec 31, 2025"))
+    reports << build_quickbooks_xls("Tax_and_Wage_Summary_2024_2025.xls", tax_wage_summary_rows(
+      start_date: "Jan 01, 2024", end_date: "Dec 31, 2025", fit_wages: multi_year_fit_wages, fit_tax: 300,
+      ss_wages: 3_000, ss_tax: 240, medicare_wages: 3_000, medicare_tax: 60, employer_medicare_tax: 60
+    ))
+    reports
+  end
+
+  def annual_tax_wage_rows(**overrides)
+    tax_wage_summary_rows(**{
+      start_date: "Jan 01, 2024",
+      end_date: "Dec 31, 2024",
+      fit_wages: 2_950,
+      fit_tax: 300,
+      ss_wages: 3_000,
+      ss_tax: 240,
+      medicare_wages: 3_000,
+      medicare_tax: 60,
+      employer_medicare_tax: 60
+    }.merge(overrides))
+  end
+
   def review_historical_workers_as_archive_only(batch, actor:)
     batch.historical_workers.find_each do |worker|
       QuickbooksHistory::MappingService.new(worker: worker, employee: nil, actor: actor, archive_only: true).call
@@ -96,6 +246,26 @@ module QuickbooksHistoryFixtureHelper
 
   private
 
+  def quickbooks_history_uploads_with_extra_deduction(
+    label:, amount:, total_column:, deduction_total:, net_pay:, adjusted_gross: nil
+  )
+    details = payroll_details_rows
+    headers = details.fetch(4)
+    deduction_column = headers.length
+    headers << label
+    details.fetch(5)[headers.index(total_column)] = deduction_total
+    details.fetch(5)[headers.index("Adjusted gross")] = adjusted_gross if adjusted_gross
+    details.fetch(5)[headers.index("Net pay")] = net_pay
+    details.fetch(5)[deduction_column] = amount
+    details.fetch(6)[deduction_column] = 0
+    details.fetch(7)[deduction_column] = 0
+    details.fetch(8)[deduction_column] = amount
+    history = paycheck_history_rows
+    history.fetch(5)[history.fetch(4).index("Net pay")] = net_pay
+
+    authoritative_quickbooks_files(details: details, history: history)
+  end
+
   def authoritative_quickbooks_files(details:, history:, employee_details: nil, summary: nil, suffix: nil)
     employee_details ||= employee_details_rows
     summary ||= payroll_summary_rows(details)
@@ -120,6 +290,36 @@ module QuickbooksHistoryFixtureHelper
     workbook.write(tempfile.path)
     @quickbooks_history_tempfiles << tempfile
     Rack::Test::UploadedFile.new(tempfile.path, "application/vnd.ms-excel", true, original_filename: filename)
+  end
+
+  def tax_wage_summary_rows(
+    start_date:, end_date:, fit_wages:, fit_tax:, ss_wages:, ss_tax:, medicare_tax:, employer_medicare_tax:,
+    medicare_wages:, ss_excess_wages: 0, ss_taxable_wages: ss_wages - ss_excess_wages
+  )
+    [
+      [ "Example Company" ],
+      [ "Payroll tax and wage summary report" ],
+      [],
+      [ "From #{start_date} to #{end_date} from all locations" ],
+      [ "Tax types", "Total wages", "Excess wages", "Taxable wages", "Tax amount" ],
+      [ "Federal Taxes (941/943/944)", "", "", "", fit_tax + (ss_tax * 2) + medicare_tax + employer_medicare_tax ],
+      [ "Federal Income Tax", fit_wages, 0, fit_wages, fit_tax ],
+      [ "Social Security", ss_wages, ss_excess_wages, ss_taxable_wages, ss_tax ],
+      [ "Social Security Employer", ss_wages, ss_excess_wages, ss_taxable_wages, ss_tax ],
+      [ "Medicare", medicare_wages, 0, medicare_wages, medicare_tax ],
+      [ "Medicare Employer", medicare_wages, 0, medicare_wages, employer_medicare_tax ]
+    ]
+  end
+
+  def empty_tax_wage_summary_rows(start_date, end_date)
+    [
+      [ "Example Company" ],
+      [ "Payroll tax and wage summary report" ],
+      [],
+      [ "From #{start_date} to #{end_date} from all locations" ],
+      [ "Tax types", "Total wages", "Excess wages", "Taxable wages", "Tax amount" ],
+      [ "", "", "", "", "" ]
+    ]
   end
 
   def payroll_details_rows

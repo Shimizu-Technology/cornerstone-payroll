@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -126,6 +126,7 @@ function batch(id: number, workers: MockWorker[] = []): HistoricalImportBatch {
       },
     },
     reconciliation_summary: { passed: true, errors: [] },
+    tax_wage_reconciliation: { passed: false, report_count: 0, not_available: true, checks: [], errors: [] },
     worker_review_summary: {
       total: workers.length,
       needs_review: workers.filter((worker) => worker.mapping_status === 'needs_review').length,
@@ -279,6 +280,41 @@ function clientBootstrap(
   };
 }
 
+function ytdBridge(status: 'previewed' | 'applied' = 'previewed', reconciliationErrors: string[] = []): HistoricalYtdBridge {
+  const reconciled = reconciliationErrors.length === 0;
+  return {
+    id: 95,
+    status,
+    plan_digest: '9'.repeat(64),
+    preview_summary: {
+      employee_count: 114,
+      balance_count: 251,
+      tax_years: [2024, 2025, 2026],
+      through_pay_date: '2026-08-27',
+      through_period_end: '2026-08-23',
+      gross_pay: '4766581.41',
+      net_pay: '3392190.70',
+    },
+    reconciliation_summary: {
+      passed: reconciled,
+      checks: [
+        { key: 'fit_total_wages', year: 2024, label: 'FIT total wages', source_amount: '1539489.17', bridge_amount: '1539489.17', passed: true },
+        { key: 'ss_taxable_wages', year: 2025, label: 'SS taxable wages', source_amount: '1670974.21', bridge_amount: '1670974.21', passed: true },
+        { key: 'medicare_wages', year: 2026, label: 'Medicare wages', source_amount: '1260788.54', bridge_amount: reconciled ? '1260788.54' : '1260788.00', passed: reconciled },
+      ],
+      errors: reconciliationErrors,
+    },
+    ready_to_apply: status === 'previewed' && reconciled,
+    applied_at: status === 'applied' ? '2026-09-07T04:00:00Z' : null,
+    applied_by_name: status === 'applied' ? 'History Admin' : null,
+    acknowledgement: 'ACTIVATE VERIFIED HISTORICAL YTD',
+    warnings: ['This bridge carries retained QuickBooks balances into future YTD calculations.'],
+    errors: reconciliationErrors,
+    created_at: '2026-09-07T03:30:00Z',
+    updated_at: status === 'applied' ? '2026-09-07T04:00:00Z' : '2026-09-07T03:30:00Z',
+  };
+}
+
 function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImportBatch {
   const { periods: _periods, workers: _workers, paychecks: _paychecks, ...payload } = value;
   if (payload.client_bootstrap) {
@@ -289,6 +325,10 @@ function withoutDetailCollections(value: HistoricalImportDetail): HistoricalImpo
       ...bootstrapSummary
     } = payload.client_bootstrap;
     payload.client_bootstrap = bootstrapSummary;
+  }
+  if (payload.ytd_bridge) {
+    const { warnings: _warnings, errors: _errors, ...bridgeSummary } = payload.ytd_bridge;
+    payload.ytd_bridge = bridgeSummary;
   }
   return payload;
 }
@@ -1165,6 +1205,8 @@ test('previews and creates a clean current-payroll roster without running payrol
   await expect(page.getByRole('button', { name: 'Create employee records' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Create employee records' }).click();
+  const batchSelector = page.locator('#historical-batch');
+  await expect(batchSelector).toBeDisabled();
   const confirm = page.getByRole('button', { name: 'Create employees' });
   await expect(confirm).toBeDisabled();
   await page.getByLabel('Type the confirmation exactly').fill('PREPARE CLEAN CLIENT EMPLOYEES');
@@ -1210,6 +1252,220 @@ test('keeps a failed employee-preparation request visible in its confirmation di
 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('alert')).toHaveText('The clean-client preview changed. Refresh and review it again.');
+});
+
+test('previews and activates exact historical YTD before the first live payroll', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  let current: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'locked',
+    client_bootstrap: clientBootstrap('applied'),
+    cutover_review: cutoverReview('approved', true),
+    tax_wage_reconciliation: { passed: true, report_count: 15, checks: [], errors: [] },
+    ytd_bridge: null,
+  };
+  let submittedAcknowledgement: unknown;
+
+  await page.route('**/api/v1/admin/historical_imports/1/preview_ytd_bridge', async (route) => {
+    current = { ...current, ytd_bridge: ytdBridge() };
+    await fulfillJson(route, { data: current.ytd_bridge });
+  });
+  await page.route('**/api/v1/admin/historical_imports/1/apply_ytd_bridge', async (route) => {
+    submittedAcknowledgement = route.request().postDataJSON();
+    current = { ...current, ytd_bridge: ytdBridge('applied') };
+    await fulfillJson(route, { data: withoutDetailCollections(current) });
+  });
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+  await expect(page.getByRole('heading', { name: 'Carry verified history into the next payroll' })).toBeVisible();
+  await page.getByRole('button', { name: 'Prepare YTD preview' }).click();
+  await expect(page.getByText('Historical YTD opening balances match the retained QuickBooks tax and wage reports. No live payroll was changed.')).toBeVisible();
+  await expect(page.getByText('Every tax and wage total matches to the cent')).toBeVisible();
+  await expect(page.getByText('This bridge carries retained QuickBooks balances into future YTD calculations.')).toBeVisible();
+  await expect(page.getByText('$4,766,581.41')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Activate historical YTD' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Activate verified historical YTD?' });
+  const confirm = dialog.getByRole('button', { name: 'Activate historical YTD' });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('Type the confirmation exactly').fill('ACTIVATE VERIFIED HISTORICAL YTD');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  await expect(page.getByText('Historical YTD is active. The next live payroll will start after the imported boundary and use the verified balances for YTD and tax caps.')).toBeVisible();
+  await expect(page.getByText(/Active .* by History Admin/)).toBeVisible();
+  await expect(page.getByText('Accepted source limitations in these active balances')).toBeVisible();
+  expect(submittedAcknowledgement).toEqual({ acknowledgement: 'ACTIVATE VERIFIED HISTORICAL YTD' });
+});
+
+test('keeps a failed historical YTD activation reviewable and ready to retry', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const current: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'locked',
+    client_bootstrap: clientBootstrap('applied'),
+    cutover_review: cutoverReview('approved', true),
+    tax_wage_reconciliation: { passed: true, report_count: 15, checks: [], errors: [] },
+    ytd_bridge: ytdBridge(),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports/1/apply_ytd_bridge', (route) => fulfillJson(route, {
+    error: 'The historical YTD preview changed. Build a new preview and review it again.',
+    details: {},
+  }, 422));
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+  await page.getByRole('button', { name: 'Activate historical YTD' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Activate verified historical YTD?' });
+  const acknowledgement = dialog.getByLabel('Type the confirmation exactly');
+  await acknowledgement.fill('ACTIVATE VERIFIED HISTORICAL YTD');
+  await dialog.getByRole('button', { name: 'Activate historical YTD' }).click();
+
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveText('The historical YTD preview changed. Build a new preview and review it again.');
+  await expect(acknowledgement).toHaveValue('ACTIVATE VERIFIED HISTORICAL YTD');
+});
+
+test('shows reconciliation failures and withholds YTD activation', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const reconciliationError = '2026 Social Security taxable wages do not reconcile after employee allocation';
+  const current: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'locked',
+    client_bootstrap: clientBootstrap('applied'),
+    cutover_review: cutoverReview('approved', true),
+    tax_wage_reconciliation: { passed: true, report_count: 15, checks: [], errors: [] },
+    ytd_bridge: ytdBridge('previewed', [reconciliationError]),
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  const bridgeCard = page.getByTestId('historical-ytd-bridge-card');
+  await expect(bridgeCard.getByText('Blocked', { exact: true })).toBeVisible();
+  await expect(page.getByText('The opening balances do not reconcile')).toBeVisible();
+  await expect(bridgeCard.getByRole('alert')).toContainText(reconciliationError);
+  await expect(page.getByRole('button', { name: 'Activate historical YTD' })).toHaveCount(0);
+});
+
+test('binds YTD activation to the batch reviewed in the confirmation dialog', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const readyDetail = (id: number): HistoricalImportDetail => ({
+    ...detailWithVerifiedSource(id),
+    status: 'locked',
+    client_bootstrap: clientBootstrap('applied'),
+    cutover_review: cutoverReview('approved', true),
+    tax_wage_reconciliation: { passed: true, report_count: 15, checks: [], errors: [] },
+    ytd_bridge: ytdBridge(),
+  });
+  const details = new Map([[1, readyDetail(1)], [2, readyDetail(2)]]);
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [...details.values()].map(withoutDetailCollections),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/*/apply_ytd_bridge', async (route) => {
+    await fulfillJson(route, { data: withoutDetailCollections(details.get(1)!) });
+  });
+  await page.route('**/api/v1/admin/historical_imports/*?**', (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    return fulfillJson(route, {
+      data: details.get(id),
+      meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+    });
+  });
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+  const batchSelector = page.locator('#historical-batch');
+  await expect(batchSelector).toHaveValue('1');
+  await page.getByRole('button', { name: 'Activate historical YTD' }).click();
+  await expect(batchSelector).toBeDisabled();
+
+  // Simulate an unexpected external context change even though the normal UI
+  // keeps the selector disabled while this consequential dialog is open.
+  await batchSelector.evaluate((node) => {
+    const select = node as HTMLSelectElement;
+    select.disabled = false;
+    select.value = '2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(batchSelector).toHaveValue('2');
+  await expect(page.getByTestId('historical-ytd-bridge-card')).toContainText('Ready to activate');
+
+  const dialog = page.getByRole('dialog', { name: 'Activate verified historical YTD?' });
+  await dialog.getByLabel('Type the confirmation exactly').fill('ACTIVATE VERIFIED HISTORICAL YTD');
+  const activationButton = dialog.getByRole('button', { name: 'Activate historical YTD' });
+  await expect(activationButton).toBeDisabled();
+});
+
+test('explains that employee preparation comes before the historical YTD preview', async ({ page }): Promise<void> => {
+  await mockApplicationShell(page);
+  const current: HistoricalImportDetail = {
+    ...detailWithVerifiedSource(1),
+    status: 'locked',
+    client_bootstrap: clientBootstrap('previewed'),
+    cutover_review: cutoverReview('approved', true),
+    tax_wage_reconciliation: { passed: true, report_count: 15, checks: [], errors: [] },
+    ytd_bridge: null,
+  };
+
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [withoutDetailCollections(current)],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: current,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.getByText('Prepare this client’s employee records before building historical YTD.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Prepare YTD preview' })).toBeDisabled();
 });
 
 test('makes accepted QuickBooks history easy to filter, understand, and export', async ({ page }): Promise<void> => {

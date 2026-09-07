@@ -11,7 +11,9 @@ module QuickbooksHistory
       quickbooks-online-payroll-v2
       quickbooks-online-payroll-v3
       quickbooks-online-payroll-v4
+      quickbooks-online-payroll-v5
     ].freeze
+    TAX_WAGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
     LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS = %w[
       quickbooks-online-payroll-v2
       quickbooks-online-payroll-v3
@@ -97,17 +99,19 @@ module QuickbooksHistory
     def build_checks(parsed)
       stored_summary = canonical(batch.preview_summary)
       fresh_summary = canonical(parsed.summary)
+      fresh_summary.delete("tax_wage_report_count") unless batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
       stored_reconciliation = canonical(batch.reconciliation_summary)
       fresh_reconciliation = canonical(parsed.reconciliation)
+      payroll_errors = Array(fresh_reconciliation["errors"])
       stored_years = stored_year_totals
       fresh_years = parsed_year_totals(parsed.paychecks)
       digests = ledger_digests(parsed)
 
-      [
+      checks = [
         check("source_bundle", "Retained originals reproduce the recorded bundle", parsed.bundle_digest == batch.bundle_digest),
         check("importer_version", "The recorded importer version is supported by this verification parser", batch.importer_version.in?(SUPPORTED_RECORDED_IMPORTER_VERSIONS)),
         check("source_manifest", "Fresh file classifications match the retained source manifest", canonical(parsed.manifest) == canonical(batch.source_file_manifest)),
-        check("source_reconciliation", "Fresh QuickBooks cross-report reconciliation passes", parsed.errors.empty? && fresh_reconciliation["passed"] == true),
+        check("source_reconciliation", "Fresh QuickBooks cross-report reconciliation passes", payroll_errors.empty? && fresh_reconciliation["passed"] == true),
         check("preview_contract", "Fresh source summary matches the staged preview", fresh_summary == stored_summary),
         check("reconciliation_contract", "Fresh reconciliation matches the staged reconciliation", fresh_reconciliation == stored_reconciliation),
         check("warning_contract", "Fresh source limitations match the staged review", canonical(parsed.warnings) == canonical(batch.warnings)),
@@ -120,6 +124,34 @@ module QuickbooksHistory
         check("worker_review", "Every QuickBooks worker has a reviewed link or archive-only decision", batch.unresolved_worker_count.zero?),
         check("source_files", "Every original source file is retained and verified", batch.source_files_complete_and_verified?)
       ]
+      if batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
+        checks << check(
+          "tax_wage_reconciliation_contract",
+          "Fresh Tax and Wage Summary reconciliation matches the staged evidence",
+          canonical(parsed.tax_wage_reconciliation) == canonical(batch.tax_wage_reconciliation)
+        )
+        tax_evidence_present = batch.historical_tax_wage_reports.exists? || Array(parsed.tax_wage_reports).any?
+        checks << check(
+          "tax_wage_evidence_available",
+          "Tax and Wage Summary evidence is retained for this v5 import",
+          tax_evidence_present
+        )
+        if tax_evidence_present
+          checks.concat([
+            check(
+              "tax_wage_reconciliation",
+              "Fresh Tax and Wage Summary reconciliation passes",
+              parsed.tax_wage_reconciliation.to_h["passed"] == true
+            ),
+            check(
+              "tax_wage_report_ledger",
+              "Every stored Tax and Wage Summary matches the retained originals",
+              stored_tax_wage_report_digests == parsed_tax_wage_report_digests(parsed)
+            )
+          ])
+        end
+      end
+      checks
     end
 
     def check(key, label, passed)
@@ -127,7 +159,7 @@ module QuickbooksHistory
     end
 
     def build_evidence(parsed, checks)
-      {
+      evidence = {
         "version" => 1,
         "generated_at" => Time.current.iso8601(6),
         "passed" => checks.all? { |entry| entry.fetch("passed") },
@@ -154,6 +186,10 @@ module QuickbooksHistory
         end,
         "fresh_source_label" => parsed.source_label
       }
+      if batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
+        evidence["tax_wage_reconciliation"] = canonical(batch.tax_wage_reconciliation)
+      end
+      evidence
     end
 
     def persist_review!(evidence)
@@ -213,6 +249,15 @@ module QuickbooksHistory
       @stored_money_totals ||= ImportService::MONEY_FIELDS.to_h do |field|
         [ field.to_s, batch.historical_paychecks.sum(field).to_d.round(2).to_s("F") ]
       end
+    end
+
+    def stored_tax_wage_report_digests
+      batch.historical_tax_wage_reports.order(:source_position).pluck(:source_position, :report_digest)
+    end
+
+    def parsed_tax_wage_report_digests(parsed)
+      Array(parsed.tax_wage_reports).sort_by { |row| row.fetch(:source_position) }
+                                     .map { |row| [ row.fetch(:source_position), row.fetch(:report_digest) ] }
     end
 
     def stored_year_totals
@@ -325,18 +370,7 @@ module QuickbooksHistory
     end
 
     def normalize_digest_value(value)
-      case value
-      when Hash
-        value.to_h.stringify_keys.sort.to_h.transform_values { |nested| normalize_digest_value(nested) }
-      when Array
-        value.map { |nested| normalize_digest_value(nested) }
-      when BigDecimal
-        (value.zero? ? 0.to_d : value).to_s("F")
-      when Date, Time, ActiveSupport::TimeWithZone
-        value.iso8601
-      else
-        value
-      end
+      CanonicalJson.normalize(value)
     end
 
     def parsed_year_totals(paychecks)
@@ -366,7 +400,7 @@ module QuickbooksHistory
     end
 
     def canonical(value)
-      JSON.parse(JSON.generate(value))
+      CanonicalJson.round_trip(value)
     end
 
     def record_audit!(review)

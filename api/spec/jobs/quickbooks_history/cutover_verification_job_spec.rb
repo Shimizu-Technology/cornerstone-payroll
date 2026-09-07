@@ -8,7 +8,11 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
   let!(:company) { create(:company, historical_payroll_enabled: true) }
   let!(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let!(:batch) do
-    imported = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: actor).call.batch
+    imported = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: actor
+    ).call.batch
     review_historical_workers_as_archive_only(imported, actor: actor)
     QuickbooksHistory::LifecycleService.new(batch: imported, actor: actor).apply!(
       acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT

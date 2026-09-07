@@ -3,6 +3,12 @@
 # Stores tax configuration for a specific tax year.
 # Each year has one config with SS wage base, rates, and filing status configs.
 class AnnualTaxConfig < ApplicationRecord
+  HISTORICAL_SS_WAGE_BASES = {
+    2024 => 168_600,
+    2025 => 176_100,
+    2026 => 184_500
+  }.freeze
+
   has_many :filing_status_configs, dependent: :destroy
   has_many :tax_brackets, through: :filing_status_configs
   has_many :audit_logs, class_name: "TaxConfigAuditLog", dependent: :destroy
@@ -25,6 +31,12 @@ class AnnualTaxConfig < ApplicationRecord
   # admin UI/default setup flow; it must never override a pay date's year.
   def self.current(year = Date.current.year)
     for_year(year)
+  end
+
+  # The importer must reproduce retained history before a client's tax setup
+  # exists. Keep that deliberately narrow fallback beside the annual tax model.
+  def self.historical_ss_wage_base(year)
+    for_year(year)&.ss_wage_base&.to_d || HISTORICAL_SS_WAGE_BASES[year.to_i]&.to_d
   end
 
   # Create a new year's config by copying from a previous year

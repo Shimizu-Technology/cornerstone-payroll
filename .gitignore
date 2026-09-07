@@ -6,4 +6,5 @@ data/mosa-2025/manifest.json
 *.xlsx
 web/playwright-report/
 web/test-results/
+api/test-results/
 web/.e2e-fixtures/

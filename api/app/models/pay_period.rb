@@ -98,6 +98,14 @@ class PayPeriod < ApplicationRecord
   validate :supplemental_target_must_be_regular
   validate :off_cycle_tips_excludes_base_salary
   validate :purpose_fields_change_only_in_draft
+  validate :starts_after_historical_ytd_boundary,
+           if: lambda {
+             validation_context == :payroll_calculation ||
+               new_record? ||
+               will_save_change_to_start_date? ||
+               will_save_change_to_pay_date? ||
+               will_save_change_to_status?
+           }
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
 
@@ -318,6 +326,42 @@ class PayPeriod < ApplicationRecord
 
     if end_date <= start_date
       errors.add(:end_date, "must be after start date")
+    end
+  end
+
+  def starts_after_historical_ytd_boundary
+    return if company_id.blank?
+
+    batches = HistoricalImportBatch.where(company_id: company_id, status: "locked")
+                                   .includes(:historical_ytd_bridge)
+                                   .to_a
+    return if batches.empty?
+
+    bridges = batches.map(&:historical_ytd_bridge)
+    unless bridges.all? { |bridge| bridge&.applied? }
+      errors.add(:base, "Activate the verified historical YTD opening balances before creating the first live pay period")
+      return
+    end
+
+    boundaries = bridges.map do |bridge|
+      summary = bridge.preview_summary.to_h
+      begin
+        [
+          Date.iso8601(summary.fetch("through_period_end").to_s),
+          Date.iso8601(summary.fetch("through_pay_date").to_s)
+        ]
+      rescue Date::Error, KeyError
+        errors.add(:base, "The historical YTD boundary is incomplete; rebuild and review the bridge preview")
+        return
+      end
+    end
+    boundary_period_end = boundaries.map(&:first).max
+    boundary_pay_date = boundaries.map(&:last).max
+    if start_date.present? && start_date <= boundary_period_end
+      errors.add(:start_date, "must be after the imported QuickBooks history ending #{boundary_period_end.strftime('%m/%d/%Y')}")
+    end
+    if pay_date.present? && pay_date <= boundary_pay_date
+      errors.add(:pay_date, "must be after the imported QuickBooks history paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
     end
   end
 
