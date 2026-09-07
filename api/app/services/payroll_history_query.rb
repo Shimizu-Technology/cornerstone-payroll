@@ -18,8 +18,10 @@ class PayrollHistoryQuery
 
   Result = Data.define(:data, :meta)
 
-  def initialize(company_id:, params:)
+  def initialize(company_id:, params:, audience: :staff)
     @company_id = Integer(company_id)
+    @audience = audience.to_sym
+    raise ArgumentError, "Unknown payroll history audience" unless @audience.in?(%i[staff client])
     @page = [ params.fetch(:page, 1).to_i, 1 ].max
     @per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
     @status = params[:status].to_s.presence
@@ -87,6 +89,7 @@ class PayrollHistoryQuery
       LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND COALESCE(pi.voided, FALSE) = FALSE
       LEFT JOIN users committed_user ON committed_user.id = pp.committed_by_id AND committed_user.company_id = pp.company_id
       WHERE pp.company_id = #{company}
+        #{client_native_visibility_sql}
       GROUP BY pp.id, committed_user.name
       UNION ALL
       SELECT
@@ -153,6 +156,12 @@ class PayrollHistoryQuery
     clauses.any? ? "WHERE #{clauses.join(' AND ')}" : ""
   end
 
+  def client_native_visibility_sql
+    return "" unless @audience == :client
+
+    "AND pp.status = 'committed' AND (pp.correction_status IS NULL OR pp.correction_status = 'correction')"
+  end
+
   def result_sql
     offset = (@page - 1) * @per_page
     order = "#{SORT_COLUMNS.fetch(@sort)} #{@direction} NULLS LAST, record_type ASC, id DESC"
@@ -204,7 +213,7 @@ class PayrollHistoryQuery
     imported = row.fetch("record_type") == "imported"
     status = row.fetch("status")
     correction_status = row["correction_status"]
-    editable = !imported && status != "committed" && correction_status != "voided"
+    editable = @audience == :staff && !imported && status != "committed" && correction_status != "voided"
 
     {
       key: row.fetch("key"),
@@ -235,10 +244,10 @@ class PayrollHistoryQuery
         view: true,
         edit: editable,
         delete: editable,
-        enter_hours: !imported && status == "draft" && correction_status != "voided",
-        run: !imported && %w[draft calculated].include?(status) && correction_status != "voided",
-        approve: !imported && status == "calculated" && correction_status != "voided",
-        commit: !imported && status == "approved" && correction_status != "voided"
+        enter_hours: @audience == :staff && !imported && status == "draft" && correction_status != "voided",
+        run: @audience == :staff && !imported && %w[draft calculated].include?(status) && correction_status != "voided",
+        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided",
+        commit: @audience == :staff && !imported && status == "approved" && correction_status != "voided"
       }
     }
   end

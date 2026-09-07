@@ -7,10 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { clientPayPeriodsApi } from '@/services/api';
+import { clientPayPeriodsApi, type PayrollHistoryRecord } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
-import type { PayPeriod } from '@/types';
-import { currentAppPath, payRunPath } from '@/lib/routes';
+import { currentAppPath, importedPayRunPath, payRunPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
 
 export function ClientPayPeriods(): ReactElement {
@@ -19,7 +18,7 @@ export function ClientPayPeriods(): ReactElement {
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const returnTo = currentAppPath(location.pathname, location.search);
-  const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
+  const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -68,7 +67,8 @@ export function ClientPayPeriods(): ReactElement {
         formatDateRange(period.start_date, period.end_date),
         formatDate(period.pay_date),
         period.status,
-        period.period_description,
+        period.source.label,
+        period.source.detail,
       ]
         .filter(Boolean)
         .join(' ')
@@ -84,7 +84,7 @@ export function ClientPayPeriods(): ReactElement {
       <div className="p-6 lg:p-8 space-y-6">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         <div className="rounded-xl border border-primary-200 bg-primary-50/70 px-4 py-3 text-sm text-primary-800">
-          Clients only see committed payrolls here so the portal stays read-only and reflects finalized payroll history.
+          Finalized Cornerstone payrolls and locked imported payrolls appear together here. Every record is read-only in the client portal.
         </div>
 
         <div className="flex flex-col gap-4 md:flex-row">
@@ -108,25 +108,29 @@ export function ClientPayPeriods(): ReactElement {
                   <TableHead>Employees</TableHead>
                   <TableHead>Gross Pay</TableHead>
                   <TableHead>Net Pay</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody striped>
                 {visiblePayPeriods.map((period) => (
-                  <TableRow key={period.id}>
+                  <TableRow key={period.key}>
                     <TableCell className="font-medium text-gray-900">{formatDateRange(period.start_date, period.end_date)}</TableCell>
                     <TableCell>{formatDate(period.pay_date, { weekday: 'short', year: undefined })}</TableCell>
-                    <TableCell>{period.employee_count ?? period.payroll_items_count ?? 0}</TableCell>
+                    <TableCell>{period.employee_count}</TableCell>
                     <TableCell>{formatCurrency(period.total_gross ?? 0)}</TableCell>
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>
+                    <TableCell><Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>{period.source.label}</Badge></TableCell>
                     <TableCell>
-                      <Badge variant={period.status === 'committed' ? 'success' : period.status === 'approved' ? 'info' : period.status === 'calculated' ? 'warning' : 'default'}>
-                        {payPeriodStatusConfig[period.status]?.label || period.status}
+                      <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
+                        {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}>
+                      <Button variant="ghost" size="sm" onClick={() => navigate(period.record_type === 'imported'
+                        ? importedPayRunPath(companyId, period.id, { returnTo })
+                        : payRunPath(companyId, period.id, 'overview', { returnTo }))}>
                         View
                       </Button>
                     </TableCell>

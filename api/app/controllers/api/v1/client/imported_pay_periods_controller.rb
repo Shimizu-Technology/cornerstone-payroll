@@ -2,14 +2,14 @@
 
 module Api
   module V1
-    module Admin
+    module Client
       class ImportedPayPeriodsController < BaseController
         def show
           result = ImportedPayPeriodQuery.new(
             company_id: current_company_id,
             id: params[:id],
             params: params,
-            audience: :staff
+            audience: :client
           ).call
           render json: { data: result.data, meta: result.meta }
         end

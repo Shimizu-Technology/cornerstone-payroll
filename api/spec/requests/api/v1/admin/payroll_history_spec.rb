@@ -154,7 +154,11 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
     expect(body.dig("data", "id")).to eq(period.id)
     expect(body.dig("data", "paychecks").sole).to include(
       "id" => paycheck.id,
+      "historical_pay_period_id" => period.id,
+      "historical_worker_id" => paycheck.historical_worker_id,
       "employee_name" => "Linked Worker",
+      "pay_date" => "2024-04-05",
+      "period_type" => "regular",
       "federal_income_tax" => "100.0",
       "social_security_tax" => "75.0",
       "medicare_tax" => "25.0"
