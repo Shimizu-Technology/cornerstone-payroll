@@ -30,7 +30,7 @@ import { formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStat
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
-import { companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollHistoryRecord } from '@/services/api';
+import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
@@ -94,7 +94,7 @@ function PayPeriodMobileCard({
         </Badge>
         {!period.includes_base_salary && <Badge variant="info">No base salary</Badge>}
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
-          {period.record_type === 'imported' ? <><LockKeyhole className="mr-1 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
+          {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -296,7 +296,7 @@ export function PayPeriods() {
         setTotalPages(0);
         setYears([]);
       }
-      setError(err instanceof Error ? err.message : 'Failed to load pay periods');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
       if (isCurrentRequest() && !silent) {
         setLoading(false);
