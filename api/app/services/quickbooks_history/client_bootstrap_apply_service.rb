@@ -110,12 +110,20 @@ module QuickbooksHistory
     end
 
     def link_worker!(worker, employee)
-      worker.update!(
-        employee: employee,
+      attributes = {
+        employee_id: employee.id,
         mapping_status: "exact_match",
         match_method: "quickbooks_client_bootstrap",
-        match_confidence: 1
-      )
+        match_confidence: 1,
+        updated_at: Time.current
+      }
+      if bootstrap.historical_import_batch.applied?
+        # Source facts stay immutable. Only the reviewed live-employee linkage may
+        # be attached after apply and before the batch is locked.
+        worker.update_columns(attributes)
+      else
+        worker.update!(attributes)
+      end
       worker.historical_paychecks.update_all(employee_id: employee.id, updated_at: Time.current)
     end
 
