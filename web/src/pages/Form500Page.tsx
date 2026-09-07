@@ -2,14 +2,15 @@ import { useEffect, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 import { useCompany } from '@/contexts/CompanyContext';
+import { parsePayRunId } from '@/lib/pay-run-filters';
 import { payRunPath, payRunsPath } from '@/lib/routes';
 
 export function Form500Page(): ReactElement | null {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { activeCompanyId } = useCompany();
-  const payPeriodId = Number(id);
-  const isValidPayPeriodId = Number.isInteger(payPeriodId) && payPeriodId > 0;
+  const payPeriodId = parsePayRunId(id);
+  const isValidPayPeriodId = payPeriodId !== undefined;
   const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
 
   useEffect(() => {

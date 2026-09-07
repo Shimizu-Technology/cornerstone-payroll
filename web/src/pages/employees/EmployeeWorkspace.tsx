@@ -70,6 +70,7 @@ export function EmployeeWorkspace(): ReactElement {
   const [searchParams] = useSearchParams();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [payHistory, setPayHistory] = useState<PayHistoryReport | null>(null);
+  const [payHistoryError, setPayHistoryError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
@@ -88,14 +89,22 @@ export function EmployeeWorkspace(): ReactElement {
 
     setLoading(true);
     setError(null);
+    setPayHistoryError(null);
     try {
-      const [employeeResponse, historyResponse] = await Promise.all([
+      const [employeeResult, historyResult] = await Promise.allSettled([
         employeesApi.get(employeeId),
         reportsApi.employeePayHistory(employeeId, { limit: 24 }),
       ]);
       if (!isCurrentRequest()) return;
-      setEmployee(employeeResponse.data);
-      setPayHistory(historyResponse.report);
+      if (employeeResult.status === 'rejected') throw employeeResult.reason;
+
+      setEmployee(employeeResult.value.data);
+      if (historyResult.status === 'fulfilled') {
+        setPayHistory(historyResult.value.report);
+      } else {
+        setPayHistory(null);
+        setPayHistoryError('Pay history is temporarily unavailable. Employee details are still available.');
+      }
     } catch (loadError) {
       if (isCurrentRequest()) {
         setError(loadError instanceof Error ? loadError.message : 'Could not load this employee workspace.');
@@ -108,6 +117,7 @@ export function EmployeeWorkspace(): ReactElement {
   useEffect(() => {
     setEmployee(null);
     setPayHistory(null);
+    setPayHistoryError(null);
     void load();
     return (): void => {
       loadRequestIdRef.current += 1;
@@ -127,7 +137,7 @@ export function EmployeeWorkspace(): ReactElement {
     return <WorkspaceLoader label="Loading employee workspace" />;
   }
 
-  if (!employee || !payHistory || error) {
+  if (!employee || error) {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mx-auto max-w-2xl border-danger-200 bg-danger-50">
@@ -153,9 +163,9 @@ export function EmployeeWorkspace(): ReactElement {
 
   const employeeName = `${employee.first_name} ${employee.last_name}`;
   const statusConfig = employeeStatusConfig[employee.status];
-  const history = payHistory.history;
+  const history = payHistory?.history ?? [];
   const latestPay = history[0];
-  const summary = payHistory.summary;
+  const summary = payHistory?.summary ?? {};
   const employeeDescription = [
     employmentTypeLabels[employee.employment_type] || employee.employment_type,
     employee.department?.name || 'No department',
@@ -199,6 +209,14 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+        {payHistoryError && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+            <span>{payHistoryError}</span>
+            <Button variant="outline" size="sm" onClick={() => void load()}>
+              <RefreshCw className="mr-2 h-4 w-4" />Try again
+            </Button>
+          </div>
+        )}
         {activeTab === 'overview' && (
           <EmployeeOverview
             companyId={companyId}
@@ -308,12 +326,14 @@ function PaySetup({ employee, editHref }: { employee: Employee; editHref: string
   );
 }
 
-function PayHistory({ companyId, report, returnTo }: { companyId: number; report: PayHistoryReport; returnTo: string }): ReactElement {
+function PayHistory({ companyId, report, returnTo }: { companyId: number; report: PayHistoryReport | null; returnTo: string }): ReactElement {
   return (
     <Card>
       <CardHeader><CardTitle>Pay history</CardTitle><p className="mt-1 text-sm text-neutral-500">Each row connects the employee, source pay run, exact payroll item, and check reference.</p></CardHeader>
       <CardContent className="p-0">
-        {report.history.length === 0 ? (
+        {!report ? (
+          <p className="px-6 py-10 text-center text-sm text-amber-800">Pay history could not be loaded. Use Try again above without leaving this employee.</p>
+        ) : report.history.length === 0 ? (
           <p className="px-6 py-10 text-center text-sm text-neutral-500">No committed payroll records are available for this employee.</p>
         ) : (
           <Table>

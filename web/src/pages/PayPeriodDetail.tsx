@@ -940,7 +940,9 @@ export function PayPeriodDetail({
       <div className="rounded-2xl border border-danger-200 bg-danger-50 p-6" role="alert">
         <p className="font-semibold text-danger-800">Pay period not found</p>
         {error && <p className="mt-1 text-sm text-danger-700">{error}</p>}
-        <Button className="mt-4" variant="outline" onClick={() => void loadPayPeriod(payRunId)}>Try again</Button>
+        {payRunId > 0 && (
+          <Button className="mt-4" variant="outline" onClick={() => void loadPayPeriod(payRunId)}>Try again</Button>
+        )}
       </div>
     );
   }

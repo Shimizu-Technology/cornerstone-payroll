@@ -29,7 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
-import { currentAppPath, payRunPath } from '@/lib/routes';
+import { correctionRunPath, currentAppPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
@@ -129,8 +129,12 @@ export function PayPeriods() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId } = useCompany();
-  const companyId = activeCompanyId || 1;
   const returnTo = currentAppPath(location.pathname, location.search);
+  const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
+    activeCompanyId
+      ? payRunPath(activeCompanyId, payRunId, tab, { returnTo })
+      : correctionRunPath(undefined, payRunId, { returnTo })
+  );
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -790,8 +794,8 @@ export function PayPeriods() {
                     key={period.id}
                     period={period}
                     actionInFlight={actionInFlight}
-                    onView={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}
-                    onEnterHours={() => navigate(payRunPath(companyId, period.id, 'work', { returnTo }))}
+                    onView={() => navigate(payRunDestination(period.id, 'overview'))}
+                    onEnterHours={() => navigate(payRunDestination(period.id, 'work'))}
                     onEdit={() => openEditModal(period)}
                     onDelete={() => handleDelete(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
@@ -895,7 +899,7 @@ export function PayPeriods() {
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"
-                              onClick={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}
+                              onClick={() => navigate(payRunDestination(period.id, 'overview'))}
                             >
                               View
                             </button>
@@ -924,7 +928,7 @@ export function PayPeriods() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => navigate(payRunPath(companyId, period.id, 'work', { returnTo }))}
+                              onClick={() => navigate(payRunDestination(period.id, 'work'))}
                             >
                               Enter Hours
                             </Button>
