@@ -437,6 +437,17 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await waitForUiCommit(page);
     await expect(page.getByRole('dialog', { name: 'New Pay Period' })).toHaveCount(0);
 
+    await page.goto(`/companies/${fixture.company_id}/pay-runs`);
+    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Edit Pay Period' })).toBeVisible();
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.other_company_id}/pay-runs`);
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs`);
+    await expect(page.getByRole('dialog', { name: 'Edit Pay Period' })).toHaveCount(0);
+
     let markQuickFieldStarted: (() => void) | undefined;
     let releaseQuickField: (() => void) | undefined;
     const quickFieldStarted = new Promise<void>((resolve): void => { markQuickFieldStarted = resolve; });

@@ -165,7 +165,10 @@ export function PayPeriods() {
     defaultDatesRequestIdRef.current += 1;
     checkSettingsRequestIdRef.current += 1;
     setIsCreateOpen(false);
+    setIsEditOpen(false);
+    setEditingPayPeriod(null);
     setCreateError(null);
+    setEditError(null);
     setCurrentNextCheckNumber(null);
     setCheckSettingsError(null);
     setLoadingCheckSettings(false);
