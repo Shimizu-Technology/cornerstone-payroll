@@ -4,6 +4,7 @@ import {
   employeeEditPath,
   employeePath,
   employeesPath,
+  importedPayRunPath,
   newEmployeePath,
   payrollItemPath,
   payRunPath,
@@ -21,6 +22,7 @@ describe('canonical payroll routes', (): void => {
     expect(payRunsPath(12, '?status=draft')).toBe('/companies/12/pay-runs?status=draft');
     expect(payRunsPath(12, 'status=draft')).toBe('/companies/12/pay-runs?status=draft');
     expect(payRunPath(12, 91, 'checks')).toBe('/companies/12/pay-runs/91/checks');
+    expect(importedPayRunPath(12, 55)).toBe('/companies/12/pay-runs/imported/55');
     expect(payrollItemPath(12, 91, 305)).toBe('/companies/12/pay-runs/91/payroll-items/305');
   });
 
@@ -28,6 +30,9 @@ describe('canonical payroll routes', (): void => {
     expect(payRunPath(12, 91, 'overview', {
       returnTo: '/companies/12/pay-runs?status=draft&year=2026',
     })).toBe('/companies/12/pay-runs/91/overview?return_to=%2Fcompanies%2F12%2Fpay-runs%3Fstatus%3Ddraft%26year%3D2026');
+    expect(importedPayRunPath(12, 55, {
+      returnTo: '/companies/12/pay-runs?source=quickbooks&year=2024',
+    })).toBe('/companies/12/pay-runs/imported/55?return_to=%2Fcompanies%2F12%2Fpay-runs%3Fsource%3Dquickbooks%26year%3D2024');
   });
 
   it('preserves filtered list context across canonical and legacy correction links', (): void => {

@@ -736,7 +736,7 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   });
 
   await page.goto('/historical-payroll');
-  await expect(page.getByRole('heading', { name: 'Historical payroll' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Data Migration' })).toBeVisible();
   await expect(page.getByText('Batch page 1 of 2 · 51 total')).toBeVisible();
   await expect(page.locator('#historical-batch option')).toHaveCount(50);
 

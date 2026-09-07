@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
+  ArchiveRestore,
   Bell,
   Building2,
   Calculator,
@@ -192,6 +193,19 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         kind: 'navigation',
         href: '/tools/transmittals',
       });
+
+      if (activeCompany?.historical_payroll_enabled) {
+        add({
+          id: 'data-migration',
+          label: 'Data Migration',
+          description: 'Import, reconcile, and lock source payroll records.',
+          group: 'Tools',
+          keywords: ['quickbooks', 'historical payroll', 'migration', 'import'],
+          icon: <ArchiveRestore className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/historical-payroll',
+        });
+      }
 
       if (isAdmin) {
         add({
@@ -413,7 +427,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompanyId, canSwitchCompany, companies, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

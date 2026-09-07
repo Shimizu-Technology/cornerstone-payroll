@@ -59,7 +59,6 @@ const clientNavigation: NavItem[] = [
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Historical Payroll', href: '/historical-payroll', icon: <ArchiveRestore className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Checks & Payments', href: '/checks-payments', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee Loans', href: '/employee-loans', icon: <HandCoins className="h-[18px] w-[18px] shrink-0" /> },
@@ -76,6 +75,7 @@ const portalNavigation: NavItem[] = [
 ];
 
 const toolsNavigation: NavItem[] = [
+  { name: 'Data Migration', href: '/historical-payroll', icon: <ArchiveRestore className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Transmittal Builder', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Invoice Center', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
@@ -235,16 +235,16 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const historicalPayrollEnabled = activeCompany?.historical_payroll_enabled === true;
-  const primaryNavigation = (isClient
-    ? portalNavigation
-    : clientNavigation.filter((item) => (
-        item.href === '/historical-payroll' ? historicalPayrollEnabled : true
-      ))
-  ).map((item): NavItem => {
+  const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
     if (!activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
     return item;
+  });
+  const visibleToolsNavigation = toolsNavigation.filter((item) => {
+    if (item.href === '/historical-payroll') return historicalPayrollEnabled;
+    if (item.href === '/tools/invoices') return isAdmin;
+    return true;
   });
 
   useEffect(() => {
@@ -309,7 +309,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             <SectionDivider icon={<Wrench className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Tools" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={isAdmin ? toolsNavigation : toolsNavigation.filter((item) => item.href !== '/tools/invoices')}
+                items={visibleToolsNavigation}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />

@@ -68,7 +68,8 @@ class E2eReleaseFixture
         phone: "(671) 555-0100",
         email: "payroll-fixture@example.test",
         pay_frequency: "biweekly",
-        ein: "00-0000001"
+        ein: "00-0000001",
+        historical_payroll_enabled: true
       )
       other_company = organization.companies.create!(
         name: "Synthetic Boundary Company",
@@ -424,6 +425,85 @@ class E2eReleaseFixture
         notes: "Gate 0 unresolved MoSa import scenario"
       )
 
+      historical_batch = HistoricalImportBatch.create!(
+        company: company,
+        source_label: "Synthetic QuickBooks 2025 history",
+        bundle_digest: "gate0-quickbooks-history",
+        importer_version: "quickbooks-online-payroll-v5",
+        status: "locked",
+        created_by: admin,
+        locked_by: admin,
+        locked_at: Time.utc(2026, 1, 2, 0, 0, 0),
+        preview_summary: {
+          "file_count" => 5,
+          "worker_count" => 1,
+          "period_count" => 1,
+          "paycheck_count" => 1,
+          "first_pay_date" => "2025-12-19",
+          "last_pay_date" => "2025-12-19",
+          "opening_summary_count" => 0,
+          "check_number_count" => 1,
+          "totals" => { "gross_pay" => "1800.00", "net_pay" => "1390.00" }
+        },
+        reconciliation_summary: {
+          "passed" => true,
+          "payroll_detail_rows" => 1,
+          "matched_native_rows" => 1,
+          "matched_summary_rows" => 1,
+          "errors" => []
+        }
+      )
+      historical_worker = HistoricalWorker.create!(
+        historical_import_batch: historical_batch,
+        company: company,
+        employee: employee,
+        external_key: "gate0-avery",
+        source_name: "Example, Avery",
+        normalized_name: "example avery",
+        source_status: "active",
+        mapping_status: "exact_match"
+      )
+      historical_period = HistoricalPayPeriod.create!(
+        historical_import_batch: historical_batch,
+        company: company,
+        external_key: "gate0-2025-12-14",
+        source_label: "Dec 1–14, 2025",
+        start_date: Date.new(2025, 12, 1),
+        end_date: Date.new(2025, 12, 14),
+        pay_date: Date.new(2025, 12, 19),
+        paycheck_count: 1,
+        period_type: "regular",
+        totals: { "gross_pay" => "1800.00", "net_pay" => "1390.00" }
+      )
+      HistoricalPaycheck.create!(
+        historical_import_batch: historical_batch,
+        historical_pay_period: historical_period,
+        historical_worker: historical_worker,
+        company: company,
+        employee: employee,
+        external_key: "gate0-check-2025-12-19-avery",
+        source_employee_name: "Example, Avery",
+        source_row_number: 1,
+        source_status: "paid",
+        reconciliation_status: "matched",
+        period_start: historical_period.start_date,
+        period_end: historical_period.end_date,
+        pay_date: historical_period.pay_date,
+        check_number: "QB-1201",
+        payment_method: "check",
+        hours_total: 80,
+        gross_pay: 1800,
+        adjusted_gross: 1800,
+        employee_taxes: 310,
+        federal_income_tax: 172.30,
+        social_security_tax: 111.60,
+        medicare_tax: 26.10,
+        after_tax_deductions: 100,
+        net_pay: 1390,
+        employer_taxes: 137.70,
+        total_payroll_cost: 1937.70
+      )
+
       AuditLog.record!(
         user: accountant,
         organization_id: organization.id,
@@ -448,6 +528,8 @@ class E2eReleaseFixture
         employee_id: employee.id,
         client_employee_id: client_employee.id,
         other_employee_id: other_employee.id,
+        historical_import_batch_id: historical_batch.id,
+        historical_pay_period_id: historical_period.id,
         bonus_sync_pay_period_id: bonus_sync_period.id,
         bonus_alpha_employee_id: bonus_alpha.id,
         bonus_alpha_payroll_item_id: bonus_alpha_item.id,
