@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -158,7 +158,7 @@ export function PayPeriods() {
   const activeCompanyIdRef = useRef(activeCompanyId);
   const payPeriodCompanyIdRef = useRef<number | null>(null);
 
-  useEffect((): void => {
+  useLayoutEffect((): void => {
     activeCompanyIdRef.current = activeCompanyId;
   }, [activeCompanyId]);
   
