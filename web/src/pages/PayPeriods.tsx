@@ -157,9 +157,18 @@ export function PayPeriods() {
   const loadRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
   const payPeriodCompanyIdRef = useRef<number | null>(null);
+  const defaultDatesRequestIdRef = useRef(0);
+  const checkSettingsRequestIdRef = useRef(0);
 
   useLayoutEffect((): void => {
     activeCompanyIdRef.current = activeCompanyId;
+    defaultDatesRequestIdRef.current += 1;
+    checkSettingsRequestIdRef.current += 1;
+    setIsCreateOpen(false);
+    setCreateError(null);
+    setCurrentNextCheckNumber(null);
+    setCheckSettingsError(null);
+    setLoadingCheckSettings(false);
   }, [activeCompanyId]);
   
   // Modal state
@@ -416,10 +425,17 @@ export function PayPeriods() {
   // Suggest dates only when the client has an explicit boundary rule. Manual
   // schedules intentionally start blank so a legacy assumption is never
   // presented as a confirmed payroll calendar.
-  const setDefaultDates = async () => {
+  const setDefaultDates = async (): Promise<void> => {
+    const requestId = ++defaultDatesRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === defaultDatesRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+    );
     setScheduleContext('Loading this client’s pay-schedule rules…');
     try {
       const response = await payScheduleSettingsApi.get();
+      if (!isCurrentRequest()) return;
       const schedule = response.pay_schedule_settings.pay_schedule;
       const confirmation = schedule.confirmation_status === 'confirmed' ? 'Confirmed' : 'Needs confirmation';
 
@@ -473,13 +489,21 @@ export function PayPeriods() {
       }));
       setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
       setScheduleContext('Schedule settings could not be loaded. Enter and verify all dates manually.');
     }
   };
 
-  const loadCurrentNextCheckNumber = async () => {
-    if (!activeCompanyId) {
+  const loadCurrentNextCheckNumber = async (): Promise<void> => {
+    const requestId = ++checkSettingsRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === checkSettingsRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+    );
+
+    if (!requestedCompanyId) {
       setCurrentNextCheckNumber(null);
       setCheckSettingsError(null);
       setLoadingCheckSettings(false);
@@ -489,14 +513,16 @@ export function PayPeriods() {
     try {
       setLoadingCheckSettings(true);
       setCheckSettingsError(null);
-      const response = await companiesApi.get(activeCompanyId);
+      const response = await companiesApi.get(requestedCompanyId);
+      if (!isCurrentRequest()) return;
       setCurrentNextCheckNumber(response.company.next_check_number ?? null);
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setCurrentNextCheckNumber(null);
       const message = err instanceof Error ? err.message : 'Unable to load current check settings.';
       setCheckSettingsError(message);
     } finally {
-      setLoadingCheckSettings(false);
+      if (isCurrentRequest()) setLoadingCheckSettings(false);
     }
   };
 

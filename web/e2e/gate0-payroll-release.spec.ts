@@ -374,6 +374,114 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('discards company-specific form helpers after switching clients', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    let markScheduleStarted: (() => void) | undefined;
+    let releaseSchedule: (() => void) | undefined;
+    let markCheckSettingsStarted: (() => void) | undefined;
+    let releaseCheckSettings: (() => void) | undefined;
+    const scheduleStarted = new Promise<void>((resolve): void => { markScheduleStarted = resolve; });
+    const scheduleReleased = new Promise<void>((resolve): void => { releaseSchedule = resolve; });
+    const checkSettingsStarted = new Promise<void>((resolve): void => { markCheckSettingsStarted = resolve; });
+    const checkSettingsReleased = new Promise<void>((resolve): void => { releaseCheckSettings = resolve; });
+
+    await page.route('**/api/v1/admin/pay_schedule_settings', async (route): Promise<void> => {
+      if (route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      markScheduleStarted?.();
+      await scheduleReleased;
+      await route.fulfill({ response });
+    });
+    await page.route('**/api/v1/admin/companies/*', async (route): Promise<void> => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname !== `/api/v1/admin/companies/${fixture.company_id}`) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      markCheckSettingsStarted?.();
+      await checkSettingsReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs`);
+    await page.getByRole('button', { name: 'New Pay Period' }).click();
+    await Promise.all([scheduleStarted, checkSettingsStarted]);
+    await expect(page.getByRole('dialog', { name: 'New Pay Period' })).toBeVisible();
+
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.other_company_id}/pay-runs`);
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs`);
+    await expect(page.getByRole('dialog', { name: 'New Pay Period' })).toHaveCount(0);
+
+    const scheduleDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === '/api/v1/admin/pay_schedule_settings'
+      && response.request().headers()['x-company-id'] === String(fixture.company_id)
+    ));
+    const checkSettingsDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === `/api/v1/admin/companies/${fixture.company_id}`
+    ));
+    releaseSchedule?.();
+    releaseCheckSettings?.();
+    await Promise.all([scheduleDelivered, checkSettingsDelivered]);
+    await waitForUiCommit(page);
+    await expect(page.getByRole('dialog', { name: 'New Pay Period' })).toHaveCount(0);
+
+    let markQuickFieldStarted: (() => void) | undefined;
+    let releaseQuickField: (() => void) | undefined;
+    const quickFieldStarted = new Promise<void>((resolve): void => { markQuickFieldStarted = resolve; });
+    const quickFieldReleased = new Promise<void>((resolve): void => { releaseQuickField = resolve; });
+    await page.route('**/api/v1/admin/payroll_fields', async (route): Promise<void> => {
+      if (route.request().method() !== 'POST' || route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      markQuickFieldStarted?.();
+      await quickFieldReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
+    await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
+    const createClientFieldButton = page.getByRole('button', { name: 'Create client-wide field' });
+    await expect(createClientFieldButton).toBeVisible();
+    await waitForUiCommit(page);
+    await createClientFieldButton.click();
+    await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toBeVisible();
+    await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill('Delayed primary field');
+    await page.getByRole('button', { name: 'Create and assign' }).click();
+    await quickFieldStarted;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.other_company_id}/employees/${fixture.other_employee_id}/edit`);
+    await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
+
+    const quickFieldDelivered = page.waitForResponse((response): boolean => (
+      new URL(response.url()).pathname === '/api/v1/admin/payroll_fields'
+      && response.request().method() === 'POST'
+      && response.request().headers()['x-company-id'] === String(fixture.company_id)
+    ));
+    releaseQuickField?.();
+    await quickFieldDelivered;
+    await waitForUiCommit(page);
+    await expect(page.getByText('Delayed primary field', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toHaveCount(0);
+    await context.close();
+  });
+
   test('refreshes a production-shaped recurring bonus for an accountant without duplicating it', async ({ browser }): Promise<void> => {
     test.setTimeout(60_000);
     const accountantContext = await browser.newContext({
