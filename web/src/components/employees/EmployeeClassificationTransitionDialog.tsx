@@ -392,8 +392,9 @@ export function EmployeeClassificationTransitionDialog({
           )}
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-800">Reason for transition <span className="text-danger-600">*</span></label>
+            <label htmlFor="classification-transition-reason" className="mb-1 block text-sm font-medium text-neutral-800">Reason for transition <span className="text-danger-600">*</span></label>
             <Textarea
+              id="classification-transition-reason"
               value={form.reason}
               onChange={(event) => update('reason', event.target.value)}
               placeholder="Describe the confirmed business reason and effective date source."

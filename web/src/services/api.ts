@@ -6,6 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
+  companyId?: number | null;
 }
 
 export interface BlobDownload {
@@ -87,7 +88,8 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { params, ...fetchOptions } = options;
+    const { params, companyId, ...fetchOptions } = options;
+    const initiatingCompanyId = companyId === undefined ? this.activeCompanyId : companyId;
     const url = this.buildUrl(endpoint, params);
 
     const headers: HeadersInit = {
@@ -100,8 +102,8 @@ class ApiClient {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
-    if (this.activeCompanyId) {
-      (headers as Record<string, string>)['X-Company-Id'] = String(this.activeCompanyId);
+    if (initiatingCompanyId) {
+      (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
     const response = await fetch(url, {
@@ -131,26 +133,28 @@ class ApiClient {
   async get<T>(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>,
-    options: Pick<RequestOptions, 'signal'> = {},
+    options: Pick<RequestOptions, 'companyId' | 'signal'> = {},
   ): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET', params, ...options });
   }
 
-  async post<T>(endpoint: string, data?: unknown): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
+      ...options,
     });
   }
 
   async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
+    const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
     const headers: HeadersInit = {};
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
-    if (this.activeCompanyId) {
-      (headers as Record<string, string>)['X-Company-Id'] = String(this.activeCompanyId);
+    if (initiatingCompanyId) {
+      (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
     const response = await fetch(this.buildUrl(endpoint), {
@@ -174,10 +178,11 @@ class ApiClient {
 
   // CPR-66: GET raw Blob (for authenticated PDF download)
   async getBlob(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<Blob> {
+    const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
+    if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint, params), {
       method: 'GET',
@@ -199,10 +204,11 @@ class ApiClient {
 
   // POST with JSON body returning a Blob (for reports with complex params like arrays)
   async postBlob(endpoint: string, body?: Record<string, unknown>): Promise<BlobDownload> {
+    const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
+    if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint), {
       method: 'POST',
@@ -237,10 +243,11 @@ class ApiClient {
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>
   ): Promise<BlobDownload> {
+    const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
+    if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint, params), {
       method: 'GET',
@@ -263,24 +270,27 @@ class ApiClient {
 
   // (postBlob is defined above - unified for all POST-to-Blob calls)
 
-  async put<T>(endpoint: string, data?: unknown): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,
+      ...options,
     });
   }
 
-  async patch<T>(endpoint: string, data?: unknown): Promise<T> {
+  async patch<T>(endpoint: string, data?: unknown, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
+      ...options,
     });
   }
 
-  async delete<T>(endpoint: string, options?: { data?: unknown }): Promise<T> {
+  async delete<T>(endpoint: string, options?: { companyId?: number | null; data?: unknown }): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'DELETE',
       body: options?.data ? JSON.stringify(options.data) : undefined,
+      companyId: options?.companyId,
     });
   }
 }
@@ -513,19 +523,19 @@ export const employeePayrollFieldsApi = {
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
     api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`),
-  bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[]) =>
-    api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }),
+  bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[], companyId?: number) =>
+    api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }, { companyId }),
 };
 
 export const employeeWageRatesApi = {
-  list: (employeeId: number) =>
-    api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }),
-  create: (data: EmployeeWageRate & { employee_id: number }) =>
-    api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }),
-  update: (id: number, data: Partial<EmployeeWageRate>) =>
-    api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }),
-  delete: (id: number) =>
-    api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`),
+  list: (employeeId: number, companyId?: number) =>
+    api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
+  create: (data: EmployeeWageRate & { employee_id: number }, companyId?: number) =>
+    api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
+  update: (id: number, data: Partial<EmployeeWageRate>, companyId?: number) =>
+    api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
+  delete: (id: number, companyId?: number) =>
+    api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`, { companyId }),
 };
 
 // Departments (Admin API)

@@ -246,12 +246,16 @@ export function EmployeeForm() {
   const departmentsRequestIdRef = useRef(0);
   const quickPayrollFieldRequestIdRef = useRef(0);
   const submissionGenerationRef = useRef(0);
-  const companyIdRef = useRef(companyId);
+  const companyIdRef = useRef<number | null>(companyId);
 
-  useLayoutEffect((): void => {
+  useLayoutEffect((): (() => void) => {
     companyIdRef.current = companyId;
     submissionGenerationRef.current += 1;
     setIsSaving(false);
+    return (): void => {
+      companyIdRef.current = null;
+      submissionGenerationRef.current += 1;
+    };
   }, [companyId, id]);
 
   const supportsMultipleHourlyRates =
@@ -446,6 +450,9 @@ export function EmployeeForm() {
     setShowQuickPayrollField(false);
     setQuickPayrollField(initialQuickPayrollFieldDraft());
     setQuickPayrollFieldSaving(false);
+    setClassificationTransitionOpen(false);
+    setStatusTransitionMode(null);
+    setEmployeeDocumentsOpen(false);
     fetchDepartments();
     fetchPayrollFields();
     if (isEditing) {
@@ -863,7 +870,7 @@ export function EmployeeForm() {
           savedEmployeeId = response.data.id;
         }
       }
-      if (!isCurrentSubmission()) return;
+      if (isClient && !isCurrentSubmission()) return;
 
       if (!isClient && savedEmployeeId) {
         const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
@@ -883,14 +890,12 @@ export function EmployeeForm() {
           });
 
         if (payrollFieldPayload.length > 0) {
-          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload);
-          if (!isCurrentSubmission()) return;
+          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload, requestedCompanyId);
         }
       }
 
       if (!isClient && supportsMultipleHourlyRates) {
-        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId);
-        if (!isCurrentSubmission()) return;
+        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         const existingRates = existingRatesResponse.wage_rates;
         const normalizedById = new Map(
           normalizedWageRates
@@ -901,9 +906,8 @@ export function EmployeeForm() {
         await Promise.all(
           existingRates
             .filter((rate) => !normalizedById.has(rate.id as number))
-            .map((rate) => employeeWageRatesApi.delete(rate.id as number))
+            .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
-        if (!isCurrentSubmission()) return;
 
         for (const rate of normalizedWageRates) {
           const payload = {
@@ -914,14 +918,13 @@ export function EmployeeForm() {
           };
 
           if (rate.id) {
-            await employeeWageRatesApi.update(rate.id, payload);
+            await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId);
           } else {
             await employeeWageRatesApi.create({
               employee_id: savedEmployeeId,
               ...payload,
-            });
+            }, requestedCompanyId);
           }
-          if (!isCurrentSubmission()) return;
         }
       }
 
@@ -2276,8 +2279,11 @@ export function EmployeeForm() {
         <EmployeeClassificationTransitionDialog
           employee={loadedEmployee}
           open={classificationTransitionOpen}
-          onOpenChange={setClassificationTransitionOpen}
-          onTransitioned={(newEmployee) => {
+          onOpenChange={(open): void => {
+            if (companyIdRef.current === companyId) setClassificationTransitionOpen(open);
+          }}
+          onTransitioned={(newEmployee): void => {
+            if (companyIdRef.current !== companyId) return;
             setLoadedEmployee(newEmployee);
             navigate(employeePath(companyId, newEmployee.id, 'activity', { returnTo }), { replace: true });
           }}
@@ -2289,8 +2295,11 @@ export function EmployeeForm() {
           employee={loadedEmployee}
           mode={statusTransitionMode}
           open
-          onOpenChange={(open) => !open && setStatusTransitionMode(null)}
-          onCompleted={(employee) => {
+          onOpenChange={(open): void => {
+            if (companyIdRef.current === companyId && !open) setStatusTransitionMode(null);
+          }}
+          onCompleted={(employee): void => {
+            if (companyIdRef.current !== companyId) return;
             setLoadedEmployee(employee);
             setEmployeeStatus(employee.status);
             setTerminationDate(employee.termination_date || null);
