@@ -94,7 +94,7 @@ export function ClientPayPeriods(): ReactElement {
           </div>
         </div>
 
-        <Card>
+        {!error && <Card>
           {loading ? (
             <div className="py-12 text-center text-sm text-gray-500">Loading pay periods...</div>
           ) : visiblePayPeriods.length === 0 ? (
@@ -135,7 +135,7 @@ export function ClientPayPeriods(): ReactElement {
               </TableBody>
             </Table>
           )}
-        </Card>
+        </Card>}
       </div>
     </div>
   );

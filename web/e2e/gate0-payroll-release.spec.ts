@@ -1635,6 +1635,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     for (const invalidCompanyId of ['not-a-number', '0', '-1', '01', '1e3', '0x10']) {
       await page.goto(`/companies/${invalidCompanyId}/pay-runs`);
       await expect(page.getByRole('heading', { name: 'This client workspace could not be opened' })).toBeVisible();
+      await expect(page.getByText('No pay periods found.')).toHaveCount(0);
     }
     expect(payPeriodRequestCount).toBe(0);
 
