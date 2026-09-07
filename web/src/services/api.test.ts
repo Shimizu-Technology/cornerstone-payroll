@@ -11,7 +11,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, setAuthToken, setAuthTokenProvider } from './api';
+import { apiClient, employeesApi, payrollItemsApi, setAuthToken, setAuthTokenProvider } from './api';
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
@@ -70,5 +70,25 @@ describe('ApiClient company identity', (): void => {
     const neutralHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
     expect(overrideHeaders.get('X-Company-Id')).toBe('12');
     expect(neutralHeaders.has('X-Company-Id')).toBe(false);
+  });
+
+  it('scopes employee and payroll-item detail wrappers to an explicit or active company', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (): Promise<Response> => (
+      new Response(JSON.stringify({ data: {}, payroll_item: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+
+    apiClient.setActiveCompanyId(7);
+    await employeesApi.get(10, 12);
+    await payrollItemsApi.get(20, 30, 12);
+    await employeesApi.get(10);
+    await payrollItemsApi.get(20, 30);
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Company-Id')).toBe('12');
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('X-Company-Id')).toBe('12');
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get('X-Company-Id')).toBe('7');
+    expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get('X-Company-Id')).toBe('7');
   });
 });

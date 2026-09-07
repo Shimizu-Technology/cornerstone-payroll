@@ -4,6 +4,7 @@ import { Link, Outlet, useParams } from 'react-router';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath, payRunsPath } from '@/lib/routes';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 function ScopeLoader(): ReactElement {
   return <WorkspaceLoader label="Opening client workspace" minHeightClassName="min-h-[360px]" />;
@@ -12,10 +13,10 @@ function ScopeLoader(): ReactElement {
 export function CompanyScopedRoute(): ReactElement {
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
   const { companies, activeCompanyId, loading, switchCompany } = useCompany();
-  const companyId = Number(companyIdParam);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const company = companies.find((candidate) => candidate.id === companyId);
 
-  useLayoutEffect(() => {
+  useLayoutEffect((): void => {
     if (loading || !company || activeCompanyId === companyId) return;
     switchCompany(companyId);
   }, [activeCompanyId, company, companyId, loading, switchCompany]);

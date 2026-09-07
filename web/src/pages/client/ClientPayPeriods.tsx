@@ -8,15 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi } from '@/services/api';
-import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
 import { currentAppPath, payRunPath } from '@/lib/routes';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 export function ClientPayPeriods(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
-  const companyId = Number(companyIdParam);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +28,12 @@ export function ClientPayPeriods(): ReactElement {
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+      setPayPeriods([]);
+      setError('This pay-period list link is invalid.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -59,7 +66,7 @@ export function ClientPayPeriods(): ReactElement {
     return payPeriods.filter((period) =>
       [
         formatDateRange(period.start_date, period.end_date),
-        new Date(period.pay_date).toLocaleDateString(),
+        formatDate(period.pay_date),
         period.status,
         period.period_description,
       ]
@@ -109,7 +116,7 @@ export function ClientPayPeriods(): ReactElement {
                 {visiblePayPeriods.map((period) => (
                   <TableRow key={period.id}>
                     <TableCell className="font-medium text-gray-900">{formatDateRange(period.start_date, period.end_date)}</TableCell>
-                    <TableCell>{new Date(period.pay_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</TableCell>
+                    <TableCell>{formatDate(period.pay_date, { weekday: 'short', year: undefined })}</TableCell>
                     <TableCell>{period.employee_count ?? period.payroll_items_count ?? 0}</TableCell>
                     <TableCell>{formatCurrency(period.total_gross ?? 0)}</TableCell>
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>

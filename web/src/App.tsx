@@ -321,7 +321,6 @@ function AppRoutes() {
           <Route path="employees/:id/:tab?" element={isClient ? <EmployeeForm /> : <EmployeeWorkspace />} />
           <Route path="pay-runs" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
-          {isClient && <Route path="pay-runs/:id/work" element={<ClientPayPeriodDetail />} />}
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
         </Route>
         <Route path="historical-payroll" element={<HistoricalPayrollRoute><HistoricalPayroll /></HistoricalPayrollRoute>} />

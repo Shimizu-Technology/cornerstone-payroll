@@ -42,6 +42,7 @@ import {
 } from '@/lib/routes';
 import { employeesApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
 
@@ -64,8 +65,8 @@ export function EmployeeWorkspace(): ReactElement {
     id: string;
     tab?: string;
   }>();
-  const companyId = Number(companyIdParam);
-  const employeeId = Number(idParam);
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
+  const employeeId = parsePositiveRouteId(idParam) ?? 0;
   const { activeCompanyId } = useCompany();
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
@@ -78,14 +79,13 @@ export function EmployeeWorkspace(): ReactElement {
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
+  const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
 
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
-    if (activeCompanyId !== companyId) return;
-
-    if (![companyId, employeeId].every((value) => Number.isInteger(value) && value > 0)) {
+    if (!hasValidRouteIds) {
       if (isCurrentRequest()) {
         setError('This employee workspace link is invalid.');
         setResolvedRouteKey(routeKey);
@@ -93,6 +93,8 @@ export function EmployeeWorkspace(): ReactElement {
       }
       return;
     }
+
+    if (activeCompanyId !== companyId) return;
 
     setLoading(true);
     setResolvedRouteKey(null);
@@ -122,7 +124,7 @@ export function EmployeeWorkspace(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [activeCompanyId, companyId, employeeId, routeKey]);
+  }, [activeCompanyId, companyId, employeeId, hasValidRouteIds, routeKey]);
 
   useEffect(() => {
     setEmployee(null);
@@ -137,10 +139,10 @@ export function EmployeeWorkspace(): ReactElement {
     };
   }, [load]);
 
-  const employeeListFallback = employeesPath(companyId);
+  const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
 
-  if (tabParam && !tabIds.has(tabParam as EmployeeWorkspaceTab)) {
+  if (hasValidRouteIds && tabParam && !tabIds.has(tabParam as EmployeeWorkspaceTab)) {
     return <Navigate to={employeePath(companyId, employeeId, 'overview', { returnTo })} replace />;
   }
 

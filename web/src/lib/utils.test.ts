@@ -20,4 +20,8 @@ describe('date-only formatting', (): void => {
     expect(formatDate('2026-01-02')).toBe('Jan 2, 2026');
     expect(formatDateRange('2026-01-02', '2026-01-15')).toBe('Jan 2 - 15, 2026');
   });
+
+  it('keeps ISO timestamps as instants instead of treating them as calendar dates', (): void => {
+    expect(formatDate('2026-01-02T01:00:00Z')).toBe('Jan 1, 2026');
+  });
 });

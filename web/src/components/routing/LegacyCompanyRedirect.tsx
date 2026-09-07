@@ -11,6 +11,7 @@ import {
   payRunsPath,
   safeInternalReturnPath,
 } from '@/lib/routes';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
 type LegacyDestination = 'employees' | 'new-employee' | 'employee' | 'pay-runs' | 'pay-run';
 
@@ -28,7 +29,7 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
     return <WorkspaceLoader label="Resolving client workspace" minHeightClassName="min-h-[320px]" />;
   }
 
-  const recordId = Number(id);
+  const recordId = parsePositiveRouteId(id);
   const searchParams = new URLSearchParams(location.search);
   const employeeList = employeesPath(activeCompanyId);
   const payRunList = payRunsPath(activeCompanyId);
@@ -38,13 +39,13 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
 
   if (destination === 'employees') target = employeesPath(activeCompanyId, location.search);
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
-  if (destination === 'employee' && Number.isInteger(recordId) && recordId > 0) {
+  if (destination === 'employee' && recordId) {
     target = clientMode
       ? employeeEditPath(activeCompanyId, recordId, { returnTo })
       : employeePath(activeCompanyId, recordId, 'overview', { returnTo });
   }
   if (destination === 'pay-runs') target = payRunsPath(activeCompanyId, location.search);
-  if (destination === 'pay-run' && Number.isInteger(recordId) && recordId > 0) {
+  if (destination === 'pay-run' && recordId) {
     target = payRunPath(activeCompanyId, recordId, clientMode ? 'overview' : 'work', { returnTo });
   }
 
