@@ -30,7 +30,9 @@ module QuickbooksHistory
 
     def base_errors
       values = []
-      values << "The QuickBooks history must still be a preview" unless batch.previewed?
+      unless batch.previewed? || batch.applied?
+        values << "The QuickBooks history must be previewed or applied, not locked"
+      end
       values << "Every retained source file must pass integrity verification" unless batch.source_files_complete_and_verified?
       values << "QuickBooks paycheck reconciliation must pass" unless batch.reconciliation_summary.to_h["passed"] && Array(batch.validation_errors).empty?
 

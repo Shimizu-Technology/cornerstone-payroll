@@ -623,7 +623,7 @@ export function HistoricalPayroll(): ReactElement {
 
         if (!shouldContinue) {
           if (status === 'applied') {
-            setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll remains a preview and no payroll was run.' });
+            setNotice({ tone: 'success', message: 'Every QuickBooks worker now has a live employee record. Historical payroll was not recalculated and no payroll was run.' });
             setEmployeeReloadToken((current) => current + 1);
             await Promise.all([
               loadList(batchPageRef.current, selectedBatchId),
@@ -1100,6 +1100,7 @@ export function HistoricalPayroll(): ReactElement {
   const summary = selectedBatch?.preview_summary;
   const clientBootstrap = selectedBatch?.client_bootstrap;
   const clientBootstrapApplied = clientBootstrap?.status === 'applied';
+  const clientBootstrapMutable = selectedBatch?.status === 'previewed' || selectedBatch?.status === 'applied';
   const ytdBridge = selectedBatch?.ytd_bridge;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
@@ -1300,7 +1301,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="font-semibold text-neutral-950">Check the employee setup before creating anything</p>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">The preview validates every private employee snapshot, rejects unknown deduction types, suppresses the incorrect Nevada addresses, and confirms the destination client is empty. It makes no changes.</p>
                   </div>
-                  {canMutate && selectedBatch.status === 'previewed' && <Button onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}Preview current setup</Button>}
+                  {canMutate && clientBootstrapMutable && <Button onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}Preview current setup</Button>}
                 </div>
               ) : (
                 <>
@@ -1344,8 +1345,8 @@ export function HistoricalPayroll(): ReactElement {
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
                     <div className="flex flex-wrap gap-2">
-                      {canMutate && selectedBatch.status === 'previewed' && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
-                      {canMutate && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyBatchId(selectedBatch.id); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
+                      {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
+                      {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyBatchId(selectedBatch.id); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
                       {clientBootstrap.status === 'pending' && <p className="flex items-center text-sm font-semibold text-neutral-700"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Creating employee records…</p>}
                       {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {shortDate(clientBootstrap.applied_at?.slice(0, 10))}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
                     </div>
