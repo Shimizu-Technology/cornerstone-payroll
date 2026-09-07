@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router';
-import { Activity, ArrowRight, Banknote, ClipboardList, Loader2, Printer } from 'lucide-react';
+import { Activity, ArrowRight, Banknote, ClipboardList, Loader2, Printer, UserPlus } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -47,7 +47,7 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
-import { currentAppPath, employeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
+import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
@@ -937,9 +937,12 @@ export function PayPeriodDetail({
   };
 
   if (loading) {
-    return embedded
-      ? <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />
-      : <div className="p-8 text-center text-gray-500">Loading...</div>;
+    return (
+      <WorkspaceLoader
+        label="Loading payroll processing tools"
+        minHeightClassName={embedded ? 'min-h-[24rem]' : 'min-h-[32rem]'}
+      />
+    );
   }
 
   if (!payPeriod) {
@@ -2835,7 +2838,7 @@ export function PayPeriodDetail({
                       <TableRow className="bg-slate-100 font-bold hover:bg-slate-100">
                         <TableCell stickyLeft className="!z-40 bg-slate-100">Totals ({sortPayrollItems.length} {sortPayrollItems.length === 1 ? 'employee' : 'employees'})</TableCell>
                         <TableCell className="bg-slate-100" aria-label="First name total not applicable">—</TableCell>
-                        <TableCell className="bg-slate-100 text-right">{registerTotals.hours}</TableCell>
+                        <TableCell className="bg-slate-100 text-right">{Number(registerTotals.hours.toFixed(2))}</TableCell>
                         <TableCell className="bg-slate-100 text-right" aria-label="Pay rate total not applicable">—</TableCell>
                         <TableCell className="bg-slate-100 text-right">{formatCurrency(registerTotals.gross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="bg-slate-100 text-right">{registerTotals.customEarnings > 0 ? formatCurrency(registerTotals.customEarnings) : '—'}</TableCell>}
@@ -2978,8 +2981,16 @@ export function PayPeriodDetail({
 
         {/* Empty state for draft */}
         {isDraft && payrollItems.length === 0 && employees.length === 0 && (
-          <div className="p-12 text-center text-gray-500">
-            No active employees found. Add employees first before running payroll.
+          <div className="flex flex-col items-center p-12 text-center text-gray-500">
+            <UserPlus className="mb-3 h-8 w-8 text-gray-400" aria-hidden="true" />
+            <p>No active employees found. Add employees first before running payroll.</p>
+            <Link
+              className="mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
+              to={newEmployeePath(companyId, { returnTo: currentPath })}
+            >
+              <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
+              Add employee
+            </Link>
           </div>
         )}
 

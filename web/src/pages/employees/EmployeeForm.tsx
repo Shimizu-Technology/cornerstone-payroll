@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -239,6 +239,10 @@ export function EmployeeForm() {
   const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
+  const employeeRequestIdRef = useRef(0);
+  const employeePayrollFieldsRequestIdRef = useRef(0);
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -246,12 +250,19 @@ export function EmployeeForm() {
 
   const fetchEmployee = useCallback(async () => {
     if (!id) return;
-    
+
+    const requestId = ++employeeRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      employeeRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     setIsLoading(true);
     try {
       const response = isClient
         ? await clientEmployeesApi.get(parseInt(id, 10))
         : await employeesApi.get(parseInt(id, 10));
+      if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
       
@@ -332,11 +343,13 @@ export function EmployeeForm() {
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
     } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to load employee');
+      if (isCurrentRequest()) {
+        setGeneralError(err instanceof Error ? err.message : 'Failed to load employee');
+      }
     } finally {
-      setIsLoading(false);
+      if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [id, isClient]);
+  }, [companyId, id, isClient]);
 
   const fetchPayrollFields = useCallback(async () => {
     if (isClient) return;
@@ -350,8 +363,15 @@ export function EmployeeForm() {
 
   const fetchEmployeePayrollFields = useCallback(async () => {
     if (!id || isClient) return;
+    const requestId = ++employeePayrollFieldsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      employeePayrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = await employeePayrollFieldsApi.list(parseInt(id, 10));
+      if (!isCurrentRequest()) return;
       setEmployeePayrollFields(response.employee_payroll_fields.map((assignment: EmployeePayrollField) => ({
         temp_id: crypto.randomUUID(),
         id: assignment.id,
@@ -363,9 +383,9 @@ export function EmployeeForm() {
         dirty: false,
       })));
     } catch (err) {
-      console.error('Failed to load employee payroll fields:', err);
+      if (isCurrentRequest()) console.error('Failed to load employee payroll fields:', err);
     }
-  }, [id, isClient]);
+  }, [companyId, id, isClient]);
 
   const fetchDepartments = useCallback(async () => {
     try {
@@ -379,12 +399,36 @@ export function EmployeeForm() {
   }, [companyId, isClient]);
 
   useEffect(() => {
+    setLoadedEmployee(null);
+    setForm({ ...initialFormData });
+    setInitialSsn('');
+    setStoredSsnLastFour(null);
+    setInitialEmploymentType('hourly');
+    setEmployeePayrollFields([]);
+    setWageRates([defaultHourlyWageRate()]);
+    setDefaultPayrollAdjustments([]);
+    setW4CurrencyDrafts({
+      additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
+      w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
+      w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
+      w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
+    });
+    setEmployeeStatus('active');
+    setTerminationDate(null);
+    setErrors({});
+    setGeneralError(null);
+    setIsLoading(false);
+    setShowQuickPayrollField(false);
     fetchDepartments();
     fetchPayrollFields();
     if (isEditing) {
       fetchEmployee();
       fetchEmployeePayrollFields();
     }
+    return (): void => {
+      employeeRequestIdRef.current += 1;
+      employeePayrollFieldsRequestIdRef.current += 1;
+    };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
   useEffect(() => {

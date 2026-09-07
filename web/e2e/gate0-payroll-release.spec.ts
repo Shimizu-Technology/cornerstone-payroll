@@ -192,6 +192,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const boundaryStats = (await responseJson(boundaryDashboardResponse)).stats as { total_employees: number };
     const primaryTotalLabel = `${primaryStats.total_employees} total records`;
     const boundaryTotalLabel = `${boundaryStats.total_employees} total records`;
+    expect(primaryTotalLabel).not.toBe(boundaryTotalLabel);
 
     const context = await browser.newContext({
       extraHTTPHeaders: {
@@ -270,7 +271,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toBeVisible();
 
     const delayedResponseDelivered = page.waitForResponse(
-      (response): boolean => response.url().includes(`/api/v1/admin/pay_periods/${delayedPayRunId}`),
+      (response): boolean => new URL(response.url()).pathname.endsWith(`/api/v1/admin/pay_periods/${delayedPayRunId}`),
     );
     releaseDelayedResponse?.();
     await delayedResponseDelivered;
@@ -288,7 +289,46 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('link', { name: 'Open processing' })).toHaveCount(0);
   });
 
-  test('refreshes a production-shaped recurring bonus for an accountant without duplicating it', async ({ browser }) => {
+  test('does not reveal a prior company employee when an edit load finishes late', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    let markPrimaryRequestStarted: (() => void) | undefined;
+    let releasePrimaryResponse: (() => void) | undefined;
+    const primaryRequestStarted = new Promise<void>((resolve): void => { markPrimaryRequestStarted = resolve; });
+    const primaryResponseReleased = new Promise<void>((resolve): void => { releasePrimaryResponse = resolve; });
+
+    await page.route(`**/api/v1/admin/employees/${fixture.employee_id}`, async (route): Promise<void> => {
+      if (route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
+        await route.continue();
+        return;
+      }
+
+      const response = await route.fetch();
+      markPrimaryRequestStarted?.();
+      await primaryResponseReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
+    await primaryRequestStarted;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, `/companies/${fixture.other_company_id}/employees/${fixture.employee_id}/edit`);
+    await expect(page.getByText('Employee not found', { exact: true })).toBeVisible();
+
+    releasePrimaryResponse?.();
+    await waitForUiCommit(page);
+    await expect(page.getByText('Employee not found', { exact: true })).toBeVisible();
+    await expect(page.getByText('Avery Example', { exact: true })).toHaveCount(0);
+    await context.close();
+  });
+
+  test('refreshes a production-shaped recurring bonus for an accountant without duplicating it', async ({ browser }): Promise<void> => {
     test.setTimeout(60_000);
     const accountantContext = await browser.newContext({
       extraHTTPHeaders: {
@@ -464,7 +504,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantContext.close();
   });
 
-  test('accounts for every MoSa source row and ignores Revel pay amounts', async ({ browser }) => {
+  test('accounts for every MoSa source row and ignores Revel pay amounts', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.accountant_email,
@@ -524,7 +564,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
-  test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {
+  test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async (): Promise<void> => {
     const me = await adminApi.get('auth/me');
     expect(me.ok()).toBeTruthy();
     expect((await responseJson(me)).user).toMatchObject({
@@ -551,7 +591,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(JSON.stringify(await responseJson(crossCompanyEmployee))).not.toContain('Jordan Boundary');
   });
 
-  test('keeps SSNs masked and routes client payroll changes to staff approval', async () => {
+  test('keeps SSNs masked and routes client payroll changes to staff approval', async (): Promise<void> => {
     const showBefore = await clientApi.get(`client/employees/${fixture.client_employee_id}`);
     expect(showBefore.ok()).toBeTruthy();
     const beforeBody = await responseJson(showBefore);
@@ -583,7 +623,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(JSON.stringify(updateBody)).not.toContain('900-00-0099');
   });
 
-  test('reports an unavailable time source without leaking its secret', async () => {
+  test('reports an unavailable time source without leaking its secret', async (): Promise<void> => {
     const response = await adminApi.post(
       `admin/pay_periods/${fixture.time_import_pay_period_id}/preview_time_tracking_import`,
       { data: { source_id: fixture.time_tracking_source_id } },
@@ -594,7 +634,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(body).not.toMatch(/shared[_ -]?secret/i);
   });
 
-  test('keeps company, queue, and relationship context across canonical payroll records', async ({ browser }) => {
+  test('keeps company, queue, and relationship context across canonical payroll records', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email,
@@ -770,7 +810,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
-  test('redirects legacy record URLs without creating back-navigation loops', async ({ browser }) => {
+  test('redirects legacy record URLs without creating back-navigation loops', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email,
@@ -803,7 +843,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
-  test('keeps connected payroll records usable on a mobile viewport', async ({ browser }) => {
+  test('keeps connected payroll records usable on a mobile viewport', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
       extraHTTPHeaders: {
@@ -846,7 +886,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
-  test('calculates, reviews, rolls back approval, commits, and rejects a retry or edit after commit', async ({ page }) => {
+  test('calculates, reviews, rolls back approval, commits, and rejects a retry or edit after commit', async ({ page }): Promise<void> => {
     await page.goto(`/pay-periods/${fixture.workflow_pay_period_id}`);
     await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Calculate Payroll' })).toBeVisible();
@@ -945,7 +985,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     ));
   });
 
-  test('applies time to an editable period and rejects a second import after commit', async () => {
+  test('applies time to an editable period and rejects a second import after commit', async (): Promise<void> => {
     const mapping = {
       source_user_id: 'synthetic-worker-1',
       employee_id: fixture.employee_id,
