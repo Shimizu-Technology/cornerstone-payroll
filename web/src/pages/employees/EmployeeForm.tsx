@@ -243,6 +243,7 @@ export function EmployeeForm() {
   const employeePayrollFieldsRequestIdRef = useRef(0);
   const payrollFieldsRequestIdRef = useRef(0);
   const departmentsRequestIdRef = useRef(0);
+  const quickPayrollFieldRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
 
   useLayoutEffect((): void => {
@@ -438,6 +439,8 @@ export function EmployeeForm() {
     setGeneralError(null);
     setIsLoading(false);
     setShowQuickPayrollField(false);
+    setQuickPayrollField(initialQuickPayrollFieldDraft());
+    setQuickPayrollFieldSaving(false);
     fetchDepartments();
     fetchPayrollFields();
     if (isEditing) {
@@ -449,6 +452,7 @@ export function EmployeeForm() {
       employeePayrollFieldsRequestIdRef.current += 1;
       payrollFieldsRequestIdRef.current += 1;
       departmentsRequestIdRef.current += 1;
+      quickPayrollFieldRequestIdRef.current += 1;
     };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
@@ -603,9 +607,15 @@ export function EmployeeForm() {
     setQuickPayrollField((prev) => ({ ...prev, kind, tax_treatment }));
   };
 
-  const createQuickPayrollField = async () => {
+  const createQuickPayrollField = async (): Promise<void> => {
     if (!quickPayrollField.name.trim()) return;
 
+    const requestId = ++quickPayrollFieldRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === quickPayrollFieldRequestIdRef.current
+      && requestedCompanyId === companyIdRef.current
+    );
     setQuickPayrollFieldSaving(true);
     try {
       const payload = {
@@ -617,14 +627,15 @@ export function EmployeeForm() {
         show_in_payroll_grid: true,
       };
       const response = await payrollFieldsApi.create(payload);
+      if (!isCurrentRequest()) return;
       setPayrollFields((prev) => [...prev, response.payroll_field]);
       addEmployeePayrollField(response.payroll_field);
       setQuickPayrollField(initialQuickPayrollFieldDraft());
       setShowQuickPayrollField(false);
     } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
+      if (isCurrentRequest()) setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
     } finally {
-      setQuickPayrollFieldSaving(false);
+      if (isCurrentRequest()) setQuickPayrollFieldSaving(false);
     }
   };
 
