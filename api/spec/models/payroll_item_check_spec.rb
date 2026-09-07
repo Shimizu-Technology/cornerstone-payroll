@@ -284,6 +284,19 @@ RSpec.describe PayrollItem, type: :model do
       )
     end
 
+    it "calculates an item built through a valid pay period association" do
+      built_item = calc_pay_period.payroll_items.build(
+        company: company,
+        employee: calc_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+
+      expect { built_item.calculate! }.not_to raise_error
+      expect(built_item).to be_persisted
+    end
+
     it "rolls back deduction and earning clears if save fails" do
       deduction_type = DeductionType.create!(
         company: company,
