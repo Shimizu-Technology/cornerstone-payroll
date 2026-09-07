@@ -1638,7 +1638,11 @@ module Api
               )
             end),
             company_totals: payroll_period_company_totals(items, period, historical_paychecks, unified: unified),
-            source_summary: unified.source_summary(native_items: items, historical_paychecks: historical_paychecks),
+            source_summary: unified.source_summary(
+              native_items: items,
+              historical_paychecks: historical_paychecks,
+              excluded_unlinked_paychecks: unified.unlinked_historical_paychecks
+            ),
             payroll_fields: {
               totals: disclosure.totals,
               entries: disclosure.rows,
@@ -1659,6 +1663,8 @@ module Api
             employment_type: employee.employment_type,
             status: employee.status,
             payroll_count: items.map(&:pay_period_id).uniq.length,
+            imported_payroll_count: 0,
+            imported_opening_summary_count: 0,
             gross_pay: items.sum { |item| item.gross_pay.to_f },
             custom_earnings_total: custom_totals[:custom_earnings_total],
             payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
@@ -1708,7 +1714,9 @@ module Api
             custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
             net_pay: items.sum { |item| item.net_pay.to_f },
             payroll_count: items.map(&:pay_period_id).uniq.length,
-            employee_count: items.map(&:employee_id).uniq.length
+            employee_count: items.map(&:employee_id).uniq.length,
+            imported_payroll_count: 0,
+            imported_opening_summary_count: 0
           }
           return row if historical_paychecks.empty?
 
@@ -1842,14 +1850,14 @@ module Api
             historical_pay_period_id: nil,
             pay_date: item.pay_period.pay_date,
             period_description: item.pay_period.period_description,
-            scheduled_hours: item.scheduled_hours,
-            hours_worked: item.hours_worked,
-            overtime_hours: item.overtime_hours,
-            holiday_hours: item.holiday_hours,
-            pto_hours: item.pto_hours,
-            reported_tips: item.reported_tips,
-            tips_paid_out: item.tips_paid_out,
-            bonus: item.bonus,
+            scheduled_hours: item.scheduled_hours&.to_f,
+            hours_worked: item.hours_worked&.to_f,
+            overtime_hours: item.overtime_hours&.to_f,
+            holiday_hours: item.holiday_hours&.to_f,
+            pto_hours: item.pto_hours&.to_f,
+            reported_tips: item.reported_tips.to_f,
+            tips_paid_out: item.tips_paid_out.to_f,
+            bonus: item.bonus.to_f,
             custom_earnings_total: custom_earnings_total(item),
             custom_deductions_total: custom_deductions_total(item),
             gross_pay: item.gross_pay.to_f,
@@ -3334,6 +3342,8 @@ module Api
               [ "QuickBooks paychecks", quickbooks[:paycheck_count] ],
               [ "QuickBooks opening summaries", quickbooks[:opening_summary_count] ],
               [ "Excluded unlinked QuickBooks paychecks", quickbooks[:excluded_unlinked_paycheck_count] ],
+              [ "Excluded unlinked QuickBooks gross pay", quickbooks[:excluded_unlinked_gross_pay] ],
+              [ "Excluded unlinked QuickBooks net pay", quickbooks[:excluded_unlinked_net_pay] ],
               [ "Historical YTD bridge applied", bridge[:applied] ],
               [ "Historical YTD through pay date", bridge[:through_pay_date] ],
               [ "Source handling", summary[:source_statement] ]

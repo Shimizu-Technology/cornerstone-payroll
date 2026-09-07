@@ -7,7 +7,8 @@ class ImportedPayPeriodQuery
 
   def initialize(company_id:, id:, params:, audience: :staff)
     @company_id = Integer(company_id)
-    @id = Integer(id)
+    @id = Integer(id, exception: false)
+    raise ActiveRecord::RecordNotFound, "Imported pay period not found" if @id.nil?
     @page = [ params.fetch(:page, 1).to_i, 1 ].max
     @per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
     @audience = audience.to_sym
@@ -22,7 +23,7 @@ class ImportedPayPeriodQuery
       .where(historical_import_batches: { company_id: @company_id, status: "locked" })
       .find(@id)
 
-    scope = period.historical_paychecks.includes(:employee, :historical_worker)
+    scope = period.historical_paychecks.includes(:employee, :historical_worker, :historical_pay_period)
                   .order(Arel.sql("source_employee_name ASC, id ASC"))
     total_count = scope.count
     paychecks = scope.offset((@page - 1) * @per_page).limit(@per_page)
@@ -99,9 +100,15 @@ class ImportedPayPeriodQuery
   def paycheck_json(paycheck)
     {
       id: paycheck.id,
+      historical_pay_period_id: paycheck.historical_pay_period_id,
+      historical_worker_id: paycheck.historical_worker_id,
       employee_id: paycheck.employee_id,
       employee_name: paycheck.employee&.full_name,
       source_employee_name: paycheck.source_employee_name,
+      pay_date: paycheck.pay_date,
+      period_start: paycheck.period_start,
+      period_end: paycheck.period_end,
+      period_type: paycheck.historical_pay_period.period_type,
       check_number: @audience == :staff ? paycheck.check_number : nil,
       payment_method: paycheck.payment_method,
       source_status: paycheck.source_status,
