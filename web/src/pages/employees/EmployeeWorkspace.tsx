@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -72,11 +72,17 @@ export function EmployeeWorkspace(): ReactElement {
   const [payHistory, setPayHistory] = useState<PayHistoryReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+
     if (!Number.isInteger(employeeId) || employeeId < 1) {
-      setError('This employee workspace link is invalid.');
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setError('This employee workspace link is invalid.');
+        setLoading(false);
+      }
       return;
     }
 
@@ -87,17 +93,25 @@ export function EmployeeWorkspace(): ReactElement {
         employeesApi.get(employeeId),
         reportsApi.employeePayHistory(employeeId, { limit: 24 }),
       ]);
+      if (!isCurrentRequest()) return;
       setEmployee(employeeResponse.data);
       setPayHistory(historyResponse.report);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load this employee workspace.');
+      if (isCurrentRequest()) {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load this employee workspace.');
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [employeeId]);
 
   useEffect(() => {
+    setEmployee(null);
+    setPayHistory(null);
     void load();
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   const employeeListFallback = employeesPath(companyId);
