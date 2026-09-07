@@ -97,7 +97,7 @@ module QuickbooksHistory
 
     def verify_download!(key, expected_size, expected_sha256)
       bytes = storage.download_with_limit(key, max_bytes: BundleParser::MAX_FILE_BYTES)
-      valid = bytes.present? && bytes.bytesize == expected_size &&
+      valid = bytes && !bytes.empty? && bytes.bytesize == expected_size &&
         ActiveSupport::SecurityUtils.secure_compare(Digest::SHA256.hexdigest(bytes), expected_sha256)
       return if valid
 
