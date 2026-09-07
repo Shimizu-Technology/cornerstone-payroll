@@ -870,7 +870,7 @@ export function EmployeeForm() {
           savedEmployeeId = response.data.id;
         }
       }
-      if (isClient && !isCurrentSubmission()) return;
+      if (!isCurrentSubmission()) return;
 
       if (!isClient && savedEmployeeId) {
         const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
@@ -891,11 +891,13 @@ export function EmployeeForm() {
 
         if (payrollFieldPayload.length > 0) {
           await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload, requestedCompanyId);
+          if (!isCurrentSubmission()) return;
         }
       }
 
       if (!isClient && supportsMultipleHourlyRates) {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
+        if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
         const normalizedById = new Map(
           normalizedWageRates
@@ -908,6 +910,7 @@ export function EmployeeForm() {
             .filter((rate) => !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
+        if (!isCurrentSubmission()) return;
 
         for (const rate of normalizedWageRates) {
           const payload = {
@@ -925,6 +928,7 @@ export function EmployeeForm() {
               ...payload,
             }, requestedCompanyId);
           }
+          if (!isCurrentSubmission()) return;
         }
       }
 
