@@ -53,4 +53,22 @@ describe('ApiClient company identity', (): void => {
     expect(headers.get('X-Company-Id')).toBe('7');
     expect(headers.get('Authorization')).toBe('Bearer test-token');
   });
+
+  it('honors an explicit company override and permits company-neutral requests', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (): Promise<Response> => (
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+
+    apiClient.setActiveCompanyId(7);
+    await apiClient.get<{ ok: boolean }>('/explicit-company', undefined, { companyId: 12 });
+    await apiClient.get<{ ok: boolean }>('/company-neutral', undefined, { companyId: null });
+
+    const overrideHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    const neutralHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
+    expect(overrideHeaders.get('X-Company-Id')).toBe('12');
+    expect(neutralHeaders.has('X-Company-Id')).toBe(false);
+  });
 });

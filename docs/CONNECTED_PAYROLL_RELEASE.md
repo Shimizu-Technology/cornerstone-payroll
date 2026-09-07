@@ -64,7 +64,7 @@ Legacy `/employees*` and `/pay-periods*` paths remain compatibility entry points
 - Invalid, unavailable, or unauthorized company routes render a safe state and do not issue scoped record requests.
 - `return_to` accepts only same-origin absolute application paths; protocol-relative and external URLs are rejected.
 - Client portal behavior remains on its existing read/edit surfaces. The connected workspaces are staff operational records.
-- No payroll arithmetic, tax, filing, check mutation, or persistence behavior changes in this release.
+- Employee job titles are now persisted for connected employee records; payroll-record persistence, arithmetic, tax, filing, and check-mutation behavior remain unchanged.
 
 ## Acceptance matrix
 
