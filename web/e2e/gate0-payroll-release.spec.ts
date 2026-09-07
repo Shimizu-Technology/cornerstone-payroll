@@ -25,6 +25,7 @@ interface Gate0Fixture {
   register_reconciliation_field_total: number;
   workflow_pay_period_id: number;
   workflow_payroll_item_id: number;
+  filter_race_pay_period_id: number;
   time_import_pay_period_id: number;
   time_tracking_source_id: number;
   first_time_import_id: number;
@@ -491,6 +492,71 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText('Delayed primary field', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toHaveCount(0);
     await context.close();
+  });
+
+  test('keeps the selected pay-run filter when an action finishes late', async ({ page }): Promise<void> => {
+    const calculate = await adminApi.post(`admin/pay_periods/${fixture.filter_race_pay_period_id}/run_payroll`);
+    expect(calculate.ok()).toBeTruthy();
+
+    let markApprovalStarted: (() => void) | undefined;
+    const approvalStarted = new Promise<void>((resolve): void => {
+      markApprovalStarted = resolve;
+    });
+    let releaseApproval: (() => void) | undefined;
+    const approvalReleased = new Promise<void>((resolve): void => {
+      releaseApproval = resolve;
+    });
+    let approvalWasReleased = false;
+    let staleCalculatedReloadSeen = false;
+
+    await page.route('**/api/v1/admin/pay_periods**', async (route): Promise<void> => {
+      const url = new URL(route.request().url());
+      const isDelayedApproval = route.request().method() === 'POST'
+        && url.pathname === `/api/v1/admin/pay_periods/${fixture.filter_race_pay_period_id}/approve`;
+
+      if (isDelayedApproval) {
+        const response = await route.fetch();
+        markApprovalStarted?.();
+        await approvalReleased;
+        approvalWasReleased = true;
+        await route.fulfill({ response });
+        return;
+      }
+
+      if (
+        approvalWasReleased
+        && route.request().method() === 'GET'
+        && url.pathname === '/api/v1/admin/pay_periods'
+        && url.searchParams.get('status') === 'calculated'
+      ) {
+        staleCalculatedReloadSeen = true;
+      }
+      await route.continue();
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
+    const delayedRow = page.getByRole('row').filter({ hasText: 'Jul 5 - 18, 2026' });
+    await expect(delayedRow).toBeVisible();
+    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await approvalStarted;
+
+    await page.getByRole('button', { name: /^Draft \(/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
+    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
+
+    const approvalDelivered = page.waitForResponse((response): boolean => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === `/api/v1/admin/pay_periods/${fixture.filter_race_pay_period_id}/approve`
+    ));
+    releaseApproval?.();
+    await approvalDelivered;
+    await waitForUiCommit(page);
+    await waitForUiCommit(page);
+
+    expect(staleCalculatedReloadSeen).toBe(false);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
+    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
+    await expect(delayedRow).toHaveCount(0);
   });
 
   test('refreshes a production-shaped recurring bonus for an accountant without duplicating it', async ({ browser }): Promise<void> => {

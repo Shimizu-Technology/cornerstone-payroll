@@ -148,6 +148,7 @@ export function PayPeriods() {
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status';
   const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
   const yearFilter = searchParams.get('year') || '';
+  const payPeriodViewKey = `${statusFilter ?? ''}\u0000${yearFilter}`;
   const updateViewParam = (key: string, value?: string, replace = false): void => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
@@ -156,9 +157,15 @@ export function PayPeriods() {
   };
   const loadRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
+  const payPeriodViewKeyRef = useRef(payPeriodViewKey);
   const payPeriodCompanyIdRef = useRef<number | null>(null);
   const defaultDatesRequestIdRef = useRef(0);
   const checkSettingsRequestIdRef = useRef(0);
+
+  useLayoutEffect((): void => {
+    payPeriodViewKeyRef.current = payPeriodViewKey;
+    loadRequestIdRef.current += 1;
+  }, [payPeriodViewKey]);
 
   useLayoutEffect((): void => {
     activeCompanyIdRef.current = activeCompanyId;
@@ -208,8 +215,17 @@ export function PayPeriods() {
   // Load pay periods
   const loadPayPeriods = useCallback(async (silent = false): Promise<void> => {
     const requestedCompanyId = activeCompanyId;
-    if (requestedCompanyId !== activeCompanyIdRef.current) return;
+    const requestedViewKey = payPeriodViewKey;
+    if (
+      requestedCompanyId !== activeCompanyIdRef.current
+      || requestedViewKey !== payPeriodViewKeyRef.current
+    ) return;
     const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => (
+      requestId === loadRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+      && requestedViewKey === payPeriodViewKeyRef.current
+    );
 
     if (payPeriodCompanyIdRef.current !== requestedCompanyId) {
       payPeriodCompanyIdRef.current = null;
@@ -222,20 +238,20 @@ export function PayPeriods() {
       if (!silent) setLoading(true);
       setError(null);
       const response = await payPeriodsApi.list({ status: statusFilter, year: parsePayRunYear(yearFilter) });
-      if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
+      if (!isCurrentRequest()) return;
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
-      if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      if (requestId === loadRequestIdRef.current && requestedCompanyId === activeCompanyIdRef.current && !silent) {
+      if (isCurrentRequest() && !silent) {
         setLoading(false);
       }
     }
-  }, [activeCompanyId, statusFilter, yearFilter]);
+  }, [activeCompanyId, payPeriodViewKey, statusFilter, yearFilter]);
 
   useEffect(() => {
     loadPayPeriods();

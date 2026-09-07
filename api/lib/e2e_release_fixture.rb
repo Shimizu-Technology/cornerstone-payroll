@@ -335,6 +335,16 @@ class E2eReleaseFixture
         timekeeping_source: "manual"
       )
 
+      filter_race_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 7, 5),
+        end_date: Date.new(2026, 7, 18),
+        pay_date: Date.new(2026, 7, 24),
+        notes: "Gate 0 pay-run filter race scenario"
+      )
+
       time_import_period = create_pay_period!(
         company: company,
         pay_schedule: pay_schedule,
@@ -430,6 +440,7 @@ class E2eReleaseFixture
         register_reconciliation_field_total: 35.79,
         workflow_pay_period_id: workflow_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
+        filter_race_pay_period_id: filter_race_period.id,
         time_import_pay_period_id: time_import_period.id,
         time_tracking_source_id: source.id,
         first_time_import_id: first_import.id,
