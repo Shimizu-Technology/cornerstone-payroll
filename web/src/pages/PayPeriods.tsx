@@ -157,7 +157,10 @@ export function PayPeriods() {
   const loadRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
   const payPeriodCompanyIdRef = useRef<number | null>(null);
-  activeCompanyIdRef.current = activeCompanyId;
+
+  useEffect((): void => {
+    activeCompanyIdRef.current = activeCompanyId;
+  }, [activeCompanyId]);
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);

@@ -244,7 +244,10 @@ export function EmployeeForm() {
   const payrollFieldsRequestIdRef = useRef(0);
   const departmentsRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
-  companyIdRef.current = companyId;
+
+  useEffect((): void => {
+    companyIdRef.current = companyId;
+  }, [companyId]);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
