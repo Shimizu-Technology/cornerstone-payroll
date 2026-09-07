@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -14,12 +14,15 @@ import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeS
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
   middle_name: '',
   last_name: '',
+  job_title: '',
   ssn: '',
   ssn_confirmation: '',
   date_of_birth: '',
@@ -200,11 +203,14 @@ const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormDa
 export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
   const { user, isClient, isSuperAdmin, isManager } = useAuth();
+  const { activeCompanyId } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
-  const companyId = user?.company_id ?? DEV_COMPANY_ID;
+  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -234,6 +240,23 @@ export function EmployeeForm() {
   const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
+  const employeeRequestIdRef = useRef(0);
+  const employeePayrollFieldsRequestIdRef = useRef(0);
+  const payrollFieldsRequestIdRef = useRef(0);
+  const departmentsRequestIdRef = useRef(0);
+  const quickPayrollFieldRequestIdRef = useRef(0);
+  const submissionGenerationRef = useRef(0);
+  const companyIdRef = useRef<number | null>(companyId);
+
+  useLayoutEffect((): (() => void) => {
+    companyIdRef.current = companyId;
+    submissionGenerationRef.current += 1;
+    setIsSaving(false);
+    return (): void => {
+      companyIdRef.current = null;
+      submissionGenerationRef.current += 1;
+    };
+  }, [companyId, id]);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -241,12 +264,19 @@ export function EmployeeForm() {
 
   const fetchEmployee = useCallback(async () => {
     if (!id) return;
-    
+
+    const requestId = ++employeeRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      employeeRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     setIsLoading(true);
     try {
       const response = isClient
         ? await clientEmployeesApi.get(parseInt(id, 10))
         : await employeesApi.get(parseInt(id, 10));
+      if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
       
@@ -255,6 +285,7 @@ export function EmployeeForm() {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
+        job_title: employee.job_title || '',
         ssn: loadedSsn,
         ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
@@ -327,26 +358,41 @@ export function EmployeeForm() {
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
     } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to load employee');
+      if (isCurrentRequest()) {
+        setGeneralError(err instanceof Error ? err.message : 'Failed to load employee');
+      }
     } finally {
-      setIsLoading(false);
+      if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [id, isClient]);
+  }, [companyId, id, isClient]);
 
   const fetchPayrollFields = useCallback(async () => {
     if (isClient) return;
+    const requestId = ++payrollFieldsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      payrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = await payrollFieldsApi.list({ active: true });
-      setPayrollFields(response.payroll_fields);
+      if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
     } catch (err) {
-      console.error('Failed to load payroll fields:', err);
+      if (isCurrentRequest()) console.error('Failed to load payroll fields:', err);
     }
-  }, [isClient]);
+  }, [companyId, isClient]);
 
   const fetchEmployeePayrollFields = useCallback(async () => {
     if (!id || isClient) return;
+    const requestId = ++employeePayrollFieldsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      employeePayrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = await employeePayrollFieldsApi.list(parseInt(id, 10));
+      if (!isCurrentRequest()) return;
       setEmployeePayrollFields(response.employee_payroll_fields.map((assignment: EmployeePayrollField) => ({
         temp_id: crypto.randomUUID(),
         id: assignment.id,
@@ -358,28 +404,68 @@ export function EmployeeForm() {
         dirty: false,
       })));
     } catch (err) {
-      console.error('Failed to load employee payroll fields:', err);
+      if (isCurrentRequest()) console.error('Failed to load employee payroll fields:', err);
     }
-  }, [id, isClient]);
+  }, [companyId, id, isClient]);
 
   const fetchDepartments = useCallback(async () => {
+    const requestId = ++departmentsRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      departmentsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
+    );
+
     try {
       const response = isClient
         ? await clientDepartmentsApi.list({ active: true })
         : await departmentsApi.list({ company_id: companyId, active: true });
-      setDepartments(response.data);
+      if (isCurrentRequest()) setDepartments(response.data);
     } catch (err) {
-      console.error('Failed to load departments:', err);
+      if (isCurrentRequest()) console.error('Failed to load departments:', err);
     }
   }, [companyId, isClient]);
 
   useEffect(() => {
+    setLoadedEmployee(null);
+    setForm({ ...initialFormData });
+    setInitialSsn('');
+    setStoredSsnLastFour(null);
+    setInitialEmploymentType('hourly');
+    setPayrollFields([]);
+    setEmployeePayrollFields([]);
+    setDepartments([]);
+    setWageRates([defaultHourlyWageRate()]);
+    setDefaultPayrollAdjustments([]);
+    setW4CurrencyDrafts({
+      additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
+      w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
+      w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
+      w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
+    });
+    setEmployeeStatus('active');
+    setTerminationDate(null);
+    setErrors({});
+    setGeneralError(null);
+    setIsLoading(false);
+    setShowQuickPayrollField(false);
+    setQuickPayrollField(initialQuickPayrollFieldDraft());
+    setQuickPayrollFieldSaving(false);
+    setClassificationTransitionOpen(false);
+    setStatusTransitionMode(null);
+    setEmployeeDocumentsOpen(false);
     fetchDepartments();
     fetchPayrollFields();
     if (isEditing) {
       fetchEmployee();
       fetchEmployeePayrollFields();
     }
+    return (): void => {
+      employeeRequestIdRef.current += 1;
+      employeePayrollFieldsRequestIdRef.current += 1;
+      payrollFieldsRequestIdRef.current += 1;
+      departmentsRequestIdRef.current += 1;
+      quickPayrollFieldRequestIdRef.current += 1;
+    };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
   useEffect(() => {
@@ -533,9 +619,15 @@ export function EmployeeForm() {
     setQuickPayrollField((prev) => ({ ...prev, kind, tax_treatment }));
   };
 
-  const createQuickPayrollField = async () => {
+  const createQuickPayrollField = async (): Promise<void> => {
     if (!quickPayrollField.name.trim()) return;
 
+    const requestId = ++quickPayrollFieldRequestIdRef.current;
+    const requestedCompanyId = companyId;
+    const isCurrentRequest = (): boolean => (
+      requestId === quickPayrollFieldRequestIdRef.current
+      && requestedCompanyId === companyIdRef.current
+    );
     setQuickPayrollFieldSaving(true);
     try {
       const payload = {
@@ -547,14 +639,15 @@ export function EmployeeForm() {
         show_in_payroll_grid: true,
       };
       const response = await payrollFieldsApi.create(payload);
+      if (!isCurrentRequest()) return;
       setPayrollFields((prev) => [...prev, response.payroll_field]);
       addEmployeePayrollField(response.payroll_field);
       setQuickPayrollField(initialQuickPayrollFieldDraft());
       setShowQuickPayrollField(false);
     } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
+      if (isCurrentRequest()) setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
     } finally {
-      setQuickPayrollFieldSaving(false);
+      if (isCurrentRequest()) setQuickPayrollFieldSaving(false);
     }
   };
 
@@ -698,6 +791,12 @@ export function EmployeeForm() {
     
     if (!validateForm()) return;
 
+    const requestedCompanyId = companyId;
+    const submissionGeneration = ++submissionGenerationRef.current;
+    const isCurrentSubmission = (): boolean => (
+      requestedCompanyId === companyIdRef.current
+      && submissionGeneration === submissionGenerationRef.current
+    );
     setIsSaving(true);
     setGeneralError(null);
 
@@ -771,6 +870,7 @@ export function EmployeeForm() {
           savedEmployeeId = response.data.id;
         }
       }
+      if (!isCurrentSubmission()) return;
 
       if (!isClient && savedEmployeeId) {
         const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
@@ -790,12 +890,14 @@ export function EmployeeForm() {
           });
 
         if (payrollFieldPayload.length > 0) {
-          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload);
+          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload, requestedCompanyId);
+          if (!isCurrentSubmission()) return;
         }
       }
 
       if (!isClient && supportsMultipleHourlyRates) {
-        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId);
+        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
+        if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
         const normalizedById = new Map(
           normalizedWageRates
@@ -806,8 +908,9 @@ export function EmployeeForm() {
         await Promise.all(
           existingRates
             .filter((rate) => !normalizedById.has(rate.id as number))
-            .map((rate) => employeeWageRatesApi.delete(rate.id as number))
+            .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
+        if (!isCurrentSubmission()) return;
 
         for (const rate of normalizedWageRates) {
           const payload = {
@@ -818,20 +921,30 @@ export function EmployeeForm() {
           };
 
           if (rate.id) {
-            await employeeWageRatesApi.update(rate.id, payload);
+            await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId);
           } else {
             await employeeWageRatesApi.create({
               employee_id: savedEmployeeId,
               ...payload,
-            });
+            }, requestedCompanyId);
           }
+          if (!isCurrentSubmission()) return;
         }
       }
 
-      navigate(isClient && portalChangeRequestId ? '/change-requests' : '/employees', {
+      if (!isCurrentSubmission()) return;
+      const saveDestination = isClient && portalChangeRequestId
+        ? '/change-requests'
+        : isEditing
+          ? returnTo
+          : isClient
+            ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
+            : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
+      navigate(saveDestination, {
         state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
     } catch (err) {
+      if (!isCurrentSubmission()) return;
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
         focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
@@ -839,7 +952,7 @@ export function EmployeeForm() {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
       }
     } finally {
-      setIsSaving(false);
+      if (isCurrentSubmission()) setIsSaving(false);
     }
   };
 
@@ -871,7 +984,7 @@ export function EmployeeForm() {
         title={isEditing ? `Edit ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : 'Add Employee / Contractor'}
         description={isEditing ? `Update ${form.employment_type === 'contractor' ? 'contractor' : 'employee'} information` : 'Add a new employee or 1099 contractor'}
         actions={
-          <Button variant="outline" onClick={() => navigate('/employees')}>
+          <Button variant="outline" onClick={() => navigate(returnTo)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
@@ -1083,6 +1196,18 @@ export function EmployeeForm() {
                   ))}
                 </Select>
               </div>
+              <div>
+                <label htmlFor="job_title" className="mb-2 block text-sm font-medium text-gray-700">
+                  Job Title
+                </label>
+                <Input
+                  id="job_title"
+                  name="job_title"
+                  value={form.job_title || ''}
+                  onChange={(e) => handleChange('job_title', e.target.value)}
+                  placeholder="e.g. Payroll Specialist"
+                />
+              </div>
             </div>
 
             <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-4' : form.employment_type === 'salary' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mt-4`}>
@@ -1209,7 +1334,7 @@ export function EmployeeForm() {
                         </div>
                         <div className="space-y-2">
                           {loadedEmployee.classification_history.previous_employee && (
-                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.previous_employee?.id}`)}>
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(employeePath(companyId, loadedEmployee.classification_history?.previous_employee?.id || 0, 'activity', { returnTo }))}>
                               <span className="font-semibold text-primary-700">Prior {loadedEmployee.classification_history.previous_employee.tax_classification.toUpperCase()} record</span>
                               <span className="ml-2 text-neutral-500">{loadedEmployee.classification_history.previous_employee.hire_date || 'Start unknown'} – {loadedEmployee.classification_history.previous_employee.termination_date || 'End unknown'}</span>
                             </button>
@@ -1219,7 +1344,7 @@ export function EmployeeForm() {
                             <span className="ml-2">{loadedEmployee.hire_date || 'Start unknown'} – {loadedEmployee.termination_date || 'Present'}</span>
                           </div>
                           {loadedEmployee.classification_history.next_employee && (
-                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.next_employee?.id}`)}>
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(employeePath(companyId, loadedEmployee.classification_history?.next_employee?.id || 0, 'activity', { returnTo }))}>
                               <span className="font-semibold text-primary-700">Successor {loadedEmployee.classification_history.next_employee.tax_classification.toUpperCase()} record</span>
                               <span className="ml-2 text-neutral-500">Starts {loadedEmployee.classification_history.next_employee.hire_date || 'unknown'}</span>
                             </button>
@@ -2114,7 +2239,7 @@ export function EmployeeForm() {
             Required fields are marked <span className="font-semibold text-danger-600">*</span>
           </p>
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 sm:flex sm:justify-end">
-            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate('/employees')} disabled={isSaving}>
+            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate(returnTo)} disabled={isSaving}>
               Cancel
             </Button>
             <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving}>
@@ -2159,10 +2284,13 @@ export function EmployeeForm() {
         <EmployeeClassificationTransitionDialog
           employee={loadedEmployee}
           open={classificationTransitionOpen}
-          onOpenChange={setClassificationTransitionOpen}
-          onTransitioned={(newEmployee) => {
+          onOpenChange={(open): void => {
+            if (companyIdRef.current === companyId) setClassificationTransitionOpen(open);
+          }}
+          onTransitioned={(newEmployee): void => {
+            if (companyIdRef.current !== companyId) return;
             setLoadedEmployee(newEmployee);
-            navigate(`/employees/${newEmployee.id}`, { replace: true });
+            navigate(employeePath(companyId, newEmployee.id, 'activity', { returnTo }), { replace: true });
           }}
         />
       )}
@@ -2172,8 +2300,11 @@ export function EmployeeForm() {
           employee={loadedEmployee}
           mode={statusTransitionMode}
           open
-          onOpenChange={(open) => !open && setStatusTransitionMode(null)}
-          onCompleted={(employee) => {
+          onOpenChange={(open): void => {
+            if (companyIdRef.current === companyId && !open) setStatusTransitionMode(null);
+          }}
+          onCompleted={(employee): void => {
+            if (companyIdRef.current !== companyId) return;
             setLoadedEmployee(employee);
             setEmployeeStatus(employee.status);
             setTerminationDate(employee.termination_date || null);

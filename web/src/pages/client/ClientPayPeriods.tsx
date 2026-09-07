@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card } from '@/components/ui/card';
@@ -8,31 +8,56 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi } from '@/services/api';
-import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
+import { currentAppPath, payRunPath } from '@/lib/routes';
+import { parsePositiveRouteId } from '@/lib/route-params';
 
-export function ClientPayPeriods() {
+export function ClientPayPeriods(): ReactElement {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { companyId: companyIdParam } = useParams<{ companyId: string }>();
+  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
+  const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const loadRequestIdRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+    if (!Number.isInteger(companyId) || companyId <= 0) {
+      setPayPeriods([]);
+      setError('This pay-period list link is invalid.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const response = await clientPayPeriodsApi.list();
-      setPayPeriods(response.pay_periods);
+      const response = await clientPayPeriodsApi.list(undefined, companyId);
+      if (isCurrentRequest()) setPayPeriods(response.pay_periods);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load pay periods');
+      if (isCurrentRequest()) setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
-  }, []);
+  }, [companyId]);
 
-  useEffect(() => {
+  useLayoutEffect((): void => {
+    loadRequestIdRef.current += 1;
+    setPayPeriods([]);
+    setError(null);
+    setLoading(true);
+  }, [companyId]);
+
+  useEffect((): (() => void) => {
     void load();
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   const visiblePayPeriods = useMemo(() => {
@@ -41,7 +66,7 @@ export function ClientPayPeriods() {
     return payPeriods.filter((period) =>
       [
         formatDateRange(period.start_date, period.end_date),
-        new Date(period.pay_date).toLocaleDateString(),
+        formatDate(period.pay_date),
         period.status,
         period.period_description,
       ]
@@ -69,7 +94,7 @@ export function ClientPayPeriods() {
           </div>
         </div>
 
-        <Card>
+        {!error && <Card>
           {loading ? (
             <div className="py-12 text-center text-sm text-gray-500">Loading pay periods...</div>
           ) : visiblePayPeriods.length === 0 ? (
@@ -91,7 +116,7 @@ export function ClientPayPeriods() {
                 {visiblePayPeriods.map((period) => (
                   <TableRow key={period.id}>
                     <TableCell className="font-medium text-gray-900">{formatDateRange(period.start_date, period.end_date)}</TableCell>
-                    <TableCell>{new Date(period.pay_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</TableCell>
+                    <TableCell>{formatDate(period.pay_date, { weekday: 'short', year: undefined })}</TableCell>
                     <TableCell>{period.employee_count ?? period.payroll_items_count ?? 0}</TableCell>
                     <TableCell>{formatCurrency(period.total_gross ?? 0)}</TableCell>
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>
@@ -101,7 +126,7 @@ export function ClientPayPeriods() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/pay-periods/${period.id}`)}>
+                      <Button variant="ghost" size="sm" onClick={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}>
                         View
                       </Button>
                     </TableCell>
@@ -110,7 +135,7 @@ export function ClientPayPeriods() {
               </TableBody>
             </Table>
           )}
-        </Card>
+        </Card>}
       </div>
     </div>
   );

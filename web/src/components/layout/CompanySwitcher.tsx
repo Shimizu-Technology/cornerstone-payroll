@@ -22,14 +22,14 @@ export function CompanySwitcher() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const handleCompanySelect = (companyId: number) => {
+  const handleCompanySelect = (companyId: number): void => {
     setIsOpen(false);
 
     if (companyId === activeCompany?.id) {
       return;
     }
 
-    const redirect = getCompanySwitchRedirect(location.pathname);
+    const redirect = getCompanySwitchRedirect(location.pathname, companyId, location.search);
 
     analytics.companySwitch(companyId);
     switchCompany(companyId);

@@ -30,7 +30,7 @@ export default defineConfig({
     },
     {
       name: 'gate0-release',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], timezoneId: 'Pacific/Guam' },
       testMatch: /gate0-payroll-release\.spec\.ts/,
       retries: 0,
     },

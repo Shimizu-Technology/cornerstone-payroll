@@ -7,6 +7,7 @@ module Api
         include Auditable
         audit_actions :terminate, :reactivate
         before_action :set_employee, only: [ :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification ]
+        before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
         before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
 
@@ -134,6 +135,17 @@ module Api
           return if @employee
 
           render json: { error: "Employee not found" }, status: :not_found
+        end
+
+        def validate_department_scope!
+          department_id = params.dig(:employee, :department_id)
+          return if department_id.blank?
+          return if Department.exists?(id: department_id, company_id: current_company_id)
+
+          render json: {
+            error: "Validation failed",
+            details: { department_id: [ "does not belong to this company" ] }
+          }, status: :unprocessable_entity
         end
 
         def employee_params

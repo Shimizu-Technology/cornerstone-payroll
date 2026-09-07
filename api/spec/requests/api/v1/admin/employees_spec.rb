@@ -159,7 +159,13 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   end
 
   describe "GET /api/v1/admin/employees/:id" do
-    let!(:employee) { create(:employee, company: company, department: department, ssn_encrypted: "123-45-6789") }
+    let!(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        ssn_encrypted: "123-45-6789",
+        job_title: "Payroll Specialist")
+    end
 
     it "returns the employee" do
       get "/api/v1/admin/employees/#{employee.id}"
@@ -168,6 +174,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       json = response.parsed_body
       expect(json["data"]["id"]).to eq(employee.id)
       expect(json["data"]["first_name"]).to eq(employee.first_name)
+      expect(json["data"]["job_title"]).to eq("Payroll Specialist")
     end
 
     it "includes SSN last 4 digits only" do
@@ -209,6 +216,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         employee: {
           first_name: "John",
           last_name: "Doe",
+          job_title: "Controller",
           email: "john.doe@example.com",
           ssn: "123-45-6789",
           ssn_confirmation: "123-45-6789",
@@ -238,6 +246,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         json = response.parsed_body
         expect(json["data"]["first_name"]).to eq("John")
         expect(json["data"]["last_name"]).to eq("Doe")
+        expect(json["data"]["job_title"]).to eq("Controller")
         expect(json["data"]["email"]).to eq("john.doe@example.com")
       end
 
@@ -274,6 +283,19 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(response.parsed_body.fetch("details").keys).to include(
           "address_line1", "city", "state", "zip"
         )
+      end
+
+      it "rejects a department from another company" do
+        other_department = create(:department, company: create(:company))
+        cross_company_params = valid_params.deep_dup
+        cross_company_params[:employee][:department_id] = other_department.id
+
+        expect {
+          post "/api/v1/admin/employees", params: cross_company_params
+        }.not_to change(Employee, :count)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body).dig("details", "department_id")).to include("does not belong to this company")
       end
 
       it "creates a salaried employee with a multi-million-dollar annual rate" do
@@ -390,7 +412,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/admin/employees/:id" do
-    let!(:employee) { create(:employee, company: company, first_name: "Original") }
+    let!(:employee) { create(:employee, company: company, department: department, first_name: "Original") }
 
     context "with valid params" do
       it "updates the employee" do
@@ -416,6 +438,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
         expect(response).to have_http_status(:ok)
         expect(employee.reload.pay_rate).to eq(25.00)
+      end
+
+      it "updates and returns the employee job title" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { job_title: "Senior Payroll Specialist" }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("data", "job_title")).to eq("Senior Payroll Specialist")
+        expect(employee.reload.job_title).to eq("Senior Payroll Specialist")
       end
 
       it "allows changing between hourly and salary within W-2 treatment" do
@@ -461,6 +493,19 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "with invalid params" do
+      it "rejects a department from another company without changing the employee" do
+        original_department_id = employee.department_id
+        other_department = create(:department, company: create(:company))
+
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { department_id: other_department.id }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body).dig("details", "department_id")).to include("does not belong to this company")
+        expect(employee.reload.department_id).to eq(original_department_id)
+      end
+
       it "rejects an in-place W-2 to 1099 change" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {

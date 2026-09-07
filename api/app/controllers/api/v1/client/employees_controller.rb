@@ -100,6 +100,7 @@ module Api
             :first_name,
             :middle_name,
             :last_name,
+            :job_title,
             :email,
             :ssn,
             :date_of_birth,

@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
-import type { FormEvent } from 'react';
-import { Link, useParams, useNavigate } from 'react-router';
-import { Loader2 } from 'lucide-react';
-import { Header } from '@/components/layout/Header';
+import type { FormEvent, ReactElement } from 'react';
+import { Link, useParams, useLocation, useSearchParams } from 'react-router';
+import { ArrowRight, Loader2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
@@ -44,6 +44,8 @@ import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPane
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
+import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
+import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
@@ -256,10 +258,25 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
   failed: { label: 'Tax Sync Failed', variant: 'danger' },
 };
 
-export function PayPeriodDetail() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+interface PayPeriodDetailProps {
+  initialPayPeriod?: PayPeriod;
+  onPayPeriodChange?: (payPeriod: PayPeriod) => void;
+}
+
+export function PayPeriodDetail({
+  initialPayPeriod,
+  onPayPeriodChange,
+}: PayPeriodDetailProps): ReactElement {
+  const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const companyId = Number(companyIdParam);
+  const payRunId = parsePayRunId(id) ?? 0;
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
+  const currentPath = currentAppPath(location.pathname, location.search);
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
+  const initialPayPeriodRef = useRef(initialPayPeriod);
+  const loadRequestIdRef = useRef(0);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -362,18 +379,30 @@ export function PayPeriodDetail() {
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false) => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+
     try {
       if (!silent) setLoading(true);
       setError(null);
 
       setLiabilityLoading(true);
       setLiabilityError(null);
+      const prefetchedPayPeriod = initialPayPeriodRef.current?.id === periodId
+        ? initialPayPeriodRef.current
+        : null;
+      initialPayPeriodRef.current = undefined;
+
       const [ppResponse, empResponse, liabilityResponse, payrollFieldResponse] = await Promise.all([
-        payPeriodsApi.get(periodId),
+        prefetchedPayPeriod
+          ? Promise.resolve({ pay_period: prefetchedPayPeriod })
+          : payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
         payPeriodsApi.liabilities(periodId).catch((err) => {
-          setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+          if (isCurrentRequest()) {
+            setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+          }
           return null;
         }),
         payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
@@ -382,6 +411,7 @@ export function PayPeriodDetail() {
         }),
       ]);
 
+      if (!isCurrentRequest()) return;
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
@@ -390,26 +420,48 @@ export function PayPeriodDetail() {
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
       syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      if (isCurrentRequest()) {
+        setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      }
     } finally {
-      setLiabilityLoading(false);
-      if (!silent) setLoading(false);
+      if (isCurrentRequest()) {
+        setLiabilityLoading(false);
+        if (!silent) setLoading(false);
+      }
     }
   }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
-  useEffect(() => {
-    if (id) {
-      // Reset cross-pay-period observer state so divergence indicators don't
-      // momentarily render against the previous period's checks while the
-      // new panel loads.
-      setNonEmployeeChecks([]);
-      setSupplementals([]);
-      setComparison(null);
-      setComparisonError(null);
-      tipsLoansVisibilityModeRef.current = 'auto';
-      loadPayPeriod(parseInt(id));
+  useEffect((): (() => void) => {
+    // Reset cross-pay-period observer state so divergence indicators don't
+    // momentarily render against the previous period's checks while the
+    // new panel loads.
+    setPayPeriod(null);
+    setPayrollItems([]);
+    setNonEmployeeChecks([]);
+    setSupplementals([]);
+    setComparison(null);
+    setComparisonError(null);
+    tipsLoansVisibilityModeRef.current = 'auto';
+
+    if (payRunId < 1) {
+      setPayPeriod(null);
+      setError('This pay-run processing link is invalid.');
+      setLoading(false);
+      return (): void => {
+        loadRequestIdRef.current += 1;
+      };
     }
-  }, [id, loadPayPeriod]);
+
+    void loadPayPeriod(payRunId);
+
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
+  }, [loadPayPeriod, payRunId]);
+
+  useEffect(() => {
+    if (payPeriod) onPayPeriodChange?.(payPeriod);
+  }, [onPayPeriodChange, payPeriod]);
 
   const loadComparison = useCallback(async (payPeriodId: number) => {
     setComparisonLoading(true);
@@ -880,11 +932,19 @@ export function PayPeriodDetail() {
   };
 
   if (loading) {
-    return <div className="p-8 text-center text-gray-500">Loading...</div>;
+    return <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />;
   }
 
   if (!payPeriod) {
-    return <div className="p-8 text-center text-gray-500">Pay period not found</div>;
+    return (
+      <div className="rounded-2xl border border-danger-200 bg-danger-50 p-6" role="alert">
+        <p className="font-semibold text-danger-800">Pay period not found</p>
+        {error && <p className="mt-1 text-sm text-danger-700">{error}</p>}
+        {payRunId > 0 && (
+          <Button className="mt-4" variant="outline" onClick={() => void loadPayPeriod(payRunId)}>Try again</Button>
+        )}
+      </div>
+    );
   }
 
   const isDraft = payPeriod.status === 'draft';
@@ -1232,75 +1292,76 @@ export function PayPeriodDetail() {
     return 0;
   });
 
+  const workflowActions = (
+    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+      {isCommitted && !isVoided && (
+        <>
+          {canImportTimeTracking && (
+            <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+              {hasLinkedAireRecord ? 'View AIRE Record' : 'Link AIRE Record'}
+            </Button>
+          )}
+          <Button variant="outline" onClick={openPayDateCorrection}>
+            Correct Pay Date
+          </Button>
+        </>
+      )}
+      {isDraft && (
+        <>
+          {canImportMosa && (
+            <Button variant="outline" onClick={() => setImportModalOpen(true)}>
+              Import (MoSa)
+            </Button>
+          )}
+          {canImportSpikeIntake && (
+            <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
+              Import Spike Email
+            </Button>
+          )}
+          {canImportTimeTracking && (
+            <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+              Import Time Tracking
+            </Button>
+          )}
+          <Button onClick={handleRunPayroll} disabled={processing}>
+            {processing ? 'Calculating...' : 'Calculate Payroll'}
+          </Button>
+        </>
+      )}
+      {isCalculated && (
+        <>
+          <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
+            Recalculate
+          </Button>
+          <Button onClick={handleApprove} disabled={processing}>
+            Approve
+          </Button>
+        </>
+      )}
+      {isApproved && (
+        <>
+          <Button variant="outline" onClick={handleUnapprove} disabled={processing}>
+            Roll Back Approval
+          </Button>
+          <Button onClick={handleCommit} disabled={processing}>
+            {processing ? 'Committing...' : 'Commit & Finalize'}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div>
-      <Header
-        title={`Pay Period: ${formatDateRange(payPeriod.start_date, payPeriod.end_date)}`}
-        description={`Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`}
-        actions={
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-            <Button variant="outline" onClick={() => navigate('/pay-periods')}>
-              Back to List
-            </Button>
-            {isCommitted && !isVoided && (
-              <>
-                {canImportTimeTracking && (
-                  <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
-                    {hasLinkedAireRecord ? 'View AIRE Record' : 'Link AIRE Record'}
-                  </Button>
-                )}
-                <Button variant="outline" onClick={openPayDateCorrection}>
-                  Correct Pay Date
-                </Button>
-              </>
-            )}
-            {isDraft && (
-              <>
-                {canImportMosa && (
-                  <Button variant="outline" onClick={() => setImportModalOpen(true)}>
-                    Import (MoSa)
-                  </Button>
-                )}
-                {canImportSpikeIntake && (
-                  <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
-                    Import Spike Email
-                  </Button>
-                )}
-                {canImportTimeTracking && (
-                  <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
-                    Import Time Tracking
-                  </Button>
-                )}
-                <Button onClick={handleRunPayroll} disabled={processing}>
-                  {processing ? 'Calculating...' : 'Calculate Payroll'}
-                </Button>
-              </>
-            )}
-            {isCalculated && (
-              <>
-                <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
-                  Recalculate
-                </Button>
-                <Button onClick={handleApprove} disabled={processing}>
-                  Approve
-                </Button>
-              </>
-            )}
-            {isApproved && (
-              <>
-                <Button variant="outline" onClick={handleUnapprove} disabled={processing}>
-                  Roll Back Approval
-                </Button>
-                <Button onClick={handleCommit} disabled={processing}>
-                  {processing ? 'Committing...' : 'Commit & Finalize'}
-                </Button>
-              </>
-            )}
-          </div>
-        }
-      />
+      <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
+        <div>
+          <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
+          <p className="mt-1 text-sm text-neutral-500">Import inputs, calculate the run, and advance it through approval.</p>
+        </div>
+        {workflowActions}
+      </section>
 
-      <div className="p-4 space-y-6 sm:p-6 lg:p-8">
+      <div className="space-y-6">
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
@@ -1980,7 +2041,7 @@ export function PayPeriodDetail() {
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
+                              <Link className="font-medium text-gray-900 hover:text-primary-700 hover:underline" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{emp.first_name} {emp.last_name}</Link>
                               {additionalEmployeeIds.has(emp.id) && (
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
@@ -2391,7 +2452,12 @@ export function PayPeriodDetail() {
                         })()}
                         <TableRow key={item.id} className={rowTone}>
                           <TableCell stickyLeft className={`min-w-[170px] ${rowTone}`}>
-                            <p className="font-medium text-gray-900">{lastName || '—'}</p>
+                            <Link
+                              className="font-medium text-gray-900 hover:text-primary-700 hover:underline"
+                              to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}
+                            >
+                              {lastName || '—'}
+                            </Link>
                             {(item.department_name || empRecord?.department?.name) && (
                               <p className="mt-0.5 text-xs text-gray-500">
                                 {item.department_name || empRecord?.department?.name}
@@ -2447,6 +2513,12 @@ export function PayPeriodDetail() {
                                     </span>
                                   )}
                             </div>
+                            <Link
+                              className="mt-1 inline-flex min-h-9 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900"
+                              to={payrollItemPath(companyId, payRunId, item.id, { returnTo: currentPath })}
+                            >
+                              Open payroll item <ArrowRight className="h-3.5 w-3.5" />
+                            </Link>
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
                             {isSalary ? (
@@ -2731,7 +2803,7 @@ export function PayPeriodDetail() {
                       <TableRow className="bg-slate-100 font-bold hover:bg-slate-100">
                         <TableCell stickyLeft className="!z-40 bg-slate-100">Totals ({sortPayrollItems.length} {sortPayrollItems.length === 1 ? 'employee' : 'employees'})</TableCell>
                         <TableCell className="bg-slate-100" aria-label="First name total not applicable">—</TableCell>
-                        <TableCell className="bg-slate-100 text-right">{registerTotals.hours}</TableCell>
+                        <TableCell className="bg-slate-100 text-right">{registerTotals.hours.toFixed(2)}</TableCell>
                         <TableCell className="bg-slate-100 text-right" aria-label="Pay rate total not applicable">—</TableCell>
                         <TableCell className="bg-slate-100 text-right">{formatCurrency(registerTotals.gross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="bg-slate-100 text-right">{registerTotals.customEarnings > 0 ? formatCurrency(registerTotals.customEarnings) : '—'}</TableCell>}
@@ -2874,8 +2946,16 @@ export function PayPeriodDetail() {
 
         {/* Empty state for draft */}
         {isDraft && payrollItems.length === 0 && employees.length === 0 && (
-          <div className="p-12 text-center text-gray-500">
-            No active employees found. Add employees first before running payroll.
+          <div className="flex flex-col items-center p-12 text-center text-gray-500">
+            <UserPlus className="mb-4 h-8 w-8 text-gray-400" aria-hidden="true" />
+            <p>No active employees found. Add employees first before running payroll.</p>
+            <Link
+              className="mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
+              to={newEmployeePath(companyId, { returnTo: currentPath })}
+            >
+              <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
+              Add employee
+            </Link>
           </div>
         )}
 
@@ -2901,12 +2981,12 @@ export function PayPeriodDetail() {
                 <div key={sp.id} className="p-4 flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
-                      <a
-                        href={`/pay-periods/${sp.id}`}
+                      <Link
+                        to={payRunPath(companyId, sp.id, 'work', { returnTo: currentPath })}
                         className="text-sm font-semibold text-blue-700 hover:underline"
                       >
                         Supplemental period · pay date {sp.pay_date}
-                      </a>
+                      </Link>
                       {sp.tax_sync_status && (
                         <span className="text-xs text-gray-500">
                           {sp.tax_sync_status === 'synced' ? 'tax-synced' : `tax-sync ${sp.tax_sync_status}`}
@@ -2947,12 +3027,12 @@ export function PayPeriodDetail() {
               <p className="text-sm text-blue-900">
                 This is a <strong>supplemental (corrective) pay period</strong>{' '}
                 tied to{' '}
-                <a
-                  href={`/pay-periods/${payPeriod.corrects_pay_period_id}`}
+                <Link
+                  to={payRunPath(companyId, payPeriod.corrects_pay_period_id, 'work', { returnTo: currentPath })}
                   className="font-semibold underline"
                 >
                   the original committed period
-                </a>
+                </Link>
                 . The figures here are <em>deltas</em> against that period;
                 they're rolled into YTDs, W-2s, and reports automatically.
               </p>
@@ -3031,6 +3111,7 @@ export function PayPeriodDetail() {
             <div className="p-4">
               <CorrectionPanel
                 payPeriod={payPeriod}
+                returnTo={returnTo}
                 onPayPeriodChange={(updated) => {
                   setPayPeriod(updated);
                   if (updated.payroll_items) {

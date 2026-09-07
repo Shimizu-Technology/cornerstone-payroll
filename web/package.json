@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run src",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gate": "./scripts/gate.sh",
@@ -47,6 +48,7 @@
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.65.0",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^4.1.11"
   }
 }
