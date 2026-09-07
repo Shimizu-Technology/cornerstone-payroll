@@ -1,5 +1,5 @@
 import { matchPath } from 'react-router';
-import { employeesPath, payRunsPath } from '@/lib/routes';
+import { employeesPath, newEmployeePath, payRunsPath } from '@/lib/routes';
 
 export interface CompanySwitchRedirect {
   notice: string;
@@ -19,6 +19,13 @@ export function getCompanySwitchRedirect(pathname: string, nextCompanyId?: numbe
   const canonicalEmployeeList = matchPath('/companies/:companyId/employees', pathname);
   const canonicalEmployeeCreate = matchPath('/companies/:companyId/employees/new', pathname);
   const legacyEmployeeList = pathname === '/employees';
+  if (canonicalEmployeeCreate) {
+    return {
+      notice: 'Switched clients. Starting a new employee for the selected client.',
+      to: nextCompanyId ? newEmployeePath(nextCompanyId) : '/employees/new',
+    };
+  }
+
   if (canonicalEmployeeList || legacyEmployeeList || (!canonicalEmployeeCreate && matchPath('/companies/:companyId/employees/*', pathname)) || (pathname !== '/employees/new' && matchPath('/employees/:id', pathname))) {
     return {
       notice: 'Switched clients. Showing employees for the selected client.',

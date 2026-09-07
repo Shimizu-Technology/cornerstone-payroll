@@ -6,6 +6,7 @@ class ClientEmployeeUpdateService
     first_name
     middle_name
     last_name
+    job_title
     email
     date_of_birth
     hire_date
