@@ -501,7 +501,7 @@ export function PayPeriods() {
       setError(null);
       await payPeriodsApi.delete(id);
       if (!isCurrentMutation()) return;
-      setPayPeriods((prev) => prev.filter((period) => period.id !== id));
+      setPayPeriods((prev) => prev.filter((period) => period.key !== `native:${id}`));
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
