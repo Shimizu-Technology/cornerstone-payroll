@@ -22,7 +22,7 @@ export function CompanySwitcher() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const handleCompanySelect = (companyId: number) => {
+  const handleCompanySelect = (companyId: number): void => {
     setIsOpen(false);
 
     if (companyId === activeCompany?.id) {

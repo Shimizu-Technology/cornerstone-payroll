@@ -2947,7 +2947,7 @@ export function PayPeriodDetail({
         {/* Empty state for draft */}
         {isDraft && payrollItems.length === 0 && employees.length === 0 && (
           <div className="flex flex-col items-center p-12 text-center text-gray-500">
-            <UserPlus className="mb-3 h-8 w-8 text-gray-400" aria-hidden="true" />
+            <UserPlus className="mb-4 h-8 w-8 text-gray-400" aria-hidden="true" />
             <p>No active employees found. Add employees first before running payroll.</p>
             <Link
               className="mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
