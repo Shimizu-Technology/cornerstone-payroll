@@ -118,6 +118,8 @@ Rails.application.routes.draw do
             post :archive_unlinked_workers
             post :preview_client_bootstrap
             post :apply_client_bootstrap
+            post :preview_ytd_bridge
+            post :apply_ytd_bridge
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
         end

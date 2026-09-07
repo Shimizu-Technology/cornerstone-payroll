@@ -467,6 +467,16 @@ class PayrollItem < ApplicationRecord
   # Calculate and store all values
   def calculate!
     ApplicationRecord.transaction do
+      # Validate a clean copy of the persisted period. Calculating an item built
+      # through `pay_period.payroll_items` leaves that unsaved item in the
+      # association target; validating the in-memory parent would recursively
+      # validate the same child and fail before the calculator can save it.
+      calculation_period = PayPeriod.find(pay_period_id)
+      unless calculation_period.valid?(:payroll_calculation)
+        raise ActiveRecord::RecordInvalid, calculation_period
+      end
+      self.pay_period = calculation_period
+
       calculator = PayrollCalculator.for(employee, self)
       calculator.calculate
       save!

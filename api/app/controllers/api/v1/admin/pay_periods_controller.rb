@@ -93,7 +93,10 @@ module Api
           @pay_period.status = "draft"
 
           ActiveRecord::Base.transaction do
-            apply_starting_check_number!(starting_check_number) if starting_check_number.present?
+            if starting_check_number.present?
+              locked_company = Company.lock.find(current_company_id)
+              apply_starting_check_number!(starting_check_number, company: locked_company)
+            end
             @pay_period.save!
           end
 
@@ -947,16 +950,13 @@ module Api
             submitted.key?(:includes_base_salary) || submitted.key?("includes_base_salary")
         end
 
-        def apply_starting_check_number!(value)
+        def apply_starting_check_number!(value, company:)
           new_number = value.to_s.strip
           raise ArgumentError, "Starting check number must be numeric" unless new_number.match?(/\A\d+\z/)
 
           number = new_number.to_i
           raise ArgumentError, "Starting check number must be greater than 0" if number < 1
           raise ArgumentError, "Starting check number cannot exceed 9,999,999" if number > 9_999_999
-
-          company = @pay_period.company || Company.find(current_company_id)
-          company.lock!
 
           issued = PayrollItem.where(company_id: current_company_id, check_number: new_number).exists? ||
             NonEmployeeCheck.where(company_id: current_company_id, check_number: new_number).exists?
@@ -1544,8 +1544,31 @@ module Api
             ytd_map = {}
           end
 
+          historical_ytd_rows = HistoricalEmployeeYtdBalance
+                               .joins(:historical_ytd_bridge)
+                               .where(
+                                 employee_id: eids,
+                                 tax_year: year,
+                                 historical_ytd_bridges: { status: "applied" }
+                               )
+                               .order(
+                                 through_pay_date: :desc,
+                                 "historical_ytd_bridges.applied_at" => :desc,
+                                 "historical_ytd_bridges.id" => :desc,
+                                 id: :desc
+                               )
+          historical_ytd_map = historical_ytd_rows.each_with_object({}) do |balance, map|
+            map[balance.employee_id] ||= balance
+          end
+
           employees.each do |emp|
             data = ytd_map[emp.id] || Employee::YTD_AGGREGATE_COLUMNS.keys.index_with { 0.0 }
+            data = emp.merge_historical_ytd(
+              data,
+              year,
+              historical_balance: historical_ytd_map[emp.id],
+              preloaded: true
+            )
             emp.cache_ytd_values!(
               year: year,
               as_of_pay_date: pay_period.pay_date,
