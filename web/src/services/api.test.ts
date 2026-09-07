@@ -11,11 +11,12 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, setAuthTokenProvider } from './api';
+import { apiClient, setAuthToken, setAuthTokenProvider } from './api';
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
     setAuthTokenProvider(null);
+    setAuthToken(null);
     apiClient.setActiveCompanyId(null);
     vi.restoreAllMocks();
   });
