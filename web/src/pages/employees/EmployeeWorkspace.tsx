@@ -198,7 +198,7 @@ export function EmployeeWorkspace(): ReactElement {
           <PaySetup employee={employee} editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })} />
         )}
         {activeTab === 'pay-history' && (
-          <PayHistory companyId={companyId} employeeId={employeeId} report={payHistory} returnTo={currentPath} />
+          <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} />
         )}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
       </main>
@@ -294,7 +294,7 @@ function PaySetup({ employee, editHref }: { employee: Employee; editHref: string
   );
 }
 
-function PayHistory({ companyId, employeeId, report, returnTo }: { companyId: number; employeeId: number; report: PayHistoryReport; returnTo: string }): ReactElement {
+function PayHistory({ companyId, report, returnTo }: { companyId: number; report: PayHistoryReport; returnTo: string }): ReactElement {
   return (
     <Card>
       <CardHeader><CardTitle>Pay history</CardTitle><p className="mt-1 text-sm text-neutral-500">Each row connects the employee, source pay run, exact payroll item, and check reference.</p></CardHeader>
@@ -313,7 +313,7 @@ function PayHistory({ companyId, employeeId, report, returnTo }: { companyId: nu
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
                   <TableCell>{item.check_number || 'Not assigned'}</TableCell>
-                  <TableCell className="text-right"><Link aria-label={`Open payroll item for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo: employeePath(companyId, employeeId, 'pay-history', { returnTo }) })}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
+                  <TableCell className="text-right"><Link aria-label={`Open payroll item for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
                 </TableRow>
               ))}
             </TableBody>
