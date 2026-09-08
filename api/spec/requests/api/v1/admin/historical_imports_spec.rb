@@ -144,6 +144,12 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "net_pay" => "2325.0"
     )
     expect(index_body.fetch("meta")).to include("total_count" => 1, "current_page" => 1)
+    expect(index_body.dig("meta", "import_providers").sole).to include(
+      "key" => "quickbooks_online",
+      "label" => "QuickBooks Online Payroll",
+      "importer_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION,
+      "max_files" => QuickbooksHistory::BundleParser::MAX_FILE_COUNT
+    )
     expect(index_body.dig("data", 0, "cutover_review")).not_to have_key("evidence")
 
     get "/api/v1/admin/historical_imports/#{batch_id}"
@@ -242,6 +248,25 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(CompanyYtdTotal.where(company_id: company.id)).to be_empty
     expect(batch.reload).to be_previewed
     expect(AuditLog.where(action: "historical_imports#apply_client_bootstrap", company: company)).to exist
+  end
+
+  it "blocks optional migration workflows until the provider explicitly enables them" do
+    batch = QuickbooksHistory::ImportService.new(company: company, files: quickbooks_history_uploads, actor: admin).call.batch
+    adapter = Class.new(HistoricalPayrollImports::QuickbooksOnlineAdapter) do
+      def capabilities = super.merge(client_bootstrap: false, ytd_bridge: false)
+    end.new
+    registry = HistoricalPayrollImports::Registry.new(adapters: [ adapter ])
+    allow(HistoricalPayrollImports::Registry).to receive(:default).and_return(registry)
+    expect(QuickbooksHistory::ClientBootstrapPreviewService).not_to receive(:new)
+    expect(QuickbooksHistory::YtdBridgePreviewService).not_to receive(:new)
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("QuickBooks Online Payroll does not support client bootstrap")
+
+    post "/api/v1/admin/historical_imports/#{batch.id}/preview_ytd_bridge"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("QuickBooks Online Payroll does not support ytd bridge")
   end
 
   it "rejects an incorrect clean-client preparation acknowledgement without enqueueing work" do
@@ -505,6 +530,22 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "details" => {}
     )
     expect(HistoricalImportBatch.count).to eq(0)
+  end
+
+  it "rejects an unsupported source before parsing or persisting files" do
+    expect(QuickbooksHistory::ImportService).not_to receive(:new)
+
+    post "/api/v1/admin/historical_imports/preview", params: {
+      source_system: "unreviewed_provider",
+      files: quickbooks_history_uploads
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include(
+      "error" => "Unsupported historical payroll source: unreviewed_provider",
+      "details" => {}
+    )
+    expect(HistoricalImportBatch).not_to exist
   end
 
   it "fails safely when no active company is selected" do

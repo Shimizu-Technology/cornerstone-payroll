@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 namespace :quickbooks_history do
-  desc "Preview (and optionally apply/lock) a QuickBooks payroll-history bundle"
+  desc "Preview (and optionally apply/lock) a provider-backed payroll-history bundle"
   task import: :environment do
     bundle_dir = Pathname.new(ENV.fetch("BUNDLE_DIR")).expand_path
     company_id = Integer(ENV.fetch("COMPANY_ID"), 10)
@@ -16,22 +16,30 @@ namespace :quickbooks_history do
     authorized_actor = actor.can_access_company?(company.id) && StaffRolePolicy.allowed?(actor, :manage_client_configuration)
     raise ArgumentError, "ACTOR_EMAIL must identify a manager or administrator with access to COMPANY_ID" unless authorized_actor
 
+    source_system = ENV.fetch("SOURCE_SYSTEM", HistoricalPayrollImports::Registry::DEFAULT_SOURCE_SYSTEM)
+    adapter = HistoricalPayrollImports::Registry.default.fetch!(source_system)
+
     paths = bundle_dir.glob("**/*", File::FNM_DOTMATCH)
                       .reject(&:symlink?)
                       .select(&:file?)
-                      .select { |path| QuickbooksHistory::BundleParser::ALLOWED_EXTENSIONS.include?(path.extname.downcase) }
+                      .select { |path| adapter.accepted_extensions.include?(path.extname.downcase) }
                       .sort_by { |path| path.basename.to_s.downcase }
-    raise ArgumentError, "No supported QuickBooks export files were found in BUNDLE_DIR" if paths.empty?
+    raise ArgumentError, "No supported #{adapter.label} export files were found in BUNDLE_DIR" if paths.empty?
 
     files = paths.map do |path|
-      QuickbooksHistory::BundleParser::SourceFile.new(
+      adapter.source_file(
         original_filename: path.basename.to_s,
         path: path.to_s,
         size: path.size
       )
     end
 
-    result = QuickbooksHistory::ImportService.new(company: company, files: files, actor: actor).call
+    result = HistoricalPayrollImports::ImportService.new(
+      company: company,
+      files: files,
+      actor: actor,
+      source_system: source_system
+    ).call
     raise result.error unless result.success?
 
     batch = result.batch
@@ -45,7 +53,7 @@ namespace :quickbooks_history do
 
     summary = batch.preview_summary.to_h
     reconciliation = batch.reconciliation_summary.to_h
-    puts "QuickBooks historical import #{result.idempotent ? 'reused' : 'created'}"
+    puts "#{adapter.label} historical import #{result.idempotent ? 'reused' : 'created'}"
     puts "Batch ID: #{batch.id}"
     puts "Company ID: #{company.id}"
     puts "Status: #{batch.status}"

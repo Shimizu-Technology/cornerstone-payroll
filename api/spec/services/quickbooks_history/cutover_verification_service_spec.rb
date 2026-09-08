@@ -249,6 +249,15 @@ RSpec.describe QuickbooksHistory::CutoverVerificationService do
       .to raise_error(ArgumentError, /unsupported.*reviewed source migration/i)
   end
 
+  it "fails closed before restoring files when a recorded source has no registered adapter" do
+    batch.source_system = "removed_provider"
+    storage = instance_double(R2StorageService)
+    expect(storage).not_to receive(:download)
+
+    expect { described_class.new(batch: batch, actor: actor, storage: storage).call }
+      .to raise_error(ArgumentError, "Unsupported historical payroll source: removed_provider")
+  end
+
   it "cannot persist over a newer queued verification attempt" do
     review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
     original_token = review.verification_started_at.iso8601(6)

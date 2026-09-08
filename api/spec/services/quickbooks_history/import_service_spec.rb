@@ -194,7 +194,9 @@ RSpec.describe QuickbooksHistory::ImportService do
 
     second = described_class.new(company: company, files: quickbooks_history_uploads(suffix: "changed"), actor: actor).call
 
-    expect(second.batch.validation_errors).to include("2 paycheck snapshot(s) already exist in applied QuickBooks history")
+    expect(second.batch.validation_errors).to include(
+      "2 paycheck snapshot(s) already exist in applied QuickBooks Online Payroll history"
+    )
     expect(second.batch).to be_previewed
   end
 
