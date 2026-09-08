@@ -53,6 +53,10 @@ Rails.application.routes.draw do
           get :ytd_summary_csv
           get :ytd_summary_pdf
           get :ytd_summary_xlsx
+          get :annual_payroll_summary
+          get :annual_payroll_summary_csv
+          get :annual_payroll_summary_pdf
+          get :annual_payroll_summary_xlsx
         end
       end
 
@@ -293,6 +297,10 @@ Rails.application.routes.draw do
         get "reports/ytd_summary_csv", to: "reports#ytd_summary_csv"
         get "reports/ytd_summary_pdf", to: "reports#ytd_summary_pdf"
         get "reports/ytd_summary_xlsx", to: "reports#ytd_summary_xlsx"
+        get "reports/annual_payroll_summary", to: "reports#annual_payroll_summary"
+        get "reports/annual_payroll_summary_csv", to: "reports#annual_payroll_summary_csv"
+        get "reports/annual_payroll_summary_pdf", to: "reports#annual_payroll_summary_pdf"
+        get "reports/annual_payroll_summary_xlsx", to: "reports#annual_payroll_summary_xlsx"
         get "reports/quarterly_compliance_packet", to: "reports#quarterly_compliance_packet"
         post "reports/quarterly_compliance_packet_workflow", to: "reports#start_quarterly_compliance_packet_workflow"
         get "reports/quarterly_compliance_packet_pdf", to: "reports#quarterly_compliance_packet_pdf"

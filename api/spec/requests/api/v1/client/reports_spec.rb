@@ -237,4 +237,21 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(text).to include("Ana Perez")
     expect(text).to include("Rent Deduction")
   end
+
+  it "allows client users to review and export year-by-year payroll totals" do
+    create_client_historical_paycheck(employee: employee, suffix: "annual-linked")
+
+    get "/api/v1/client/reports/annual_payroll_summary"
+    expect(response).to have_http_status(:ok)
+    report = response.parsed_body.fetch("report")
+    expect(report.fetch("years").pluck("year")).to eq([ 2026 ])
+    expect(report.dig("years", 0, "cornerstone_payroll_count")).to eq(1)
+    expect(report.dig("years", 0, "quickbooks_payroll_count")).to eq(1)
+    expect(report.dig("totals", "gross_pay").to_f).to eq(1_850.0)
+
+    %w[csv pdf xlsx].each do |format|
+      get "/api/v1/client/reports/annual_payroll_summary_#{format}"
+      expect(response).to have_http_status(:ok), "expected client #{format} export to succeed"
+    end
+  end
 end
