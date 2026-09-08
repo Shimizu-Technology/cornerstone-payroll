@@ -132,44 +132,48 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
       attributes: attributes
     ).call
 
-    adjustment_thread = Thread.new do
-      Thread.current[:historical_adjustment_after_audit] = lambda do
-        adjustment_at_audit << true
-        release_adjustment.pop
+    adjustment_thread = nil
+    approval_thread = nil
+    begin
+      adjustment_thread = Thread.new do
+        Thread.current[:historical_adjustment_after_audit] = lambda do
+          adjustment_at_audit << true
+          release_adjustment.pop
+        end
+        ActiveRecord::Base.connection_pool.with_connection do
+          thread_paycheck = HistoricalPaycheck.find(paycheck.id)
+          thread_actor = User.find(actor.id)
+          HistoricalPayroll::AdjustmentCreateService.new(
+            paycheck: thread_paycheck,
+            actor: thread_actor,
+            attributes: attributes,
+            acknowledgement: HistoricalPayroll::AdjustmentCreateService::ACKNOWLEDGEMENT,
+            preview_digest: preview.digest
+          ).call
+          results << [ :ok, :adjustment ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        ensure
+          Thread.current[:historical_adjustment_after_audit] = nil
+        end
       end
-      ActiveRecord::Base.connection_pool.with_connection do
-        thread_paycheck = HistoricalPaycheck.find(paycheck.id)
-        thread_actor = User.find(actor.id)
-        HistoricalPayroll::AdjustmentCreateService.new(
-          paycheck: thread_paycheck,
-          actor: thread_actor,
-          attributes: attributes,
-          acknowledgement: HistoricalPayroll::AdjustmentCreateService::ACKNOWLEDGEMENT,
-          preview_digest: preview.digest
-        ).call
-        results << [ :ok, :adjustment ]
-      rescue StandardError => e
-        results << [ :error, e ]
-      ensure
-        Thread.current[:historical_adjustment_after_audit] = nil
-      end
-    end
-    pop_with_timeout(adjustment_at_audit)
+      pop_with_timeout(adjustment_at_audit)
 
-    approval_thread = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        thread_period = PayPeriod.find(pay_period.id)
-        thread_actor = User.find(actor.id)
-        PayPeriodLifecycleService.new(pay_period: thread_period, actor: thread_actor).approve!
-        results << [ :ok, :approval ]
-      rescue StandardError => e
-        results << [ :error, e ]
+      approval_thread = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          thread_period = PayPeriod.find(pay_period.id)
+          thread_actor = User.find(actor.id)
+          PayPeriodLifecycleService.new(pay_period: thread_period, actor: thread_actor).approve!
+          results << [ :ok, :approval ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        end
       end
+      expect { pop_with_timeout(results, seconds: 0.2) }.to raise_error(Timeout::Error)
+    ensure
+      release_adjustment << true
+      [ adjustment_thread, approval_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     end
-    expect { pop_with_timeout(results, seconds: 0.2) }.to raise_error(Timeout::Error)
-
-    release_adjustment << true
-    [ adjustment_thread, approval_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
     outcomes = 2.times.map { pop_with_timeout(results) }
 
     expect(outcomes).to include([ :ok, :adjustment ])
