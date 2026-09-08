@@ -82,7 +82,8 @@ class PayrollRegisterCsvExporter
   private
 
   def headers
-    HEADERS + payroll_field_columns.map { |column| payroll_field_header(column) }
+    HEADERS + payroll_adjustment_export.headers +
+      payroll_field_columns.map { |column| payroll_field_header(column) }
   end
 
   def payroll_rows
@@ -136,6 +137,10 @@ class PayrollRegisterCsvExporter
     "Payroll Field - #{column[:label]} (#{column[:tax_treatment].humanize}; #{effect})"
   end
 
+  def payroll_adjustment_export
+    @payroll_adjustment_export ||= PayrollAdjustmentExport.new(payroll_rows)
+  end
+
   def employee_row(emp)
     base_row = [
       sanitize_csv_field(emp[:employee_last_name]),
@@ -172,7 +177,9 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
-    base_row + payroll_field_columns.map do |column|
+    base_row + payroll_adjustment_export.values_for(emp).map do |amount|
+      amount.nil? ? "" : format_currency(amount)
+    end + payroll_field_columns.map do |column|
       amount = payroll_field_amount(emp, column)
       amount.nil? ? "" : format_currency(amount)
     end
@@ -215,7 +222,8 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:total_deductions)),
       format_currency(total_for(:net_pay)),
       ""
-    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
+    ] + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
+      payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
   end
 
   def summary_label(summary)
