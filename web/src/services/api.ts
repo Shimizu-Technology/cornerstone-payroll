@@ -1617,6 +1617,10 @@ export interface PayrollRegisterReport {
       total_reported_tips?: number;
       total_tips_paid_out?: number;
       total_custom_earnings?: number;
+      total_payroll_adjustment_taxable_additions?: number;
+      total_payroll_adjustment_non_taxable_additions?: number;
+      total_payroll_adjustment_pre_tax_deductions?: number;
+      total_payroll_adjustment_post_tax_deductions?: number;
       total_payroll_field_taxable_additions?: number;
       total_payroll_field_non_taxable_additions?: number;
       total_payroll_field_pre_tax_deductions?: number;
@@ -1635,6 +1639,7 @@ export interface PayrollRegisterReport {
       contractor_total_net?: number;
     };
     payroll_fields?: PayrollFieldsDisclosure;
+    payroll_adjustments?: PayrollAdjustmentsDisclosure;
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
     contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
     simple_register?: {
@@ -1693,6 +1698,32 @@ export interface PayrollFieldDisclosureEntry {
 export interface PayrollFieldsDisclosure {
   totals: PayrollFieldDisclosureEntry[];
   entries?: PayrollFieldDisclosureEntry[];
+  treatment_totals: Record<string, number>;
+}
+
+export interface PayrollAdjustmentDisclosureEntry {
+  payroll_item_id?: number;
+  pay_period_id?: number;
+  pay_date?: string;
+  period_description?: string;
+  employee_id?: number;
+  employee_name?: string;
+  employment_type?: string;
+  label: string;
+  treatment: string;
+  kind: 'addition' | 'deduction';
+  source: 'employee_default' | 'manual' | 'legacy_snapshot';
+  employee_paid: boolean;
+  employer_paid: false;
+  amount: number;
+  notes?: string | null;
+  employee_count?: number;
+  pay_period_count?: number;
+}
+
+export interface PayrollAdjustmentsDisclosure {
+  totals: PayrollAdjustmentDisclosureEntry[];
+  entries?: PayrollAdjustmentDisclosureEntry[];
   treatment_totals: Record<string, number>;
 }
 

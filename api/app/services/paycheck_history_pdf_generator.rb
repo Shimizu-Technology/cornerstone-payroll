@@ -29,6 +29,7 @@ class PaycheckHistoryPdfGenerator
     else
       render_history_table(pdf, rows)
       render_detail_table(pdf, rows)
+      render_payroll_adjustment_detail(pdf)
       render_payroll_field_detail(pdf)
     end
 
@@ -129,6 +130,42 @@ class PaycheckHistoryPdfGenerator
       row(0).background_color = QB_HEADER_BG
       column(4).align = :right
     end
+  end
+
+  def render_payroll_adjustment_detail(pdf)
+    rows = PayrollAdjustmentDisclosure.new(data.items(include_voided: true)).rows
+    return if rows.empty?
+
+    pdf.start_new_page
+    pdf.font_size(12) { pdf.text "Recurring and manual adjustment detail", style: :bold, color: TEXT }
+    pdf.move_down 3
+    pdf.fill_color MUTED
+    pdf.font_size(8) { pdf.text "Snapshotted amounts applied to each paycheck. Later employee setup changes do not alter this history." }
+    pdf.fill_color TEXT
+    pdf.move_down 8
+
+    table_rows = [ [ "Employee", "Adjustment", "Tax treatment", "Source", "Amount" ] ] + rows.map do |row|
+      [
+        row[:employee_name], row[:label], row[:treatment].to_s.humanize,
+        adjustment_source_label(row[:source]), money(row[:amount])
+      ]
+    end
+    pdf.table(table_rows, header: true, width: pdf.bounds.width) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.5
+      cells.padding = [ 4, 5 ]
+      cells.size = 8
+      row(0).background_color = QB_HEADER_BG
+      column(4).align = :right
+    end
+  end
+
+  def adjustment_source_label(source)
+    {
+      PayrollItem::EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE => "Employee setup",
+      PayrollItem::MANUAL_ADJUSTMENTS_SOURCE => "Manual pay-period entry",
+      PayrollAdjustmentDisclosure::LEGACY_SNAPSHOT_SOURCE => "Legacy snapshot"
+    }.fetch(source.to_s, "Snapshot")
   end
 
   def start_new_page_if_needed(pdf, height)

@@ -41,6 +41,14 @@ RSpec.describe PayrollRegisterPdfGenerator do
           total_deductions: 383.00,
           net_pay: 1617.00,
           check_number: "10001",
+          payroll_adjustments: [
+            {
+              label: "Employee Loan",
+              treatment: "post_tax_deduction",
+              source: "employee_default",
+              amount: 50.00
+            }
+          ],
           payroll_field_entries: [
             {
               label: "Shift Bonus",
@@ -122,6 +130,13 @@ RSpec.describe PayrollRegisterPdfGenerator do
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
       expect(text).to include("Payroll Fields by Worker", "Alice Terlaje")
+    end
+
+    it "renders source-aware recurring and manual adjustments by worker" do
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Recurring and Manual Adjustments by Worker", "Employee Loan")
+      expect(text).to include("Employee setup", "Post tax deduction", "$50.00")
     end
 
     it "distinguishes an assigned zero amount from a field that was not assigned" do

@@ -2111,6 +2111,48 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       end
     end
 
+    it "discloses recurring and manual adjustment treatments in JSON and Excel without changing payroll totals" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: hourly_employee)
+      original_totals = item.slice(:gross_pay, :total_deductions, :net_pay)
+      item.payroll_adjustments = [
+        { "label" => "Shift premium", "treatment" => "taxable_addition", "amount" => 10.0 },
+        { "label" => "Mileage", "treatment" => "non_taxable_addition", "amount" => 20.0 },
+        { "label" => "Medical premium", "treatment" => "pre_tax_deduction", "amount" => 30.0 },
+        { "label" => "Employee loan", "treatment" => "post_tax_deduction", "amount" => 40.0 }
+      ]
+      item.mark_payroll_adjustments_overridden!
+      item.save!
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+
+      report = response.parsed_body.fetch("report")
+      row = report.fetch("employees").find { |candidate| candidate.fetch("employee_id") == hourly_employee.id }
+      expect(row.fetch("payroll_adjustments").map { |entry| [ entry.fetch("label"), entry.fetch("treatment"), entry.fetch("source"), entry.fetch("amount").to_f ] }).to contain_exactly(
+        [ "Shift premium", "taxable_addition", "manual", 10.0 ],
+        [ "Mileage", "non_taxable_addition", "manual", 20.0 ],
+        [ "Medical premium", "pre_tax_deduction", "manual", 30.0 ],
+        [ "Employee loan", "post_tax_deduction", "manual", 40.0 ]
+      )
+      expect(report.fetch("payroll_adjustments").fetch("treatment_totals")).to include(
+        "taxable_addition" => 10.0,
+        "non_taxable_addition" => 20.0,
+        "pre_tax_deduction" => 30.0,
+        "post_tax_deduction" => 40.0
+      )
+      expect(item.reload.slice(:gross_pay, :total_deductions, :net_pay)).to eq(original_totals)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      workbook = workbook_from_response
+      expect(workbook.sheets).to include("Payroll Adjustments Detail", "Payroll Adjustments Totals")
+      detail_rows = (1..workbook.sheet("Payroll Adjustments Detail").last_row).map do |row_number|
+        workbook.sheet("Payroll Adjustments Detail").row(row_number)
+      end
+      expect(detail_rows).to include(include(hourly_employee.full_name, "Employee loan", "manual", 40.0))
+      employee_headers = workbook.sheet("Employees").row(1)
+      expect(employee_headers).to include("Payroll Adjustment - Employee loan (Post tax deduction; manual pay-period entry)")
+    end
+
     it "returns the canonical simple register payload used by the browser preview and workbook" do
       get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
 
