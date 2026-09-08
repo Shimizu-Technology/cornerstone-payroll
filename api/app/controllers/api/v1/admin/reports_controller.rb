@@ -1225,6 +1225,7 @@ module Api
           company = pay_period.company
           intake_tip_components = company.simple_payroll_register_enabled? ? intake_tip_components_by_item_id(items) : {}
           lifecycle = pay_period_lifecycle_report(pay_period)
+          adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           report_data = {
             type: "payroll_register",
             simple_payroll_register_enabled: company.simple_payroll_register_enabled?,
@@ -1247,6 +1248,10 @@ module Api
               total_non_taxable_pay: w2_items.sum(&:non_taxable_pay),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_adjustment_taxable_additions: w2_items.sum(&:taxable_payroll_adjustments_total),
+              total_payroll_adjustment_non_taxable_additions: w2_items.sum(&:non_taxable_payroll_adjustments_total),
+              total_payroll_adjustment_pre_tax_deductions: w2_items.sum(&:pre_tax_payroll_adjustments_total),
+              total_payroll_adjustment_post_tax_deductions: w2_items.sum(&:post_tax_payroll_adjustments_total),
               total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
               total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
               total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
@@ -1269,6 +1274,11 @@ module Api
               total_net: w2_items.sum(&:net_pay),
               contractor_total_gross: contractor_items.sum(&:gross_pay),
               contractor_total_net: contractor_items.sum(&:net_pay)
+            },
+            payroll_adjustments: {
+              totals: adjustment_disclosure.totals,
+              entries: adjustment_disclosure.rows,
+              treatment_totals: adjustment_disclosure.treatment_totals
             },
             employees: w2_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) },
             contractors: contractor_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) }
@@ -1811,6 +1821,12 @@ module Api
             custom_earnings_total: custom_earnings_total(item),
             custom_deductions: item.custom_deductions || [],
             custom_deductions_total: custom_deductions_total(item),
+            payroll_adjustments: payroll_adjustment_rows(item),
+            payroll_adjustment_totals: payroll_adjustment_totals(item),
+            payroll_adjustment_taxable_additions_total: item.taxable_payroll_adjustments_total,
+            payroll_adjustment_non_taxable_additions_total: item.non_taxable_payroll_adjustments_total,
+            payroll_adjustment_pre_tax_deductions_total: item.pre_tax_payroll_adjustments_total,
+            payroll_adjustment_post_tax_deductions_total: item.post_tax_payroll_adjustments_total,
             payroll_field_entries: payroll_field_entry_rows(item),
             payroll_field_totals: payroll_field_totals(item),
             payroll_field_taxable_additions_total: payroll_field_total(item, "taxable_addition"),
@@ -2033,6 +2049,7 @@ module Api
           )
           w2_items = items.reject { |i| i.employment_type == "contractor" }
           contractor_items = items.select { |i| i.employment_type == "contractor" }
+          adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           {
             type: "payroll_summary_by_employee",
             meta: report_meta(pay_period.company, :payroll_summary_by_employee),
@@ -2051,6 +2068,10 @@ module Api
               total_bonus: w2_items.sum(&:bonus),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_adjustment_taxable_additions: w2_items.sum(&:taxable_payroll_adjustments_total),
+              total_payroll_adjustment_non_taxable_additions: w2_items.sum(&:non_taxable_payroll_adjustments_total),
+              total_payroll_adjustment_pre_tax_deductions: w2_items.sum(&:pre_tax_payroll_adjustments_total),
+              total_payroll_adjustment_post_tax_deductions: w2_items.sum(&:post_tax_payroll_adjustments_total),
               total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
               total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
               total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
@@ -2068,6 +2089,11 @@ module Api
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay)
             },
+            payroll_adjustments: {
+              totals: adjustment_disclosure.totals,
+              entries: adjustment_disclosure.rows,
+              treatment_totals: adjustment_disclosure.treatment_totals
+            },
             employees: w2_items.map { |item| payroll_item_detail(item) },
             contractors: contractor_items.map { |item| payroll_item_detail(item) }
           }
@@ -2083,6 +2109,14 @@ module Api
 
         def active_payroll_field_entries(item)
           item.payroll_item_field_entries.select(&:active?)
+        end
+
+        def payroll_adjustment_rows(item)
+          PayrollAdjustmentDisclosure.new([ item ]).rows
+        end
+
+        def payroll_adjustment_totals(item)
+          PayrollAdjustmentDisclosure.new([ item ]).treatment_totals
         end
 
         def tip_component_rows(item, fallback_components: nil)
@@ -2425,10 +2459,11 @@ module Api
         def payroll_register_sheets(report)
           employees = Array(report[:employees])
           contractors = Array(report[:contractors])
+          adjustment_columns = payroll_adjustment_export_columns(employees + contractors)
           field_columns = payroll_field_export_columns(employees + contractors)
-          detail_headers = PAYROLL_REGISTER_HEADERS + field_columns.map { |column| payroll_field_export_header(column) }
-          employee_rows = employees.map { |emp| payroll_export_row(emp) + payroll_field_export_values(emp, field_columns) }
-          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + payroll_field_export_values(emp, field_columns) }
+          detail_headers = PAYROLL_REGISTER_HEADERS + adjustment_columns.map { |column| payroll_adjustment_export_header(column) } + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| payroll_export_row(emp) + payroll_adjustment_export_values(emp, adjustment_columns) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + payroll_adjustment_export_values(emp, adjustment_columns) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
@@ -2436,6 +2471,8 @@ module Api
           sheets << { name: "Contractors", rows: [ detail_headers ] + contractor_rows } if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
+          sheets << payroll_adjustment_breakdown_sheet(report)
+          sheets << payroll_adjustment_totals_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
           sheets << payroll_register_review_sheet(simple_register) if simple_register
@@ -2456,6 +2493,40 @@ module Api
               }
             end
             .sort_by { |column| [ payroll_field_export_group_order(column[:group]), column[:treatment], column[:label] ] }
+        end
+
+        def payroll_adjustment_export_columns(workers)
+          workers.flat_map { |worker| active_payroll_adjustment_snapshot_entries(worker) }
+            .group_by { |entry| payroll_adjustment_export_key(entry) }
+            .map do |key, entries|
+              entry = entries.first
+              { key: key, label: entry[:label].to_s, treatment: entry[:treatment].to_s, source: entry[:source].to_s }
+            end
+            .sort_by { |column| [ column[:treatment], column[:label], column[:source] ] }
+        end
+
+        def active_payroll_adjustment_snapshot_entries(worker)
+          Array(worker[:payroll_adjustments]).reject { |entry| entry[:active] == false }
+        end
+
+        def payroll_adjustment_export_key(entry)
+          [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+        end
+
+        def payroll_adjustment_export_header(column)
+          source = {
+            "employee_default" => "employee setup snapshot",
+            "manual" => "manual pay-period entry",
+            "legacy_snapshot" => "legacy snapshot"
+          }.fetch(column[:source], "snapshot")
+          "Payroll Adjustment - #{column[:label]} (#{column[:treatment].humanize}; #{source})"
+        end
+
+        def payroll_adjustment_export_values(worker, columns)
+          columns.map do |column|
+            entries = active_payroll_adjustment_snapshot_entries(worker).select { |entry| payroll_adjustment_export_key(entry) == column[:key] }
+            entries.empty? ? nil : entries.sum { |entry| entry[:amount].to_f }
+          end
         end
 
         def active_payroll_field_snapshot_entries(worker)
@@ -2904,13 +2975,13 @@ module Api
             displayed_gross = row[8].to_f + row[11].to_f
             gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
             if gross_diff.abs > 0.01
-              rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, payroll fields, or non-taxable pay on detail sheets." ]
+              rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, recurring/manual adjustments, payroll fields, or non-taxable pay on detail sheets." ]
             end
 
             displayed_deductions = simple_register_deductions_total(emp)
             deduction_diff = money(emp[:total_deductions].to_f - displayed_deductions)
             if deduction_diff.abs > 0.01
-              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the simple columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
+              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the simple columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, recurring/manual adjustments, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
             end
 
             tip_components_total = Array(emp[:tip_components]).sum { |component| component[:amount].to_f }
@@ -2925,6 +2996,7 @@ module Api
             rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "Simple register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Roth retirement present", "Retirement column includes Roth and traditional employee retirement." ] if emp[:roth_retirement_payment].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Payroll fields present", "Review Payroll Fields Detail for itemized field treatment." ] if Array(emp[:payroll_field_entries]).any? { |entry| entry[:amount].to_f.positive? }
+            rows << [ "Review", emp[:employee_name], "Recurring or manual adjustments present", "Review Payroll Adjustments Detail for the itemized amount, treatment, and saved source." ] if Array(emp[:payroll_adjustments]).any? { |entry| entry[:amount].to_f.positive? }
           end
 
           rows
@@ -2959,6 +3031,8 @@ module Api
             payroll_summary_totals_sheet(report[:summary] || {}),
             earnings_breakdown_sheet(report),
             deductions_breakdown_sheet(report),
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
             payroll_field_breakdown_sheet(report),
             payroll_field_totals_sheet(report)
           ]
@@ -3159,6 +3233,28 @@ module Api
             end
           end
           { name: "Payroll Fields Detail", rows: rows }
+        end
+
+        def payroll_adjustment_breakdown_sheet(report)
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Adjustment", "Source", "Notes", "Amount" ] ]
+          (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
+            active_payroll_adjustment_snapshot_entries(emp).each do |entry|
+              rows << [
+                emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+                entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:notes], entry[:amount]
+              ]
+            end
+          end
+          { name: "Payroll Adjustments Detail", rows: rows }
+        end
+
+        def payroll_adjustment_totals_sheet(report)
+          entries = (Array(report[:employees]) + Array(report[:contractors])).flat_map { |emp| active_payroll_adjustment_snapshot_entries(emp) }
+          rows = [ [ "Kind", "Tax Treatment", "Adjustment", "Source", "Amount" ] ]
+          entries.group_by { |entry| payroll_adjustment_export_key(entry) }.sort_by { |key, _| key.map(&:to_s) }.each do |(label, treatment, source), grouped|
+            rows << [ grouped.first[:kind], treatment, label, source, grouped.sum { |entry| entry[:amount].to_f } ]
+          end
+          { name: "Payroll Adjustments Totals", rows: rows }
         end
 
         def payroll_field_totals_sheet(report)
@@ -3546,6 +3642,8 @@ module Api
             { name: "QB Ded-Contrib", rows: aggregate_rows },
             { name: "Employee Detail", rows: detail_rows },
             deductions_breakdown_sheet(report),
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
             payroll_field_breakdown_sheet(report),
             payroll_field_totals_sheet(report),
             { name: "Payroll Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
@@ -3568,6 +3666,8 @@ module Api
             { name: "QB Paycheck History", rows: history_rows },
             { name: "Payroll Detail", rows: detail_rows },
             { name: "Payroll Register Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
             payroll_field_breakdown_sheet(report),
             report_info_sheet(report, title: "Paycheck History", description: REPORT_DESCRIPTIONS[:paycheck_history])
           ]

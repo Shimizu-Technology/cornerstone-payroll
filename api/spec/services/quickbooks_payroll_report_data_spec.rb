@@ -161,4 +161,64 @@ RSpec.describe QuickbooksPayrollReportData do
     expect(entry.reporting_group).to be_nil
     expect(data.retirement_rows).to be_empty
   end
+
+  describe "snapshotted payroll adjustments" do
+    let(:company) { create(:company) }
+    let(:employee) { create(:employee, company: company) }
+    let(:pay_period) { create(:pay_period, :committed, company: company) }
+    let!(:payroll_item) do
+      create(
+        :payroll_item,
+        company: company,
+        employee: employee,
+        pay_period: pay_period,
+        gross_pay: 1_100,
+        total_deductions: 180,
+        net_pay: 920,
+        payroll_adjustments: [
+          { "label" => "Shift premium", "amount" => 100, "treatment" => "taxable_addition" },
+          { "label" => "Mileage", "amount" => 20, "treatment" => "non_taxable_addition" },
+          { "label" => "Medical premium", "amount" => 30, "treatment" => "pre_tax_deduction" },
+          { "label" => "Employee loan", "amount" => 50, "treatment" => "post_tax_deduction" }
+        ],
+        custom_columns_data: {
+          PayrollItem::PAYROLL_ADJUSTMENTS_SOURCE_KEY => PayrollItem::MANUAL_ADJUSTMENTS_SOURCE,
+          "payroll_adjustments_overridden" => true
+        }
+      )
+    end
+
+    subject(:report) { described_class.new(pay_period) }
+
+    it "discloses every applied adjustment exactly once in its accounting bucket" do
+      expect(report.earnings_lines_for(payroll_item).count { |line| line.label == "Shift premium" && line.amount == 100 }).to eq(1)
+      expect(report.other_pay_lines_for(payroll_item).count { |line| line.label == "Mileage" && line.amount == 20 }).to eq(1)
+      expect(report.pre_tax_retirement_deduction_lines_for(payroll_item).count { |line| line.label == "Medical premium" && line.amount == 30 }).to eq(1)
+      expect(report.after_tax_deduction_lines_for(payroll_item).count { |line| line.label == "Employee loan" && line.amount == 50 }).to eq(1)
+    end
+
+    it "reconciles disclosure totals with the payroll item treatment totals" do
+      disclosure = PayrollAdjustmentDisclosure.new([ payroll_item ])
+
+      expect(disclosure.treatment_totals).to eq(
+        "taxable_addition" => payroll_item.taxable_payroll_adjustments_total,
+        "non_taxable_addition" => payroll_item.non_taxable_payroll_adjustments_total,
+        "pre_tax_deduction" => payroll_item.pre_tax_payroll_adjustments_total,
+        "post_tax_deduction" => payroll_item.post_tax_payroll_adjustments_total
+      )
+    end
+
+    it "identifies manual deductions in the deductions and contributions report" do
+      entry = report.deduction_contribution_entries_for_item(payroll_item).find do |row|
+        row.description == "Employee loan"
+      end
+
+      expect(entry).to have_attributes(
+        type: "Manual pay-period adjustment",
+        source: "manual",
+        bucket: "post_tax",
+        employee_amount: 50.0
+      )
+    end
+  end
 end

@@ -104,6 +104,10 @@ class QuickbooksPayrollReportData
       lines << Line.new(label: entry.label, amount: entry.amount.to_f)
     end
 
+    payroll_adjustments_for(item, "taxable_addition").each do |adjustment|
+      lines << Line.new(label: adjustment.fetch("label"), amount: adjustment.fetch("amount").to_f)
+    end
+
     lines
   end
 
@@ -118,6 +122,10 @@ class QuickbooksPayrollReportData
       next unless entry.amount.to_f.positive?
 
       lines << Line.new(label: entry.label, amount: entry.amount.to_f)
+    end
+
+    payroll_adjustments_for(item, "non_taxable_addition").each do |adjustment|
+      lines << Line.new(label: adjustment.fetch("label"), amount: adjustment.fetch("amount").to_f)
     end
 
     if item.non_taxable_pay.to_f.positive? && lines.none? { |line| line.amount.to_f == item.non_taxable_pay.to_f }
@@ -330,6 +338,21 @@ class QuickbooksPayrollReportData
       )
     end
 
+    %w[pre_tax_deduction post_tax_deduction].each do |treatment|
+      payroll_adjustments_for(item, treatment).each do |adjustment|
+        entries << DeductionContributionEntry.new(
+          item: item,
+          employee_name: qb_employee_name(item.employee),
+          description: adjustment.fetch("label"),
+          type: payroll_adjustment_type(item),
+          employee_amount: adjustment.fetch("amount").to_f,
+          company_amount: 0.0,
+          bucket: treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax",
+          source: payroll_adjustment_source(item)
+        )
+      end
+    end
+
     entries.concat(legacy_retirement_entries(item))
     entries.concat(legacy_special_deduction_entries(item))
     entries.concat(custom_deduction_entries(item))
@@ -463,6 +486,27 @@ class QuickbooksPayrollReportData
 
   def payroll_field_entries_for(item, *treatments)
     item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
+  end
+
+  def payroll_adjustments_for(item, *treatments)
+    item.active_payroll_adjustments.select do |adjustment|
+      treatments.include?(adjustment["treatment"]) && adjustment["amount"].to_f.positive?
+    end
+  end
+
+  def payroll_adjustment_source(item)
+    PayrollAdjustmentDisclosure.source_for(item)
+  end
+
+  def payroll_adjustment_type(item)
+    case payroll_adjustment_source(item)
+    when PayrollItem::EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE
+      "Recurring employee adjustment"
+    when PayrollItem::MANUAL_ADJUSTMENTS_SOURCE
+      "Manual pay-period adjustment"
+    else
+      "Payroll adjustment (legacy snapshot)"
+    end
   end
 
   def payroll_field_mirrored_deduction?(deduction, field_entries)

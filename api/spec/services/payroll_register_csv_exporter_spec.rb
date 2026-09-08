@@ -185,6 +185,25 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(rows.find { |row| row["Employee Name"] == "Bob Meno" }[header]).to eq("")
     end
 
+    it "exports source-aware adjustment columns and reconciled totals" do
+      report_data[:employees].first[:payroll_adjustments] = [
+        { label: "Employee Loan", treatment: "post_tax_deduction", source: "employee_default", amount: 50.00 }
+      ]
+      report_data[:employees].last[:payroll_adjustments] = [
+        { label: "Employee Loan", treatment: "post_tax_deduction", source: "manual", amount: 25.00 }
+      ]
+
+      rows = CSV.parse(exporter.generate, headers: true)
+      recurring_header = "Payroll Adjustment - Employee Loan (Post tax deduction; employee setup snapshot)"
+      manual_header = "Payroll Adjustment - Employee Loan (Post tax deduction; manual pay-period entry)"
+
+      expect(rows.headers).to include(recurring_header, manual_header)
+      expect(rows.find { |row| row["Employee Name"] == "Alice Terlaje" }[recurring_header]).to eq("50.00")
+      expect(rows.find { |row| row["Employee Name"] == "Bob Meno" }[manual_header]).to eq("25.00")
+      expect(rows[-1][recurring_header]).to eq("50.00")
+      expect(rows[-1][manual_header]).to eq("25.00")
+    end
+
     it "keeps the TOTALS row aligned with the headers" do
       rows = CSV.parse(exporter.generate, headers: true)
       totals = rows[-1]

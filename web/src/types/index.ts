@@ -187,6 +187,10 @@ export interface PayrollAdjustment {
   treatment: PayrollAdjustmentTreatment;
   notes?: string;
   active?: boolean;
+  source?: 'employee_default' | 'manual' | 'legacy_snapshot';
+  kind?: 'addition' | 'deduction';
+  employee_paid?: boolean;
+  employer_paid?: boolean;
 }
 
 export interface Employee {

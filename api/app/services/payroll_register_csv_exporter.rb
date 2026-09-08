@@ -82,7 +82,8 @@ class PayrollRegisterCsvExporter
   private
 
   def headers
-    HEADERS + payroll_field_columns.map { |column| payroll_field_header(column) }
+    HEADERS + payroll_adjustment_columns.map { |column| payroll_adjustment_header(column) } +
+      payroll_field_columns.map { |column| payroll_field_header(column) }
   end
 
   def payroll_rows
@@ -136,6 +137,44 @@ class PayrollRegisterCsvExporter
     "Payroll Field - #{column[:label]} (#{column[:tax_treatment].humanize}; #{effect})"
   end
 
+  def payroll_adjustment_columns
+    @payroll_adjustment_columns ||= payroll_rows.flat_map { |employee| active_payroll_adjustments(employee) }
+      .group_by { |entry| payroll_adjustment_key(entry) }
+      .map do |key, entries|
+        entry = entries.first
+        { key: key, label: entry[:label].to_s, treatment: entry[:treatment].to_s, source: entry[:source].to_s }
+      end
+      .sort_by { |column| [ adjustment_treatment_order(column[:treatment]), column[:label], column[:source] ] }
+  end
+
+  def active_payroll_adjustments(employee)
+    Array(employee[:payroll_adjustments]).reject { |entry| entry[:active] == false }
+  end
+
+  def payroll_adjustment_key(entry)
+    [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+  end
+
+  def payroll_adjustment_amount(employee, column)
+    matching = active_payroll_adjustments(employee).select { |entry| payroll_adjustment_key(entry) == column[:key] }
+    return nil if matching.empty?
+
+    matching.sum { |entry| entry[:amount].to_f }
+  end
+
+  def adjustment_treatment_order(treatment)
+    PayrollAdjustmentDisclosure::TREATMENTS.index(treatment) || PayrollAdjustmentDisclosure::TREATMENTS.length
+  end
+
+  def payroll_adjustment_header(column)
+    source = {
+      PayrollItem::EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE => "employee setup snapshot",
+      PayrollItem::MANUAL_ADJUSTMENTS_SOURCE => "manual pay-period entry",
+      PayrollAdjustmentDisclosure::LEGACY_SNAPSHOT_SOURCE => "legacy snapshot"
+    }.fetch(column[:source], "snapshot")
+    "Payroll Adjustment - #{column[:label]} (#{column[:treatment].humanize}; #{source})"
+  end
+
   def employee_row(emp)
     base_row = [
       sanitize_csv_field(emp[:employee_last_name]),
@@ -172,7 +211,10 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
-    base_row + payroll_field_columns.map do |column|
+    base_row + payroll_adjustment_columns.map do |column|
+      amount = payroll_adjustment_amount(emp, column)
+      amount.nil? ? "" : format_currency(amount)
+    end + payroll_field_columns.map do |column|
       amount = payroll_field_amount(emp, column)
       amount.nil? ? "" : format_currency(amount)
     end
@@ -215,7 +257,9 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:total_deductions)),
       format_currency(total_for(:net_pay)),
       ""
-    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
+    ] + payroll_adjustment_columns.map do |column|
+      format_currency(payroll_rows.sum { |emp| payroll_adjustment_amount(emp, column).to_f })
+    end + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
   end
 
   def summary_label(summary)
