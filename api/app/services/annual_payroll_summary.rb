@@ -102,7 +102,7 @@ class AnnualPayrollSummary
     items.each do |item|
       pretax = native_pretax_deductions(item)
       employee_taxes = native_employee_taxes(item)
-      after_tax = native_after_tax_deductions(item)
+      after_tax = native_after_tax_deductions(item, pretax:, employee_taxes:)
       non_taxable = native_non_taxable_pay(item)
       employer_taxes = item.employer_social_security_tax.to_d + item.employer_medicare_tax.to_d
       employer_contributions = native_employer_contributions(item)
@@ -134,7 +134,11 @@ class AnnualPayrollSummary
       item.medicare_tax.to_d
   end
 
-  def native_after_tax_deductions(item)
+  def native_after_tax_deductions(item, pretax:, employee_taxes:)
+    if item.correction_entry?
+      return item.total_deductions.to_d - pretax - employee_taxes
+    end
+
     item.roth_retirement_payment.to_d + native_itemized_or_legacy_post_tax(item) +
       item.custom_deductions_total.to_d + item.post_tax_payroll_adjustments_total.to_d + item.tips_paid_out.to_d
   end
@@ -152,6 +156,10 @@ class AnnualPayrollSummary
   end
 
   def native_non_taxable_pay(item)
+    if item.correction_entry?
+      return item.net_pay.to_d - item.gross_pay.to_d + item.total_deductions.to_d
+    end
+
     item.non_taxable_pay.to_d + item.non_taxable_payroll_adjustments_total.to_d + item.non_taxable_payroll_field_entries_total.to_d
   end
 
