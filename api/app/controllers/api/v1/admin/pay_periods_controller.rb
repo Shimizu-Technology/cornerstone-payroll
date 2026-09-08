@@ -296,7 +296,7 @@ module Api
             eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
           end
           employees_by_id = eligible_scope
-                                     .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
+                                     .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
 
           preload_ytd_caches!(employees_by_id.values, @pay_period)

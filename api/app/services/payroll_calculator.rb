@@ -282,7 +282,7 @@ class PayrollCalculator
   # Process loan balance tracking for any loan-type deductions
   def process_loan_payments
     payroll_item.payroll_item_deductions.select { |pid| pid.deduction_type&.loan? }.each do |pid|
-      loan = find_active_loan_for_deduction(pid.deduction_type_id)
+      loan = find_active_loan_for_deduction(pid)
       next unless loan
       next if payment_already_recorded?(loan)
 
@@ -435,6 +435,8 @@ class PayrollCalculator
   def employee_w4_snapshot
     {
       "w4" => {
+        "election_id" => w4_election_for_calculation&.id,
+        "election_source" => w4_election_for_calculation&.source,
         "form_version" => employee_value(:w4_form_version),
         "effective_on" => employee_value(:w4_effective_on)&.to_date&.iso8601,
         "filing_status_entered" => employee_value(:filing_status),
@@ -557,12 +559,36 @@ class PayrollCalculator
     employee_value(:retirement_rate).to_f.positive?
   end
 
-  def find_active_loan_for_deduction(deduction_type_id)
-    if employee.association(:employee_loans).loaded?
-      employee.employee_loans.find { |loan| loan.active? && loan.deduction_type_id == deduction_type_id }
+  def find_active_loan_for_deduction(payroll_item_deduction)
+    loan = if employee.association(:employee_loans).loaded?
+      employee.employee_loans.find do |candidate|
+        candidate.active? && candidate.deduction_type_id == payroll_item_deduction.deduction_type_id
+      end
     else
-      employee.employee_loans.active.find_by(deduction_type_id: deduction_type_id)
+      employee.employee_loans.active.find_by(deduction_type_id: payroll_item_deduction.deduction_type_id)
     end
+    return loan if loan
+
+    field_entry = payroll_item.payroll_item_field_entries.find do |entry|
+      entry.active? && entry.category == "loan" && entry.label == payroll_item_deduction.label
+    end
+    return unless field_entry&.payroll_field_definition_id
+
+    assignment = if employee.association(:employee_payroll_fields).loaded?
+      employee.employee_payroll_fields.find do |candidate|
+          candidate.active? &&
+          candidate.payroll_field_definition_id == field_entry.payroll_field_definition_id &&
+          candidate.employee_loan_id.present? &&
+          (candidate.start_date.blank? || candidate.start_date <= pay_period.pay_date) &&
+          (candidate.end_date.blank? || candidate.end_date >= pay_period.pay_date)
+      end
+    else
+      employee.employee_payroll_fields.active
+        .effective_on(pay_period.pay_date)
+        .find_by(payroll_field_definition_id: field_entry.payroll_field_definition_id)
+    end
+    linked_loan = assignment&.employee_loan
+    linked_loan if linked_loan&.active?
   end
 
   def payment_already_recorded?(loan)
@@ -724,9 +750,21 @@ class PayrollCalculator
   end
 
   def employee_value(attribute)
-    return employee.public_send(attribute) unless historical_calculation?
+    unless historical_calculation?
+      if EmployeeW4Election::PROFILE_ATTRIBUTES.include?(attribute.to_sym) && w4_election_for_calculation
+        return w4_election_for_calculation.profile_attributes.fetch(attribute.to_sym)
+      end
+
+      return employee.public_send(attribute)
+    end
 
     PayrollCalculationContext.employee_value(@calculation_context, attribute)
+  end
+
+  def w4_election_for_calculation
+    return nil if historical_calculation? || employee.contractor?
+
+    @w4_election_for_calculation ||= employee.w4_election_on(pay_period.pay_date)
   end
 
   def employee_deductions_for_calculation
@@ -772,7 +810,8 @@ class PayrollCalculator
     payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(
       employee: employee,
       employee_deductions: employee_deductions_for_calculation,
-      payroll_field_assignments: payroll_field_assignments_for_calculation
+      payroll_field_assignments: payroll_field_assignments_for_calculation,
+      w4_election: w4_election_for_calculation
     )
   end
 

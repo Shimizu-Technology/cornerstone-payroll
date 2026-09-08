@@ -10,6 +10,7 @@ import {
   ReceiptText,
   RefreshCw,
   Settings2,
+  ShieldCheck,
   UserRound,
 } from 'lucide-react';
 import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-router';
@@ -306,7 +307,10 @@ function EmployeeOverview({
             <ContextRow label="Department" value={employee.department?.name || 'Not assigned'} />
             <ContextRow label="Job title" value={employee.job_title || 'Not recorded'} />
             <ContextRow label="Pay frequency" value={payFrequencyLabels[employee.pay_frequency] || employee.pay_frequency} />
-            <ContextRow label="Tax filing" value={filingStatusLabels[employee.filing_status] || employee.filing_status} />
+            <ContextRow
+              label="Tax filing"
+              value={filingStatusLabels[employee.current_w4_election?.filing_status || employee.filing_status] || employee.current_w4_election?.filing_status || employee.filing_status}
+            />
           </CardContent>
         </Card>
       </div>
@@ -322,8 +326,11 @@ interface PaySetupProps {
 function PaySetup({ employee, editHref }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
+  const currentW4 = employee.current_w4_election;
+  const upcomingW4 = employee.upcoming_w4_election;
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+    <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
       <Card>
         <CardHeader><CardTitle>Payroll setup</CardTitle><p className="mt-2 text-sm text-neutral-500">A readable summary of the values used when this employee enters a pay run.</p></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -345,6 +352,50 @@ function PaySetup({ employee, editHref }: PaySetupProps): ReactElement {
           <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
         </CardContent>
       </Card>
+      </div>
+
+      {employee.employment_type !== 'contractor' && (
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle>W-4 election history</CardTitle>
+              <p className="mt-2 text-sm leading-6 text-neutral-500">Payroll selects the election effective on each pay date. Prior elections are retained and cannot be overwritten.</p>
+            </div>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700"><ShieldCheck className="h-5 w-5" /></span>
+          </CardHeader>
+          <CardContent>
+            {upcomingW4 && (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="font-semibold">Upcoming election:</span> {filingStatusLabels[upcomingW4.filing_status] || upcomingW4.filing_status}, effective {formatDate(upcomingW4.effective_on)}.
+              </div>
+            )}
+            {currentW4 ? (
+              <div className="grid gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <div className="rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Current election</p>
+                  <p className="mt-2 font-display text-xl font-extrabold text-neutral-950">{filingStatusLabels[currentW4.filing_status] || currentW4.filing_status}</p>
+                  <p className="mt-2 text-sm text-neutral-600">Effective {formatDate(currentW4.effective_on)} · Form {currentW4.w4_form_version}</p>
+                  <p className="mt-1 text-sm text-neutral-600">{formatCurrency(Number(currentW4.additional_withholding) || 0)} extra withholding per pay period</p>
+                </div>
+                <div className="space-y-3">
+                  {(employee.w4_elections || []).map((election) => (
+                    <div key={election.id} className="rounded-2xl border border-neutral-200 px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-neutral-900">Effective {formatDate(election.effective_on)}</p>
+                        <Badge variant={election.id === currentW4.id ? 'success' : 'default'}>{election.id === currentW4.id ? 'Current' : election.source.replace('_', ' ')}</Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-neutral-600">{filingStatusLabels[election.filing_status] || election.filing_status} · {election.reason}</p>
+                      <p className="mt-1 text-xs text-neutral-500">Recorded {formatGuamDateTime(election.created_at)}{election.created_by_name ? ` by ${election.created_by_name}` : ''}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">No dated W-4 election is recorded yet. Edit this employee before the next payroll.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

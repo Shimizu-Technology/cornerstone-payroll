@@ -230,6 +230,9 @@ export interface Employee {
   w4_step4b_deductions: number;
   w4_form_version: number;
   w4_effective_on?: string | null;
+  current_w4_election?: EmployeeW4Election | null;
+  upcoming_w4_election?: EmployeeW4Election | null;
+  w4_elections?: EmployeeW4Election[];
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -256,6 +259,27 @@ export interface Employee {
   employee_payroll_fields?: EmployeePayrollField[];
   created_at: string;
   updated_at: string;
+}
+
+export type EmployeeW4ElectionSource = 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
+
+export interface EmployeeW4Election {
+  id: number;
+  employee_id: number;
+  company_id: number;
+  effective_on: string;
+  filing_status: FilingStatus;
+  allowances: number;
+  additional_withholding: number;
+  w4_dependent_credit: number;
+  w4_step2_multiple_jobs: boolean;
+  w4_step4a_other_income: number;
+  w4_step4b_deductions: number;
+  w4_form_version: number;
+  source: EmployeeW4ElectionSource;
+  reason: string;
+  created_by_name?: string | null;
+  created_at: string;
 }
 
 export type EmployeeOvertimeStatus = 'exempt' | 'nonexempt' | 'needs_review';
@@ -400,6 +424,7 @@ export interface EmployeeFormData {
   w4_step4b_deductions: number;
   w4_form_version: number;
   w4_effective_on?: string | null;
+  w4_change_reason?: string;
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -1309,7 +1334,12 @@ export interface EmployeeLoan {
   employee_name: string;
   name: string;
   original_amount: number;
+  opening_balance: number;
   current_balance: number;
+  balance_as_of: string;
+  balance_source: 'new_loan' | 'quickbooks' | 'statement' | 'employee_confirmation' | 'other_verified';
+  principal_amount_known: boolean;
+  created_by_name?: string | null;
   payment_amount?: number;
   start_date?: string;
   paid_off_date?: string;
@@ -1329,8 +1359,23 @@ export interface LoanTransaction {
   balance_after: number;
   transaction_date: string;
   notes?: string;
+  source: 'opening_balance' | 'payroll' | 'manual';
+  recorded_by_name?: string | null;
   pay_period_id?: number;
   created_at: string;
+}
+
+export interface LoanSchedule {
+  kind: 'employee_deduction' | 'payroll_field';
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  label: string;
+  amount?: number | null;
+  percentage?: number | null;
+  amount_type: 'fixed' | 'percentage' | 'manual';
+  deduction_type_id?: number | null;
+  tracked: boolean;
 }
 
 // ----------------

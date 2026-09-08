@@ -3055,24 +3055,28 @@ export const payrollReportsApi = {
 // ============================================================
 // Employee Loans API
 // ============================================================
-import type { EmployeeLoan, NonEmployeeCheck } from '../types';
+import type { EmployeeLoan, LoanSchedule, NonEmployeeCheck } from '../types';
 
 export const employeeLoansApi = {
   list: (params?: { employee_id?: number; status?: string }) =>
-    api.get<{ loans: EmployeeLoan[] }>('/admin/employee_loans', params),
+    api.get<{ loans: EmployeeLoan[]; loan_schedules: LoanSchedule[]; setup_gaps: LoanSchedule[] }>('/admin/employee_loans', params),
   get: (id: number) =>
     api.get<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`),
   create: (data: {
-    employee_id: number; name: string; original_amount: number;
-    payment_amount?: number; start_date?: string; deduction_type_id?: number; notes?: string;
+    employee_id: number; name: string; original_amount?: number;
+    opening_balance?: number; payment_amount?: number; start_date?: string;
+    balance_as_of?: string; balance_source?: EmployeeLoan['balance_source'];
+    principal_amount_known?: boolean; balance_setup_mode?: 'new_loan' | 'existing_balance';
+    schedule_kind?: LoanSchedule['kind']; schedule_id?: number;
+    deduction_type_id?: number; notes?: string;
   }) =>
     api.post<{ loan: EmployeeLoan }>('/admin/employee_loans', { employee_loan: data }),
-  update: (id: number, data: Partial<{ name: string; payment_amount: number; status: string; notes: string; deduction_type_id: number }>) =>
+  update: (id: number, data: Partial<{ name: string; payment_amount: number; notes: string; deduction_type_id: number }>) =>
     api.patch<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`, { employee_loan: data }),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/employee_loans/${id}`),
-  recordPayment: (id: number, amount: number, date?: string) =>
-    api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date }),
+  recordPayment: (id: number, amount: number, date?: string, notes?: string) =>
+    api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date, notes }),
   recordAddition: (id: number, amount: number, date?: string, notes?: string) =>
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/record_addition`, { amount, date, notes }),
   markPaidOff: (id: number, date?: string, notes?: string) =>

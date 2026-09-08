@@ -40,6 +40,12 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       expect(response).to have_http_status(:ok)
       expect(employee.reload.pay_rate.to_f).to eq(23.5)
       expect(employee.additional_withholding.to_f).to eq(15.0)
+      expect(employee.employee_w4_elections.sole).to have_attributes(
+        effective_on: employee.hire_date,
+        source: "client_approved",
+        created_by_id: admin_user.id,
+        additional_withholding: 15.0
+      )
 
       change_request.reload
       expect(change_request.status).to eq("approved")

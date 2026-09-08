@@ -46,10 +46,10 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:)
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil)
       {
         "version" => VERSION,
-        "employee" => employee_snapshot(employee),
+        "employee" => employee_snapshot(employee, w4_election: w4_election),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments)
       }
@@ -104,9 +104,13 @@ class PayrollCalculationContext
 
     private
 
-    def employee_snapshot(employee)
+    def employee_snapshot(employee, w4_election:)
       SCALAR_ATTRIBUTES.index_with do |attribute|
-        value = employee.public_send(attribute)
+        value = if w4_election && EmployeeW4Election::PROFILE_ATTRIBUTES.include?(attribute.to_sym)
+          w4_election.profile_attributes.fetch(attribute.to_sym)
+        else
+          employee.public_send(attribute)
+        end
         value.respond_to?(:iso8601) ? value.iso8601 : value
       end
     end
