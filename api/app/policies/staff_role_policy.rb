@@ -84,7 +84,12 @@ class StaffRolePolicy
     "api/v1/admin/historical_imports#apply_client_bootstrap" => :manage_client_configuration,
     "api/v1/admin/historical_imports#update_worker" => :manage_client_configuration,
     "api/v1/admin/historical_imports#preview_ytd_bridge" => :manage_client_configuration,
-    "api/v1/admin/historical_imports#apply_ytd_bridge" => :manage_client_configuration
+    "api/v1/admin/historical_imports#apply_ytd_bridge" => :manage_client_configuration,
+    "api/v1/admin/historical_paycheck_adjustments#index" => :payroll_operations,
+    "api/v1/admin/historical_paycheck_adjustments#preview" => :manage_client_configuration,
+    "api/v1/admin/historical_paycheck_adjustments#create" => :manage_client_configuration,
+    "api/v1/admin/historical_paycheck_adjustments#reverse" => :manage_client_configuration,
+    "api/v1/admin/historical_paycheck_adjustments#event" => :manage_client_configuration
   }.freeze
 
   def self.capability_for(controller_path:, action_name:)

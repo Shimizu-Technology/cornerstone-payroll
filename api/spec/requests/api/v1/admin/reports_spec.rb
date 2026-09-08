@@ -1602,6 +1602,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         gross_pay: 200,
         net_pay: 120
       )
+      adjustment = HistoricalPaycheckAdjustment.create!(
+        company: company,
+        historical_paycheck: historical_paycheck,
+        created_by: admin_user,
+        kind: "correction",
+        effective_pay_date: historical_paycheck.pay_date,
+        filing_year: 2026,
+        filing_quarter: 2,
+        reason: "Correct retained source evidence",
+        idempotency_key: "reports-adjustment-#{company.id}",
+        gross_pay: 100,
+        adjusted_gross: 100,
+        employee_taxes: 10,
+        federal_income_tax: 10,
+        employee_tax_breakdown: [ { "label" => "Historical correction", "amount" => "10.0" } ],
+        net_pay: 90,
+        total_payroll_cost: 100
+      )
 
       get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
 
@@ -1613,13 +1631,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "imported_payroll_count" => 1,
         "imported_opening_summary_count" => 1
       )
-      expect(employee_row.fetch("gross_pay").to_f).to eq(1_700)
-      expect(employee_row.fetch("net_pay").to_f).to eq(1_243.5)
+      expect(employee_row.fetch("gross_pay").to_f).to eq(1_800)
+      expect(employee_row.fetch("net_pay").to_f).to eq(1_333.5)
       expect(employee_row.fetch("retirement").to_f).to eq(40)
       expect(employee_row.fetch("roth_retirement").to_f).to eq(20)
       expect(employee_row.fetch("tips").to_f).to eq(50)
       expect(employee_row.fetch("tips_paid_out").to_f).to eq(0)
-      expect(report.dig("company_totals", "gross_pay").to_f).to eq(1_700)
+      expect(report.dig("company_totals", "gross_pay").to_f).to eq(1_800)
       expect(report.dig("company_totals", "employee_count")).to eq(1)
       expect(report.dig("source_summary", "cornerstone")).to include("payroll_count" => 1, "paycheck_count" => 1)
       expect(report.dig("source_summary", "quickbooks")).to include(
@@ -1630,6 +1648,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "excluded_unlinked_gross_pay" => 250.0,
         "excluded_unlinked_net_pay" => 180.0
       )
+      expect(report.fetch("source_summary").fetch("adjustments")).to include(
+        "count" => 1,
+        "gross_pay_delta" => 100.0,
+        "net_pay_delta" => 90.0
+      )
       expect(report.dig("source_summary", "source_statement")).to include("not recalculated")
 
       get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, year: 2026 }
@@ -1639,8 +1662,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(history_report.fetch("history").map { |row| row.fetch("key") }).to eq([
         "native:#{native_item.id}",
         "imported:#{historical_paycheck.id}",
+        "historical_adjustment:#{adjustment.id}",
         "imported:#{opening_paycheck.id}"
       ])
+      adjustment_row = history_report.fetch("history").find { |row| row.fetch("historical_adjustment_id", nil) == adjustment.id }
+      expect(adjustment_row).to include(
+        "record_type" => "adjustment",
+        "gross_pay" => 100.0,
+        "net_pay" => 90.0,
+        "reason" => "Correct retained source evidence",
+        "capabilities" => { "view" => true, "edit" => false }
+      )
+      expect(adjustment_row.dig("source", "label")).to eq("Historical adjustment")
       imported_row = history_report.fetch("history").find { |row| row.fetch("historical_pay_period_id") == historical_period.id }
       expect(imported_row).to include(
         "record_type" => "imported",
@@ -1650,7 +1683,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "capabilities" => { "view" => true, "edit" => false }
       )
       expect(imported_row.dig("source", "label")).to eq("QuickBooks import")
-      expect(history_report.dig("summary", "gross_pay").to_f).to eq(1_700)
+      expect(history_report.dig("summary", "gross_pay").to_f).to eq(1_800)
     end
 
     it "applies the history limit across both sources" do

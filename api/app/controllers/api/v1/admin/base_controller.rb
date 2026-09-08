@@ -37,6 +37,15 @@ module Api
           }, status: :forbidden
         end
 
+        def require_historical_payroll_enabled!
+          return if current_company&.historical_payroll_enabled?
+
+          render json: {
+            error: "Historical payroll is not enabled for this client",
+            details: {}
+          }, status: :forbidden
+        end
+
         # Staff must stay inside the companies granted by their platform role.
         def enforce_company_access!
           return if current_user.nil?

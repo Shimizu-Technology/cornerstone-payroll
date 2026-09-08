@@ -288,11 +288,11 @@ function EmployeeOverview({
             {latestPay ? (
               <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
                 <div>
-                  <div className="flex flex-wrap items-center gap-2"><p className="font-display text-lg font-bold text-neutral-950">{latestPay.period_description}</p><Badge variant={latestPay.record_type === 'imported' ? 'warning' : 'default'}>{latestPay.source.label}</Badge></div>
+                  <div className="flex flex-wrap items-center gap-2"><p className="font-display text-lg font-bold text-neutral-950">{latestPay.period_description}</p><Badge variant={latestPay.record_type === 'native' ? 'default' : 'warning'}>{latestPay.source.label}</Badge></div>
                   <p className="mt-2 text-sm text-neutral-500">Pay date {formatDate(latestPay.pay_date)} · {formatCurrency(latestPay.net_pay)} net</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={payHistoryRunPath(companyId, latestPay, returnTo)}>{latestPay.record_type === 'imported' ? 'Imported pay run' : 'Pay run'} <ArrowRight className="h-4 w-4" /></Link>
+                  <Link className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={payHistoryRunPath(companyId, latestPay, returnTo)}>{latestPay.record_type === 'native' ? 'Pay run' : 'Imported pay run'} <ArrowRight className="h-4 w-4" /></Link>
                   {latestPay.record_type === 'native' && latestPay.pay_period_id && latestPay.payroll_item_id && <Link className="inline-flex min-h-11 items-center gap-1 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={payrollItemPath(companyId, latestPay.pay_period_id, latestPay.payroll_item_id, { returnTo })}>Payroll item <ArrowRight className="h-4 w-4" /></Link>}
                 </div>
               </div>
@@ -372,7 +372,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                 <TableRow key={item.key}>
                   <TableCell className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
-                  <TableCell><Badge variant={item.record_type === 'imported' ? 'warning' : 'default'}>{item.source.label}</Badge></TableCell>
+                  <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge></TableCell>
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
@@ -389,7 +389,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
 }
 
 function payHistoryRunPath(companyId: number, item: PayHistoryReport['history'][number], returnTo: string): string {
-  if (item.record_type === 'imported') {
+  if (item.record_type !== 'native') {
     return item.historical_pay_period_id
       ? importedPayRunPath(companyId, item.historical_pay_period_id, { returnTo })
       : returnTo;

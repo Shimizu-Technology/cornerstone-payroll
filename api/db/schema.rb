@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -974,6 +974,76 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
     t.check_constraint "period_type::text = ANY (ARRAY['regular'::character varying::text, 'opening_summary'::character varying::text])", name: "historical_pay_periods_type"
   end
 
+  create_table "historical_paycheck_adjustment_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.string "event_type", null: false
+    t.bigint "historical_paycheck_adjustment_id", null: false
+    t.bigint "historical_ytd_bridge_id"
+    t.jsonb "metadata", default: {}, null: false
+    t.text "note"
+    t.index ["company_id", "created_at"], name: "idx_historical_adjustment_events_company_time"
+    t.index ["created_by_id"], name: "idx_historical_adjustment_events_creator"
+    t.index ["historical_paycheck_adjustment_id"], name: "idx_historical_adjustment_events_adjustment"
+    t.index ["historical_ytd_bridge_id"], name: "idx_historical_adjustment_events_bridge"
+    t.check_constraint "event_type::text = ANY (ARRAY['filing_reviewed_no_amendment'::character varying, 'filing_amendment_required'::character varying, 'filing_amendment_filed_external'::character varying, 'filing_review_reopened'::character varying, 'downstream_impact_acknowledged'::character varying, 'ytd_revision_activated'::character varying]::text[])", name: "historical_adjustment_events_type_check"
+    t.check_constraint "jsonb_typeof(metadata) = 'object'::text", name: "historical_adjustment_events_metadata_object"
+  end
+
+  create_table "historical_paycheck_adjustments", force: :cascade do |t|
+    t.decimal "adjusted_gross", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "after_tax_deduction_breakdown", default: [], null: false
+    t.decimal "after_tax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.jsonb "earnings_breakdown", default: [], null: false
+    t.date "effective_pay_date", null: false
+    t.jsonb "employee_tax_breakdown", default: [], null: false
+    t.decimal "employee_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "employer_contribution_breakdown", default: [], null: false
+    t.decimal "employer_contributions", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "employer_tax_breakdown", default: [], null: false
+    t.decimal "employer_taxes", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "evidence_metadata", default: {}, null: false
+    t.string "external_reference"
+    t.decimal "federal_income_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.integer "filing_quarter", null: false
+    t.integer "filing_year", null: false
+    t.decimal "gross_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.bigint "historical_paycheck_id", null: false
+    t.jsonb "hours_breakdown", default: [], null: false
+    t.decimal "hours_total", precision: 12, scale: 4, default: "0.0", null: false
+    t.string "idempotency_key", null: false
+    t.string "kind", null: false
+    t.decimal "medicare_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "net_pay", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "pretax_deduction_breakdown", default: [], null: false
+    t.decimal "pretax_deductions", precision: 15, scale: 2, default: "0.0", null: false
+    t.text "reason", null: false
+    t.bigint "reverses_adjustment_id"
+    t.decimal "social_security_tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "total_payroll_cost", precision: 15, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "effective_pay_date"], name: "idx_historical_adjustments_company_date"
+    t.index ["company_id", "idempotency_key"], name: "idx_historical_adjustments_idempotency", unique: true
+    t.index ["created_by_id"], name: "idx_historical_adjustments_creator"
+    t.index ["historical_paycheck_id"], name: "idx_historical_adjustments_paycheck"
+    t.index ["id", "company_id"], name: "idx_historical_adjustments_tenant_key", unique: true
+    t.index ["reverses_adjustment_id"], name: "idx_historical_adjustments_one_reversal", unique: true, where: "(reverses_adjustment_id IS NOT NULL)"
+    t.check_constraint "filing_year >= 2000 AND filing_year <= 2200 AND filing_quarter >= 1 AND filing_quarter <= 4", name: "historical_adjustments_filing_period_check"
+    t.check_constraint "jsonb_typeof(after_tax_deduction_breakdown) = 'array'::text", name: "historical_adjustments_after_tax_deduction_array"
+    t.check_constraint "jsonb_typeof(earnings_breakdown) = 'array'::text", name: "historical_adjustments_earnings_array"
+    t.check_constraint "jsonb_typeof(employee_tax_breakdown) = 'array'::text", name: "historical_adjustments_employee_tax_array"
+    t.check_constraint "jsonb_typeof(employer_contribution_breakdown) = 'array'::text", name: "historical_adjustments_employer_contribution_array"
+    t.check_constraint "jsonb_typeof(employer_tax_breakdown) = 'array'::text", name: "historical_adjustments_employer_tax_array"
+    t.check_constraint "jsonb_typeof(evidence_metadata) = 'object'::text", name: "historical_adjustments_evidence_object"
+    t.check_constraint "jsonb_typeof(hours_breakdown) = 'array'::text", name: "historical_adjustments_hours_array"
+    t.check_constraint "jsonb_typeof(pretax_deduction_breakdown) = 'array'::text", name: "historical_adjustments_pretax_deduction_array"
+    t.check_constraint "kind::text = ANY (ARRAY['correction'::character varying, 'void'::character varying, 'reversal'::character varying]::text[])", name: "historical_adjustments_kind_check"
+  end
+
   create_table "historical_paychecks", force: :cascade do |t|
     t.decimal "adjusted_gross", precision: 15, scale: 2, default: "0.0", null: false
     t.jsonb "after_tax_deduction_breakdown", default: [], null: false
@@ -1022,6 +1092,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
     t.index ["historical_pay_period_id"], name: "index_historical_paychecks_on_historical_pay_period_id"
     t.index ["historical_worker_id", "pay_date"], name: "idx_on_historical_worker_id_pay_date_085f957883"
     t.index ["historical_worker_id"], name: "index_historical_paychecks_on_historical_worker_id"
+    t.index ["id", "company_id"], name: "idx_historical_paychecks_tenant_key", unique: true
     t.check_constraint "period_end >= period_start AND pay_date >= period_end", name: "historical_paychecks_date_order"
     t.check_constraint "reconciliation_status::text = ANY (ARRAY['matched'::character varying::text, 'opening_summary'::character varying::text, 'unmatched'::character varying::text])", name: "historical_paychecks_reconciliation_status"
   end
@@ -1082,19 +1153,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
     t.string "plan_digest", null: false
     t.jsonb "preview_summary", default: {}, null: false
     t.jsonb "reconciliation_summary", default: {}, null: false
+    t.integer "revision", default: 1, null: false
     t.string "status", default: "previewed", null: false
+    t.bigint "supersedes_historical_ytd_bridge_id"
     t.datetime "updated_at", null: false
     t.jsonb "validation_errors", default: [], null: false
     t.jsonb "warnings", default: [], null: false
     t.index ["applied_by_id"], name: "index_historical_ytd_bridges_on_applied_by_id"
     t.index ["company_id", "status"], name: "index_historical_ytd_bridges_on_company_id_and_status"
     t.index ["created_by_id"], name: "index_historical_ytd_bridges_on_created_by_id"
-    t.index ["historical_client_bootstrap_id"], name: "index_historical_ytd_bridges_on_historical_client_bootstrap_id", unique: true
-    t.index ["historical_import_batch_id"], name: "index_historical_ytd_bridges_on_historical_import_batch_id", unique: true
+    t.index ["historical_client_bootstrap_id"], name: "idx_historical_ytd_bridges_bootstrap"
+    t.index ["historical_import_batch_id", "revision"], name: "idx_historical_ytd_bridges_batch_revision", unique: true
     t.index ["id", "company_id"], name: "idx_historical_ytd_bridges_tenant_key", unique: true
+    t.index ["supersedes_historical_ytd_bridge_id"], name: "idx_historical_ytd_bridges_one_successor", unique: true, where: "(supersedes_historical_ytd_bridge_id IS NOT NULL)"
     t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text AND jsonb_typeof(reconciliation_summary) = 'object'::text", name: "historical_ytd_bridges_summary_objects"
     t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text", name: "historical_ytd_bridges_arrays"
     t.check_constraint "preview_summary ? 'through_period_end'::text AND preview_summary ? 'through_pay_date'::text AND (preview_summary ->> 'through_period_end'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) >= (preview_summary ->> 'through_period_end'::text)", name: "historical_ytd_bridges_boundary_order"
+    t.check_constraint "revision > 0", name: "historical_ytd_bridges_revision_positive"
     t.check_constraint "status::text = 'applied'::text AND applied_at IS NOT NULL AND applied_by_id IS NOT NULL AND apply_acknowledgement IS NOT NULL OR status::text = 'previewed'::text AND applied_at IS NULL AND applied_by_id IS NULL AND apply_acknowledgement IS NULL", name: "historical_ytd_bridges_status_audit_fields"
     t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text])", name: "historical_ytd_bridges_status_check"
   end
@@ -2638,6 +2713,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
   add_foreign_key "historical_import_source_files", "users", column: "uploaded_by_id", on_delete: :nullify
   add_foreign_key "historical_pay_periods", "companies"
   add_foreign_key "historical_pay_periods", "historical_import_batches"
+  add_foreign_key "historical_paycheck_adjustment_events", "companies"
+  add_foreign_key "historical_paycheck_adjustment_events", "historical_paycheck_adjustments"
+  add_foreign_key "historical_paycheck_adjustment_events", "historical_paycheck_adjustments", column: ["historical_paycheck_adjustment_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustment_events_tenant"
+  add_foreign_key "historical_paycheck_adjustment_events", "historical_ytd_bridges"
+  add_foreign_key "historical_paycheck_adjustment_events", "users", column: "created_by_id", on_delete: :restrict
+  add_foreign_key "historical_paycheck_adjustments", "companies"
+  add_foreign_key "historical_paycheck_adjustments", "historical_paycheck_adjustments", column: "reverses_adjustment_id"
+  add_foreign_key "historical_paycheck_adjustments", "historical_paychecks"
+  add_foreign_key "historical_paycheck_adjustments", "historical_paychecks", column: ["historical_paycheck_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustments_paycheck_tenant"
+  add_foreign_key "historical_paycheck_adjustments", "users", column: "created_by_id", on_delete: :restrict
   add_foreign_key "historical_paychecks", "companies"
   add_foreign_key "historical_paychecks", "employees"
   add_foreign_key "historical_paychecks", "historical_import_batches"
@@ -2654,6 +2739,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_07_122000) do
   add_foreign_key "historical_ytd_bridges", "historical_client_bootstraps"
   add_foreign_key "historical_ytd_bridges", "historical_import_batches"
   add_foreign_key "historical_ytd_bridges", "historical_import_batches", column: ["historical_import_batch_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_ytd_bridges_batch_tenant"
+  add_foreign_key "historical_ytd_bridges", "historical_ytd_bridges", column: "supersedes_historical_ytd_bridge_id"
   add_foreign_key "historical_ytd_bridges", "users", column: "applied_by_id", on_delete: :restrict
   add_foreign_key "historical_ytd_bridges", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "invoice_artifacts", "invoices"

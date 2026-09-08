@@ -50,6 +50,7 @@ module QuickbooksHistory
           applied_at: timestamp,
           apply_acknowledgement: acknowledgement
         )
+        record_adjustment_activation_events!(plan, timestamp)
         record_audit!(plan)
         bridge
       end
@@ -70,12 +71,28 @@ module QuickbooksHistory
         subject_name: bridge.historical_import_batch.source_label,
         metadata: {
           historical_import_batch_id: bridge.historical_import_batch_id,
+          revision: bridge.revision,
           plan_digest: plan.digest,
           employee_count: plan.summary.fetch("employee_count"),
           balance_count: plan.summary.fetch("balance_count"),
           through_pay_date: plan.summary.fetch("through_pay_date")
         }
       )
+    end
+
+    def record_adjustment_activation_events!(plan, timestamp)
+      adjustment_ids = Array(plan.summary["adjustment_ids"])
+      adjustment_ids.each do |adjustment_id|
+        HistoricalPaycheckAdjustmentEvent.create!(
+          company: bridge.company,
+          historical_paycheck_adjustment_id: adjustment_id,
+          historical_ytd_bridge: bridge,
+          created_by: actor,
+          event_type: "ytd_revision_activated",
+          metadata: { "revision" => bridge.revision, "plan_digest" => plan.digest },
+          created_at: timestamp
+        )
+      end
     end
   end
 end

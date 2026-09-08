@@ -8,7 +8,8 @@ interface PayrollSourceNoticeProps {
 }
 
 export function PayrollSourceNotice({ summary, mentionFieldScope = false }: PayrollSourceNoticeProps): ReactElement | null {
-  if (!summary || (summary.quickbooks.paycheck_count === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0)) return null;
+  const adjustments = summary?.adjustments || { count: 0, gross_pay_delta: 0, net_pay_delta: 0 };
+  if (!summary || (summary.quickbooks.paycheck_count === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0 && adjustments.count === 0)) return null;
 
   const quickbooks = summary.quickbooks;
   const importedLabel = `${quickbooks.paycheck_count} linked QuickBooks ${quickbooks.paycheck_count === 1 ? 'record' : 'records'}`;
@@ -29,6 +30,11 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
             </p>
           )}
           {mentionFieldScope && <p className="mt-1 leading-6 text-amber-800">Payroll field reconciliation below covers Cornerstone records only.</p>}
+          {adjustments.count > 0 && (
+            <p className="mt-1 leading-6 text-amber-800">
+              {adjustments.count} recorded historical ledger {adjustments.count === 1 ? 'adjustment is' : 'adjustments are'} included separately (gross change {formatMoney(adjustments.gross_pay_delta)}; net change {formatMoney(adjustments.net_pay_delta)}). No source snapshot was rewritten.
+            </p>
+          )}
         </div>
       </div>
       {quickbooks.excluded_unlinked_paycheck_count > 0 && (
