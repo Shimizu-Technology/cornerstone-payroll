@@ -54,6 +54,27 @@ RSpec.describe DeductionsContributionsReportPdfGenerator do
       expect(described_class.new(pay_period).send(:employee_deductions_total, payroll_item)).to eq(20.00)
     end
 
+    it "includes employee recurring and manual pay-period adjustments with their source" do
+      company = create(:company)
+      pay_period = create(:pay_period, :committed, company: company)
+      recurring_employee = create(:employee, company: company)
+      manual_employee = create(:employee, company: company)
+      recurring = create(:payroll_item, pay_period: pay_period, employee: recurring_employee, company: company,
+        payroll_adjustments: [ { "label" => "Employee Loan", "amount" => 50, "treatment" => "post_tax_deduction" } ],
+        custom_columns_data: { PayrollItem::PAYROLL_ADJUSTMENTS_SOURCE_KEY => PayrollItem::EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE })
+      manual = create(:payroll_item, pay_period: pay_period, employee: manual_employee, company: company,
+        payroll_adjustments: [ { "label" => "Employee Loan", "amount" => 25, "treatment" => "post_tax_deduction" } ],
+        custom_columns_data: { "payroll_adjustments_overridden" => true, PayrollItem::PAYROLL_ADJUSTMENTS_SOURCE_KEY => PayrollItem::MANUAL_ADJUSTMENTS_SOURCE })
+
+      data = described_class.new(pay_period).data
+      entries = data.deduction_contribution_entries.select { |entry| entry.description == "Employee Loan" }
+
+      expect(entries.map(&:employee_amount)).to contain_exactly(50.0, 25.0)
+      expect(entries.map(&:type)).to contain_exactly("Recurring employee adjustment", "Manual pay-period adjustment")
+      expect(data.employee_after_tax_total(recurring)).to eq(50.0)
+      expect(data.employee_after_tax_total(manual)).to eq(25.0)
+    end
+
     it "includes field-only employee deductions in totals" do
       company = create(:company)
       employee = create(:employee, company: company)

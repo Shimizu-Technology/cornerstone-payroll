@@ -51,6 +51,8 @@ class PayrollRegisterPdfGenerator
     render_pay_period_block(pdf)
     render_summary_block(pdf)
     render_employee_table(pdf)
+    render_payroll_adjustment_matrix(pdf)
+    render_payroll_adjustments_summary(pdf)
     render_payroll_field_matrix(pdf)
     render_payroll_fields_summary(pdf)
 
@@ -176,6 +178,116 @@ class PayrollRegisterPdfGenerator
       columns(2..4).align = :right
     end
     pdf.move_down 14
+  end
+
+  def render_payroll_adjustments_summary(pdf)
+    rows = payroll_adjustment_total_rows
+    return if rows.empty?
+
+    pdf.start_new_page if pdf.cursor < 120
+    pdf.font_size(11) { pdf.text "Recurring and Manual Adjustments", style: :bold }
+    pdf.move_down 4
+
+    table_data = [ [ "Treatment", "Adjustment", "Source", "Amount" ] ] + rows
+    pdf.table(table_data, header: true, width: pdf.bounds.width) do
+      row(0).font_style = :bold
+      row(0).background_color = HEADER_BG
+      row(0).text_color = "FFFFFF"
+      cells.size = 8
+      cells.padding = [ 3, 5 ]
+      column(3).align = :right
+    end
+    pdf.move_down 14
+  end
+
+  def render_payroll_adjustment_matrix(pdf)
+    columns = payroll_adjustment_columns
+    return if columns.empty?
+
+    columns.each_slice(5).with_index do |column_chunk, index|
+      pdf.start_new_page if pdf.cursor < 120
+      title = index.zero? ? "Recurring and Manual Adjustments by Worker" : "Recurring and Manual Adjustments by Worker (continued)"
+      pdf.font_size(11) { pdf.text title, style: :bold }
+      if index.zero?
+        pdf.move_down 2
+        pdf.font_size(7) do
+          pdf.text "These payroll-item snapshots are already included in gross pay, deductions, and net pay. Employee setup changes do not rewrite completed payrolls.", color: TEXT_MUTED
+        end
+      end
+      pdf.move_down 5
+
+      header = [ "Worker" ] + column_chunk.map { |column| "#{column[:label]}\n#{column[:treatment]} · #{column[:source]}" }
+      rows = payroll_workers.map do |worker|
+        [ worker[:employee_name].to_s ] + column_chunk.map do |column|
+          amount = payroll_adjustment_amount(worker, column)
+          amount.nil? ? "—" : fmt(amount)
+        end
+      end
+      totals = [ "TOTALS" ] + column_chunk.map { |column| fmt(payroll_workers.sum { |worker| payroll_adjustment_amount(worker, column).to_f }) }
+
+      pdf.table([ header ] + rows + [ totals ], header: true, width: pdf.bounds.width) do
+        row(0).font_style = :bold
+        row(0).background_color = HEADER_BG
+        row(0).text_color = "FFFFFF"
+        row(-1).font_style = :bold
+        row(-1).background_color = SECTION_BG
+        cells.size = 7
+        cells.padding = [ 3, 5 ]
+        columns(1..column_chunk.length).align = :right
+      end
+      pdf.move_down 12
+    end
+  end
+
+  def payroll_adjustment_total_rows
+    active_payroll_adjustments_by_worker
+      .group_by { |entry| payroll_adjustment_column_key(entry) }
+      .sort_by { |key, _| key.map(&:to_s) }
+      .map do |(label, treatment, source), grouped|
+        [ treatment.to_s.humanize, label, adjustment_source_label(source), fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+      end
+  end
+
+  def active_payroll_adjustments(worker)
+    Array(worker[:payroll_adjustments]).reject { |entry| entry[:active] == false }
+  end
+
+  def active_payroll_adjustments_by_worker
+    payroll_workers.flat_map { |worker| active_payroll_adjustments(worker) }
+  end
+
+  def payroll_adjustment_columns
+    @payroll_adjustment_columns ||= active_payroll_adjustments_by_worker
+      .group_by { |entry| payroll_adjustment_column_key(entry) }
+      .map do |key, entries|
+        entry = entries.first
+        {
+          key: key,
+          label: entry[:label].to_s,
+          treatment: entry[:treatment].to_s.humanize,
+          source: adjustment_source_label(entry[:source])
+        }
+      end
+      .sort_by { |column| [ column[:treatment], column[:label], column[:source] ] }
+  end
+
+  def payroll_adjustment_column_key(entry)
+    [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+  end
+
+  def payroll_adjustment_amount(worker, column)
+    matching = active_payroll_adjustments(worker).select { |entry| payroll_adjustment_column_key(entry) == column[:key] }
+    return nil if matching.empty?
+
+    matching.sum { |entry| entry[:amount].to_f }
+  end
+
+  def adjustment_source_label(source)
+    {
+      "employee_default" => "Employee setup",
+      "manual" => "Manual entry",
+      "legacy_snapshot" => "Legacy snapshot"
+    }.fetch(source.to_s, "Snapshot")
   end
 
   def render_payroll_field_matrix(pdf)
