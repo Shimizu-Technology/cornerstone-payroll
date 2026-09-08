@@ -10,6 +10,41 @@ RSpec.describe PayrollCalculator do
   let(:pay_period) { create(:pay_period, company: company, pay_date: Date.new(2024, 1, 19)) }
   let(:payroll_item) { create(:payroll_item, employee: employee, pay_period: pay_period) }
 
+  describe "effective-dated W-4 elections" do
+    it "uses the election effective on the pay date and snapshots that version" do
+      base_attributes = {
+        company: company,
+        employee: employee,
+        allowances: 0,
+        additional_withholding: 0,
+        w4_dependent_credit: 0,
+        w4_step2_multiple_jobs: false,
+        w4_step4a_other_income: 0,
+        w4_step4b_deductions: 0,
+        w4_form_version: 2020,
+        source: "staff",
+        reason: "Signed W-4"
+      }
+      first = EmployeeW4Election.create!(
+        **base_attributes,
+        effective_on: Date.new(2024, 1, 1),
+        filing_status: "single"
+      )
+      EmployeeW4Election.create!(
+        **base_attributes,
+        effective_on: Date.new(2024, 2, 1),
+        filing_status: "married"
+      )
+
+      calculator = described_class.new(employee, payroll_item)
+
+      expect(calculator.send(:employee_value, :filing_status)).to eq("single")
+      calculator.send(:capture_calculation_context!)
+      expect(payroll_item.calculation_context_snapshot.dig("employee", "filing_status")).to eq("single")
+      expect(calculator.send(:employee_w4_snapshot).dig("w4", "election_id")).to eq(first.id)
+    end
+  end
+
   describe "#find_or_create_employer_deduction_type" do
     it "reloads the existing deduction type when a concurrent create collides" do
       calculator = described_class.new(employee, payroll_item)
@@ -179,6 +214,45 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.loan_payment).to eq(200.0)
       expect(payroll_item.total_deductions.to_f).to be >= 200.0
       expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
+    end
+
+    it "reduces a loan linked to an assigned payroll field when payroll is committed" do
+      loan = EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Verified balance",
+        original_amount: 500,
+        current_balance: 500,
+        payment_amount: 50,
+        status: "active"
+      )
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employee loan payment",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 50
+      )
+      EmployeePayrollField.create!(
+        employee: employee,
+        employee_loan: loan,
+        payroll_field_definition: field,
+        amount: 50
+      )
+
+      calculator = described_class.for(employee, payroll_item)
+      calculator.calculate
+      payroll_item.save!
+      calculator.apply_loan_payments!
+
+      expect(loan.reload.current_balance).to eq(450)
+      expect(loan.loan_transactions.payments.last).to have_attributes(
+        amount: 50,
+        payroll_item_id: payroll_item.id,
+        source: "payroll"
+      )
     end
 
     it "uses a manual paycheck loan deduction without duplicating configured loan deductions" do

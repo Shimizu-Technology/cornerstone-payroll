@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
@@ -16,6 +17,7 @@ import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi,
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
+import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
@@ -231,6 +233,7 @@ export function EmployeeForm() {
     w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
+  const [w4ChangeReason, setW4ChangeReason] = useState('');
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -261,6 +264,18 @@ export function EmployeeForm() {
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
     (form.employment_type === 'contractor' && form.contractor_pay_type === 'hourly');
+
+  const w4HasChanged = Boolean(loadedEmployee && (
+    normalizeFilingStatus(loadedEmployee.filing_status) !== form.filing_status
+    || toNumberOrZero(loadedEmployee.allowances) !== toNumberOrZero(form.allowances)
+    || roundCurrencyValue(toNumberOrZero(loadedEmployee.additional_withholding)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.additional_withholding) || 0)
+    || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_dependent_credit)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_dependent_credit) || 0)
+    || toBoolean(loadedEmployee.w4_step2_multiple_jobs) !== form.w4_step2_multiple_jobs
+    || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4a_other_income)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4a_other_income) || 0)
+    || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4b_deductions)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0)
+    || toNumberOrZero(loadedEmployee.w4_form_version) !== toNumberOrZero(form.w4_form_version)
+    || (loadedEmployee.w4_effective_on || '') !== (form.w4_effective_on || '')
+  ));
 
   const fetchEmployee = useCallback(async () => {
     if (!id) return;
@@ -324,6 +339,7 @@ export function EmployeeForm() {
       setInitialSsn(loadedSsn);
       setStoredSsnLastFour(employee.ssn_last_four || null);
       setInitialEmploymentType(employee.employment_type);
+      setW4ChangeReason('');
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -761,6 +777,12 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
+    if (form.employment_type !== 'contractor' && !form.w4_effective_on) {
+      newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
+    }
+    if (isEditing && !isClient && form.employment_type !== 'contractor' && w4HasChanged && !w4ChangeReason.trim()) {
+      newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
+    }
     const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
     const employerRothMatch = form.employer_roth_match_rate ?? 0;
     if (form.employment_type !== 'contractor' && (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1)) {
@@ -835,6 +857,7 @@ export function EmployeeForm() {
             }))
           : undefined,
         default_payroll_adjustments: normalizeDefaultPayrollAdjustments(),
+        w4_change_reason: w4HasChanged ? w4ChangeReason.trim() : undefined,
       };
 
       let savedEmployeeId: number;
@@ -1923,10 +1946,25 @@ export function EmployeeForm() {
             <CardHeader>
               <CardTitle>W-4 Tax Withholding</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
-                Based on IRS Form W-4 (2020+). Enter values from the employee&apos;s submitted W-4.
+                Based on IRS Form W-4 (2020+). Each saved change becomes a dated, read-only election in the employee&apos;s history.
               </p>
             </CardHeader>
             <CardContent>
+              {isEditing && loadedEmployee?.current_w4_election && (
+                <div className="mb-5 rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-primary-950">Current election</p>
+                      <p className="mt-1 text-sm text-primary-800">
+                        Effective {new Date(`${loadedEmployee.current_w4_election.effective_on}T00:00:00`).toLocaleDateString()} · Form {loadedEmployee.current_w4_election.w4_form_version}
+                      </p>
+                    </div>
+                    <Badge variant="default">{loadedEmployee.w4_elections?.length || 1} recorded</Badge>
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-primary-800">Future payroll uses the election effective on its pay date. Previously committed and imported checks remain unchanged.</p>
+                </div>
+              )}
+
               {/* Step 1: Filing Status */}
               <div className="mb-4">
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 1: Filing Status</h4>
@@ -1963,11 +2001,14 @@ export function EmployeeForm() {
                       Effective date
                     </label>
                     <Input
+                      name="w4_effective_on"
                       type="date"
                       value={form.w4_effective_on || ''}
                       onChange={(e) => handleChange('w4_effective_on', e.target.value || null)}
+                      aria-invalid={Boolean(getFieldError('w4_effective_on'))}
                     />
                     <p className="mt-1 text-xs text-gray-500">Record the date this withholding election became effective.</p>
+                    {getFieldError('w4_effective_on') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_effective_on')}</p>}
                   </div>
                 </div>
               </div>
@@ -2064,6 +2105,43 @@ export function EmployeeForm() {
                   </div>
                 </div>
               </div>
+
+              {isEditing && !isClient && w4HasChanged && (
+                <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <label htmlFor="w4-change-reason" className="block text-sm font-semibold text-amber-950">
+                    Reason for this W-4 change <span className="text-danger-600">*</span>
+                  </label>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">This note and the effective date will be preserved with the new election. The prior election will stay in history.</p>
+                  <Input
+                    id="w4-change-reason"
+                    name="w4_change_reason"
+                    className="mt-3 bg-white"
+                    value={w4ChangeReason}
+                    onChange={(event) => setW4ChangeReason(event.target.value)}
+                    placeholder="Example: New signed W-4 received from employee"
+                    aria-invalid={Boolean(getFieldError('w4_change_reason'))}
+                  />
+                  {getFieldError('w4_change_reason') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_change_reason')}</p>}
+                </div>
+              )}
+
+              {isEditing && loadedEmployee?.w4_elections && loadedEmployee.w4_elections.length > 0 && (
+                <details className="mb-5 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-neutral-900">View W-4 election history</summary>
+                  <div className="mt-4 space-y-3">
+                    {loadedEmployee.w4_elections.map((election) => (
+                      <div key={election.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-neutral-900">Effective {new Date(`${election.effective_on}T00:00:00`).toLocaleDateString()}</span>
+                          <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">{election.source.replace('_', ' ')}</span>
+                        </div>
+                        <p className="mt-1 text-neutral-600">{filingStatusLabels[election.filing_status] || election.filing_status} · Form {election.w4_form_version} · {formatCurrency(Number(election.additional_withholding) || 0)} extra per pay period</p>
+                        <p className="mt-2 text-xs leading-5 text-neutral-500">{election.reason}{election.created_by_name ? ` · Recorded by ${election.created_by_name}` : ''}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               {/* Retirement Contributions */}
               <div className="mt-6 pt-4 border-t border-gray-200">

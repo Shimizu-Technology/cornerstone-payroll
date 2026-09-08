@@ -61,6 +61,11 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     )
     expect(result.new_employee.ssn_encrypted).to eq("123-45-6789")
     expect(result.new_employee.primary_wage_rate.rate).to eq(9.25.to_d)
+    expect(result.new_employee.employee_w4_elections.sole).to have_attributes(
+      effective_on: Date.current,
+      source: "employee_creation",
+      created_by_id: super_admin.id
+    )
     expect(historical_item.reload.employee_id).to eq(contractor.id)
     expect(AuditLog.last).to have_attributes(
       action: "employees#transition_tax_classification",

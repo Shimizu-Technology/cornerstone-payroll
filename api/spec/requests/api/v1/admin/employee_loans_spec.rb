@@ -87,6 +87,29 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
         "Alice Zephyr"
       ])
     end
+
+    it "surfaces recurring loan deductions that do not have a balance ledger" do
+      employee.employee_deductions.create!(
+        deduction_type: deduction_type,
+        amount: 50,
+        is_percentage: false,
+        active: true
+      )
+
+      get "/api/v1/admin/employee_loans"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("setup_gaps")).to contain_exactly(
+        include(
+          "kind" => "employee_deduction",
+          "employee_id" => employee.id,
+          "label" => "Employee Loan",
+          "amount" => "50.0",
+          "amount_type" => "fixed",
+          "tracked" => false
+        )
+      )
+    end
   end
 
   describe "POST /api/v1/admin/employee_loans" do
@@ -164,6 +187,110 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
 
       expect(response).to have_http_status(:not_found)
       expect(response.parsed_body["error"]).to eq("Deduction type not found")
+    end
+
+    it "creates a verified opening balance without inventing an original principal" do
+      schedule = employee.employee_deductions.create!(
+        deduction_type: deduction_type,
+        amount: 50,
+        is_percentage: false,
+        active: true
+      )
+
+      post "/api/v1/admin/employee_loans",
+        params: {
+          employee_loan: {
+            employee_id: employee.id,
+            name: "QuickBooks employee loan",
+            balance_setup_mode: "existing_balance",
+            opening_balance: 425.75,
+            balance_as_of: "2026-09-01",
+            balance_source: "quickbooks",
+            principal_amount_known: false,
+            payment_amount: 50,
+            schedule_kind: "employee_deduction",
+            schedule_id: schedule.id
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:created)
+      loan = EmployeeLoan.last
+      expect(loan).to have_attributes(
+        opening_balance: 425.75,
+        current_balance: 425.75,
+        original_amount: 425.75,
+        balance_as_of: Date.new(2026, 9, 1),
+        balance_source: "quickbooks",
+        principal_amount_known: false,
+        deduction_type_id: deduction_type.id,
+        created_by_id: admin_user.id
+      )
+      expect(loan.loan_transactions.first).to have_attributes(
+        amount: 425.75,
+        source: "opening_balance",
+        recorded_by_id: admin_user.id
+      )
+
+      get "/api/v1/admin/employee_loans"
+      expect(response.parsed_body.fetch("setup_gaps")).to be_empty
+    end
+
+    it "links an assigned loan payroll field to the new balance ledger" do
+      definition = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employee Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 50,
+        active: true
+      )
+      assignment = EmployeePayrollField.create!(
+        employee: employee,
+        payroll_field_definition: definition,
+        amount: 50,
+        active: true
+      )
+
+      post "/api/v1/admin/employee_loans",
+        params: {
+          employee_loan: {
+            employee_id: employee.id,
+            name: "Existing loan",
+            balance_setup_mode: "existing_balance",
+            opening_balance: 200,
+            balance_as_of: "2026-09-01",
+            balance_source: "statement",
+            schedule_kind: "payroll_field",
+            schedule_id: assignment.id
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(assignment.reload.employee_loan).to eq(EmployeeLoan.last)
+    end
+
+    it "requires the original principal when staff marks it as known" do
+      post "/api/v1/admin/employee_loans",
+        params: {
+          employee_loan: {
+            employee_id: employee.id,
+            name: "Existing loan",
+            balance_setup_mode: "existing_balance",
+            opening_balance: 200,
+            balance_as_of: "2026-09-01",
+            balance_source: "statement",
+            principal_amount_known: true
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Original principal must be greater than zero")
+      expect(EmployeeLoan).not_to exist(name: "Existing loan")
     end
   end
 

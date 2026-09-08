@@ -21,7 +21,7 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          service = EmployeeBulkImport::ImportService.new(company)
+          service = EmployeeBulkImport::ImportService.new(company, actor: current_user)
           result = service.parse(file)
 
           if result[:errors].any?
@@ -98,7 +98,7 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          service = EmployeeBulkImport::ImportService.new(company)
+          service = EmployeeBulkImport::ImportService.new(company, actor: current_user)
 
           rows = employees_data.each_with_index.map do |emp, idx|
             {
