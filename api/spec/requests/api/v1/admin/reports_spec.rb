@@ -1712,6 +1712,55 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/reports/annual_payroll_summary" do
+    before do
+      period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 7, 3))
+      create(:payroll_item, pay_period: period, employee: employee, company: company, gross_pay: 1_000, net_pay: 800)
+      create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "annual-2025",
+        pay_date: Date.new(2025, 12, 19),
+        gross_pay: 500,
+        net_pay: 300
+      )
+    end
+
+    it "returns a normal report with one row per available payroll year" do
+      get "/api/v1/admin/reports/annual_payroll_summary"
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.fetch("years").pluck("year")).to eq([ 2026, 2025 ])
+      expect(report.dig("years", 0, "cornerstone_payroll_count")).to eq(1)
+      expect(report.dig("years", 1, "quickbooks_payroll_count")).to eq(1)
+      expect(report.dig("totals", "gross_pay").to_f).to eq(1_500.0)
+      expect(report.fetch("source_statement")).to include("not recalculated")
+    end
+
+    it "exports the same year rows and overall total as CSV, PDF, and Excel" do
+      get "/api/v1/admin/reports/annual_payroll_summary_csv"
+      expect(response).to have_http_status(:ok)
+      csv = CSV.parse(response.body)
+      expect(csv.first).to include(
+        "Year", "Gross pay", "Total payroll cost", "Excluded unlinked gross pay", "Excluded unlinked net pay"
+      )
+      expect(csv.map(&:first)).to include("2026", "2025", "All years")
+
+      get "/api/v1/admin/reports/annual_payroll_summary_xlsx"
+      expect(response).to have_http_status(:ok)
+      workbook = Roo::Excelx.new(StringIO.new(response.body))
+      expect(workbook.sheets).to eq([ "Annual Totals", "Report Information" ])
+      expect(workbook.sheet("Annual Totals").column(1)).to include(2026, 2025, "All years")
+
+      get "/api/v1/admin/reports/annual_payroll_summary_pdf"
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("Annual Payroll Totals", "2026", "2025")
+      expect(text).to include("Annual Pay Totals", "Employer Cost and Payroll Sources", "Report Information")
+      expect(text).to include("All", "years")
+    end
+  end
+
   describe "custom pay-date reporting periods and payroll field disclosure" do
     let!(:inside_period) do
       create(:pay_period, :committed, company: company, start_date: Date.new(2026, 5, 1), end_date: Date.new(2026, 5, 14), pay_date: Date.new(2026, 5, 16))
