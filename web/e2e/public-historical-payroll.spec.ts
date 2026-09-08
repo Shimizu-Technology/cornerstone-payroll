@@ -776,6 +776,7 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
 
 test('drives the upload control from the registered provider contract', async ({ page }) => {
   await mockApplicationShell(page);
+  const limitedUploadProvider = { ...quickbooksProvider, max_file_bytes: 4, max_bundle_bytes: 6 };
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [],
     meta: {
@@ -784,7 +785,7 @@ test('drives the upload control from the registered provider contract', async ({
       total_count: 0,
       per_page: 50,
       archive,
-      import_providers: [quickbooksProvider],
+      import_providers: [limitedUploadProvider],
     },
   }));
 
@@ -793,8 +794,26 @@ test('drives the upload control from the registered provider contract', async ({
   await expect(page.locator('#historical-import-provider')).toHaveValue('quickbooks_online');
   await expect(page.locator('#historical-import-provider option')).toHaveText('QuickBooks Online Payroll');
   await expect(page.getByText('Importer quickbooks-online-payroll-v5')).toBeVisible();
-  await expect(page.locator('input[type="file"]')).toHaveAttribute('accept', '.xls,.xlsx,.pdf,.jpg,.jpeg,.png');
+  const fileInput = page.locator('input[type="file"]');
+  await expect(fileInput).toHaveAttribute('accept', '.xls,.xlsx,.pdf,.jpg,.jpeg,.png');
   await expect(page.getByText('XLS, XLSX, PDF, JPG, JPEG, PNG · up to 75 files')).toBeVisible();
+
+  await fileInput.setInputFiles({ name: 'too-large.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('12345') });
+  await expect(page.getByRole('alert')).toContainText('Each QuickBooks Online Payroll file must be 4 B or smaller.');
+  await fileInput.setInputFiles([
+    { name: 'part-one.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('1234') },
+    { name: 'part-two.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('5678') },
+  ]);
+  await expect(page.getByRole('alert')).toContainText('The QuickBooks Online Payroll selection must be 6 B or smaller.');
+
+  const validFile = { name: 'valid.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('1234') };
+  await fileInput.setInputFiles(validFile);
+  await expect(page.getByText('1 file selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('No files selected')).toBeVisible();
+  await expect.poll(() => fileInput.evaluate((input: HTMLInputElement) => input.files?.length)).toBe(0);
+  await fileInput.setInputFiles(validFile);
+  await expect(page.getByText('1 file selected')).toBeVisible();
 });
 
 test('hides downstream workflows the selected provider has not enabled', async ({ page }) => {

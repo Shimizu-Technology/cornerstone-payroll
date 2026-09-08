@@ -72,6 +72,13 @@ function shortDate(value?: string | null): string {
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1) return `${Number(megabytes.toFixed(1))} MB`;
+  return `${Number((bytes / 1024).toFixed(1))} KB`;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
@@ -394,6 +401,7 @@ export function HistoricalPayroll(): ReactElement {
     setError(null);
     setValidationErrors({});
     setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     try {
       await loadList();
     } catch (err) {
@@ -706,11 +714,27 @@ export function HistoricalPayroll(): ReactElement {
 
   const handleFileSelection = (fileList: FileList | null): void => {
     const selected = Array.from(fileList || []);
-    const maxFiles = selectedImportProvider?.max_files || 1;
+    const provider = selectedImportProvider;
+    const maxFiles = provider?.max_files || 1;
     if (selected.length > maxFiles) {
       setFiles([]);
       setValidationErrors({});
-      setError(`Select at most ${maxFiles} files for ${selectedImportProvider?.label || 'this source'}.`);
+      setError(`Select at most ${maxFiles} files for ${provider?.label || 'this source'}.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    if (provider && selected.some((file) => file.size > provider.max_file_bytes)) {
+      setFiles([]);
+      setValidationErrors({});
+      setError(`Each ${provider.label} file must be ${fileSize(provider.max_file_bytes)} or smaller.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    const bundleBytes = selected.reduce((total, file) => total + file.size, 0);
+    if (provider && bundleBytes > provider.max_bundle_bytes) {
+      setFiles([]);
+      setValidationErrors({});
+      setError(`The ${provider.label} selection must be ${fileSize(provider.max_bundle_bytes)} or smaller.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -1243,12 +1267,12 @@ export function HistoricalPayroll(): ReactElement {
                         if (fileInputRef.current) fileInputRef.current.value = '';
                       }}
                       disabled={Boolean(action || importProviders.length === 0)}
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100"
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100"
                     >
                       {importProviders.map((provider) => <option key={provider.key} value={provider.key}>{provider.label}</option>)}
                     </select>
                     {selectedImportProvider && (
-                      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs leading-5 text-neutral-600">
+                      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-xs leading-5 text-neutral-600">
                         <p>{selectedImportProvider.description}</p>
                         <p className="mt-1 font-medium text-neutral-700">Importer {selectedImportProvider.importer_version}</p>
                       </div>

@@ -262,11 +262,13 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
     post "/api/v1/admin/historical_imports/#{batch.id}/preview_client_bootstrap"
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to eq("QuickBooks Online Payroll does not support client bootstrap")
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("QuickBooks Online Payroll does not support client bootstrap")
 
     post "/api/v1/admin/historical_imports/#{batch.id}/preview_ytd_bridge"
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to eq("QuickBooks Online Payroll does not support ytd bridge")
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("QuickBooks Online Payroll does not support ytd bridge")
   end
 
   it "rejects an incorrect clean-client preparation acknowledgement without enqueueing work" do
@@ -541,7 +543,8 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     }
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body).to include(
+    json = JSON.parse(response.body)
+    expect(json).to include(
       "error" => "Unsupported historical payroll source: unreviewed_provider",
       "details" => {}
     )
