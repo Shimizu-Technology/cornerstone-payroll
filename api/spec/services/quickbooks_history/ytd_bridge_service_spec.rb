@@ -100,6 +100,37 @@ RSpec.describe "QuickBooks historical YTD bridge" do
     expect(bridge.errors[:preview_summary]).to include(/valid ISO-8601 through pay date/)
   end
 
+  it "rejects a superseded YTD bridge from another client" do
+    predecessor = create_applied_bridge(
+      plan_digest: "first-client-bridge",
+      through_period_end: "2024-07-15",
+      through_pay_date: "2024-07-20"
+    )
+    other_company = create(:company)
+    other_batch = create(:historical_import_batch, company: other_company)
+    other_bootstrap = create(
+      :historical_client_bootstrap,
+      company: other_company,
+      historical_import_batch: other_batch
+    )
+    successor = HistoricalYtdBridge.new(
+      company: other_company,
+      historical_import_batch: other_batch,
+      historical_client_bootstrap: other_bootstrap,
+      status: "previewed",
+      revision: 2,
+      supersedes_historical_ytd_bridge: predecessor,
+      plan_digest: "cross-client-successor",
+      preview_summary: {
+        "through_period_end" => "2024-07-15",
+        "through_pay_date" => "2024-07-20"
+      }
+    )
+
+    expect(successor).not_to be_valid
+    expect(successor.errors[:supersedes_historical_ytd_bridge]).to include(/same historical import/)
+  end
+
   it "rejects employee balances that extend beyond their bridge boundary" do
     bridge = create_applied_bridge(
       plan_digest: "bounded-bridge",

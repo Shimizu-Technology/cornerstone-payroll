@@ -109,8 +109,11 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
     remove_index :historical_ytd_bridges, name: "index_historical_ytd_bridges_on_historical_import_batch_id"
     remove_index :historical_ytd_bridges, name: "index_historical_ytd_bridges_on_historical_client_bootstrap_id"
     add_column :historical_ytd_bridges, :revision, :integer, null: false, default: 1
-    add_reference :historical_ytd_bridges, :supersedes_historical_ytd_bridge,
-                  foreign_key: { to_table: :historical_ytd_bridges }, index: false
+    add_reference :historical_ytd_bridges, :supersedes_historical_ytd_bridge, index: false
+    add_foreign_key :historical_ytd_bridges, :historical_ytd_bridges,
+                    column: [ :supersedes_historical_ytd_bridge_id, :company_id ],
+                    primary_key: [ :id, :company_id ],
+                    name: "fk_historical_ytd_bridges_supersedes_tenant"
     add_index :historical_ytd_bridges, [ :historical_import_batch_id, :revision ], unique: true,
               name: "idx_historical_ytd_bridges_batch_revision"
     add_index :historical_ytd_bridges, :historical_client_bootstrap_id,
@@ -138,8 +141,8 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
     remove_index :historical_ytd_bridges, name: "idx_historical_ytd_bridges_one_successor"
     remove_index :historical_ytd_bridges, name: "idx_historical_ytd_bridges_bootstrap"
     remove_index :historical_ytd_bridges, name: "idx_historical_ytd_bridges_batch_revision"
-    remove_reference :historical_ytd_bridges, :supersedes_historical_ytd_bridge,
-                     foreign_key: { to_table: :historical_ytd_bridges }
+    remove_foreign_key :historical_ytd_bridges, name: "fk_historical_ytd_bridges_supersedes_tenant"
+    remove_reference :historical_ytd_bridges, :supersedes_historical_ytd_bridge
     remove_column :historical_ytd_bridges, :revision
     add_index :historical_ytd_bridges, :historical_client_bootstrap_id, unique: true
     add_index :historical_ytd_bridges, :historical_import_batch_id, unique: true
