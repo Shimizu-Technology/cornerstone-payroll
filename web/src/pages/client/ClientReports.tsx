@@ -18,6 +18,7 @@ export function ClientReports() {
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string>('');
   const [payrollRegister, setPayrollRegister] = useState<Awaited<ReturnType<typeof clientReportsApi.payrollRegister>>['report'] | null>(null);
   const [ytdSummary, setYtdSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.ytdSummary>>['report'] | null>(null);
+  const [annualSummary, setAnnualSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.annualPayrollSummary>>['report'] | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [exporting, setExporting] = useState<string | null>(null);
@@ -64,6 +65,15 @@ export function ClientReports() {
     }
   }, [startDate, endDate]);
 
+  const loadAnnualSummary = useCallback(async () => {
+    try {
+      const response = await clientReportsApi.annualPayrollSummary();
+      setAnnualSummary(response.report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load annual payroll totals');
+    }
+  }, []);
+
   useEffect(() => {
     void loadBaseData();
   }, [loadBaseData]);
@@ -76,6 +86,10 @@ export function ClientReports() {
   useEffect(() => {
     void loadYtdSummary();
   }, [loadYtdSummary]);
+
+  useEffect(() => {
+    void loadAnnualSummary();
+  }, [loadAnnualSummary]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -184,6 +198,48 @@ export function ClientReports() {
     },
   ];
 
+  const annualSummaryFormats: ReportDownloadFormat[] = [
+    {
+      key: 'annual-pdf',
+      label: 'PDF',
+      description: 'Shareable year-by-year summary',
+      kind: 'pdf',
+      loading: exporting === 'annual-pdf',
+      onSelect: () => exportReport('annual-pdf', 'annual_payroll_summary.pdf', clientReportsApi.annualPayrollSummaryPdf),
+    },
+    {
+      key: 'annual-xlsx',
+      label: 'Excel workbook',
+      description: 'Annual totals and source detail',
+      kind: 'spreadsheet',
+      loading: exporting === 'annual-xlsx',
+      onSelect: () => exportReport('annual-xlsx', 'annual_payroll_summary.xlsx', clientReportsApi.annualPayrollSummaryXlsx),
+    },
+    {
+      key: 'annual-csv',
+      label: 'CSV data',
+      description: 'One row per payroll year',
+      kind: 'data',
+      loading: exporting === 'annual-csv',
+      onSelect: () => exportReport('annual-csv', 'annual_payroll_summary.csv', clientReportsApi.annualPayrollSummaryCsv),
+    },
+  ];
+
+  const annualSourceLabel = (row: NonNullable<typeof annualSummary>['years'][number]) => [
+    row.cornerstone_payroll_count > 0
+      ? `${row.cornerstone_payroll_count} Cornerstone payroll${row.cornerstone_payroll_count === 1 ? '' : 's'}`
+      : null,
+    row.quickbooks_payroll_count > 0
+      ? `${row.quickbooks_payroll_count} QuickBooks payroll${row.quickbooks_payroll_count === 1 ? '' : 's'}`
+      : null,
+    row.opening_summary_count > 0
+      ? `${row.opening_summary_count} QuickBooks opening summar${row.opening_summary_count === 1 ? 'y' : 'ies'}`
+      : null,
+    row.adjustment_count > 0
+      ? `${row.adjustment_count} ledger adjustment${row.adjustment_count === 1 ? '' : 's'}`
+      : null,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div>
       <Header title="Reports" description="Read-only payroll reports for finalized payroll periods." />
@@ -234,6 +290,71 @@ export function ClientReports() {
                 </div>
               )}
             </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Annual Payroll Totals</CardTitle>
+                  <p className="mt-2 text-sm leading-6 text-gray-500">Year-by-year totals across locked QuickBooks imports and committed Cornerstone payroll.</p>
+                </div>
+                <ReportDownloadMenu formats={annualSummaryFormats} disabled={!annualSummary || exporting !== null} ariaLabel="Export annual payroll totals" />
+              </CardHeader>
+              <CardContent className="space-y-4 p-4">
+                {annualSummary && (
+                  <>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm leading-6 text-blue-900">
+                      <p className="font-semibold">Imported payroll values remain locked.</p>
+                      <p className="mt-2">{annualSummary.source_statement}</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <Metric label="All-Year Gross Pay" value={formatCurrency(annualSummary.totals.gross_pay)} />
+                      <Metric label="All-Year Net Pay" value={formatCurrency(annualSummary.totals.net_pay)} />
+                      <Metric label="Employer Costs" value={formatCurrency(annualSummary.totals.employer_taxes + annualSummary.totals.employer_contributions)} />
+                      <Metric label="Total Payroll Cost" value={formatCurrency(annualSummary.totals.total_payroll_cost)} />
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Year &amp; source</TableHead>
+                          <TableHead className="text-right">Gross pay</TableHead>
+                          <TableHead className="text-right">Employee taxes</TableHead>
+                          <TableHead className="text-right">Deductions</TableHead>
+                          <TableHead className="text-right">Net pay</TableHead>
+                          <TableHead className="text-right">Total cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody striped>
+                        {annualSummary.years.map((row) => (
+                          <TableRow key={row.year}>
+                            <TableCell>
+                              <p className="font-semibold text-gray-900">{row.year}</p>
+                              <p className="mt-2 text-xs text-gray-500">{annualSourceLabel(row)}</p>
+                              {row.excluded_unlinked_paycheck_count > 0 && (
+                                <p className="mt-2 text-xs font-semibold text-amber-700">
+                                  {row.excluded_unlinked_paycheck_count} unlinked imported paycheck{row.excluded_unlinked_paycheck_count === 1 ? '' : 's'} excluded ({formatCurrency(row.excluded_unlinked_gross_pay)} gross / {formatCurrency(row.excluded_unlinked_net_pay)} net)
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{formatCurrency(row.gross_pay)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatCurrency(row.employee_taxes)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatCurrency(row.pretax_deductions + row.after_tax_deductions)}</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.net_pay)}</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.total_payroll_cost)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {annualSummary.years.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="py-10 text-center text-gray-500">
+                              No committed or locked payroll history is available yet.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </>
+                )}
+              </CardContent>
             </Card>
 
             <Card>

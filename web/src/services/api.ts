@@ -1921,6 +1921,48 @@ export interface YtdSummaryParams {
   sort_direction?: 'asc' | 'desc';
 }
 
+export interface AnnualPayrollSummaryRow {
+  year: number;
+  payroll_count: number;
+  paycheck_count: number;
+  employee_count: number;
+  cornerstone_payroll_count: number;
+  cornerstone_paycheck_count: number;
+  quickbooks_payroll_count: number;
+  quickbooks_paycheck_count: number;
+  opening_summary_count: number;
+  adjustment_count: number;
+  excluded_unlinked_paycheck_count: number;
+  excluded_unlinked_gross_pay: number;
+  excluded_unlinked_net_pay: number;
+  hours: number;
+  gross_pay: number;
+  non_taxable_pay: number;
+  adjusted_gross: number;
+  pretax_deductions: number;
+  employee_taxes: number;
+  after_tax_deductions: number;
+  net_pay: number;
+  employer_taxes: number;
+  employer_contributions: number;
+  total_payroll_cost: number;
+}
+
+export interface AnnualPayrollSummaryReport {
+  report: {
+    type: 'annual_payroll_summary';
+    meta: {
+      company_id: number;
+      company_name: string;
+      generated_at: string;
+      period_basis: 'pay_date';
+    };
+    source_statement: string;
+    years: AnnualPayrollSummaryRow[];
+    totals: Omit<AnnualPayrollSummaryRow, 'year'> & { year_count: number };
+  };
+}
+
 export interface Form941GuReport {
   meta: {
     report_type: string;
@@ -2256,6 +2298,14 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/ytd_summary_pdf', params),
   ytdSummaryCsv: (params?: YtdSummaryParams) =>
     api.getBlobWithParams('/admin/reports/ytd_summary_csv', params),
+  annualPayrollSummary: () =>
+    api.get<AnnualPayrollSummaryReport>('/admin/reports/annual_payroll_summary'),
+  annualPayrollSummaryXlsx: () =>
+    api.getBlobWithParams('/admin/reports/annual_payroll_summary_xlsx'),
+  annualPayrollSummaryPdf: () =>
+    api.getBlobWithParams('/admin/reports/annual_payroll_summary_pdf'),
+  annualPayrollSummaryCsv: () =>
+    api.getBlobWithParams('/admin/reports/annual_payroll_summary_csv'),
   // CPR-68: W-2GU Annual Report
   w2Gu: (year: number) =>
     api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),
@@ -2381,6 +2431,14 @@ export const clientReportsApi = {
     api.getBlobWithParams('/client/reports/ytd_summary_pdf', params),
   ytdSummaryXlsx: (params: PayrollReportPeriodParams = {}) =>
     api.getBlobWithParams('/client/reports/ytd_summary_xlsx', params),
+  annualPayrollSummary: () =>
+    api.get<AnnualPayrollSummaryReport>('/client/reports/annual_payroll_summary'),
+  annualPayrollSummaryCsv: () =>
+    api.getBlobWithParams('/client/reports/annual_payroll_summary_csv'),
+  annualPayrollSummaryPdf: () =>
+    api.getBlobWithParams('/client/reports/annual_payroll_summary_pdf'),
+  annualPayrollSummaryXlsx: () =>
+    api.getBlobWithParams('/client/reports/annual_payroll_summary_xlsx'),
 };
 
 export interface TransmittalCustomEntry {

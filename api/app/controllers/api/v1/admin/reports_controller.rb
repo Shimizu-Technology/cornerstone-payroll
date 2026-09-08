@@ -11,7 +11,8 @@ module Api
           paycheck_history: "Check numbers, check dates, earnings, deductions, and net pay for payroll items in the selected pay period.",
           retirement_plans: "401(k), Roth 401(k), and employer retirement contribution activity for the selected pay period.",
           tax_summary: "Payroll tax withholding summary used to review Guam/federal payroll tax liability for the selected year or quarter.",
-          ytd_summary: "Year-to-date payroll totals by worker for the selected tax year.",
+          ytd_summary: "Payroll totals by worker for the selected tax year or pay-date range.",
+          annual_payroll_summary: "Year-by-year payroll totals across locked QuickBooks imports and committed Cornerstone payroll.",
           employee_pay_history: "Paycheck history for an individual worker, including recent pay periods and year-to-date totals.",
           form_941_gu: "Federal Form 941 preparation worksheet for Guam employers, with Guam-specific line 2/3 skip handling and FICA liability detail.",
           quarterly_compliance_packet: "Quarterly Guam and federal payroll filing packet covering Form 500, W-1, SWICA, Federal Form 941, and review tie-outs.",
@@ -1048,6 +1049,36 @@ module Api
           )
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def annual_payroll_summary
+          render json: { report: build_annual_payroll_summary }
+        end
+
+        def annual_payroll_summary_xlsx
+          report = build_annual_payroll_summary
+          send_spreadsheet!(
+            filename: "annual_payroll_summary.xlsx",
+            sheets: annual_payroll_summary_sheets(report)
+          )
+        end
+
+        def annual_payroll_summary_pdf
+          report = build_annual_payroll_summary
+          send_tabular_pdf!(
+            title: "Annual Payroll Totals",
+            subtitle: "#{report.dig(:meta, :company_name)} — all available payroll years",
+            filename: "annual_payroll_summary.pdf",
+            sheets: annual_payroll_summary_pdf_sheets(report)
+          )
+        end
+
+        def annual_payroll_summary_csv
+          report = build_annual_payroll_summary
+          send_tabular_csv!(
+            filename: "annual_payroll_summary.csv",
+            sheet: annual_payroll_summary_sheets(report).first
+          )
         end
 
         private
@@ -3411,6 +3442,119 @@ module Api
             payroll_field_activity_for_report_sheet(report),
             report_info_sheet(report, title: "Payroll Summary by Period")
           ]
+        end
+
+        def build_annual_payroll_summary
+          AnnualPayrollSummary.new(company: Company.find(current_company_id)).call
+        end
+
+        def annual_payroll_summary_sheets(report)
+          headers = [
+            "Year", "Payrolls", "Paychecks", "Employees", "Hours", "Gross pay", "Non-taxable pay",
+            "Adjusted gross", "Pre-tax deductions", "Employee taxes", "After-tax deductions", "Net pay",
+            "Employer taxes", "Employer contributions", "Total payroll cost", "Cornerstone payrolls",
+            "QuickBooks payrolls", "QuickBooks paychecks", "Opening summaries", "Ledger adjustments",
+            "Excluded unlinked paychecks", "Excluded unlinked gross pay", "Excluded unlinked net pay"
+          ]
+          row_values = lambda do |row|
+            [
+              row[:year], row[:payroll_count], row[:paycheck_count], row[:employee_count], row[:hours],
+              row[:gross_pay], row[:non_taxable_pay], row[:adjusted_gross], row[:pretax_deductions],
+              row[:employee_taxes], row[:after_tax_deductions], row[:net_pay], row[:employer_taxes],
+              row[:employer_contributions], row[:total_payroll_cost], row[:cornerstone_payroll_count],
+              row[:quickbooks_payroll_count], row[:quickbooks_paycheck_count], row[:opening_summary_count],
+              row[:adjustment_count], row[:excluded_unlinked_paycheck_count], row[:excluded_unlinked_gross_pay],
+              row[:excluded_unlinked_net_pay]
+            ]
+          end
+          annual_rows = [ headers ] + annual_payroll_summary_rows(report).map { |row| row_values.call(row) }
+          totals = report[:totals] || {}
+
+          [
+            { name: "Annual Totals", rows: annual_rows },
+            annual_payroll_summary_information_sheet(report)
+          ]
+        end
+
+        def annual_payroll_summary_pdf_sheets(report)
+          rows = annual_payroll_summary_rows(report)
+          sheets = [
+            {
+              name: "Annual Pay Totals",
+              rows: [
+                [ "Year", "Hours", "Gross pay", "Non-taxable pay", "Adjusted gross", "Pre-tax deductions",
+                  "Employee taxes", "After-tax deductions", "Net pay" ],
+                *rows.map do |row|
+                  [ row[:year], annual_payroll_pdf_number(row[:hours]), annual_payroll_pdf_money(row[:gross_pay]),
+                    annual_payroll_pdf_money(row[:non_taxable_pay]), annual_payroll_pdf_money(row[:adjusted_gross]),
+                    annual_payroll_pdf_money(row[:pretax_deductions]), annual_payroll_pdf_money(row[:employee_taxes]),
+                    annual_payroll_pdf_money(row[:after_tax_deductions]), annual_payroll_pdf_money(row[:net_pay]) ]
+                end
+              ]
+            },
+            {
+              name: "Employer Cost and Payroll Sources",
+              rows: [
+                [ "Year", "Employer taxes", "Employer contributions", "Total payroll cost", "Cornerstone payrolls",
+                  "QuickBooks payrolls", "QuickBooks paychecks", "Opening summaries", "Ledger adjustments" ],
+                *rows.map do |row|
+                  [ row[:year], annual_payroll_pdf_money(row[:employer_taxes]),
+                    annual_payroll_pdf_money(row[:employer_contributions]), annual_payroll_pdf_money(row[:total_payroll_cost]),
+                    row[:cornerstone_payroll_count], row[:quickbooks_payroll_count], row[:quickbooks_paycheck_count],
+                    row[:opening_summary_count], row[:adjustment_count] ]
+                end
+              ]
+            }
+          ]
+
+          if report.dig(:totals, :excluded_unlinked_paycheck_count).to_i.positive?
+            sheets << {
+              name: "Excluded Unlinked Imports",
+              rows: [
+                [ "Year", "Excluded paychecks", "Excluded gross pay", "Excluded net pay" ],
+                *rows.map do |row|
+                  [ row[:year], row[:excluded_unlinked_paycheck_count],
+                    annual_payroll_pdf_money(row[:excluded_unlinked_gross_pay]),
+                    annual_payroll_pdf_money(row[:excluded_unlinked_net_pay]) ]
+                end
+              ]
+            }
+          end
+
+          sheets << annual_payroll_summary_information_sheet(report)
+        end
+
+        def annual_payroll_summary_rows(report)
+          Array(report[:years]) + [ (report[:totals] || {}).merge(year: "All years") ]
+        end
+
+        def annual_payroll_pdf_money(value)
+          ActiveSupport::NumberHelper.number_to_currency(value.to_d, precision: 2)
+        end
+
+        def annual_payroll_pdf_number(value)
+          ActiveSupport::NumberHelper.number_to_rounded(
+            value.to_d,
+            precision: 4,
+            strip_insignificant_zeros: true,
+            delimiter: ","
+          )
+        end
+
+        def annual_payroll_summary_information_sheet(report)
+          totals = report[:totals] || {}
+          {
+            name: "Report Information",
+            rows: [
+              [ "Field", "Value" ],
+              [ "Company", report.dig(:meta, :company_name) ],
+              [ "Period basis", "Pay date" ],
+              [ "Generated at", report.dig(:meta, :generated_at) ],
+              [ "Source handling", report[:source_statement] ],
+              [ "Excluded unlinked gross pay", totals[:excluded_unlinked_gross_pay] ],
+              [ "Excluded unlinked net pay", totals[:excluded_unlinked_net_pay] ]
+            ]
+          }
         end
 
         def payroll_source_summary_sheet(report)

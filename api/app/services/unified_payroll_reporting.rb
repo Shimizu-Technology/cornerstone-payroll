@@ -66,6 +66,23 @@ class UnifiedPayrollReporting
     )
   end
 
+  def historical_financial_totals(paychecks, adjustments = [])
+    rows = paychecks + adjustments
+    {
+      hours: sum(rows, :hours_total),
+      gross_pay: sum(rows, :gross_pay),
+      non_taxable_pay: 0.to_d,
+      adjusted_gross: sum(rows, :adjusted_gross),
+      pretax_deductions: sum(rows, :pretax_deductions),
+      employee_taxes: sum(rows, :employee_taxes),
+      after_tax_deductions: sum(rows, :after_tax_deductions),
+      net_pay: sum(rows, :net_pay),
+      employer_taxes: sum(rows, :employer_taxes),
+      employer_contributions: sum(rows, :employer_contributions),
+      total_payroll_cost: sum(rows, :total_payroll_cost)
+    }
+  end
+
   def history_row(paycheck)
     totals = historical_totals([ paycheck ])
     {

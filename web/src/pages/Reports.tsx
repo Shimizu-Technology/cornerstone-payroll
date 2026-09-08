@@ -19,7 +19,7 @@ import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
-import type { EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
+import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -1489,6 +1489,192 @@ function YtdSummaryPanel() {
                   )}
                 </tbody>
               </table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Annual Payroll Summary Panel ────────────────────────────────────────────
+
+function AnnualPayrollSummaryPanel() {
+  const [loading, setLoading] = useState(true);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<AnnualPayrollSummaryReport['report'] | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await reportsApi.annualPayrollSummary();
+      setReport(response.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadReport();
+  }, []);
+
+  async function download(
+    format: 'xlsx' | 'pdf' | 'csv',
+    setExporting: (value: boolean) => void,
+  ) {
+    setExporting(true);
+    setError(null);
+    try {
+      const response = format === 'xlsx'
+        ? await reportsApi.annualPayrollSummaryXlsx()
+        : format === 'pdf'
+          ? await reportsApi.annualPayrollSummaryPdf()
+          : await reportsApi.annualPayrollSummaryCsv();
+      triggerDownload(response.blob, response.filename || `annual_payroll_summary.${format}`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Shareable year-by-year summary.', kind: 'pdf', loading: exportingPdf, onSelect: () => download('pdf', setExportingPdf) },
+    { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Annual totals and source reconciliation.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: () => download('xlsx', setExportingXlsx) },
+    { key: 'csv', label: 'Annual totals (.csv)', description: 'One row per payroll year.', kind: 'data', loading: exportingCsv, onSelect: () => download('csv', setExportingCsv) },
+  ];
+
+  function sourceLabel(row: AnnualPayrollSummaryRow): string {
+    const parts: string[] = [];
+    if (row.cornerstone_payroll_count > 0) {
+      parts.push(`${row.cornerstone_payroll_count} Cornerstone payroll${row.cornerstone_payroll_count === 1 ? '' : 's'}`);
+    }
+    if (row.quickbooks_payroll_count > 0) {
+      parts.push(`${row.quickbooks_payroll_count} QuickBooks payroll${row.quickbooks_payroll_count === 1 ? '' : 's'}`);
+    }
+    if (row.opening_summary_count > 0) {
+      parts.push(`${row.opening_summary_count} QuickBooks opening summar${row.opening_summary_count === 1 ? 'y' : 'ies'}`);
+    }
+    if (row.adjustment_count > 0) {
+      parts.push(`${row.adjustment_count} ledger adjustment${row.adjustment_count === 1 ? '' : 's'}`);
+    }
+    return parts.join(' · ');
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-lg">Year-by-Year Payroll Totals</CardTitle>
+            <CardDescription className="mt-2 max-w-3xl">
+              Compare every available payroll year on a pay-date basis. Locked QuickBooks imports and committed Cornerstone payrolls are combined without changing imported values.
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="secondary" onClick={() => void loadReport()} disabled={loading}>
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || !report || exportingPdf || exportingXlsx || exportingCsv} />
+          </div>
+        </CardHeader>
+        {error && <CardContent><p className="text-sm text-red-600">{error}</p></CardContent>}
+      </Card>
+
+      {loading && !report && (
+        <Card><CardContent className="py-10 text-center text-sm text-neutral-500">Loading annual payroll totals…</CardContent></Card>
+      )}
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>All-year totals</CardTitle>
+              <CardDescription>
+                {report.totals.year_count} year{report.totals.year_count === 1 ? '' : 's'} &bull; {report.totals.payroll_count} payroll{report.totals.payroll_count === 1 ? '' : 's'} &bull; {report.totals.employee_count} employee{report.totals.employee_count === 1 ? '' : 's'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm leading-6 text-blue-950">
+                <p className="font-semibold">Imported payroll stays authoritative and read-only.</p>
+                <p className="mt-2 text-blue-800">{report.source_statement}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+                <TotalBox label="Gross Pay" value={report.totals.gross_pay} />
+                <TotalBox label="Pre-Tax Deductions" value={report.totals.pretax_deductions} />
+                <TotalBox label="Employee Taxes" value={report.totals.employee_taxes} />
+                <TotalBox label="After-Tax Deductions" value={report.totals.after_tax_deductions} />
+                <TotalBox label="Net Pay" value={report.totals.net_pay} />
+                <TotalBox label="Employer Taxes" value={report.totals.employer_taxes} />
+                <TotalBox label="Employer Contributions" value={report.totals.employer_contributions} />
+                <TotalBox label="Total Payroll Cost" value={report.totals.total_payroll_cost} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Annual breakdown</CardTitle>
+              <CardDescription>
+                Each row shows the combined ledger for that calendar year and how much came from each source. Scroll horizontally to review every metric.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table className="min-w-[1520px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead stickyLeft>Year &amp; source</TableHead>
+                    <TableHead className="text-right">Employees</TableHead>
+                    <TableHead className="text-right">Hours</TableHead>
+                    <TableHead className="text-right">Gross pay</TableHead>
+                    <TableHead className="text-right">Non-taxable pay</TableHead>
+                    <TableHead className="text-right">Adjusted gross</TableHead>
+                    <TableHead className="text-right">Pre-tax ded.</TableHead>
+                    <TableHead className="text-right">Employee taxes</TableHead>
+                    <TableHead className="text-right">After-tax ded.</TableHead>
+                    <TableHead className="text-right">Net pay</TableHead>
+                    <TableHead className="text-right">Employer taxes</TableHead>
+                    <TableHead className="text-right">Employer contrib.</TableHead>
+                    <TableHead className="text-right">Total cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.years.map((row) => (
+                    <TableRow key={row.year}>
+                      <TableCell stickyLeft className="min-w-64 bg-white align-top">
+                        <p className="font-display text-lg font-extrabold text-neutral-950">{row.year}</p>
+                        <p className="mt-2 text-xs leading-5 text-neutral-500">{sourceLabel(row)}</p>
+                        {row.excluded_unlinked_paycheck_count > 0 && (
+                          <p className="mt-2 text-xs font-semibold text-amber-700">
+                            {row.excluded_unlinked_paycheck_count} unlinked imported paycheck{row.excluded_unlinked_paycheck_count === 1 ? '' : 's'} excluded ({fmt(row.excluded_unlinked_gross_pay)} gross / {fmt(row.excluded_unlinked_net_pay)} net)
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{row.employee_count}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.hours.toLocaleString('en-US', { maximumFractionDigits: 4 })}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.gross_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.non_taxable_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.adjusted_gross)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.pretax_deductions)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.employee_taxes)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.after_tax_deductions)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.net_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.employer_taxes)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.employer_contributions)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.total_payroll_cost)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {report.years.length === 0 && (
+                    <TableRow><TableCell colSpan={13} className="py-10 text-center text-neutral-500">No committed or locked payroll history is available yet.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </>
@@ -3007,7 +3193,7 @@ function Form1099NecPanel() {
 
 // ─── Reports Center ───────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'quarterly-compliance-packet' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
+type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'quarterly-compliance-packet' | 'ytd-summary' | 'annual-payroll-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
 type ReportCategory = 'all' | 'payroll' | 'tax-compliance' | 'people' | 'checks' | 'annual';
 
 interface ReportDefinition {
@@ -3023,7 +3209,7 @@ interface ReportDefinition {
   icon: ReactNode;
 }
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'quarterly-compliance-packet', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'quarterly-compliance-packet', 'ytd-summary', 'annual-payroll-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
 function reportIcon(path: ReactNode) {
   return (
@@ -3069,6 +3255,18 @@ const reports: ReportDefinition[] = [
     cta: 'Choose period',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />),
+  },
+  {
+    id: 'annual-payroll-summary',
+    title: 'Annual Payroll Totals',
+    description: 'Year-by-year totals across locked QuickBooks imports and committed Cornerstone payroll.',
+    category: 'payroll',
+    basis: 'Pay date by year',
+    frequency: 'Annual comparison',
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
+    cta: 'Compare years',
+    featured: true,
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 19V9m5 10V5m5 14v-7m5 7V3M3 21h18" />),
   },
   {
     id: 'tax-withholding-summary',
@@ -3349,6 +3547,7 @@ export function Reports() {
     if (activeReport === 'tax-withholding-summary') return <TaxSummaryPanel />;
     if (activeReport === 'quarterly-compliance-packet') return <QuarterlyCompliancePacketPanel />;
     if (activeReport === 'ytd-summary') return <YtdSummaryPanel />;
+    if (activeReport === 'annual-payroll-summary') return <AnnualPayrollSummaryPanel />;
     if (activeReport === 'employer-liability') return <EmployerLiabilityPanel />;
     if (activeReport === 'w2-gu') return <W2GuPanel />;
     if (activeReport === '1099-nec') return <Form1099NecPanel />;
