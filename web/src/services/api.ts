@@ -3758,7 +3758,25 @@ export const dashboardApi = {
 };
 
 export const HISTORICAL_IMPORT_ACKNOWLEDGEMENT =
-  'I understand this imports authoritative QuickBooks snapshots and does not recalculate payroll.';
+  'I understand this imports authoritative source snapshots and does not recalculate payroll.';
+
+export interface HistoricalImportProvider {
+  key: string;
+  label: string;
+  description: string;
+  importer_version: string;
+  accepted_extensions: string[];
+  max_files: number;
+  max_file_bytes: number;
+  max_bundle_bytes: number;
+  capabilities: {
+    source_file_retention: boolean;
+    cutover_verification: boolean;
+    client_bootstrap: boolean;
+    ytd_bridge: boolean;
+  };
+  limitations: string[];
+}
 
 export interface HistoricalMoneyTotals {
   gross_pay: string;
@@ -3822,7 +3840,7 @@ export interface HistoricalCutoverReview {
 export interface HistoricalImportBatch {
   id: number;
   company_id: number;
-  source_system: 'quickbooks_online';
+  source_system: string;
   source_label: string;
   bundle_digest: string;
   importer_version: string;
@@ -4288,12 +4306,13 @@ export interface HistoricalReportResponse {
 }
 
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }> =>
-    api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary } }>('/admin/historical_imports', params),
+  list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+    api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
-  preview: (files: File[]): Promise<{ data: HistoricalImportBatch; meta: { idempotent: boolean } }> => {
+  preview: (files: File[], sourceSystem = 'quickbooks_online'): Promise<{ data: HistoricalImportBatch; meta: { idempotent: boolean } }> => {
     const form = new FormData();
+    form.append('source_system', sourceSystem);
     files.forEach((file) => form.append('files[]', file));
     return api.postForm<{ data: HistoricalImportBatch; meta: { idempotent: boolean } }>('/admin/historical_imports/preview', form);
   },
