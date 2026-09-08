@@ -100,6 +100,37 @@ RSpec.describe "QuickBooks historical YTD bridge" do
     expect(bridge.errors[:preview_summary]).to include(/valid ISO-8601 through pay date/)
   end
 
+  it "rejects a superseded YTD bridge from another client" do
+    predecessor = create_applied_bridge(
+      plan_digest: "first-client-bridge",
+      through_period_end: "2024-07-15",
+      through_pay_date: "2024-07-20"
+    )
+    other_company = create(:company)
+    other_batch = create(:historical_import_batch, company: other_company)
+    other_bootstrap = create(
+      :historical_client_bootstrap,
+      company: other_company,
+      historical_import_batch: other_batch
+    )
+    successor = HistoricalYtdBridge.new(
+      company: other_company,
+      historical_import_batch: other_batch,
+      historical_client_bootstrap: other_bootstrap,
+      status: "previewed",
+      revision: 2,
+      supersedes_historical_ytd_bridge: predecessor,
+      plan_digest: "cross-client-successor",
+      preview_summary: {
+        "through_period_end" => "2024-07-15",
+        "through_pay_date" => "2024-07-20"
+      }
+    )
+
+    expect(successor).not_to be_valid
+    expect(successor.errors[:supersedes_historical_ytd_bridge]).to include(/same historical import/)
+  end
+
   it "rejects employee balances that extend beyond their bridge boundary" do
     bridge = create_applied_bridge(
       plan_digest: "bounded-bridge",
@@ -470,6 +501,106 @@ RSpec.describe "QuickBooks historical YTD bridge" do
       QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
     end.to raise_error(ArgumentError, /Lock the approved QuickBooks history/)
     expect(HistoricalYtdBridge.count).to eq(bridge_count)
+  end
+
+  it "creates an immutable second YTD revision for reviewed historical adjustments" do
+    first_bridge = prepare_previewed_bridge
+    QuickbooksHistory::YtdBridgeApplyService.new(
+      bridge: first_bridge,
+      actor: actor,
+      acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT
+    ).call
+    batch = first_bridge.historical_import_batch
+    paycheck = batch.historical_paychecks.order(:id).first
+    original_gross = paycheck.gross_pay
+    input = {
+      kind: "correction",
+      effective_pay_date: paycheck.pay_date.iso8601,
+      reason: "Correct source wage classification",
+      idempotency_key: "ytd-revision-adjustment",
+      gross_pay: 100,
+      federal_income_tax: 10,
+      social_security_tax: 6.20,
+      medicare_tax: 1.45
+    }
+    preview = HistoricalPayroll::AdjustmentPreviewService.new(
+      paycheck: paycheck, actor: actor, attributes: input
+    ).call
+    adjustment = HistoricalPayroll::AdjustmentCreateService.new(
+      paycheck: paycheck,
+      actor: actor,
+      attributes: input,
+      acknowledgement: HistoricalPayroll::AdjustmentCreateService::ACKNOWLEDGEMENT,
+      preview_digest: preview.digest
+    ).call
+
+    stale_period = build_next_period(company)
+    stale_period.save!
+    expect(stale_period).not_to be_valid(:payroll_calculation)
+    expect(stale_period.errors[:base]).to include(/revised historical YTD bridge/)
+
+    blocked = QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
+    expect(blocked).to be_previewed
+    expect(blocked.revision).to eq(2)
+    expect(blocked.validation_errors.join(" ")).to include("requires filing review")
+    boundary_end = Date.iso8601(first_bridge.preview_summary.fetch("through_period_end"))
+    boundary_pay_date = Date.iso8601(first_bridge.preview_summary.fetch("through_pay_date"))
+    overlapping = company.pay_periods.build(
+      start_date: boundary_end,
+      end_date: boundary_end + 7.days,
+      pay_date: [ boundary_pay_date, boundary_end + 7.days ].max + 1.day,
+      status: "draft"
+    )
+    expect(overlapping).not_to be_valid
+    expect(overlapping.errors[:start_date]).to include(/must be after the imported QuickBooks history/)
+
+    HistoricalPayroll::AdjustmentEventService.new(
+      adjustment: adjustment,
+      actor: actor,
+      event_type: "filing_reviewed_no_amendment"
+    ).call
+    revised = QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
+    expect(revised).to have_attributes(revision: 2, supersedes_historical_ytd_bridge_id: first_bridge.id)
+    expect(revised).to be_ready_to_apply
+    expect(revised.preview_summary).to include(
+      "adjustment_ids" => [ adjustment.id ],
+      "adjustment_deltas" => include("gross_pay" => "100.0")
+    )
+    expect(revised.reconciliation_summary).to include("passed" => true)
+
+    QuickbooksHistory::YtdBridgeApplyService.new(
+      bridge: revised,
+      actor: actor,
+      acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT
+    ).call
+
+    expect(first_bridge.reload).to be_applied
+    expect(first_bridge.historical_employee_ytd_balances).to exist
+    expect(revised.reload).to be_applied
+    expect(revised.historical_employee_ytd_balances).to exist
+    expect(adjustment.events.where(event_type: "ytd_revision_activated", historical_ytd_bridge: revised)).to exist
+    expect(paycheck.reload.gross_pay).to eq(original_gross)
+    expect(stale_period.reload).to be_valid(:payroll_calculation)
+  end
+
+  it "reuses an applied revision only when the complete YTD plan is unchanged" do
+    first_bridge = prepare_previewed_bridge
+    QuickbooksHistory::YtdBridgeApplyService.new(
+      bridge: first_bridge,
+      actor: actor,
+      acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT
+    ).call
+    batch = first_bridge.historical_import_batch
+    reconciliation = batch.tax_wage_reconciliation.deep_dup
+    reconciliation["checks"].first["source_amount"] = "0.0"
+    batch.update_column(:tax_wage_reconciliation, reconciliation)
+
+    revised = QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
+
+    expect(revised).to have_attributes(revision: 2, supersedes_historical_ytd_bridge_id: first_bridge.id)
+    expect(revised).to be_previewed
+    expect(revised.plan_digest).not_to eq(first_bridge.plan_digest)
+    expect(revised.validation_errors).not_to be_empty
   end
 
   def build_next_period(company, start_date: Date.new(2024, 6, 28))

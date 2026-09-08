@@ -82,14 +82,14 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
   end
 
   it "does not deadlock commit against the check-number worksheet" do
-    commit_at_check_assignment, release_commit = pause_commit_before_company_lock
-    worksheet_at_period_lock = observe_worksheet_period_lock
+    commit_at_check_assignment, release_commit = pause_commit_at_check_assignment
+    worksheet_at_company_lock = observe_worksheet_company_lock
     results = Queue.new
 
     commit_thread = lifecycle_thread(results, :commit!)
     commit_at_check_assignment.pop
     worksheet_thread = check_number_worksheet_thread(results)
-    worksheet_at_period_lock.pop
+    worksheet_at_company_lock.pop
     release_commit << true
     [ commit_thread, worksheet_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
 
@@ -167,7 +167,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     [ first_at_posting, release_first ]
   end
 
-  def pause_commit_before_company_lock
+  def pause_commit_at_check_assignment
     commit_at_check_assignment = Queue.new
     release_commit = Queue.new
     paused_once = false
@@ -189,13 +189,13 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     [ commit_at_check_assignment, release_commit ]
   end
 
-  def observe_worksheet_period_lock
-    worksheet_at_period_lock = Queue.new
-    allow_any_instance_of(PayPeriod).to receive(:lock!).and_wrap_original do |original, *args|
-      worksheet_at_period_lock << true if Thread.current[:check_number_worksheet]
+  def observe_worksheet_company_lock
+    worksheet_at_company_lock = Queue.new
+    allow_any_instance_of(Company).to receive(:lock!).and_wrap_original do |original, *args|
+      worksheet_at_company_lock << true if Thread.current[:check_number_worksheet]
       original.call(*args)
     end
-    worksheet_at_period_lock
+    worksheet_at_company_lock
   end
 
   def check_number_worksheet_thread(results)

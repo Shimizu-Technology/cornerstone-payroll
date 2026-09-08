@@ -18,6 +18,7 @@ interface Gate0Fixture {
   other_employee_id: number;
   historical_import_batch_id: number;
   historical_pay_period_id: number;
+  historical_paycheck_id: number;
   bonus_sync_pay_period_id: number;
   bonus_alpha_employee_id: number;
   bonus_alpha_payroll_item_id: number;
@@ -1826,5 +1827,79 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     );
     expect(retryApply.status()).toBe(422);
     expect(String((await responseJson(retryApply)).error)).toMatch(/non-editable pay period/i);
+  });
+
+  test('records a historical correction beside the locked source and exposes its immutable review workflow', async ({ browser }): Promise<void> => {
+    const sourceBefore = await adminApi.get(`admin/imported_pay_periods/${fixture.historical_pay_period_id}`);
+    expect(sourceBefore.ok()).toBeTruthy();
+    const sourceBeforeBody = await responseJson(sourceBefore);
+    const sourcePaycheckBefore = ((sourceBeforeBody.data as Record<string, unknown>).paychecks as Array<Record<string, unknown>>)[0];
+
+    const adjustment = {
+      kind: 'correction',
+      effective_pay_date: '2025-12-19',
+      reason: 'Gate 0 retained-source correction',
+      external_reference: 'GATE0-ADJ-1',
+      idempotency_key: 'gate0-historical-adjustment',
+      gross_pay: 25,
+      federal_income_tax: 5,
+    };
+    const previewResponse = await adminApi.post(
+      `admin/historical_paychecks/${fixture.historical_paycheck_id}/adjustments/preview`,
+      { data: { adjustment } },
+    );
+    expect(previewResponse.ok()).toBeTruthy();
+    const preview = (await responseJson(previewResponse)).data as Record<string, unknown>;
+    expect(preview).toMatchObject({ ready: true });
+
+    const createResponse = await adminApi.post(
+      `admin/historical_paychecks/${fixture.historical_paycheck_id}/adjustments`,
+      { data: {
+        adjustment,
+        preview_digest: preview.digest,
+        acknowledgement: 'RECORD HISTORICAL ADJUSTMENT',
+      } },
+    );
+    expect(createResponse.ok()).toBeTruthy();
+    const createdAdjustment = (await responseJson(createResponse)).data as Record<string, unknown>;
+
+    const sourceAfter = await adminApi.get(`admin/imported_pay_periods/${fixture.historical_pay_period_id}`);
+    const sourceAfterBody = await responseJson(sourceAfter);
+    const sourcePaycheckAfter = ((sourceAfterBody.data as Record<string, unknown>).paychecks as Array<Record<string, unknown>>)[0];
+    expect(sourcePaycheckAfter).toEqual(sourcePaycheckBefore);
+
+    const staffContext = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const staffPage = await staffContext.newPage();
+    await staffPage.goto(`/companies/${fixture.company_id}/pay-runs/imported/${fixture.historical_pay_period_id}`);
+    await staffPage.getByRole('button', { name: 'Adjustments' }).click();
+    await expect(staffPage.getByText('Gate 0 retained-source correction')).toBeVisible();
+    await expect(staffPage.getByText('Gross $25.00 · Net $20.00')).toBeVisible();
+    await expect(staffPage.getByRole('button', { name: 'Reverse adjustment' })).toBeVisible();
+    await staffContext.close();
+
+    const accountantContext = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.accountant_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const accountantPage = await accountantContext.newPage();
+    await accountantPage.goto(`/companies/${fixture.company_id}/pay-runs/imported/${fixture.historical_pay_period_id}`);
+    await accountantPage.getByRole('button', { name: 'Adjustments' }).click();
+    await expect(accountantPage.getByText('Gate 0 retained-source correction')).toBeVisible();
+    await expect(accountantPage.getByRole('button', { name: 'Record adjustment' })).toHaveCount(0);
+    await expect(accountantPage.getByRole('button', { name: 'Reverse adjustment' })).toHaveCount(0);
+    await accountantContext.close();
+
+    const eventResponse = await adminApi.post(
+      `admin/historical_paycheck_adjustments/${String(createdAdjustment.id)}/event`,
+      { data: { event_type: 'filing_reviewed_no_amendment', note: 'Reviewed in Gate 0' } },
+    );
+    expect(eventResponse.ok()).toBeTruthy();
   });
 });

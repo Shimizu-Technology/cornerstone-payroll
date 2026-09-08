@@ -7,7 +7,9 @@ class HistoricalClientBootstrap < ApplicationRecord
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :applied_by, class_name: "User", optional: true
   has_many :historical_client_bootstrap_dispatches, dependent: :restrict_with_error
-  has_one :historical_ytd_bridge, dependent: :restrict_with_error
+  has_many :historical_ytd_bridges, dependent: :restrict_with_error
+  has_one :historical_ytd_bridge, -> { order(revision: :desc, id: :desc) },
+          class_name: "HistoricalYtdBridge", dependent: :restrict_with_error
 
   validates :historical_import_batch_id, uniqueness: true
   validates :plan_digest, presence: true

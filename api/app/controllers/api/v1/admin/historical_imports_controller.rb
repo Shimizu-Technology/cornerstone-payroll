@@ -516,6 +516,8 @@ module Api
 
           payload = {
             id: bridge.id,
+            revision: bridge.revision,
+            supersedes_historical_ytd_bridge_id: bridge.supersedes_historical_ytd_bridge_id,
             status: bridge.status,
             plan_digest: bridge.plan_digest,
             preview_summary: bridge.preview_summary,

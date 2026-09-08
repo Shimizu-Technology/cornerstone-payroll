@@ -1622,6 +1622,8 @@ module Api
           unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
           historical_paychecks = unified.historical_paychecks
           historical_by_employee = historical_paychecks.group_by(&:employee_id)
+          historical_adjustments = unified.historical_adjustments
+          adjustments_by_employee = historical_adjustments.group_by { |adjustment| adjustment.historical_paycheck.employee_id }
           disclosure = PayrollFieldDisclosure.new(items)
 
           {
@@ -1634,13 +1636,17 @@ module Api
                 employee,
                 items_by_employee[employee.id] || [],
                 historical_by_employee[employee.id] || [],
+                adjustments_by_employee[employee.id] || [],
                 unified: unified
               )
             end),
-            company_totals: payroll_period_company_totals(items, period, historical_paychecks, unified: unified),
+            company_totals: payroll_period_company_totals(
+              items, period, historical_paychecks, historical_adjustments, unified: unified
+            ),
             source_summary: unified.source_summary(
               native_items: items,
               historical_paychecks: historical_paychecks,
+              historical_adjustments: historical_adjustments,
               excluded_unlinked_paychecks: unified.unlinked_historical_paychecks
             ),
             payroll_fields: {
@@ -1651,7 +1657,7 @@ module Api
           }
         end
 
-        def payroll_period_employee_row(employee, items, historical_paychecks = [], unified: nil)
+        def payroll_period_employee_row(employee, items, historical_paychecks = [], historical_adjustments = [], unified: nil)
           custom_totals = custom_ytd_totals_for_items(items)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
 
@@ -1684,13 +1690,13 @@ module Api
             custom_deductions_total: custom_totals[:custom_deductions_total],
             net_pay: items.sum { |item| item.net_pay.to_f }
           }
-          return row if historical_paychecks.empty?
+          return row if historical_paychecks.empty? && historical_adjustments.empty?
 
           (unified || UnifiedPayrollReporting.new(company_id: current_company_id, period: payroll_reporting_period))
-            .add_historical_to_employee_row(row, historical_paychecks)
+            .add_historical_to_employee_row(row, historical_paychecks, historical_adjustments)
         end
 
-        def payroll_period_company_totals(items, period, historical_paychecks = [], unified: nil)
+        def payroll_period_company_totals(items, period, historical_paychecks = [], historical_adjustments = [], unified: nil)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
 
           row = {
@@ -1718,12 +1724,13 @@ module Api
             imported_payroll_count: 0,
             imported_opening_summary_count: 0
           }
-          return row if historical_paychecks.empty?
+          return row if historical_paychecks.empty? && historical_adjustments.empty?
 
           (unified || UnifiedPayrollReporting.new(company_id: current_company_id, period: period))
             .add_historical_to_company_totals(
               row,
               historical_paychecks,
+              historical_adjustments,
               native_employee_ids: items.map(&:employee_id)
             )
         end
@@ -1939,10 +1946,13 @@ module Api
           unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
           item_rows = items.to_a
           historical_paychecks = unified.historical_paychecks(employee_id: employee.id)
+          historical_adjustments = unified.historical_adjustments(employee_id: employee.id)
           entries = item_rows.map do |item|
             { type: :native, record: item, pay_date: item.pay_period.pay_date, id: item.id }
           end + historical_paychecks.map do |paycheck|
             { type: :imported, record: paycheck, pay_date: paycheck.pay_date, id: paycheck.id }
+          end + historical_adjustments.map do |adjustment|
+            { type: :adjustment, record: adjustment, pay_date: adjustment.effective_pay_date, id: adjustment.id }
           end
           entries.sort_by! { |entry| [ entry.fetch(:pay_date), entry.fetch(:type).to_s, entry.fetch(:id) ] }
           entries.reverse!
@@ -1950,11 +1960,18 @@ module Api
           entries = entries.first(limit) if limit
           selected_items = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :native }
           selected_historical = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :imported }
+          selected_adjustments = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :adjustment }
           history = entries.map do |entry|
-            entry.fetch(:type) == :native ? pay_history_item(entry.fetch(:record)) : unified.history_row(entry.fetch(:record))
+            case entry.fetch(:type)
+            when :native then pay_history_item(entry.fetch(:record))
+            when :imported then unified.history_row(entry.fetch(:record))
+            else unified.adjustment_history_row(entry.fetch(:record))
+            end
           end
           disclosure = PayrollFieldDisclosure.new(selected_items)
-          summary = payroll_period_employee_row(employee, selected_items, selected_historical, unified: unified)
+          summary = payroll_period_employee_row(
+            employee, selected_items, selected_historical, selected_adjustments, unified: unified
+          )
 
           {
             type: "employee_pay_history",
@@ -1973,7 +1990,11 @@ module Api
             # Kept for older clients while they move from the YTD label to the
             # exact pay-date period summary.
             ytd: summary.merge(year: period.year),
-            source_summary: unified.source_summary(native_items: selected_items, historical_paychecks: selected_historical),
+            source_summary: unified.source_summary(
+              native_items: selected_items,
+              historical_paychecks: selected_historical,
+              historical_adjustments: selected_adjustments
+            ),
             payroll_fields: {
               totals: disclosure.totals,
               entries: disclosure.rows,
@@ -3331,6 +3352,7 @@ module Api
           cornerstone = summary[:cornerstone] || {}
           quickbooks = summary[:quickbooks] || {}
           bridge = summary[:historical_ytd_bridge] || {}
+          adjustments = summary[:adjustments] || {}
           {
             name: "Payroll Sources",
             rows: [
@@ -3344,6 +3366,9 @@ module Api
               [ "Excluded unlinked QuickBooks paychecks", quickbooks[:excluded_unlinked_paycheck_count] ],
               [ "Excluded unlinked QuickBooks gross pay", quickbooks[:excluded_unlinked_gross_pay] ],
               [ "Excluded unlinked QuickBooks net pay", quickbooks[:excluded_unlinked_net_pay] ],
+              [ "Historical ledger adjustments", adjustments[:count] ],
+              [ "Historical adjustment gross delta", adjustments[:gross_pay_delta] ],
+              [ "Historical adjustment net delta", adjustments[:net_pay_delta] ],
               [ "Historical YTD bridge applied", bridge[:applied] ],
               [ "Historical YTD through pay date", bridge[:through_pay_date] ],
               [ "Source handling", summary[:source_statement] ]

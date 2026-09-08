@@ -9,14 +9,11 @@ module QuickbooksHistory
 
     def call
       ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: batch.company_id)
-      existing = batch.historical_ytd_bridge
-      return existing if existing&.applied?
 
       HistoricalYtdBridge.transaction do
         batch.company.lock!
         batch.lock!
-        existing = batch.historical_ytd_bridge
-        next existing if existing&.applied?
+        existing = batch.historical_ytd_bridges.order(revision: :desc, id: :desc).first
 
         raise ArgumentError, "Lock the approved QuickBooks history before preparing historical YTD" unless batch.locked?
 
@@ -24,6 +21,9 @@ module QuickbooksHistory
         raise ArgumentError, "Apply the clean-client employee setup before preparing historical YTD" unless bootstrap&.applied?
 
         plan = YtdBridgePlan.new(batch: batch).call
+        if existing&.applied? && ActiveSupport::SecurityUtils.secure_compare(existing.plan_digest, plan.digest)
+          next existing
+        end
         missing_boundaries = HistoricalYtdBridge::BOUNDARY_KEYS.select { |key| plan.summary[key].blank? }
         if missing_boundaries.any?
           message = plan.errors.presence&.join(". ") ||
@@ -31,11 +31,17 @@ module QuickbooksHistory
           raise ArgumentError, message
         end
 
-        bridge = existing || batch.build_historical_ytd_bridge(
-          company: batch.company,
-          historical_client_bootstrap: bootstrap,
-          created_by: actor
-        )
+        bridge = if existing&.previewed?
+          existing
+        else
+          batch.historical_ytd_bridges.build(
+            company: batch.company,
+            historical_client_bootstrap: bootstrap,
+            created_by: actor,
+            revision: existing ? existing.revision + 1 : 1,
+            supersedes_historical_ytd_bridge: existing
+          )
+        end
         bridge.assign_attributes(
           status: "previewed",
           plan_digest: plan.digest,
@@ -65,6 +71,7 @@ module QuickbooksHistory
         subject_name: batch.source_label,
         metadata: {
           historical_import_batch_id: batch.id,
+          revision: bridge.revision,
           plan_digest: plan.digest,
           ready: plan.ready?,
           employee_count: plan.summary.fetch("employee_count", 0),

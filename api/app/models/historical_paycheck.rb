@@ -8,6 +8,7 @@ class HistoricalPaycheck < ApplicationRecord
   belongs_to :historical_worker
   belongs_to :company
   belongs_to :employee, optional: true
+  has_many :historical_paycheck_adjustments, dependent: :restrict_with_error
 
   validates :external_key, :source_employee_name, :pay_date, :period_start, :period_end, presence: true
   validates :external_key, uniqueness: { scope: :historical_import_batch_id }

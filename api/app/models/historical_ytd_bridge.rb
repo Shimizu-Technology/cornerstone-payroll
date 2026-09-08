@@ -9,14 +9,22 @@ class HistoricalYtdBridge < ApplicationRecord
   belongs_to :historical_client_bootstrap
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :applied_by, class_name: "User", optional: true
+  belongs_to :supersedes_historical_ytd_bridge, class_name: "HistoricalYtdBridge", optional: true
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
+  has_many :historical_paycheck_adjustment_events, dependent: :restrict_with_error
+  has_one :superseding_historical_ytd_bridge, class_name: "HistoricalYtdBridge",
+                                              foreign_key: :supersedes_historical_ytd_bridge_id,
+                                              inverse_of: :supersedes_historical_ytd_bridge,
+                                              dependent: :restrict_with_error
 
-  validates :historical_import_batch_id, :historical_client_bootstrap_id, uniqueness: true
+  validates :revision, numericality: { only_integer: true, greater_than: 0 }
+  validates :revision, uniqueness: { scope: :historical_import_batch_id }
   validates :status, inclusion: { in: STATUSES }
   validates :plan_digest, presence: true
   validate :tenant_and_sources_match
   validate :preview_summary_declares_boundary
   validate :boundary_unchanged_after_balances, on: :update
+  validate :revision_chain_is_consistent
 
   before_update :prevent_applied_update
   before_destroy :prevent_destroy
@@ -63,6 +71,26 @@ class HistoricalYtdBridge < ApplicationRecord
     return unless historical_employee_ytd_balances.exists?
 
     errors.add(:preview_summary, "cannot change after historical YTD balances exist")
+  end
+
+  def revision_chain_is_consistent
+    if revision.to_i == 1 && supersedes_historical_ytd_bridge.present?
+      errors.add(:supersedes_historical_ytd_bridge, "must be blank for revision 1")
+      return
+    end
+    return if revision.to_i == 1 && supersedes_historical_ytd_bridge.blank?
+
+    unless supersedes_historical_ytd_bridge
+      errors.add(:supersedes_historical_ytd_bridge, "is required after revision 1")
+      return
+    end
+    if supersedes_historical_ytd_bridge.historical_import_batch_id != historical_import_batch_id ||
+       supersedes_historical_ytd_bridge.company_id != company_id
+      errors.add(:supersedes_historical_ytd_bridge, "must belong to the same historical import")
+    end
+    if revision != supersedes_historical_ytd_bridge.revision + 1
+      errors.add(:revision, "must immediately follow the superseded revision")
+    end
   end
 
   def prevent_applied_update

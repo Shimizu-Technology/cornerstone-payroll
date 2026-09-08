@@ -1711,6 +1711,11 @@ export interface PayrollSourceSummary {
     excluded_unlinked_gross_pay: number;
     excluded_unlinked_net_pay: number;
   };
+  adjustments: {
+    count: number;
+    gross_pay_delta: number;
+    net_pay_delta: number;
+  };
   historical_ytd_bridge: {
     applied: boolean;
     tax_years: number[];
@@ -1721,10 +1726,12 @@ export interface PayrollSourceSummary {
 
 export interface EmployeePayHistoryRecord {
   key: string;
-  record_type: 'native' | 'imported';
+  record_type: 'native' | 'imported' | 'adjustment';
   payroll_item_id: number | null;
   pay_period_id: number | null;
   historical_pay_period_id: number | null;
+  historical_paycheck_id?: number | null;
+  historical_adjustment_id?: number | null;
   pay_date: string;
   period_description: string;
   scheduled_hours: number | null;
@@ -1744,8 +1751,9 @@ export interface EmployeePayHistoryRecord {
   total_deductions: number;
   net_pay: number;
   check_number: string | null;
+  reason?: string;
   source: {
-    system: 'cornerstone' | 'quickbooks_online';
+    system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
     label: string;
     locked: boolean;
   };
@@ -3899,6 +3907,8 @@ export interface HistoricalImportBatch {
 
 export interface HistoricalYtdBridgeSummary {
   id: number;
+  revision: number;
+  supersedes_historical_ytd_bridge_id?: number | null;
   status: 'previewed' | 'applied';
   plan_digest: string;
   preview_summary: {
@@ -3909,6 +3919,11 @@ export interface HistoricalYtdBridgeSummary {
     through_period_end?: string | null;
     gross_pay: string;
     net_pay: string;
+    adjustment_ids?: number[];
+    adjustment_digest?: string;
+    source_snapshot_totals?: Record<string, string>;
+    adjustment_deltas?: Record<string, string>;
+    adjusted_totals?: Record<string, string>;
   };
   reconciliation_summary: {
     passed: boolean;
@@ -4050,6 +4065,62 @@ export interface HistoricalPaycheck {
   employer_contribution_breakdown: HistoricalBreakdownLine[];
 }
 
+export interface HistoricalPaycheckAdjustmentEvent {
+  id: number;
+  event_type: string;
+  note?: string | null;
+  metadata: Record<string, unknown>;
+  historical_ytd_bridge_id?: number | null;
+  created_at: string;
+  created_by_name?: string | null;
+}
+
+export interface HistoricalPaycheckAdjustment {
+  id: number;
+  historical_paycheck_id: number;
+  reverses_adjustment_id?: number | null;
+  kind: 'correction' | 'void' | 'reversal';
+  effective_pay_date: string;
+  filing_year: number;
+  filing_quarter: number;
+  reason: string;
+  external_reference?: string | null;
+  evidence_metadata: Record<string, unknown>;
+  idempotency_key: string;
+  created_at: string;
+  created_by_name?: string | null;
+  filing_review_state: 'unreviewed' | 'no_amendment_required' | 'amendment_required' | 'amendment_filed_external';
+  downstream_impact_required: boolean;
+  downstream_impact_acknowledged: boolean;
+  values: Record<string, string | HistoricalBreakdownLine[]>;
+  events: HistoricalPaycheckAdjustmentEvent[];
+}
+
+export interface HistoricalAdjustmentInput {
+  kind: 'correction' | 'void';
+  effective_pay_date: string;
+  reason: string;
+  external_reference?: string;
+  idempotency_key: string;
+  gross_pay?: number;
+  pretax_deductions?: number;
+  federal_income_tax?: number;
+  social_security_tax?: number;
+  medicare_tax?: number;
+  after_tax_deductions?: number;
+  employer_taxes?: number;
+  employer_contributions?: number;
+}
+
+export interface HistoricalAdjustmentPreview {
+  attributes: Record<string, unknown>;
+  errors: string[];
+  warnings: string[];
+  downstream_pay_period_ids: number[];
+  digest: string;
+  ready: boolean;
+}
+
 export interface PayrollHistoryCapabilities {
   view: boolean;
   edit: boolean;
@@ -4118,6 +4189,19 @@ export const payrollHistoryApi = {
     companyId: number,
   ): Promise<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }> =>
     api.get<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }>(`/admin/imported_pay_periods/${id}`, params, { companyId }),
+};
+
+export const historicalAdjustmentsApi = {
+  list: (historicalPaycheckId: number, companyId: number): Promise<{ data: HistoricalPaycheckAdjustment[] }> =>
+    api.get<{ data: HistoricalPaycheckAdjustment[] }>(`/admin/historical_paychecks/${historicalPaycheckId}/adjustments`, undefined, { companyId }),
+  preview: (historicalPaycheckId: number, adjustment: HistoricalAdjustmentInput, companyId: number): Promise<{ data: HistoricalAdjustmentPreview }> =>
+    api.post<{ data: HistoricalAdjustmentPreview }>(`/admin/historical_paychecks/${historicalPaycheckId}/adjustments/preview`, { adjustment }, { companyId }),
+  create: (historicalPaycheckId: number, adjustment: HistoricalAdjustmentInput, previewDigest: string, acknowledgement: string, companyId: number): Promise<{ data: HistoricalPaycheckAdjustment }> =>
+    api.post<{ data: HistoricalPaycheckAdjustment }>(`/admin/historical_paychecks/${historicalPaycheckId}/adjustments`, { adjustment, preview_digest: previewDigest, acknowledgement }, { companyId }),
+  event: (id: number, eventType: string, note: string, companyId: number): Promise<{ data: HistoricalPaycheckAdjustmentEvent }> =>
+    api.post<{ data: HistoricalPaycheckAdjustmentEvent }>(`/admin/historical_paycheck_adjustments/${id}/event`, { event_type: eventType, note }, { companyId }),
+  reverse: (id: number, reason: string, idempotencyKey: string, acknowledgement: string, companyId: number): Promise<{ data: HistoricalPaycheckAdjustment }> =>
+    api.post<{ data: HistoricalPaycheckAdjustment }>(`/admin/historical_paycheck_adjustments/${id}/reverse`, { reason, idempotency_key: idempotencyKey, acknowledgement }, { companyId }),
 };
 
 export interface HistoricalImportDetail extends HistoricalImportBatch {
