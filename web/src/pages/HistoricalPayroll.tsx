@@ -43,6 +43,7 @@ import {
   type HistoricalClientBootstrapSummary,
   type HistoricalImportBatch,
   type HistoricalImportDetail,
+  type HistoricalImportProvider,
   type HistoricalPaycheck,
   type HistoricalReport,
   type HistoricalReportColumn,
@@ -53,7 +54,6 @@ import {
 import type { Employee, PaginationMeta } from '@/types';
 
 const EMPTY_META: PaginationMeta = { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 };
-const MAX_BUNDLE_FILES = 75;
 const CUTOVER_POLL_DELAYS_MS = [2_000, 3_000, 5_000, 8_000, 10_000] as const;
 const HISTORICAL_REPORTS: Array<{ value: HistoricalReportType; label: string }> = [
   { value: 'register', label: 'Payroll register' },
@@ -70,6 +70,13 @@ function dollars(value?: string | number | null): string {
 function shortDate(value?: string | null): string {
   if (!value) return '—';
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1) return `${Number(megabytes.toFixed(1))} MB`;
+  return `${Number((bytes / 1024).toFixed(1))} KB`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -243,6 +250,8 @@ export function HistoricalPayroll(): ReactElement {
   const detailQueryRef = useRef<{ page: number; periodId?: number; search: string }>({ page: 1, search: '' });
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
+  const [importProviders, setImportProviders] = useState<HistoricalImportProvider[]>([]);
+  const [selectedImportProviderKey, setSelectedImportProviderKey] = useState('quickbooks_online');
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [batchMeta, setBatchMeta] = useState<PaginationMeta>(EMPTY_META);
@@ -336,8 +345,15 @@ export function HistoricalPayroll(): ReactElement {
     const currentPreferredBatchId = selectedBatchIdRef.current !== selectionAtRequestStart
       ? selectedBatchIdRef.current
       : preferredBatchId;
+    const providers = response.meta.import_providers || [];
     setBatches(response.data);
     setArchive(response.meta.archive);
+    setImportProviders(providers);
+    if (providers.length > 0) setSelectedImportProviderKey((current) => (
+      providers.some((provider) => provider.key === current)
+        ? current
+        : providers[0]?.key || ''
+    ));
     setBatchMeta(response.meta);
     selectBatchPage(response.meta.current_page);
     selectBatch(
@@ -384,6 +400,8 @@ export function HistoricalPayroll(): ReactElement {
     setBatchListLoading(true);
     setError(null);
     setValidationErrors({});
+    setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     try {
       await loadList();
     } catch (err) {
@@ -523,6 +541,10 @@ export function HistoricalPayroll(): ReactElement {
     () => detail?.id === selectedBatchId ? detail : null,
     [detail, selectedBatchId],
   );
+  const selectedImportProvider = useMemo(
+    () => importProviders.find((provider) => provider.key === selectedImportProviderKey) || null,
+    [importProviders, selectedImportProviderKey],
+  );
   const cutoverReviewSyncKey = [
     selectedBatch?.cutover_review?.id ?? '',
     selectedBatch?.cutover_review?.status ?? '',
@@ -655,7 +677,12 @@ export function HistoricalPayroll(): ReactElement {
   const handlePreview = async (): Promise<void> => {
     if (files.length === 0) {
       setValidationErrors({});
-      setError('Select the exported QuickBooks files first.');
+      setError(`Select the exported ${selectedImportProvider?.label || 'payroll'} files first.`);
+      return;
+    }
+    if (!selectedImportProvider) {
+      setValidationErrors({});
+      setError('Choose a supported payroll source before building a preview.');
       return;
     }
     setAction('preview');
@@ -663,7 +690,7 @@ export function HistoricalPayroll(): ReactElement {
     setValidationErrors({});
     setNotice(null);
     try {
-      const response = await historicalImportsApi.preview(files);
+      const response = await historicalImportsApi.preview(files, selectedImportProvider.key);
       selectBatchPage(1);
       selectBatch(response.data.id);
       setFiles([]);
@@ -675,11 +702,11 @@ export function HistoricalPayroll(): ReactElement {
           ? 'The preview was created, but it is blocked. Add the missing reports or resolve the reconciliation issues shown below.'
           : response.meta.idempotent
             ? 'This exact bundle was already staged. The existing preview was opened.'
-            : 'QuickBooks history was staged. Review reconciliation and worker matches before applying it.',
+            : `${selectedImportProvider.label} history was staged. Review reconciliation and worker matches before applying it.`,
       });
       await loadList(1, response.data.id);
     } catch (err) {
-      handleError(err, 'QuickBooks history could not be previewed.');
+      handleError(err, `${selectedImportProvider.label} history could not be previewed.`);
     } finally {
       setAction(null);
     }
@@ -687,10 +714,27 @@ export function HistoricalPayroll(): ReactElement {
 
   const handleFileSelection = (fileList: FileList | null): void => {
     const selected = Array.from(fileList || []);
-    if (selected.length > MAX_BUNDLE_FILES) {
+    const provider = selectedImportProvider;
+    const maxFiles = provider?.max_files || 1;
+    if (selected.length > maxFiles) {
       setFiles([]);
       setValidationErrors({});
-      setError(`Select at most ${MAX_BUNDLE_FILES} files.`);
+      setError(`Select at most ${maxFiles} files for ${provider?.label || 'this source'}.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    if (provider && selected.some((file) => file.size > provider.max_file_bytes)) {
+      setFiles([]);
+      setValidationErrors({});
+      setError(`Each ${provider.label} file must be ${fileSize(provider.max_file_bytes)} or smaller.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    const bundleBytes = selected.reduce((total, file) => total + file.size, 0);
+    if (provider && bundleBytes > provider.max_bundle_bytes) {
+      setFiles([]);
+      setValidationErrors({});
+      setError(`The ${provider.label} selection must be ${fileSize(provider.max_bundle_bytes)} or smaller.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -1104,6 +1148,13 @@ export function HistoricalPayroll(): ReactElement {
   const ytdBridge = selectedBatch?.ytd_bridge;
   const linkedWorkers = selectedBatch?.worker_review_summary.linked || 0;
   const cutoverReview = selectedBatch?.cutover_review;
+  const selectedBatchProvider = selectedBatch
+    ? importProviders.find((provider) => provider.key === selectedBatch.source_system) || null
+    : null;
+  const acceptedImportExtensions = selectedImportProvider?.accepted_extensions.join(',') || undefined;
+  const acceptedImportLabel = selectedImportProvider?.accepted_extensions
+    .map((extension) => extension.replace(/^\./, '').toUpperCase())
+    .join(', ') || 'No file types available';
   const cutoverApproved = cutoverReview?.status === 'approved';
   const canDownloadCutoverEvidence = canMutate || cutoverApproved;
   const cutoverChecks = cutoverReview?.evidence?.checks || [];
@@ -1161,8 +1212,8 @@ export function HistoricalPayroll(): ReactElement {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><ArchiveRestore className="h-4 w-4" />Archive ledger</div>
-                  <CardTitle className="mt-3 text-2xl">{detailLoading && selectedBatchId ? 'Loading selected QuickBooks history…' : selectedBatch?.source_label || 'No QuickBooks history staged yet'}</CardTitle>
-                  <CardDescription className="mt-2 max-w-2xl">The archive stores the final values QuickBooks recorded. It does not calculate checks, post taxes, issue payments, or update live YTD tables.</CardDescription>
+                  <CardTitle className="mt-3 text-2xl">{detailLoading && selectedBatchId ? 'Loading selected source history…' : selectedBatch?.source_label || 'No payroll history staged yet'}</CardTitle>
+                  <CardDescription className="mt-2 max-w-2xl">The archive stores the final values recorded by {selectedBatchProvider?.label || 'the selected payroll source'}. It does not calculate checks, post taxes, issue payments, or update live YTD tables.</CardDescription>
                 </div>
                 {selectedBatch && statusBadge(selectedBatch.status)}
               </div>
@@ -1178,7 +1229,7 @@ export function HistoricalPayroll(): ReactElement {
                   <Metric label="Net payroll" value={dollars(summary.totals.net_pay)} note={`${summary.check_number_count || 0} recorded check numbers`} />
                 </div>
               ) : (
-                <div className="py-8 text-center text-sm text-neutral-500">Select a QuickBooks export bundle to create the first preview.</div>
+                <div className="py-8 text-center text-sm text-neutral-500">Select a supported payroll export bundle to create the first preview.</div>
               )}
             </CardContent>
           </Card>
@@ -1201,15 +1252,37 @@ export function HistoricalPayroll(): ReactElement {
 
         <section className="grid gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
           <Card>
-            <CardHeader><CardTitle>Stage a QuickBooks bundle</CardTitle><CardDescription>Select every exported report and supporting PDF/image. Each original file is stored privately, then checked against its SHA-256 fingerprint before a preview can be applied.</CardDescription></CardHeader>
+            <CardHeader><CardTitle>Stage a payroll export</CardTitle><CardDescription>Choose the source that produced the files. Each adapter defines its required reports, validation rules, and safe migration capabilities.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
               {canMutate ? (
                 <>
+                  <div className="space-y-2">
+                    <label htmlFor="historical-import-provider" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Import source</label>
+                    <select
+                      id="historical-import-provider"
+                      value={selectedImportProviderKey}
+                      onChange={(event) => {
+                        setSelectedImportProviderKey(event.target.value);
+                        setFiles([]);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      disabled={Boolean(action || importProviders.length === 0)}
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100"
+                    >
+                      {importProviders.map((provider) => <option key={provider.key} value={provider.key}>{provider.label}</option>)}
+                    </select>
+                    {selectedImportProvider && (
+                      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-xs leading-5 text-neutral-600">
+                        <p>{selectedImportProvider.description}</p>
+                        <p className="mt-1 font-medium text-neutral-700">Importer {selectedImportProvider.importer_version}</p>
+                      </div>
+                    )}
+                  </div>
                   <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-300 bg-primary-50/50 px-6 py-6 text-center transition hover:border-primary-500 hover:bg-primary-50 focus-within:ring-2 focus-within:ring-primary-300">
                     <UploadCloud className="h-7 w-7 text-primary-700" />
                     <span className="mt-3 text-sm font-semibold text-neutral-900">Select exported files</span>
-                    <span className="mt-1 text-xs text-neutral-500">XLS, XLSX, PDF, JPG or PNG · up to {MAX_BUNDLE_FILES} files</span>
-                    <input ref={fileInputRef} type="file" multiple accept=".xls,.xlsx,.pdf,.jpg,.jpeg,.png" className="sr-only" onChange={(event) => handleFileSelection(event.target.files)} />
+                    <span className="mt-1 text-xs text-neutral-500">{acceptedImportLabel} · up to {selectedImportProvider?.max_files || 0} files</span>
+                    <input ref={fileInputRef} type="file" multiple accept={acceptedImportExtensions} disabled={!selectedImportProvider} className="sr-only" onChange={(event) => handleFileSelection(event.target.files)} />
                   </label>
                   <div className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0 truncate text-neutral-600">{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'No files selected'}</span><Button onClick={() => void handlePreview()} disabled={!files.length || action !== null}>{action === 'preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}Build preview</Button></div>
                 </>
@@ -1272,14 +1345,14 @@ export function HistoricalPayroll(): ReactElement {
           </Card>
         </section>
 
-        {selectedBatch && (
+        {selectedBatch && selectedBatchProvider?.capabilities.client_bootstrap && (
           <Card className="overflow-hidden">
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.8),rgba(255,255,255,0.98)_58%,rgba(239,246,255,0.8))]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><UsersRound className="h-4 w-4" />Current payroll setup</div>
                   <CardTitle className="mt-2">Prepare this clean client for its next payroll</CardTitle>
-                  <CardDescription className="mt-2">Create one live employee for every QuickBooks worker, carry over supported pay rates and active recurring setup, and link the archive automatically. This is available only while the client has no live payroll data.</CardDescription>
+                  <CardDescription className="mt-2">Create one live employee for every {selectedBatchProvider.label} worker, carry over supported pay rates and active recurring setup, and link the archive automatically. This is available only while the client has no live payroll data.</CardDescription>
                 </div>
                 {clientBootstrap?.status === 'applied'
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Employees prepared</Badge>
@@ -1359,13 +1432,13 @@ export function HistoricalPayroll(): ReactElement {
           </Card>
         )}
 
-        {selectedBatch && (selectedBatch.status === 'applied' || selectedBatch.status === 'locked') && (
+        {selectedBatch && selectedBatchProvider?.capabilities.cutover_verification && (selectedBatch.status === 'applied' || selectedBatch.status === 'locked') && (
           <Card className="overflow-hidden">
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(255,247,237,0.72),rgba(255,255,255,0.98)_55%,rgba(240,253,250,0.72))]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><ShieldCheck className="h-4 w-4" />Final cutover gate</div>
-                  <CardTitle className="mt-2">Prove the archive works without QuickBooks</CardTitle>
+                  <CardTitle className="mt-2">Prove the archive works without {selectedBatchProvider.label}</CardTitle>
                   <CardDescription className="mt-2">Re-open the retained originals, parse them again, compare every worker, period, paycheck, component, count, and money total, document known limitations, and confirm the recovery plan before locking this batch.</CardDescription>
                 </div>
                 <div className="shrink-0 lg:text-right">
@@ -1431,7 +1504,7 @@ export function HistoricalPayroll(): ReactElement {
                   )}
 
                   <section>
-                    <h3 className="font-display text-lg font-extrabold text-neutral-950">No-QuickBooks checklist</h3>
+                    <h3 className="font-display text-lg font-extrabold text-neutral-950">No-{selectedBatchProvider.label} checklist</h3>
                     <p className="mt-1 text-sm leading-6 text-neutral-600">These are operational facts the application cannot safely assume. Confirm them only after someone performs each step.</p>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {Object.entries(cutoverReview.attestation_labels).map(([key, label]) => (
@@ -1449,7 +1522,7 @@ export function HistoricalPayroll(): ReactElement {
                   </div>
 
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel QuickBooks only after this approval and the business owner’s separate cancellation decision.</p>
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel {selectedBatchProvider.label} only after this approval and the business owner’s separate cancellation decision.</p>
                     <div className="flex flex-wrap gap-2">
                       {canDownloadCutoverEvidence && <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>}
                       {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
@@ -1463,14 +1536,14 @@ export function HistoricalPayroll(): ReactElement {
           </Card>
         )}
 
-        {selectedBatch?.status === 'locked' && (
+        {selectedBatch?.status === 'locked' && selectedBatchProvider?.capabilities.ytd_bridge && (
           <Card className="overflow-hidden" data-testid="historical-ytd-bridge-card">
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.9),rgba(255,255,255,0.98)_55%,rgba(239,246,255,0.8))]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-3xl">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge{ytdBridge ? ` · Revision ${ytdBridge.revision || 1}` : ''}</div>
                   <CardTitle className="mt-2">Carry verified history into the next payroll</CardTitle>
-                  <CardDescription className="mt-2">This creates immutable opening balances from the linked QuickBooks paychecks. Future payroll uses them for pay-stub YTD totals, Social Security caps, and Medicare thresholds without turning imported history into live payroll.</CardDescription>
+                  <CardDescription className="mt-2">This creates immutable opening balances from the linked {selectedBatchProvider.label} paychecks. Future payroll uses them for pay-stub YTD totals, Social Security caps, and Medicare thresholds without turning imported history into live payroll.</CardDescription>
                 </div>
                 {ytdBridge?.status === 'applied'
                   ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />Active</Badge>
@@ -1503,7 +1576,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="text-sm font-semibold">{ytdBridge.reconciliation_summary.passed ? 'Every tax and wage total matches to the cent' : 'The opening balances do not reconcile'}</p>
                     <p className="mt-1 text-sm leading-6">{ytdBridge.reconciliation_summary.checks.filter((check) => check.passed).length}/{ytdBridge.reconciliation_summary.checks.length} employee-allocation checks passed across {ytdBridge.preview_summary.tax_years.join(', ') || 'no tax years'}.</p>
                   </div>
-                  {(ytdBridge.preview_summary.adjustment_ids?.length || 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Reviewed historical adjustments included</p><p className="mt-1 leading-6">Revision {ytdBridge.revision} includes {ytdBridge.preview_summary.adjustment_ids?.length} append-only ledger {ytdBridge.preview_summary.adjustment_ids?.length === 1 ? 'entry' : 'entries'} with a gross change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.gross_pay || '0')} and net change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.net_pay || '0')}. QuickBooks source snapshots remain unchanged.</p></div>}
+                  {(ytdBridge.preview_summary.adjustment_ids?.length || 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Reviewed historical adjustments included</p><p className="mt-1 leading-6">Revision {ytdBridge.revision} includes {ytdBridge.preview_summary.adjustment_ids?.length} append-only ledger {ytdBridge.preview_summary.adjustment_ids?.length === 1 ? 'entry' : 'entries'} with a gross change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.gross_pay || '0')} and net change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.net_pay || '0')}. The original source snapshots remain unchanged.</p></div>}
                   {ytdBridge.warnings.length > 0 && (
                     <div role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
                       <p className="font-semibold">{ytdBridge.status === 'applied' ? 'Accepted source limitations in these active balances' : 'Source limitations to review before activation'}</p>
@@ -1512,7 +1585,7 @@ export function HistoricalPayroll(): ReactElement {
                   )}
                   {ytdBridge.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"><ul className="space-y-1">{ytdBridge.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">After activation, the application blocks any pay period that overlaps QuickBooks history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">After activation, the application blocks any pay period that overlaps imported history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
                     <div className="flex flex-wrap gap-2">
                       {canMutate && ytdBridge.status === 'previewed' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
                       {canMutate && ytdBridge.status === 'applied' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Check for YTD revision</Button>}
@@ -1530,7 +1603,7 @@ export function HistoricalPayroll(): ReactElement {
           <Card>
             <CardHeader>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="max-w-2xl"><CardTitle>Worker review</CardTitle><CardDescription>Link a QuickBooks name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
+                <div className="max-w-2xl"><CardTitle>Worker review</CardTitle><CardDescription>Link a source name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
                 <div className="flex flex-wrap items-center gap-2">
                   {canMutate && detail.status === 'previewed' && detail.worker_review_summary.needs_review > 0 && <Button size="sm" variant="outline" onClick={() => setArchiveWorkersConfirmation({ batchId: detail.id, batchLabel: detail.source_label })}>Keep all unlinked archive-only</Button>}
                   {workersReviewed ? <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" />All reviewed</Badge> : <Badge variant="warning">{detail.worker_review_summary.needs_review} remaining</Badge>}
@@ -1546,7 +1619,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardContent className="p-0">
               <div className="max-h-[34rem] overflow-auto border-y border-neutral-200">
                 <Table>
-                  <TableHeader><TableRow><TableHead>QuickBooks worker</TableHead><TableHead>Source status</TableHead><TableHead>Disposition</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Imported worker</TableHead><TableHead>Source status</TableHead><TableHead>Disposition</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {detail.workers.map((worker) => (
                       <TableRow key={worker.id}>
@@ -1592,7 +1665,7 @@ export function HistoricalPayroll(): ReactElement {
                 <div className="max-w-3xl">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><FileSpreadsheet className="h-4 w-4" />Accepted history</div>
                   <CardTitle className="mt-2">Historical reports</CardTitle>
-                  <CardDescription className="mt-2">Browse and export the final values recorded by QuickBooks. These reports never recalculate payroll and never mix preview batches into official history.</CardDescription>
+                  <CardDescription className="mt-2">Browse and export final values recorded by the accepted payroll sources. These reports never recalculate payroll and never mix preview batches into official history.</CardDescription>
                 </div>
                 <ReportDownloadMenu
                   formats={historicalReportFormats}
@@ -1687,7 +1760,7 @@ export function HistoricalPayroll(): ReactElement {
           <Card>
             <CardHeader>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div><CardTitle>Paycheck ledger</CardTitle><CardDescription>Final QuickBooks values, searchable by employee or check number. Open a row to inspect its itemized source lines.</CardDescription></div>
+                <div><CardTitle>Paycheck ledger</CardTitle><CardDescription>Final imported values, searchable by employee or check number. Open a row to inspect its itemized source lines.</CardDescription></div>
                 <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)]">
                   <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search historical paychecks" value={paycheckSearchDraft} onChange={(event) => setPaycheckSearchDraft(event.target.value)} placeholder="Employee or check number" className="pl-9" /></div>
                   <select aria-label="Filter historical period" value={periodId || ''} onChange={(event) => { setPeriodId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }} className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"><option value="">All {detail.periods.length} periods</option>{detail.periods.map((period) => <option key={period.id} value={period.id}>{shortDate(period.pay_date)} · {period.source_label}{period.period_type === 'opening_summary' ? ' · summary' : ''}</option>)}</select>

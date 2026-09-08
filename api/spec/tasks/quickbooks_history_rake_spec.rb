@@ -9,7 +9,7 @@ RSpec.describe "quickbooks_history:import" do
   let!(:accountant) { create(:user, company: company, organization: company.organization, role: "accountant") }
   let(:task) { Rake::Task["quickbooks_history:import"] }
   let(:bundle_dir) { Dir.mktmpdir("quickbooks-history-rake") }
-  let(:managed_env_keys) { %w[BUNDLE_DIR COMPANY_ID ACTOR_EMAIL APPLY LOCK] }
+  let(:managed_env_keys) { %w[BUNDLE_DIR COMPANY_ID ACTOR_EMAIL SOURCE_SYSTEM APPLY LOCK] }
 
   before do
     Rails.application.load_tasks unless Rake::Task.task_defined?("quickbooks_history:import")
@@ -37,5 +37,17 @@ RSpec.describe "quickbooks_history:import" do
       task.invoke
     end.to raise_error(ArgumentError, /manager or administrator with access/)
     expect(HistoricalImportBatch.count).to eq(0)
+  end
+
+  it "rejects an unregistered source before scanning the bundle" do
+    admin = create(:user, company: company, organization: company.organization, role: "admin")
+    ENV["ACTOR_EMAIL"] = admin.email
+    ENV["SOURCE_SYSTEM"] = "unsupported_payroll"
+    expect(HistoricalPayrollImports::ImportService).not_to receive(:new)
+
+    expect do
+      task.invoke
+    end.to raise_error(ArgumentError, /Unsupported historical payroll source/)
+    expect(HistoricalImportBatch).not_to exist
   end
 end

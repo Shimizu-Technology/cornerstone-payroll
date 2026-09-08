@@ -7,17 +7,9 @@ module QuickbooksHistory
   class CutoverVerificationService
     class StaleVerificationAttempt < StandardError; end
 
-    SUPPORTED_RECORDED_IMPORTER_VERSIONS = %w[
-      quickbooks-online-payroll-v2
-      quickbooks-online-payroll-v3
-      quickbooks-online-payroll-v4
-      quickbooks-online-payroll-v5
-    ].freeze
-    TAX_WAGE_IMPORTER_VERSIONS = HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS
-    LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS = %w[
-      quickbooks-online-payroll-v2
-      quickbooks-online-payroll-v3
-    ].freeze
+    SUPPORTED_RECORDED_IMPORTER_VERSIONS = HistoricalPayrollImports::QuickbooksOnlineAdapter::SUPPORTED_VERIFICATION_VERSIONS
+    TAX_WAGE_IMPORTER_VERSIONS = HistoricalPayrollImports::QuickbooksOnlineAdapter::TAX_WAGE_VERSIONS
+    LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS = HistoricalPayrollImports::QuickbooksOnlineAdapter::LEGACY_WORKER_SNAPSHOT_VERSIONS
     WORKER_FIELDS = %i[external_key source_name normalized_name source_status hire_date].freeze
     PERIOD_FIELDS = %i[external_key period_type start_date end_date pay_date source_label paycheck_count totals].freeze
     PAYCHECK_FIELDS = %i[
@@ -29,18 +21,27 @@ module QuickbooksHistory
 
     Result = Struct.new(:review, :passed, keyword_init: true)
 
-    def self.ensure_supported_importer_version!(version)
-      return if version.in?(SUPPORTED_RECORDED_IMPORTER_VERSIONS)
+    def self.ensure_supported_importer_version!(version, source_system: nil, registry: HistoricalPayrollImports::Registry.default)
+      adapter = registry.fetch!(source_system)
+      return if adapter.supports_verification_version?(version)
 
       raise ArgumentError,
-            "Importer version #{version.inspect} is unsupported. Preserve this batch and use an explicitly reviewed source migration."
+            "Importer version #{version.inspect} is unsupported for #{adapter.label}. " \
+            "Preserve this batch and use an explicitly reviewed source migration."
     end
 
-    def initialize(batch:, actor:, storage: R2StorageService.new, expected_verification_started_at: nil)
+    def initialize(
+      batch:,
+      actor:,
+      storage: R2StorageService.new,
+      expected_verification_started_at: nil,
+      registry: HistoricalPayrollImports::Registry.default
+    )
       @batch = batch
       @actor = actor
       @storage = storage
       @expected_verification_started_at = expected_verification_started_at
+      @adapter = registry.fetch!(batch.source_system)
       @tempfiles = []
     end
 
@@ -57,7 +58,7 @@ module QuickbooksHistory
 
     private
 
-    attr_reader :batch, :actor, :storage, :tempfiles, :expected_verification_started_at
+    attr_reader :batch, :actor, :storage, :tempfiles, :expected_verification_started_at, :adapter
 
     def ensure_eligible!
       authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
@@ -65,7 +66,11 @@ module QuickbooksHistory
       raise ArgumentError, "A manager or administrator with company access is required" unless authorized
 
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
-      self.class.ensure_supported_importer_version!(batch.importer_version)
+      self.class.ensure_supported_importer_version!(
+        batch.importer_version,
+        source_system: batch.source_system,
+        registry: HistoricalPayrollImports::Registry.new(adapters: [ adapter ])
+      )
       if batch.historical_import_cutover_review&.approved?
         raise ArgumentError, "The approved cutover review is sealed"
       end
@@ -81,7 +86,7 @@ module QuickbooksHistory
         tempfile.write(bytes)
         tempfile.flush
         tempfiles << tempfile
-        BundleParser::SourceFile.new(
+        adapter.source_file(
           original_filename: source_file.original_filename,
           path: tempfile.path,
           size: bytes.bytesize,
@@ -89,17 +94,19 @@ module QuickbooksHistory
           source: tempfile
         )
       end
-      raise ArgumentError, "Every retained QuickBooks source file must pass integrity verification" unless batch.reload.source_files_complete_and_verified?
+      unless batch.reload.source_files_complete_and_verified?
+        raise ArgumentError, "Every retained #{adapter.label} source file must pass integrity verification"
+      end
 
-      BundleParser.new(files: sources).call
+      adapter.parse(files: sources)
     rescue R2StorageService::DownloadError, R2StorageService::ConfigurationError
-      raise ArgumentError, "Retained QuickBooks source files could not be restored and verified"
+      raise ArgumentError, "Retained #{adapter.label} source files could not be restored and verified"
     end
 
     def build_checks(parsed)
       stored_summary = canonical(batch.preview_summary)
       fresh_summary = canonical(parsed.summary)
-      fresh_summary.delete("tax_wage_report_count") unless batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
+      fresh_summary.delete("tax_wage_report_count") unless adapter.tax_wage_version?(batch.importer_version)
       stored_reconciliation = canonical(batch.reconciliation_summary)
       fresh_reconciliation = canonical(parsed.reconciliation)
       payroll_errors = Array(fresh_reconciliation["errors"])
@@ -109,9 +116,9 @@ module QuickbooksHistory
 
       checks = [
         check("source_bundle", "Retained originals reproduce the recorded bundle", parsed.bundle_digest == batch.bundle_digest),
-        check("importer_version", "The recorded importer version is supported by this verification parser", batch.importer_version.in?(SUPPORTED_RECORDED_IMPORTER_VERSIONS)),
+        check("importer_version", "The recorded importer version is supported by this verification parser", adapter.supports_verification_version?(batch.importer_version)),
         check("source_manifest", "Fresh file classifications match the retained source manifest", canonical(parsed.manifest) == canonical(batch.source_file_manifest)),
-        check("source_reconciliation", "Fresh QuickBooks cross-report reconciliation passes", payroll_errors.empty? && fresh_reconciliation["passed"] == true),
+        check("source_reconciliation", "Fresh #{adapter.label} cross-report reconciliation passes", payroll_errors.empty? && fresh_reconciliation["passed"] == true),
         check("preview_contract", "Fresh source summary matches the staged preview", fresh_summary == stored_summary),
         check("reconciliation_contract", "Fresh reconciliation matches the staged reconciliation", fresh_reconciliation == stored_reconciliation),
         check("warning_contract", "Fresh source limitations match the staged review", canonical(parsed.warnings) == canonical(batch.warnings)),
@@ -121,10 +128,10 @@ module QuickbooksHistory
         check("worker_ledger", "Every stored worker source fact matches the retained originals", digests.dig("workers", "stored") == digests.dig("workers", "source")),
         check("period_ledger", "Every stored pay-period source fact matches the retained originals", digests.dig("periods", "stored") == digests.dig("periods", "source")),
         check("paycheck_ledger", "Every stored paycheck and component matches the retained originals", digests.dig("paychecks", "stored") == digests.dig("paychecks", "source")),
-        check("worker_review", "Every QuickBooks worker has a reviewed link or archive-only decision", batch.unresolved_worker_count.zero?),
+        check("worker_review", "Every #{adapter.label} worker has a reviewed link or archive-only decision", batch.unresolved_worker_count.zero?),
         check("source_files", "Every original source file is retained and verified", batch.source_files_complete_and_verified?)
       ]
-      if batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
+      if adapter.tax_wage_version?(batch.importer_version)
         checks << check(
           "tax_wage_reconciliation_contract",
           "Fresh Tax and Wage Summary reconciliation matches the staged evidence",
@@ -166,7 +173,7 @@ module QuickbooksHistory
         "batch_id" => batch.id,
         "bundle_digest" => batch.bundle_digest,
         "importer_version" => batch.importer_version,
-        "verification_parser_version" => BundleParser::IMPORTER_VERSION,
+        "verification_parser_version" => adapter.importer_version,
         "checks" => checks,
         "counts" => stored_counts,
         "totals" => stored_money_totals,
@@ -186,7 +193,7 @@ module QuickbooksHistory
         end,
         "fresh_source_label" => parsed.source_label
       }
-      if batch.importer_version.in?(TAX_WAGE_IMPORTER_VERSIONS)
+      if adapter.tax_wage_version?(batch.importer_version)
         evidence["tax_wage_reconciliation"] = canonical(batch.tax_wage_reconciliation)
       end
       evidence
@@ -333,7 +340,7 @@ module QuickbooksHistory
     end
 
     def legacy_worker_snapshot?
-      batch.importer_version.in?(LEGACY_WORKER_SNAPSHOT_IMPORTER_VERSIONS)
+      adapter.legacy_worker_snapshot_version?(batch.importer_version)
     end
 
     def stored_paycheck_payload(row)

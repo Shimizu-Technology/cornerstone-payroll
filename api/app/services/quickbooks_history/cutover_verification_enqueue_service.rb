@@ -12,7 +12,10 @@ module QuickbooksHistory
 
     def call
       ensure_authorized!
-      CutoverVerificationService.ensure_supported_importer_version!(batch.importer_version)
+      CutoverVerificationService.ensure_supported_importer_version!(
+        batch.importer_version,
+        source_system: batch.source_system
+      )
       review, should_enqueue = prepare_pending_review!
       return Result.new(review: review, enqueued: false) unless should_enqueue
 

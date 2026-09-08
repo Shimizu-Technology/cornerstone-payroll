@@ -2,7 +2,6 @@
 
 class HistoricalImportBatch < ApplicationRecord
   STATUSES = %w[previewed applied locked failed].freeze
-  SOURCE_SYSTEMS = %w[quickbooks_online].freeze
   YTD_BRIDGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
 
   belongs_to :company
@@ -23,7 +22,7 @@ class HistoricalImportBatch < ApplicationRecord
   has_one :latest_applied_historical_ytd_bridge, -> { where(status: "applied").order(revision: :desc, id: :desc) },
           class_name: "HistoricalYtdBridge", dependent: :restrict_with_error
 
-  validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
+  validate :source_system_is_registered
   validates :source_label, :bundle_digest, :importer_version, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :bundle_digest, uniqueness: { scope: %i[company_id source_system importer_version] }
@@ -75,6 +74,12 @@ class HistoricalImportBatch < ApplicationRecord
   end
 
   private
+
+  def source_system_is_registered
+    return if HistoricalPayrollImports::Registry.default.find(source_system)
+
+    errors.add(:source_system, "is not supported")
+  end
 
   def prevent_locked_batch_update
     persisted_status = self.class.lock.where(id: id).pick(:status)

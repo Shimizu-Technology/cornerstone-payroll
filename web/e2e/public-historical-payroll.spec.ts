@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -32,6 +32,24 @@ const acceptedArchive = {
   last_pay_date: '2024-12-31',
   gross_pay: '3000.0',
   net_pay: '2325.0',
+};
+
+const quickbooksProvider: HistoricalImportProvider = {
+  key: 'quickbooks_online',
+  label: 'QuickBooks Online Payroll',
+  description: 'Import a complete retained QuickBooks payroll export bundle and reconcile it before use.',
+  importer_version: 'quickbooks-online-payroll-v5',
+  accepted_extensions: ['.xls', '.xlsx', '.pdf', '.jpg', '.jpeg', '.png'],
+  max_files: 75,
+  max_file_bytes: 30 * 1024 * 1024,
+  max_bundle_bytes: 150 * 1024 * 1024,
+  capabilities: {
+    source_file_retention: true,
+    cutover_verification: true,
+    client_bootstrap: true,
+    ytd_bridge: true,
+  },
+  limitations: ['Requires the complete supported QuickBooks report set.'],
 };
 
 const seededEmployeeEditPath = '/companies/1/employees/900/edit';
@@ -345,7 +363,14 @@ function withoutCutoverEvidence(value: HistoricalImportDetail): HistoricalImport
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
-  await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const url = new URL(route.request().url());
+  const response = body as { meta?: Record<string, unknown> };
+  const normalizedBody = url.pathname.endsWith('/admin/historical_imports')
+    && response.meta
+    && !('import_providers' in response.meta)
+    ? { ...response, meta: { ...response.meta, import_providers: [quickbooksProvider] } }
+    : body;
+  await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(normalizedBody) });
 }
 
 async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = 'admin'): Promise<void> {
@@ -749,6 +774,79 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   await expect(page.getByText('No source inventory is attached')).toBeVisible();
 });
 
+test('drives the upload control from the registered provider contract', async ({ page }) => {
+  await mockApplicationShell(page);
+  const limitedUploadProvider = { ...quickbooksProvider, max_file_bytes: 4, max_bundle_bytes: 6 };
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [],
+    meta: {
+      current_page: 1,
+      total_pages: 0,
+      total_count: 0,
+      per_page: 50,
+      archive,
+      import_providers: [limitedUploadProvider],
+    },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.locator('#historical-import-provider')).toHaveValue('quickbooks_online');
+  await expect(page.locator('#historical-import-provider option')).toHaveText('QuickBooks Online Payroll');
+  await expect(page.getByText('Importer quickbooks-online-payroll-v5')).toBeVisible();
+  const fileInput = page.locator('input[type="file"]');
+  await expect(fileInput).toHaveAttribute('accept', '.xls,.xlsx,.pdf,.jpg,.jpeg,.png');
+  await expect(page.getByText('XLS, XLSX, PDF, JPG, JPEG, PNG · up to 75 files')).toBeVisible();
+
+  await fileInput.setInputFiles({ name: 'too-large.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('12345') });
+  await expect(page.getByRole('alert')).toContainText('Each QuickBooks Online Payroll file must be 4 B or smaller.');
+  await fileInput.setInputFiles([
+    { name: 'part-one.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('1234') },
+    { name: 'part-two.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('5678') },
+  ]);
+  await expect(page.getByRole('alert')).toContainText('The QuickBooks Online Payroll selection must be 6 B or smaller.');
+
+  const validFile = { name: 'valid.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('1234') };
+  await fileInput.setInputFiles(validFile);
+  await expect(page.getByText('1 file selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('No files selected')).toBeVisible();
+  await expect.poll(() => fileInput.evaluate((input: HTMLInputElement) => input.files?.length)).toBe(0);
+  await fileInput.setInputFiles(validFile);
+  await expect(page.getByText('1 file selected')).toBeVisible();
+});
+
+test('hides downstream workflows the selected provider has not enabled', async ({ page }) => {
+  await mockApplicationShell(page);
+  const limitedProvider: HistoricalImportProvider = {
+    ...quickbooksProvider,
+    capabilities: { ...quickbooksProvider.capabilities, client_bootstrap: false, ytd_bridge: false },
+  };
+  const lockedBatch = { ...batch(1), status: 'locked' as const };
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [lockedBatch],
+    meta: {
+      current_page: 1,
+      total_pages: 1,
+      total_count: 1,
+      per_page: 50,
+      archive,
+      import_providers: [limitedProvider],
+    },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: { ...detail(1), status: 'locked' },
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
+  await expect(page.getByText('Prepare this clean client for its next payroll')).toHaveCount(0);
+  await expect(page.getByTestId('historical-ytd-bridge-card')).toHaveCount(0);
+  await expect(page.getByText('Prove the archive works without QuickBooks Online Payroll')).toBeVisible();
+});
+
 test('hides the previous batch while a newly selected batch detail is delayed', async ({ page }) => {
   await mockApplicationShell(page);
   const sourceWorker: MockWorker = {
@@ -784,7 +882,7 @@ test('hides the previous batch while a newly selected batch detail is delayed', 
 
   await expect(page.getByText('Previous Batch Worker')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Loading selected QuickBooks history…' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Loading selected source history…' })).toBeVisible();
   await expect(page.getByRole('status')).toContainText('Loading selected batch details…');
   releaseNextDetail?.();
   await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
@@ -1578,7 +1676,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
   }));
 
   await page.goto('/historical-payroll');
-  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks Online Payroll' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Complete cutover review' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Run final verification' }).click();
@@ -1634,7 +1732,7 @@ test('gives an accountant the accepted evidence without import or source-file co
   await page.goto('/historical-payroll');
 
   await expect(page.getByText('Accountants can review imported history and reconciliation.')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prove the archive works without QuickBooks Online Payroll' })).toBeVisible();
   await expect(page.getByText('Approved', { exact: true })).toBeVisible();
   await expect(page.getByText(/by History Admin/)).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Evidence workbook' })).toBeVisible();

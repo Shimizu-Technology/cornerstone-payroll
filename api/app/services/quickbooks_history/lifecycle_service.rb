@@ -2,7 +2,7 @@
 
 module QuickbooksHistory
   class LifecycleService
-    ACKNOWLEDGEMENT = "I understand this imports authoritative QuickBooks snapshots and does not recalculate payroll."
+    ACKNOWLEDGEMENT = "I understand this imports authoritative source snapshots and does not recalculate payroll."
 
     def initialize(batch:, actor:)
       @batch = batch

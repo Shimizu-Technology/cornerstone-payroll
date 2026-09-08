@@ -6,6 +6,7 @@ module Api
       class HistoricalImportsController < BaseController
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 200
+        DEFAULT_DETAIL_RECORD_LIMIT = 2_000
 
         before_action :require_historical_payroll_enabled!
         before_action :set_batch, only: %i[
@@ -14,6 +15,12 @@ module Api
           preview_client_bootstrap apply_client_bootstrap
           preview_ytd_bridge apply_ytd_bridge
         ]
+        before_action only: %i[preview_client_bootstrap apply_client_bootstrap] do
+          require_provider_capability!(:client_bootstrap)
+        end
+        before_action only: %i[preview_ytd_bridge apply_ytd_bridge] do
+          require_provider_capability!(:ytd_bridge)
+        end
 
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
@@ -47,7 +54,8 @@ module Api
               per_page: per_page,
               total_count: total,
               total_pages: (total.to_f / per_page).ceil,
-              archive: archive
+              archive: archive,
+              import_providers: import_registry.contracts
             }
           }
         end
@@ -65,10 +73,10 @@ module Api
           render json: {
             data: batch_json(@batch, include_source_files: true, include_cutover_evidence: true).merge(
               periods: @batch.historical_pay_periods.reverse_chronological
-                             .limit(QuickbooksHistory::BundleParser::MAX_PERIOD_COUNT)
+                             .limit(import_registry.find(@batch.source_system)&.max_periods || DEFAULT_DETAIL_RECORD_LIMIT)
                              .map { |period| period_json(period) },
               workers: @batch.historical_workers.includes(:employee).order(:normalized_name)
-                             .limit(QuickbooksHistory::BundleParser::MAX_WORKER_COUNT)
+                             .limit(import_registry.find(@batch.source_system)&.max_workers || DEFAULT_DETAIL_RECORD_LIMIT)
                              .map { |worker| worker_json(worker) },
               paychecks: paychecks.map { |paycheck| paycheck_json(paycheck) }
             ),
@@ -83,10 +91,12 @@ module Api
 
         def preview
           files = Array(params[:files]).compact
-          result = QuickbooksHistory::ImportService.new(
+          result = HistoricalPayrollImports::ImportService.new(
             company: current_company,
             files: files,
-            actor: current_user
+            actor: current_user,
+            source_system: params[:source_system],
+            registry: import_registry
           ).call
           unless result.success?
             render json: error_payload(result.error), status: :unprocessable_entity
@@ -363,6 +373,22 @@ module Api
         def error_payload(error)
           details = error.respond_to?(:record) ? error.record.errors.to_hash : {}
           { error: error.message, details: details }
+        end
+
+        def import_registry
+          @import_registry ||= HistoricalPayrollImports::Registry.default
+        end
+
+        def require_provider_capability!(capability)
+          adapter = import_registry.fetch!(@batch.source_system)
+          return if adapter.capabilities.fetch(capability)
+
+          render json: {
+            error: "#{adapter.label} does not support #{capability.to_s.humanize.downcase}",
+            details: {}
+          }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: error_payload(e), status: :unprocessable_entity
         end
 
         def archive_summary
