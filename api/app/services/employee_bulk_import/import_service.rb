@@ -30,10 +30,11 @@ module EmployeeBulkImport
     ].freeze
     DATE_COLUMNS = %w[date_of_birth hire_date w4_effective_on].freeze
 
-    attr_reader :company, :errors
+    attr_reader :company, :errors, :actor
 
-    def initialize(company)
+    def initialize(company, actor: nil)
       @company = company
+      @actor = actor
       @errors = []
     end
 
@@ -85,6 +86,7 @@ module EmployeeBulkImport
 
           employee = company.employees.new(attrs)
           if employee.save
+            create_w4_election!(employee)
             results[:created] += 1
           else
             results[:failed] += 1
@@ -390,6 +392,18 @@ module EmployeeBulkImport
       end
 
       attrs
+    end
+
+    def create_w4_election!(employee)
+      return if employee.contractor?
+
+      EmployeeW4ElectionChangeService.new(
+        employee: employee,
+        attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) },
+        actor: actor,
+        source: "employee_creation",
+        reason: "Initial W-4 election from employee bulk import"
+      ).call!
     end
   end
 end

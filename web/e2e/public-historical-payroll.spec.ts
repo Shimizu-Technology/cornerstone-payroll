@@ -499,10 +499,14 @@ test('preserves decimal employer matches and explains every migrated setup revie
 
   await pretaxMatch.fill('4.75');
   await pretaxMatch.blur();
+  await page.locator('input[name="w4_effective_on"]').fill('2026-09-01');
+  await page.getByLabel('Reason for this W-4 change').fill('Current signed W-4 verified during migration review');
   await page.getByRole('button', { name: 'Update Employee' }).click();
 
   await expect.poll(() => submittedEmployee?.employer_retirement_match_rate).toBe(0.0475);
   expect(submittedEmployee?.employer_roth_match_rate).toBe(0.035);
+  expect(submittedEmployee?.w4_effective_on).toBe('2026-09-01');
+  expect(submittedEmployee?.w4_change_reason).toBe('Current signed W-4 verified during migration review');
 });
 
 test('hides QuickBooks setup review outside a migrated employee needing review', async ({ page }) => {

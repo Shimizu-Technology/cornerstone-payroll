@@ -558,7 +558,7 @@ class E2eReleaseFixture
     end
 
     def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:, default_payroll_adjustments: [], employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)
-      Employee.create!(
+      employee = Employee.create!(
         company: company,
         department: department,
         first_name: first_name,
@@ -573,6 +573,7 @@ class E2eReleaseFixture
         status: "active",
         filing_status: "single",
         allowances: 0,
+        w4_effective_on: employment_type == "contractor" ? nil : hire_date,
         hire_date: hire_date,
         address_line1: "100 Test Avenue",
         city: "Hagåtña",
@@ -580,6 +581,18 @@ class E2eReleaseFixture
         zip: "96910",
         default_payroll_adjustments: default_payroll_adjustments
       )
+
+      unless employee.contractor?
+        EmployeeW4ElectionChangeService.new(
+          employee: employee,
+          attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) },
+          actor: nil,
+          source: "employee_creation",
+          reason: "Initial W-4 election for the synthetic release fixture"
+        ).call!
+      end
+
+      employee
     end
 
     def existing_adjustments

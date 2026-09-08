@@ -81,7 +81,7 @@ class EmployeeChangeRequest < ApplicationRecord
       ensure_pending!
       employee.lock!
       verify_original_values!
-      apply_proposed_changes!
+      apply_proposed_changes!(actor: actor)
       update!(
         status: :approved,
         reviewed_by: actor,
@@ -112,14 +112,23 @@ class EmployeeChangeRequest < ApplicationRecord
     raise ActiveRecord::RecordInvalid, self
   end
 
-  def apply_proposed_changes!
+  def apply_proposed_changes!(actor:)
     attrs = effective_proposed_changes
     wage_rates = attrs.delete(:wage_rates)
     validate_supported_change_keys!(attrs.keys)
     safe_attrs = attrs.slice(*PERMITTED_EMPLOYEE_UPDATE_KEYS)
     validate_department_scope!(safe_attrs)
 
+    w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+
     employee.update!(safe_attrs) if safe_attrs.present?
+    EmployeeW4ElectionChangeService.new(
+      employee: employee,
+      attributes: w4_attrs,
+      actor: actor,
+      source: "client_approved",
+      reason: "Approved client employee change request ##{id}"
+    ).call! if w4_attrs.present?
     return unless wage_rates.present?
 
     EmployeeWageRateSyncService.new(employee: employee, wage_rates: wage_rates).sync!

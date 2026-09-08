@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -473,24 +473,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   end
 
   create_table "employee_loans", force: :cascade do |t|
+    t.date "balance_as_of", null: false
+    t.string "balance_source", null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
+    t.bigint "created_by_id"
     t.decimal "current_balance", precision: 10, scale: 2, default: "0.0", null: false
     t.bigint "deduction_type_id"
     t.bigint "employee_id", null: false
     t.string "name", null: false
     t.text "notes"
+    t.decimal "opening_balance", precision: 10, scale: 2, null: false
     t.decimal "original_amount", precision: 10, scale: 2, null: false
     t.date "paid_off_date"
     t.decimal "payment_amount", precision: 10, scale: 2
+    t.boolean "principal_amount_known", default: true, null: false
     t.date "start_date"
     t.string "status", default: "active", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "status"], name: "index_employee_loans_on_company_id_and_status"
     t.index ["company_id"], name: "index_employee_loans_on_company_id"
+    t.index ["created_by_id"], name: "index_employee_loans_on_created_by_id"
     t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
+    t.check_constraint "balance_source::text = ANY (ARRAY['new_loan'::character varying::text, 'quickbooks'::character varying::text, 'statement'::character varying::text, 'employee_confirmation'::character varying::text, 'other_verified'::character varying::text])", name: "employee_loans_balance_source_check"
   end
 
   create_table "employee_payroll_fields", force: :cascade do |t|
@@ -562,6 +569,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
     t.datetime "updated_at", null: false
     t.index ["employee_id", "label"], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index ["employee_id"], name: "index_employee_wage_rates_on_employee_id"
+  end
+
+  create_table "employee_w4_elections", force: :cascade do |t|
+    t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0", null: false
+    t.integer "allowances", default: 0, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.date "effective_on", null: false
+    t.bigint "employee_id", null: false
+    t.string "filing_status", null: false
+    t.text "reason", null: false
+    t.string "source", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
+    t.integer "w4_form_version", default: 2020, null: false
+    t.boolean "w4_step2_multiple_jobs", default: false, null: false
+    t.decimal "w4_step4a_other_income", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
+    t.index ["company_id", "effective_on"], name: "idx_employee_w4_elections_company_effective"
+    t.index ["company_id"], name: "index_employee_w4_elections_on_company_id"
+    t.index ["created_by_id"], name: "index_employee_w4_elections_on_created_by_id"
+    t.index ["employee_id", "effective_on", "created_at"], name: "idx_employee_w4_elections_effective"
+    t.index ["employee_id"], name: "index_employee_w4_elections_on_employee_id"
+    t.check_constraint "filing_status::text = ANY (ARRAY['single'::character varying::text, 'married'::character varying::text, 'married_separate'::character varying::text, 'head_of_household'::character varying::text])", name: "employee_w4_elections_filing_status_check"
+    t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text])", name: "employee_w4_elections_source_check"
   end
 
   create_table "employee_work_profiles", force: :cascade do |t|
@@ -1464,6 +1497,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
     t.text "notes"
     t.bigint "pay_period_id"
     t.bigint "payroll_item_id"
+    t.bigint "recorded_by_id"
+    t.string "source", null: false
     t.date "transaction_date", null: false
     t.string "transaction_type", null: false
     t.datetime "updated_at", null: false
@@ -1471,7 +1506,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
     t.index ["employee_loan_id"], name: "index_loan_transactions_on_employee_loan_id"
     t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
     t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
+    t.index ["recorded_by_id"], name: "index_loan_transactions_on_recorded_by_id"
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
+    t.check_constraint "source::text = ANY (ARRAY['opening_balance'::character varying::text, 'payroll'::character varying::text, 'manual'::character varying::text])", name: "loan_transactions_source_check"
   end
 
   create_table "non_employee_check_edits", force: :cascade do |t|
@@ -2660,6 +2697,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
+  add_foreign_key "employee_loans", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
@@ -2668,6 +2706,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   add_foreign_key "employee_status_events", "users", column: "actor_id"
   add_foreign_key "employee_tipped_occupations", "employees", on_delete: :cascade
   add_foreign_key "employee_wage_rates", "employees"
+  add_foreign_key "employee_w4_elections", "companies", on_delete: :restrict
+  add_foreign_key "employee_w4_elections", "employees", on_delete: :restrict
+  add_foreign_key "employee_w4_elections", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_work_profiles", "companies"
   add_foreign_key "employee_work_profiles", "employees"
   add_foreign_key "employee_work_profiles", "users", column: "confirmed_by_id"
@@ -2781,6 +2822,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   add_foreign_key "loan_transactions", "employee_loans"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"
+  add_foreign_key "loan_transactions", "users", column: "recorded_by_id", on_delete: :nullify
   add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade

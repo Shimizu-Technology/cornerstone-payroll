@@ -19,6 +19,7 @@ class EmployeeClassificationTransitionService
       validate_transition!
 
       new_employee = Employee.create!(new_employee_attributes)
+      create_w4_election!(new_employee)
       create_primary_wage_rate!(new_employee)
 
       employee.update!(
@@ -190,6 +191,18 @@ class EmployeeClassificationTransitionService
       is_primary: true,
       active: true
     )
+  end
+
+  def create_w4_election!(new_employee)
+    return if new_employee.contractor?
+
+    EmployeeW4ElectionChangeService.new(
+      employee: new_employee,
+      attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| new_employee.public_send(attribute) },
+      actor: actor,
+      source: "employee_creation",
+      reason: "Initial W-4 election for tax-classification transition"
+    ).call!
   end
 
   def pay_rate
