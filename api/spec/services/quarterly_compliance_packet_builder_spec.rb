@@ -104,6 +104,73 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(report.dig(:pay_periods, 0, :guam_withholding)).to eq(125.0)
     end
 
+    it "uses locked QuickBooks payroll in quarterly reports without recreating its payments" do
+      imported = create_historical_filing_source(
+        company: company,
+        employee: employee,
+        pay_date: Date.new(2026, 4, 10),
+        gross_pay: 1_000,
+        federal_income_tax: 80,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        employer_social_security_tax: 62,
+        employer_medicare_tax: 14.50
+      )
+      live_period = create_committed_period(
+        start_date: Date.new(2026, 4, 7),
+        end_date: Date.new(2026, 4, 20),
+        pay_date: Date.new(2026, 4, 24)
+      )
+      live_item = create_item(pay_period: live_period, gross_pay: 2_000)
+      live_item.update!(withholding_tax: 100, net_pay: 1_871)
+
+      report = described_class.new(company, 2026, 2).generate
+      imported_period = report[:pay_periods].find { |row| row[:source] == "quickbooks" }
+
+      expect(report.dig(:meta, :source_summary, :cornerstone, :pay_period_count)).to eq(1)
+      expect(report.dig(:meta, :source_summary, :quickbooks, :pay_period_count)).to eq(1)
+      expect(report.dig(:w1, :total_guam_withholding)).to eq(180.0)
+      expect(report.dig(:swica, :totals, :total_wages)).to eq(3_000.0)
+      expect(report.dig(:federal_941, :report, :meta, :source_summary, :quickbooks, :included)).to be(true)
+      expect(imported_period).to include(
+        id: "quickbooks:period:#{imported.fetch(:period).id}",
+        source: "quickbooks",
+        read_only: true,
+        payment_status: "paid_before_cornerstone",
+        gross_pay: 1_000.0
+      )
+
+      expect(report.dig(:form_500, :total_guam_withholding)).to eq(100.0)
+      expect(report.dig(:form_500, :excluded_historical_withholding)).to eq(80.0)
+      expect(report.dig(:form_500, :deposits).map { |row| row[:pay_period_id] }).to eq([ live_period.id ])
+    end
+
+    it "does not add Additional Medicare twice when a committed item already stores it" do
+      prior_period = create_committed_period(
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 15),
+        pay_date: Date.new(2026, 3, 20)
+      )
+      current_period = create_committed_period(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 17)
+      )
+      create_item(pay_period: prior_period, gross_pay: 199_000)
+      current = create_item(pay_period: current_period, gross_pay: 2_000)
+      current.update!(
+        medicare_tax: 38,
+        employer_medicare_tax: 29,
+        medicare_taxable_wages: 2_000,
+        additional_medicare_taxable_wages: 1_000
+      )
+
+      report = described_class.new(company, 2026, 2).generate
+
+      expect(report.dig(:pay_periods, 0, :federal_941_liability)).to eq(67.0)
+      expect(report.dig(:swica, :employees, 0, :federal_941_liability)).to eq(67.0)
+    end
+
     it "flags contractor-tagged payroll that contains W-2 tax amounts" do
       period = create_committed_period(
         start_date: Date.new(2026, 6, 16),

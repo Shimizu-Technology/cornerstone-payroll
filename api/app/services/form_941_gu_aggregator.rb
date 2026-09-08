@@ -567,7 +567,7 @@ class Form941GuAggregator
   end
 
   def ss_wage_base
-    AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
+    AnnualTaxConfig.historical_ss_wage_base(year)&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
       raise ArgumentError, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
     end
   end

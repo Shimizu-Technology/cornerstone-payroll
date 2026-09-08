@@ -17,7 +17,9 @@ class W2GuPreflightValidator
     findings = []
 
     findings.concat(employer_findings)
-    findings.concat(employee_findings)
+    employee_ids, source_findings = filing_employee_ids
+    findings.concat(source_findings)
+    findings.concat(employee_findings(employee_ids))
 
     {
       year: year,
@@ -52,27 +54,14 @@ class W2GuPreflightValidator
     out
   end
 
-  def employee_findings
+  def employee_findings(employee_ids)
     out = []
-
-    employee_ids = PayrollItem
-      .joins(:pay_period)
-      .where(company_id: company.id)
-      .not_voided
-      .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company.id)
-          .where('EXTRACT(YEAR FROM pay_date) = ?', year)
-          .select(:id)
-      })
-      .distinct
-      .pluck(:employee_id)
 
     if employee_ids.empty?
       out << Finding.new(
         severity: 'blocking',
         code: 'NO_COMMITTED_PAYROLL',
-        message: "No committed payroll items found for #{year}. Cannot validate W-2 readiness."
+        message: "No committed Cornerstone or locked imported payroll found for #{year}. Cannot validate W-2 readiness."
       )
       return out
     end
@@ -98,6 +87,45 @@ class W2GuPreflightValidator
     end
 
     out
+  end
+
+  def filing_employee_ids
+    native_ids = PayrollItem
+      .joins(:pay_period)
+      .where(company_id: company.id)
+      .not_voided
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+          .where(company_id: company.id, pay_date: year_range)
+          .select(:id)
+      })
+      .distinct
+      .pluck(:employee_id)
+
+    return [ native_ids, [] ] unless locked_historical_payroll?
+
+    source = HistoricalPayrollFilingSource.new(company)
+    source.validate!(range: year_range)
+    historical_ids = source.annual_balances(year).filter_map(&:employee_id)
+    [ (native_ids + historical_ids).uniq, [] ]
+  rescue ArgumentError => e
+    finding = Finding.new(
+      severity: 'blocking',
+      code: 'HISTORICAL_PAYROLL_NOT_READY',
+      message: "Locked imported payroll is not ready for W-2GU filing review: #{e.message}"
+    )
+    [ native_ids || [], [ finding ] ]
+  end
+
+  def year_range
+    Date.new(year, 1, 1)..Date.new(year, 12, 31)
+  end
+
+  def locked_historical_payroll?
+    company.historical_import_batches
+      .joins(:historical_paychecks)
+      .where(status: "locked", historical_paychecks: { pay_date: year_range })
+      .exists?
   end
 
   def serialize(finding)

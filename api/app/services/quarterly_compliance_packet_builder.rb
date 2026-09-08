@@ -57,6 +57,28 @@ class QuarterlyCompliancePacketBuilder
                               .order(:pay_date, :id)
   end
 
+  def historical_payroll_source
+    @historical_payroll_source ||= HistoricalPayrollFilingSource.new(company)
+  end
+
+  def historical_records
+    return @historical_records if defined?(@historical_records)
+
+    scope = company.historical_import_batches
+                   .joins(:historical_paychecks)
+                   .where(status: "locked", historical_paychecks: { pay_date: quarter_start..quarter_end })
+    @historical_records = if scope.exists?
+      historical_payroll_source.validate!(range: quarter_start..quarter_end)
+      historical_payroll_source.records(range: quarter_start..quarter_end)
+    else
+      []
+    end
+  end
+
+  def filing_records
+    @filing_records ||= payroll_items + historical_records
+  end
+
   def payroll_items
     @payroll_items ||= PayrollItem.includes(:payroll_item_earnings, :payroll_item_deductions, :employee, :pay_period)
                                   .joins(:employee, :pay_period)
@@ -97,7 +119,18 @@ class QuarterlyCompliancePacketBuilder
       quarter_end: quarter_end.iso8601,
       period_basis: "pay_date",
       generated_at: Time.current.iso8601,
-      pay_periods_included: pay_periods.count,
+      pay_periods_included: native_pay_period_rows.length + historical_pay_period_count,
+      source_summary: {
+        cornerstone: {
+          pay_period_count: native_pay_period_rows.length,
+          payroll_item_count: payroll_items.length
+        },
+        quickbooks: {
+          pay_period_count: historical_pay_period_count,
+          record_count: historical_records.length,
+          opening_summary_count_excluded: historical_payroll_source.opening_summary_count(range: quarter_start..quarter_end)
+        }
+      },
       document_status: "draft_not_filed"
     }
   end
@@ -120,15 +153,22 @@ class QuarterlyCompliancePacketBuilder
       guam_track: "Guam withholding belongs to Form 500 and W-1; SWICA reports quarterly employee wage detail.",
       federal_track: "Federal Form 941 reports Social Security, Medicare, Additional Medicare, deposits, and liability schedule.",
       form_941_guam_lines_2_3: "Skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
-      schedule_b: "Schedule B is a liability schedule by pay date, not a payment list."
+      schedule_b: "Schedule B is a liability schedule by pay date, not a payment list.",
+      imported_payroll: "Locked QuickBooks wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
     }
   end
 
   def pay_period_rows
-    @pay_period_rows ||= pay_periods.map do |period|
+    @pay_period_rows ||= native_pay_period_rows + historical_pay_period_rows
+  end
+
+  def native_pay_period_rows
+    @native_pay_period_rows ||= pay_periods.map do |period|
       period_items = payroll_items.select { |item| item.pay_period_id == period.id }
       {
         id: period.id,
+        source: "cornerstone",
+        read_only: false,
         start_date: period.start_date.iso8601,
         end_date: period.end_date.iso8601,
         pay_date: period.pay_date.iso8601,
@@ -144,6 +184,35 @@ class QuarterlyCompliancePacketBuilder
         federal_941_liability: money(federal_liability_for_items(period_items))
       }
     end
+  end
+
+  def historical_pay_period_rows
+    @historical_pay_period_rows ||= historical_records
+      .group_by { |record| historical_period_group_key(record) }
+      .map do |key, records|
+        first = records.first
+        {
+          id: key,
+          source: "quickbooks",
+          read_only: true,
+          payment_status: "paid_before_cornerstone",
+          record_type: first.record_type,
+          start_date: records.map(&:period_start).compact.min&.iso8601,
+          end_date: records.map(&:period_end).compact.max&.iso8601,
+          pay_date: records.map(&:pay_date).max.iso8601,
+          employee_count: records.map(&:employee_id).uniq.count,
+          gross_pay: money(records.sum(&:gross_pay)),
+          net_pay: money(records.sum(&:net_pay)),
+          deductions: money(records.sum { |record| record.pretax_deductions + record.after_tax_deductions }),
+          guam_withholding: money(total_income_tax_withheld(records)),
+          social_security_tax: money(records.sum(&:social_security_tax)),
+          medicare_tax: money(records.sum(&:medicare_tax)),
+          employer_social_security_tax: money(records.sum(&:employer_social_security_tax)),
+          employer_medicare_tax: money(records.sum(&:employer_medicare_tax)),
+          federal_941_liability: money(federal_liability_for_records(records))
+        }
+      end
+      .sort_by { |row| [ row[:pay_date], row[:id] ] }
   end
 
   def workflow_section
@@ -164,7 +233,7 @@ class QuarterlyCompliancePacketBuilder
 
   def form_500_section
     @form_500_section ||= begin
-      deposits = pay_period_rows.map do |period|
+      deposits = native_pay_period_rows.map do |period|
         filing = form500_filings_by_pay_period_id[period[:id]]
         {
           pay_period_id: period[:id],
@@ -183,6 +252,9 @@ class QuarterlyCompliancePacketBuilder
       {
         policy: "per_pay_period",
         total_guam_withholding: money(total_income_tax_withheld(payroll_items)),
+        historical_payroll_excluded: true,
+        excluded_historical_withholding: money(total_income_tax_withheld(historical_records)),
+        historical_exclusion_note: "QuickBooks payroll was paid before Cornerstone and does not create a second Form 500 deposit or payment task.",
         total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
         unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
         unreconciled_balance: money(total_income_tax_withheld(payroll_items).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
@@ -193,7 +265,7 @@ class QuarterlyCompliancePacketBuilder
 
   def w1_section
     @w1_section ||= begin
-      daily = liability_rows_by_pay_date(:total_income_tax_withheld)
+      daily = liability_rows_by_pay_date(filing_records, :total_income_tax_withheld)
       {
         filing_channel: "GuamTax.com Quarterly -> W-1",
         quarter_ending_month: quarter_end.month,
@@ -206,7 +278,7 @@ class QuarterlyCompliancePacketBuilder
         filing_status: "not_started",
         tie_out: tie_out(
           label: "W-1 Guam withholding",
-          expected: total_income_tax_withheld(payroll_items),
+          expected: total_income_tax_withheld(filing_records),
           actual: daily.sum { |row| row[:amount].to_f }
         ),
         filing_steps: [
@@ -254,7 +326,7 @@ class QuarterlyCompliancePacketBuilder
         ],
         tie_out: tie_out(
           label: "SWICA wages and withholding",
-          expected: payroll_items.sum(&:gross_pay),
+          expected: filing_records.sum(&:gross_pay),
           actual: employees.sum { |row| row[:swica_wages].to_f }
         )
       }
@@ -287,9 +359,14 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def employee_rows
-    payroll_items.group_by(&:employee).filter_map do |employee, items|
-      gross = items.sum(&:gross_pay)
-      next if gross.to_f.zero? && total_income_tax_withheld(items).zero?
+    employees_by_id = Employee.where(company_id: company.id, id: filing_records.map(&:employee_id).uniq).index_by(&:id)
+
+    filing_records.group_by(&:employee_id).filter_map do |employee_id, records|
+      employee = employees_by_id[employee_id]
+      next unless employee
+
+      gross = records.sum(&:gross_pay)
+      next if gross.to_f.zero? && total_income_tax_withheld(records).zero?
 
       {
         employee_id: employee.id,
@@ -298,21 +375,22 @@ class QuarterlyCompliancePacketBuilder
         status: employee.status,
         termination_date: employee.termination_date&.iso8601,
         gross_pay: money(gross),
-        net_pay: money(items.sum(&:net_pay)),
-        deductions: money(deductions_total(items)),
+        net_pay: money(records.sum(&:net_pay)),
+        deductions: money(records.sum { |record| deductions_for_record(record) }),
         swica_wages: money(gross),
-        reported_tips: money(items.sum(&:reported_tips)),
-        non_taxable_pay: money(items.sum(&:non_taxable_pay)),
-        guam_withholding: money(total_income_tax_withheld(items)),
-        social_security_tax: money(items.sum(&:social_security_tax)),
-        employer_social_security_tax: money(items.sum(&:employer_social_security_tax)),
-        medicare_tax: money(items.sum(&:medicare_tax)),
-        employer_medicare_tax: money(items.sum(&:employer_medicare_tax)),
-        federal_941_liability: money(federal_liability_for_items(items)),
-        social_security_wages: money(items.sum { |item| [ item.gross_pay.to_f - item.reported_tips.to_f, 0 ].max }),
-        social_security_tips: money(items.sum(&:reported_tips)),
-        medicare_wages_tips: money(gross),
-        pay_dates: items.map { |item| item.pay_period.pay_date.iso8601 }.uniq
+        reported_tips: money(records.sum(&:reported_tips)),
+        non_taxable_pay: money(records.sum { |record| non_taxable_pay_for_record(record) }),
+        guam_withholding: money(total_income_tax_withheld(records)),
+        social_security_tax: money(records.sum(&:social_security_tax)),
+        employer_social_security_tax: money(records.sum(&:employer_social_security_tax)),
+        medicare_tax: money(records.sum(&:medicare_tax)),
+        employer_medicare_tax: money(records.sum(&:employer_medicare_tax)),
+        federal_941_liability: money(federal_liability_for_records(records)),
+        social_security_wages: money(records.sum { |record| social_security_wages_for_record(record) }),
+        social_security_tips: money(records.sum { |record| social_security_tips_for_record(record) }),
+        medicare_wages_tips: money(records.sum { |record| medicare_wages_for_record(record) }),
+        pay_dates: records.map { |record| pay_date_for_record(record).iso8601 }.uniq.sort,
+        sources: records.map { |record| historical_record?(record) ? "quickbooks" : "cornerstone" }.uniq.sort
       }
     end
   end
@@ -334,7 +412,7 @@ class QuarterlyCompliancePacketBuilder
           medicare_wages_tips: taxable_earning_category?(category),
           non_taxable: non_taxable_category?(category)
         }
-      end.sort_by { |row| [ row[:category], row[:label] ] }
+      end.concat(historical_component_taxability).sort_by { |row| [ row[:category], row[:label] ] }
     end
   end
 
@@ -348,7 +426,9 @@ class QuarterlyCompliancePacketBuilder
         basis: "pay_date",
         quarter_start: quarter_start.iso8601,
         quarter_end: quarter_end.iso8601,
-        pay_periods_included: pay_periods.count
+        pay_periods_included: pay_period_rows.length,
+        cornerstone_pay_periods: native_pay_period_rows.length,
+        quickbooks_pay_periods: historical_pay_period_count
       },
       href: "/pay-periods"
     )
@@ -383,9 +463,10 @@ class QuarterlyCompliancePacketBuilder
     checks << review_check(
       "form_500_payments_reconciled",
       form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
-      "Form 500 payment confirmations reconcile to quarterly Guam withholding.",
+      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported QuickBooks payments are not recreated.",
       details: {
         expected_withholding: form_500_section[:total_guam_withholding],
+        imported_withholding_excluded: form_500_section[:excluded_historical_withholding],
         confirmed_payments: form_500_section[:total_confirmed_payments],
         unconfirmed_amount_count: form_500_section[:unconfirmed_amount_count],
         unreconciled_balance: form_500_section[:unreconciled_balance]
@@ -424,12 +505,12 @@ class QuarterlyCompliancePacketBuilder
     { key: key, status: ok ? "ok" : "needs_review", message: message, details: details, href: href }
   end
 
-  def liability_rows_by_pay_date(column)
-    payroll_items.group_by { |item| item.pay_period.pay_date }.map do |pay_date, items|
+  def liability_rows_by_pay_date(records, column)
+    records.group_by { |record| pay_date_for_record(record) }.map do |pay_date, rows|
       {
         pay_date: pay_date.iso8601,
         month: pay_date.month,
-        amount: money(items.sum(&column))
+        amount: money(rows.sum(&column))
       }
     end.sort_by { |row| row[:pay_date] }
   end
@@ -510,6 +591,14 @@ class QuarterlyCompliancePacketBuilder
       running_wages = prior_medicare_wages_by_employee_before(employee_items.map { |item| item.pay_period.pay_date }.min)[employee_id].to_f
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
+        # Modern committed items already include Additional Medicare in the
+        # stored employee Medicare amount. Reconstruct only legacy rows whose
+        # committed snapshot predates the taxable-base field.
+        if item.additional_medicare_taxable_wages.present?
+          running_wages += (item.medicare_taxable_wages || item.gross_pay).to_f
+          next
+        end
+
         previous_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
         running_wages += item.gross_pay.to_f
         current_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
@@ -549,12 +638,99 @@ class QuarterlyCompliancePacketBuilder
     additional_medicare_tax_allocations(items).values.sum
   end
 
-  def deductions_total(items)
-    items.sum do |item|
-      gross = item.gross_pay.to_f
-      taxes = item.total_income_tax_withheld.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
-      [ gross - item.net_pay.to_f - taxes, 0 ].max
+  def historical_record?(record)
+    record.respond_to?(:historical_source?) && record.historical_source?
+  end
+
+  def pay_date_for_record(record)
+    historical_record?(record) ? record.pay_date : record.pay_period.pay_date
+  end
+
+  def historical_period_group_key(record)
+    if record.record_type == "source_snapshot"
+      "quickbooks:period:#{record.historical_pay_period_id}"
+    else
+      record.key
     end
+  end
+
+  def historical_pay_period_count
+    historical_records
+      .select { |record| record.record_type == "source_snapshot" }
+      .map(&:historical_pay_period_id)
+      .uniq
+      .length
+  end
+
+  def deductions_for_record(record)
+    return record.pretax_deductions.to_d + record.after_tax_deductions.to_d if historical_record?(record)
+
+    gross = record.gross_pay.to_d
+    taxes = record.total_income_tax_withheld.to_d + record.social_security_tax.to_d + record.medicare_tax.to_d
+    [ gross - record.net_pay.to_d - taxes, 0.to_d ].max
+  end
+
+  def non_taxable_pay_for_record(record)
+    historical_record?(record) ? record.non_taxable_pay.to_d : record.non_taxable_pay.to_d
+  end
+
+  def social_security_wages_for_record(record)
+    stored = record.social_security_taxable_wages
+    return stored.to_d unless stored.nil?
+
+    [ record.gross_pay.to_d - record.reported_tips.to_d, 0.to_d ].max
+  end
+
+  def social_security_tips_for_record(record)
+    stored = record.social_security_taxable_tips
+    stored.nil? ? record.reported_tips.to_d : stored.to_d
+  end
+
+  def medicare_wages_for_record(record)
+    stored = record.medicare_taxable_wages
+    stored.nil? ? record.gross_pay.to_d : stored.to_d
+  end
+
+  def federal_liability_for_records(records)
+    native, imported = records.partition { |record| !historical_record?(record) }
+    imported_liability = imported.sum(0.to_d) do |record|
+      record.social_security_tax.to_d + record.employer_social_security_tax.to_d +
+        record.medicare_tax.to_d + record.employer_medicare_tax.to_d
+    end
+    federal_liability_for_items(native).to_d + imported_liability
+  end
+
+  def historical_component_taxability
+    tips = historical_records.sum(0.to_d, &:reported_tips)
+    non_taxable = historical_records.sum(0.to_d, &:non_taxable_pay)
+    other_taxable = historical_records.sum(0.to_d, &:gross_pay) - tips - non_taxable
+
+    [
+      imported_component("regular", "Imported taxable wages", other_taxable),
+      imported_component("tips", "Imported reported tips", tips),
+      imported_component("non_taxable", "Imported non-taxable pay", non_taxable)
+    ].compact
+  end
+
+  def imported_component(category, label, amount)
+    return if amount.zero?
+
+    {
+      category: category,
+      label: label,
+      amount: money(amount),
+      guam_withholding_wages: taxable_earning_category?(category),
+      swica_wages: taxable_earning_category?(category),
+      social_security_wages: ss_wage_category?(category),
+      social_security_tips: category == "tips",
+      medicare_wages_tips: taxable_earning_category?(category),
+      non_taxable: non_taxable_category?(category),
+      source: "quickbooks"
+    }
+  end
+
+  def deductions_total(items)
+    items.sum { |item| deductions_for_record(item) }
   end
 
 
@@ -563,21 +739,12 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def suggested_federal_deposit_schedule
-    lookback_start = Date.new(year - 2, 7, 1)
-    lookback_end = Date.new(year - 1, 6, 30)
-    lookback_periods = PayPeriod.reportable_committed
-                                .where(company_id: company.id, pay_date: lookback_start..lookback_end)
-    lookback_items = PayrollItem.includes(:pay_period)
-                                .joins(:pay_period)
-                                .where(pay_periods: { id: lookback_periods.select(:id) })
-                                .not_voided
-                                .where.not(employment_type: "contractor")
-                                .to_a
-    liability = lookback_items.sum(&:social_security_tax).to_f +
-      lookback_items.sum(&:employer_social_security_tax).to_f +
-      lookback_items.sum(&:medicare_tax).to_f +
-      lookback_items.sum(&:employer_medicare_tax).to_f +
-      additional_medicare_tax_for_lookback_items(lookback_items)
+    liability = [ [ year - 2, 3 ], [ year - 2, 4 ], [ year - 1, 1 ], [ year - 1, 2 ] ].sum do |lookback_year, lookback_quarter|
+      Form941GuAggregator.new(company, lookback_year, lookback_quarter)
+                         .generate
+                         .dig(:lines, :line12_total_after_credits)
+                         .to_f
+    end
     liability > 50_000 ? "semiweekly" : "monthly"
   end
 
