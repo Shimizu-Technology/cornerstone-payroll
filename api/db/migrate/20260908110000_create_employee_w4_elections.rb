@@ -38,7 +38,10 @@ class CreateEmployeeW4Elections < ActiveRecord::Migration[8.0]
         company_id,
         employee_id,
         effective_on,
-        filing_status,
+        CASE
+          WHEN filing_status IN ('single', 'married', 'married_separate', 'head_of_household') THEN filing_status
+          ELSE 'single'
+        END,
         allowances,
         additional_withholding,
         w4_dependent_credit,
