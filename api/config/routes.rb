@@ -126,6 +126,17 @@ Rails.application.routes.draw do
             patch "workers/:worker_id", action: :update_worker, as: :worker
           end
         end
+        resources :historical_paychecks, only: [] do
+          resources :adjustments, controller: "historical_paycheck_adjustments", only: %i[index create] do
+            post :preview, on: :collection
+          end
+        end
+        resources :historical_paycheck_adjustments, only: [] do
+          member do
+            post :reverse
+            post :event
+          end
+        end
         resources :historical_reports, param: :report_type, only: [ :show ] do
           member do
             get :csv

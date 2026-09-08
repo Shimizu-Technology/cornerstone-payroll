@@ -106,6 +106,11 @@ class PayPeriod < ApplicationRecord
                will_save_change_to_pay_date? ||
                will_save_change_to_status?
            }
+  validate :uses_current_historical_ytd_revision,
+           if: lambda {
+             validation_context == :payroll_calculation ||
+               (will_save_change_to_status? && status != "draft")
+           }
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
 
@@ -369,6 +374,23 @@ class PayPeriod < ApplicationRecord
     if pay_date.present? && pay_date <= boundary_pay_date
       errors.add(:pay_date, "must be after the imported QuickBooks history paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
     end
+  end
+
+  def uses_current_historical_ytd_revision
+    return if company_id.blank?
+
+    stale_batch = HistoricalImportBatch.where(company_id: company_id, status: "locked")
+                                       .includes(:historical_ytd_bridges, historical_paychecks: :historical_paycheck_adjustments)
+                                       .detect do |batch|
+      next false unless batch.historical_paychecks.any? { |paycheck| paycheck.historical_paycheck_adjustments.any? }
+
+      latest_applied = batch.historical_ytd_bridges.select(&:applied?).max_by { |bridge| [ bridge.revision, bridge.id ] }
+      latest_applied.nil? ||
+        latest_applied.preview_summary.to_h["adjustment_digest"] != HistoricalPayroll::Ledger.new(batch: batch).adjustment_digest
+    end
+    return unless stale_batch
+
+    errors.add(:base, "Apply the revised historical YTD bridge before calculating or finalizing payroll")
   end
 
   def pay_date_after_end_date
