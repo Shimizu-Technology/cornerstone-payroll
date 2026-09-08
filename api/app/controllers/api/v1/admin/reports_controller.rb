@@ -2459,11 +2459,11 @@ module Api
         def payroll_register_sheets(report)
           employees = Array(report[:employees])
           contractors = Array(report[:contractors])
-          adjustment_columns = payroll_adjustment_export_columns(employees + contractors)
+          adjustment_export = PayrollAdjustmentExport.new(employees + contractors)
           field_columns = payroll_field_export_columns(employees + contractors)
-          detail_headers = PAYROLL_REGISTER_HEADERS + adjustment_columns.map { |column| payroll_adjustment_export_header(column) } + field_columns.map { |column| payroll_field_export_header(column) }
-          employee_rows = employees.map { |emp| payroll_export_row(emp) + payroll_adjustment_export_values(emp, adjustment_columns) + payroll_field_export_values(emp, field_columns) }
-          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + payroll_adjustment_export_values(emp, adjustment_columns) + payroll_field_export_values(emp, field_columns) }
+          detail_headers = PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
@@ -2493,40 +2493,6 @@ module Api
               }
             end
             .sort_by { |column| [ payroll_field_export_group_order(column[:group]), column[:treatment], column[:label] ] }
-        end
-
-        def payroll_adjustment_export_columns(workers)
-          workers.flat_map { |worker| active_payroll_adjustment_snapshot_entries(worker) }
-            .group_by { |entry| payroll_adjustment_export_key(entry) }
-            .map do |key, entries|
-              entry = entries.first
-              { key: key, label: entry[:label].to_s, treatment: entry[:treatment].to_s, source: entry[:source].to_s }
-            end
-            .sort_by { |column| [ column[:treatment], column[:label], column[:source] ] }
-        end
-
-        def active_payroll_adjustment_snapshot_entries(worker)
-          Array(worker[:payroll_adjustments]).reject { |entry| entry[:active] == false }
-        end
-
-        def payroll_adjustment_export_key(entry)
-          [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
-        end
-
-        def payroll_adjustment_export_header(column)
-          source = {
-            "employee_default" => "employee setup snapshot",
-            "manual" => "manual pay-period entry",
-            "legacy_snapshot" => "legacy snapshot"
-          }.fetch(column[:source], "snapshot")
-          "Payroll Adjustment - #{column[:label]} (#{column[:treatment].humanize}; #{source})"
-        end
-
-        def payroll_adjustment_export_values(worker, columns)
-          columns.map do |column|
-            entries = active_payroll_adjustment_snapshot_entries(worker).select { |entry| payroll_adjustment_export_key(entry) == column[:key] }
-            entries.empty? ? nil : entries.sum { |entry| entry[:amount].to_f }
-          end
         end
 
         def active_payroll_field_snapshot_entries(worker)
@@ -3236,9 +3202,10 @@ module Api
         end
 
         def payroll_adjustment_breakdown_sheet(report)
+          export = payroll_adjustment_export(report)
           rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Adjustment", "Source", "Notes", "Amount" ] ]
           (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
-            active_payroll_adjustment_snapshot_entries(emp).each do |entry|
+            export.entries_for(emp).each do |entry|
               rows << [
                 emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
                 entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:notes], entry[:amount]
@@ -3249,12 +3216,15 @@ module Api
         end
 
         def payroll_adjustment_totals_sheet(report)
-          entries = (Array(report[:employees]) + Array(report[:contractors])).flat_map { |emp| active_payroll_adjustment_snapshot_entries(emp) }
           rows = [ [ "Kind", "Tax Treatment", "Adjustment", "Source", "Amount" ] ]
-          entries.group_by { |entry| payroll_adjustment_export_key(entry) }.sort_by { |key, _| key.map(&:to_s) }.each do |(label, treatment, source), grouped|
-            rows << [ grouped.first[:kind], treatment, label, source, grouped.sum { |entry| entry[:amount].to_f } ]
+          payroll_adjustment_export(report).grouped_totals.each do |entry|
+            rows << [ entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:amount] ]
           end
           { name: "Payroll Adjustments Totals", rows: rows }
+        end
+
+        def payroll_adjustment_export(report)
+          PayrollAdjustmentExport.new(Array(report[:employees]) + Array(report[:contractors]))
         end
 
         def payroll_field_totals_sheet(report)

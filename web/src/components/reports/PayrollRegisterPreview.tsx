@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from 'react';
+import { Fragment, useEffect, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,18 @@ interface PayrollAdjustmentColumn {
   treatment: string;
   group: 'addition' | 'deduction';
   source: string;
+}
+
+interface PayrollAdjustmentHeaderProps {
+  column: PayrollAdjustmentColumn;
+}
+
+interface PayrollAdjustmentCellProps extends PayrollAdjustmentHeaderProps {
+  worker: PayrollWorker;
+}
+
+interface PayrollComponentsDisclosureProps {
+  report: PayrollRegister;
 }
 
 function currency(value: unknown) {
@@ -83,7 +95,7 @@ const payrollAdjustmentTypeLabels: Record<string, string> = {
   legacy_snapshot: 'Historical adjustment',
 };
 
-function payrollAdjustmentIdentity(entry: PayrollAdjustmentEntry) {
+function payrollAdjustmentIdentity(entry: PayrollAdjustmentEntry): string {
   return [entry.label, entry.treatment, entry.source || 'legacy_snapshot'].join(':');
 }
 
@@ -119,20 +131,20 @@ function payrollAdjustmentAmount(worker: PayrollWorker, column: PayrollAdjustmen
   return matching.reduce((total, entry) => total + Number(entry.amount || 0), 0);
 }
 
-function PayrollAdjustmentHeader({ column }: { column: PayrollAdjustmentColumn }) {
+function PayrollAdjustmentHeader({ column }: PayrollAdjustmentHeaderProps): ReactElement {
   const tone = column.group === 'deduction' ? 'bg-amber-50 text-amber-950' : 'bg-emerald-50 text-emerald-950';
   return (
-    <th className={`${tone} min-w-40 border-b border-r border-slate-200 px-3 py-2 align-bottom`}>
+    <th className={`${tone} min-w-40 border-b border-r border-slate-200 px-4 py-2 align-bottom`}>
       <span className="block font-bold leading-4">{column.label}</span>
-      <span className="mt-1 block text-[10px] font-medium leading-3 opacity-70">{column.treatment} · {column.source}</span>
+      <span className="mt-2 block text-[10px] font-medium leading-3 opacity-70">{column.treatment} · {column.source}</span>
     </th>
   );
 }
 
-function PayrollAdjustmentCell({ worker, column }: { worker: PayrollWorker; column: PayrollAdjustmentColumn }) {
+function PayrollAdjustmentCell({ worker, column }: PayrollAdjustmentCellProps): ReactElement {
   const amount = payrollAdjustmentAmount(worker, column);
   return (
-    <td className="border-b border-r border-slate-100 bg-white px-3 py-2 text-right tabular-nums">
+    <td className="border-b border-r border-slate-100 bg-white px-4 py-2 text-right tabular-nums">
       {amount === null ? <span className="text-slate-400">—</span> : currency(amount)}
     </td>
   );
@@ -410,7 +422,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
     sum + (payrollFieldAmount(worker, column) || 0)
   ), 0);
-  const adjustmentTotal = (column: PayrollAdjustmentColumn) => workers.reduce((sum, worker) => (
+  const adjustmentTotal = (column: PayrollAdjustmentColumn): number => workers.reduce((sum, worker) => (
     sum + (payrollAdjustmentAmount(worker, column) || 0)
   ), 0);
   const contractorCount = report.summary.contractor_count ?? report.contractors.length;
@@ -524,7 +536,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('reported_tips'))}</td>
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('tips_paid_out'))}</td>
                 {adjustmentAdditionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
                 ))}
                 {additionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
@@ -533,7 +545,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                   <td key={key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total(key))}</td>
                 ))}
                 {adjustmentDeductionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
                 ))}
                 {deductionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
@@ -553,7 +565,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   );
 }
 
-function PayrollComponentsDisclosure({ report }: { report: PayrollRegister }) {
+function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProps): ReactElement | null {
   const workers = [...report.employees, ...report.contractors];
   const fieldRows = workers.flatMap((worker) => (
     (worker.payroll_field_entries || [])
@@ -602,17 +614,17 @@ function PayrollComponentsDisclosure({ report }: { report: PayrollRegister }) {
     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
       <div className="border-b border-neutral-200 px-5 py-4">
         <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Payroll components</p>
-        <h3 className="mt-1 font-bold text-neutral-950">Recurring fields and pay-period adjustments</h3>
-        <p className="mt-1 max-w-4xl text-sm leading-6 text-neutral-600">
+        <h3 className="mt-2 font-bold text-neutral-950">Recurring fields and pay-period adjustments</h3>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-neutral-600">
           These snapshotted values are already reflected in gross pay, deductions, net pay, and taxable wages. Their source shows whether they came from employee setup or were entered for this pay period; later setup changes do not rewrite this payroll.
         </p>
       </div>
 
       <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
         {totals.map((total) => (
-          <div key={`${total.componentType}:${total.label}:${total.treatment}:${total.effect}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+          <div key={`${total.componentType}:${total.label}:${total.treatment}:${total.effect}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 shadow-sm">
             <p className="truncate text-sm font-bold text-neutral-950" title={total.label}>{total.label}</p>
-            <p className="mt-1 text-xs text-neutral-500">{total.componentType} · {total.treatment} · {total.effect}</p>
+            <p className="mt-2 text-xs text-neutral-500">{total.componentType} · {total.treatment} · {total.effect}</p>
             <p className="mt-2 text-lg font-bold tabular-nums text-neutral-950">{currency(total.amount)}</p>
           </div>
         ))}
@@ -622,25 +634,25 @@ function PayrollComponentsDisclosure({ report }: { report: PayrollRegister }) {
         <table className="min-w-[1080px] w-full text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
             <tr>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Worker</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Component type</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Component</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Treatment</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Payroll effect</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2.5">Source</th>
-              <th className="border-b border-slate-200 px-4 py-2.5 text-right">Amount</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Worker</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Component type</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Component</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Treatment</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Payroll effect</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2">Source</th>
+              <th className="border-b border-slate-200 px-4 py-2 text-right">Amount</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, index) => (
               <tr key={`${row.worker}:${row.label}:${index}`} className="hover:bg-blue-50/50">
-                <td className="border-b border-r border-slate-100 px-4 py-2.5 font-semibold text-neutral-950">{row.worker}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.componentType}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.label}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.treatment}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.effect}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.source}</td>
-                <td className="border-b border-slate-100 px-4 py-2.5 text-right font-bold tabular-nums">{currency(row.amount)}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2 font-semibold text-neutral-950">{row.worker}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2">{row.componentType}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2">{row.label}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2">{row.treatment}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2">{row.effect}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2">{row.source}</td>
+                <td className="border-b border-slate-100 px-4 py-2 text-right font-bold tabular-nums">{currency(row.amount)}</td>
               </tr>
             ))}
           </tbody>
