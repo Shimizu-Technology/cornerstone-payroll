@@ -475,7 +475,7 @@ class E2eReleaseFixture
         period_type: "regular",
         totals: { "gross_pay" => "1800.00", "net_pay" => "1390.00" }
       )
-      HistoricalPaycheck.create!(
+      historical_paycheck = HistoricalPaycheck.create!(
         historical_import_batch: historical_batch,
         historical_pay_period: historical_period,
         historical_worker: historical_worker,
@@ -530,6 +530,7 @@ class E2eReleaseFixture
         other_employee_id: other_employee.id,
         historical_import_batch_id: historical_batch.id,
         historical_pay_period_id: historical_period.id,
+        historical_paycheck_id: historical_paycheck.id,
         bonus_sync_pay_period_id: bonus_sync_period.id,
         bonus_alpha_employee_id: bonus_alpha.id,
         bonus_alpha_payroll_item_id: bonus_alpha_item.id,

@@ -790,7 +790,11 @@ module Api
         private
 
         def with_financial_pay_period_lock
-          @pay_period.with_lock { yield }
+          ApplicationRecord.transaction do
+            Company.lock.find(@pay_period.company_id)
+            @pay_period.lock!
+            yield
+          end
         end
 
         def lifecycle_service

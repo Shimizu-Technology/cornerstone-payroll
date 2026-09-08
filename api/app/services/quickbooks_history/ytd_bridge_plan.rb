@@ -21,9 +21,12 @@ module QuickbooksHistory
 
     def call
       errors = eligibility_errors
-      balances = errors.empty? ? build_balances : []
+      source_balances = errors.empty? ? build_balances(rows: batch.historical_paychecks.includes(:employee).chronological) : []
+      balances = errors.empty? ? build_balances(rows: ledger.entries) : []
       errors << "The historical archive has no employee balances to carry forward" if errors.empty? && balances.empty?
-      reconciliation = reconcile_balances(balances)
+      # The retained QuickBooks reports reconcile only to the unmodified source
+      # snapshot. Adjustments are separately fingerprinted and disclosed.
+      reconciliation = reconcile_balances(source_balances)
       if errors.any?
         reconciliation = reconciliation.merge(
           "passed" => false,
@@ -33,7 +36,7 @@ module QuickbooksHistory
       errors.concat(Array(reconciliation["errors"]))
       summary = build_summary(balances)
       warnings = [
-        "This bridge carries retained QuickBooks balances into future YTD calculations. It does not create, recalculate, or commit historical payroll runs."
+        "This bridge carries retained QuickBooks balances and reviewed ledger adjustments into future YTD calculations. It does not create, recalculate, or commit historical payroll runs."
       ] + deduction_classification_warnings(balances)
       payload = {
         "batch_id" => batch.id,
@@ -58,6 +61,10 @@ module QuickbooksHistory
 
     attr_reader :batch
 
+    def ledger
+      @ledger ||= HistoricalPayroll::Ledger.new(batch: batch)
+    end
+
     def eligibility_errors
       errors = []
       unless batch.importer_version.in?(HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS)
@@ -67,32 +74,42 @@ module QuickbooksHistory
       errors << "Apply the clean-client employee setup before preparing historical YTD" unless batch.historical_client_bootstrap&.applied?
       errors << "Approve the cutover review before preparing historical YTD" unless batch.historical_import_cutover_review&.approved?
       errors << "Tax and Wage Summary reconciliation must pass before preparing historical YTD" unless batch.tax_wage_reconciliation.to_h["passed"] == true
-      errors << "The client already has live pay periods; historical YTD must be activated before the first live payroll" if batch.company.pay_periods.exists?
+      if batch.historical_ytd_bridges.where(status: "applied").none? && batch.company.pay_periods.exists?
+        errors << "The client already has live pay periods; historical YTD must be activated before the first live payroll"
+      end
       errors << "Every historical paycheck must be linked to its prepared employee" if batch.historical_paychecks.where(employee_id: nil).exists?
+      ledger.adjustments.each do |adjustment|
+        errors << "Adjustment #{adjustment.id} requires filing review before historical YTD can be revised" unless adjustment.filing_reviewed?
+        committed_impact = batch.company.pay_periods.reportable_committed.where("pay_date > ?", adjustment.effective_pay_date).exists?
+        if committed_impact && !adjustment.downstream_impact_acknowledged?
+          errors << "Adjustment #{adjustment.id} requires downstream-impact acknowledgement before historical YTD can be revised"
+        end
+      end
+      if ledger.adjustments.any?
+        blocking = batch.company.pay_periods.where(status: %w[calculated approved])
+                        .where("pay_date > ?", ledger.adjustments.minimum(:effective_pay_date))
+        errors << "Resolve calculated or approved payroll before activating a revised historical YTD bridge" if blocking.exists?
+      end
       missing_wage_base_years.each do |year|
         errors << "No Social Security wage base is configured for #{year}; add the annual tax configuration before preparing historical YTD"
       end
       errors
     end
 
-    def build_balances
+    def build_balances(rows:)
       balances = []
       current_key = nil
-      rows = []
-      batch.historical_paychecks.includes(:employee).find_each(
-        cursor: %i[employee_id pay_date id],
-        order: %i[asc asc asc],
-        batch_size: 1_000
-      ) do |row|
+      grouped_rows = []
+      rows.to_a.sort_by { |row| [ row.employee_id.to_i, row.pay_date, row.respond_to?(:id) ? row.id : row.record_id ] }.each do |row|
         key = [ row.employee_id, row.pay_date.year ]
         if current_key && key != current_key
-          balances << build_balance(current_key.fetch(0), current_key.fetch(1), rows)
-          rows = []
+          balances << build_balance(current_key.fetch(0), current_key.fetch(1), grouped_rows)
+          grouped_rows = []
         end
         current_key = key
-        rows << row
+        grouped_rows << row
       end
-      balances << build_balance(current_key.fetch(0), current_key.fetch(1), rows) if current_key
+      balances << build_balance(current_key.fetch(0), current_key.fetch(1), grouped_rows) if current_key
       balances
     end
 
@@ -238,8 +255,17 @@ module QuickbooksHistory
         "through_pay_date" => last_pay_date&.iso8601,
         "through_period_end" => last_period_end&.iso8601,
         "gross_pay" => sum_hashes(balances, "gross_pay").to_s("F"),
-        "net_pay" => sum_hashes(balances, "net_pay").to_s("F")
+        "net_pay" => sum_hashes(balances, "net_pay").to_s("F"),
+        "source_snapshot_totals" => serialize_totals(ledger.source_totals),
+        "adjustment_deltas" => serialize_totals(ledger.adjustment_totals),
+        "adjusted_totals" => serialize_totals(ledger.adjusted_totals),
+        "adjustment_ids" => ledger.adjustments.pluck(:id),
+        "adjustment_digest" => ledger.adjustment_digest
       }
+    end
+
+    def serialize_totals(totals)
+      totals.transform_values { |amount| amount.to_s("F") }
     end
 
     def sum(rows, field)
@@ -313,7 +339,7 @@ module QuickbooksHistory
     end
 
     def missing_wage_base_years
-      batch.historical_paychecks.distinct.pluck(:pay_date).map(&:year).uniq.sort.reject do |year|
+      ledger.entries.map(&:pay_date).map(&:year).uniq.sort.reject do |year|
         social_security_wage_base(year)
       end
     end

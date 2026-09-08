@@ -1468,7 +1468,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.9),rgba(255,255,255,0.98)_55%,rgba(239,246,255,0.8))]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge</div>
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge{ytdBridge ? ` · Revision ${ytdBridge.revision || 1}` : ''}</div>
                   <CardTitle className="mt-2">Carry verified history into the next payroll</CardTitle>
                   <CardDescription className="mt-2">This creates immutable opening balances from the linked QuickBooks paychecks. Future payroll uses them for pay-stub YTD totals, Social Security caps, and Medicare thresholds without turning imported history into live payroll.</CardDescription>
                 </div>
@@ -1503,6 +1503,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="text-sm font-semibold">{ytdBridge.reconciliation_summary.passed ? 'Every tax and wage total matches to the cent' : 'The opening balances do not reconcile'}</p>
                     <p className="mt-1 text-sm leading-6">{ytdBridge.reconciliation_summary.checks.filter((check) => check.passed).length}/{ytdBridge.reconciliation_summary.checks.length} employee-allocation checks passed across {ytdBridge.preview_summary.tax_years.join(', ') || 'no tax years'}.</p>
                   </div>
+                  {(ytdBridge.preview_summary.adjustment_ids?.length || 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Reviewed historical adjustments included</p><p className="mt-1 leading-6">Revision {ytdBridge.revision} includes {ytdBridge.preview_summary.adjustment_ids?.length} append-only ledger {ytdBridge.preview_summary.adjustment_ids?.length === 1 ? 'entry' : 'entries'} with a gross change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.gross_pay || '0')} and net change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.net_pay || '0')}. QuickBooks source snapshots remain unchanged.</p></div>}
                   {ytdBridge.warnings.length > 0 && (
                     <div role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
                       <p className="font-semibold">{ytdBridge.status === 'applied' ? 'Accepted source limitations in these active balances' : 'Source limitations to review before activation'}</p>
@@ -1514,6 +1515,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="max-w-2xl text-xs leading-5 text-neutral-500">After activation, the application blocks any pay period that overlaps QuickBooks history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
                     <div className="flex flex-wrap gap-2">
                       {canMutate && ytdBridge.status === 'previewed' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
+                      {canMutate && ytdBridge.status === 'applied' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Check for YTD revision</Button>}
                       {canMutate && ytdBridge.status === 'previewed' && ytdBridge.ready_to_apply && <Button onClick={() => { setYtdAcknowledgement(''); setYtdApplyError(null); setYtdApplyBatchId(selectedBatch.id); setYtdApplyOpen(true); }} disabled={action !== null}><CheckCircle2 className="mr-2 h-4 w-4" />Activate historical YTD</Button>}
                       {ytdBridge.status === 'applied' && <p className="text-sm font-semibold text-success-700">Active {shortDate(ytdBridge.applied_at?.slice(0, 10))}{ytdBridge.applied_by_name ? ` by ${ytdBridge.applied_by_name}` : ''}</p>}
                     </div>

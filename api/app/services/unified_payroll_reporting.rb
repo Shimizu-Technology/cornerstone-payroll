@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class UnifiedPayrollReporting
-  SOURCE_STATEMENT = "QuickBooks values are authoritative locked snapshots and were not recalculated by Cornerstone Payroll."
+  SOURCE_STATEMENT = "QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source."
 
   def initialize(company_id:, period:)
     @company_id = Integer(company_id)
@@ -20,8 +20,17 @@ class UnifiedPayrollReporting
     historical_scope.where(employee_id: nil).to_a
   end
 
-  def add_historical_to_employee_row(row, paychecks)
-    totals = historical_totals(paychecks)
+  def historical_adjustments(employee_id: nil)
+    scope = HistoricalPaycheckAdjustment.joins(historical_paycheck: :historical_import_batch)
+                                        .includes(historical_paycheck: :historical_pay_period)
+                                        .where(company_id: @company_id, effective_pay_date: @period.range)
+                                        .where(historical_import_batches: { company_id: @company_id, status: "locked" })
+    scope = scope.where(historical_paychecks: { employee_id: employee_id }) if employee_id
+    scope.chronological.to_a
+  end
+
+  def add_historical_to_employee_row(row, paychecks, adjustments = [])
+    totals = historical_totals(paychecks, adjustments)
     row.merge(
       payroll_count: row.fetch(:payroll_count, 0).to_i + regular_period_count(paychecks),
       imported_payroll_count: regular_period_count(paychecks),
@@ -39,8 +48,8 @@ class UnifiedPayrollReporting
     )
   end
 
-  def add_historical_to_company_totals(row, paychecks, native_employee_ids:)
-    totals = historical_totals(paychecks)
+  def add_historical_to_company_totals(row, paychecks, adjustments = [], native_employee_ids:)
+    totals = historical_totals(paychecks, adjustments)
     row.merge(
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
@@ -95,8 +104,46 @@ class UnifiedPayrollReporting
     }
   end
 
-  def source_summary(native_items:, historical_paychecks:, excluded_unlinked_paychecks: [])
-    includes_quickbooks = historical_paychecks.any? || excluded_unlinked_paychecks.any?
+  def adjustment_history_row(adjustment)
+    totals = historical_totals([], [ adjustment ])
+    paycheck = adjustment.historical_paycheck
+    {
+      key: "historical_adjustment:#{adjustment.id}",
+      record_type: "adjustment",
+      payroll_item_id: nil,
+      pay_period_id: nil,
+      historical_pay_period_id: paycheck.historical_pay_period_id,
+      historical_paycheck_id: paycheck.id,
+      historical_adjustment_id: adjustment.id,
+      pay_date: adjustment.effective_pay_date,
+      period_description: "Historical #{adjustment.kind} · #{paycheck.historical_pay_period.source_label}",
+      scheduled_hours: nil,
+      hours_worked: adjustment.hours_total.to_f,
+      overtime_hours: nil,
+      holiday_hours: nil,
+      pto_hours: nil,
+      reported_tips: totals[:tips],
+      tips_paid_out: 0,
+      bonus: 0,
+      custom_earnings_total: 0,
+      custom_deductions_total: 0,
+      gross_pay: adjustment.gross_pay.to_f,
+      withholding_tax: adjustment.federal_income_tax.to_f,
+      social_security_tax: adjustment.social_security_tax.to_f,
+      medicare_tax: adjustment.medicare_tax.to_f,
+      total_deductions: totals[:total_deductions],
+      net_pay: adjustment.net_pay.to_f,
+      check_number: nil,
+      reason: adjustment.reason,
+      payroll_field_entries: [],
+      payroll_field_totals: {},
+      source: { system: "historical_adjustment", label: "Historical adjustment", locked: true },
+      capabilities: { view: true, edit: false }
+    }
+  end
+
+  def source_summary(native_items:, historical_paychecks:, historical_adjustments: [], excluded_unlinked_paychecks: [])
+    includes_quickbooks = historical_paychecks.any? || historical_adjustments.any? || excluded_unlinked_paychecks.any?
     {
       mode: includes_quickbooks ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
       source_statement: SOURCE_STATEMENT,
@@ -111,6 +158,11 @@ class UnifiedPayrollReporting
         excluded_unlinked_paycheck_count: excluded_unlinked_paychecks.length,
         excluded_unlinked_gross_pay: sum(excluded_unlinked_paychecks, :gross_pay),
         excluded_unlinked_net_pay: sum(excluded_unlinked_paychecks, :net_pay)
+      },
+      adjustments: {
+        count: historical_adjustments.length,
+        gross_pay_delta: sum(historical_adjustments, :gross_pay),
+        net_pay_delta: sum(historical_adjustments, :net_pay)
       },
       historical_ytd_bridge: bridge_summary
     }
@@ -130,20 +182,21 @@ class UnifiedPayrollReporting
     historical_scope.where.not(employee_id: nil)
   end
 
-  def historical_totals(paychecks)
+  def historical_totals(paychecks, adjustments = [])
+    rows = paychecks + adjustments
     {
-      gross_pay: sum(paychecks, :gross_pay),
-      withholding_tax: sum(paychecks, :federal_income_tax),
-      social_security_tax: sum(paychecks, :social_security_tax),
-      medicare_tax: sum(paychecks, :medicare_tax),
-      retirement: component_sum(paychecks, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX),
-      roth_retirement: component_sum(paychecks, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH),
-      tips: component_sum(paychecks, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
+      gross_pay: sum(rows, :gross_pay),
+      withholding_tax: sum(rows, :federal_income_tax),
+      social_security_tax: sum(rows, :social_security_tax),
+      medicare_tax: sum(rows, :medicare_tax),
+      retirement: component_sum(rows, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX),
+      roth_retirement: component_sum(rows, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH),
+      tips: component_sum(rows, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
       # QuickBooks history does not distinguish reported tips from tips that
       # were paid out through payroll, so do not manufacture a paid-out value.
       tips_paid_out: 0.0,
-      total_deductions: paychecks.sum(0.to_d) { |paycheck| paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions }.to_f,
-      net_pay: sum(paychecks, :net_pay)
+      total_deductions: rows.sum(0.to_d) { |paycheck| paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions }.to_f,
+      net_pay: sum(rows, :net_pay)
     }
   end
 
