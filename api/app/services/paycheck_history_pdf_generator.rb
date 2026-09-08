@@ -133,7 +133,7 @@ class PaycheckHistoryPdfGenerator
   end
 
   def render_payroll_adjustment_detail(pdf)
-    rows = PayrollAdjustmentDisclosure.new(data.items(include_voided: false)).rows
+    rows = PayrollAdjustmentDisclosure.new(data.items(include_voided: true)).rows
     return if rows.empty?
 
     pdf.start_new_page

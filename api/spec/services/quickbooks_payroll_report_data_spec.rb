@@ -220,5 +220,28 @@ RSpec.describe QuickbooksPayrollReportData do
         employee_amount: 50.0
       )
     end
+
+    it "labels an unmarked legacy adjustment in the accounting report" do
+      legacy_employee = create(:employee, company: company)
+      legacy_item = create(
+        :payroll_item,
+        company: company,
+        employee: legacy_employee,
+        pay_period: pay_period,
+        payroll_adjustments: [
+          { "label" => "Legacy loan", "amount" => 15, "treatment" => "post_tax_deduction" }
+        ]
+      )
+
+      entry = report.deduction_contribution_entries_for_item(legacy_item).find do |row|
+        row.description == "Legacy loan"
+      end
+
+      expect(entry).to have_attributes(
+        type: "Payroll adjustment (legacy snapshot)",
+        source: "legacy_snapshot",
+        employee_amount: 15.0
+      )
+    end
   end
 end
