@@ -244,5 +244,102 @@ RSpec.describe W2GuAggregator do
 
       expect(row[:box3_social_security_wages]).to eq(1_000.0)
     end
+
+    it "includes an imported-only year from the applied bridge exactly once when explicitly enabled" do
+      create_historical_filing_source(
+        company: company,
+        employee: employee,
+        pay_date: Date.new(2025, 6, 18),
+        gross_pay: 1_000,
+        federal_income_tax: 100,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        employer_social_security_tax: 62,
+        employer_medicare_tax: 14.50,
+        reported_tips: 100,
+        retirement: 50,
+        social_security_taxable_wages: 900,
+        social_security_taxable_tips: 100,
+        medicare_taxable_wages: 1_000
+      )
+
+      expect(described_class.new(company, 2025, include_historical: false).generate[:employees]).to be_empty
+
+      report = described_class.new(company, 2025).generate
+      row = report[:employees].sole
+
+      expect(row).to include(
+        box1_wages_tips_other_comp: 950.0,
+        box2_federal_income_tax_withheld: 100.0,
+        box3_social_security_wages: 900.0,
+        box4_social_security_tax_withheld: 62.0,
+        box5_medicare_wages_tips: 1_000.0,
+        box6_medicare_tax_withheld: 14.5,
+        box7_social_security_tips: 100.0,
+        source_summary: {
+          cornerstone_payroll_item_count: 0,
+          quickbooks_bridge_balance_count: 1
+        }
+      )
+      expect(report.dig(:meta, :source_summary, :mode)).to eq("locked_quickbooks_plus_committed_cornerstone")
+      expect(report.dig(:meta, :source_summary, :quickbooks, :bridge_balance_count)).to eq(1)
+      expect(report[:meta][:caveats]).to include(a_string_matching(/raw historical paychecks are not added again/i))
+    end
+
+    it "adds imported bridge balances and committed payroll once in a mixed transition year" do
+      create_historical_filing_source(
+        company: company,
+        employee: employee,
+        pay_date: Date.new(2025, 6, 18),
+        gross_pay: 1_000,
+        federal_income_tax: 100,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        employer_social_security_tax: 62,
+        employer_medicare_tax: 14.50,
+        reported_tips: 100,
+        retirement: 50,
+        social_security_taxable_wages: 900,
+        social_security_taxable_tips: 100,
+        medicare_taxable_wages: 1_000
+      )
+      live_period = create(
+        :pay_period,
+        :committed,
+        company: company,
+        start_date: Date.new(2025, 7, 1),
+        end_date: Date.new(2025, 7, 14),
+        pay_date: Date.new(2025, 7, 18)
+      )
+      create(
+        :payroll_item,
+        company: company,
+        employee: employee,
+        pay_period: live_period,
+        gross_pay: 500,
+        withholding_tax: 50,
+        social_security_tax: 31,
+        medicare_tax: 7.25,
+        social_security_taxable_wages: 500,
+        social_security_taxable_tips: 0,
+        medicare_taxable_wages: 500
+      )
+
+      row = described_class.new(company, 2025, include_historical: true).generate[:employees].sole
+
+      expect(row).to include(
+        box1_wages_tips_other_comp: 1_450.0,
+        box2_federal_income_tax_withheld: 150.0,
+        box3_social_security_wages: 1_400.0,
+        box4_social_security_tax_withheld: 93.0,
+        box5_medicare_wages_tips: 1_500.0,
+        box6_medicare_tax_withheld: 21.75,
+        box7_social_security_tips: 100.0,
+        source_summary: {
+          cornerstone_payroll_item_count: 1,
+          quickbooks_bridge_balance_count: 1
+        }
+      )
+    end
   end
 end

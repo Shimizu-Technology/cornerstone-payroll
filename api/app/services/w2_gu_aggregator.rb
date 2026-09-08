@@ -15,16 +15,18 @@ class W2GuAggregator
     2026 => 184_500.00
   }.freeze
 
-  attr_reader :company, :year
+  attr_reader :company, :year, :include_historical
 
-  def initialize(company, year)
+  def initialize(company, year, include_historical: nil)
     @company = company
     @year = year.to_i
+    @include_historical = include_historical.nil? ? locked_historical_imports? : include_historical
   end
 
   def generate
     # Fail fast on unsupported years so operators don't file with wrong caps.
     ss_wage_base
+    historical_source.validate!(range: year_range) if include_historical
 
     rows = employees.map { |employee| employee_row(employee) }
 
@@ -37,6 +39,7 @@ class W2GuAggregator
         generated_at: Time.current.iso8601,
         # W-2GU count reflects only employees with committed payroll in year.
         employee_count: rows.length,
+        source_summary: source_summary,
         caveats: [
           "This report is a preparation summary and should be reviewed before filing.",
           "Employees missing SSN are flagged in compliance_issues.",
@@ -46,7 +49,8 @@ class W2GuAggregator
           "For 2026+, Box 12 code TP reports cash tips and code TT reports qualified overtime compensation; Box 14b reports Treasury tipped occupation codes.",
           "Box 13 Retirement plan checkbox is set if the employee has a retirement contribution rate > 0.",
           "Committed taxable wage bases are used when present. Legacy rows without stored bases use a clearly flagged compatibility fallback.",
-          "If payroll items were committed before tips were embedded in gross_pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually."
+          "If payroll items were committed before tips were embedded in gross_pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually.",
+          *historical_caveats
         ]
       },
       employer: {
@@ -109,6 +113,7 @@ class W2GuAggregator
         "SUM(COALESCE(medicare_taxable_wages, gross_pay)) AS medicare_wages_base",
         "SUM(COALESCE(cash_tips_reported, reported_tips)) AS cash_tips_total",
         "SUM(COALESCE(qualified_overtime_compensation, 0)) AS qualified_overtime_total",
+        "COUNT(*) AS payroll_item_count",
         "COUNT(*) FILTER (WHERE social_security_taxable_wages IS NULL OR social_security_taxable_tips IS NULL OR medicare_taxable_wages IS NULL) AS missing_tax_base_count",
         "COUNT(*) FILTER (WHERE reported_tips <> 0 AND cash_tips_reported IS NULL) AS missing_tip_classification_count",
         "COUNT(*) FILTER (WHERE overtime_hours <> 0 AND qualified_overtime_compensation IS NULL) AS missing_qualified_overtime_count"
@@ -118,25 +123,26 @@ class W2GuAggregator
 
   def employees
     @employees ||= Employee
-      .where(company_id: company.id, id: aggregated_items.keys)
+      .where(company_id: company.id, id: (aggregated_items.keys + historical_balances_by_employee.keys).uniq)
       .includes(:employee_tipped_occupations)
       .order(:last_name, :first_name)
   end
 
   def employee_row(employee)
     sums = aggregated_items[employee.id]
+    historical = historical_balances_by_employee.fetch(employee.id, [])
 
-    gross_pay = sums&.gross_pay.to_f
-    reported_tips = sums&.reported_tips.to_f
-    withholding_tax = sums&.withholding_tax.to_f + sums&.additional_withholding.to_f
-    ss_tax = sums&.ss_tax.to_f
-    medicare_tax = sums&.medicare_tax.to_f
-    retirement_total = sums&.retirement_total.to_f
-    roth_retirement_total = sums&.roth_retirement_total.to_f
-    non_taxable_total = sums&.non_taxable_total.to_f
-    ss_wages_base = sums&.ss_wages_base.to_f
-    ss_tips_base = sums&.ss_tips_base.to_f
-    medicare_wages_base = sums&.medicare_wages_base.to_f
+    gross_pay = sums&.gross_pay.to_f + historical_sum(historical, :gross_pay)
+    reported_tips = sums&.reported_tips.to_f + historical_sum(historical, :reported_tips)
+    withholding_tax = sums&.withholding_tax.to_f + sums&.additional_withholding.to_f + historical_sum(historical, :federal_income_tax)
+    ss_tax = sums&.ss_tax.to_f + historical_sum(historical, :social_security_tax)
+    medicare_tax = sums&.medicare_tax.to_f + historical_sum(historical, :medicare_tax)
+    retirement_total = sums&.retirement_total.to_f + historical_sum(historical, :retirement)
+    roth_retirement_total = sums&.roth_retirement_total.to_f + historical_sum(historical, :roth_retirement)
+    non_taxable_total = sums&.non_taxable_total.to_f + historical_sum(historical, :non_taxable_pay)
+    ss_wages_base = sums&.ss_wages_base.to_f + historical_sum(historical, :social_security_taxable_wages)
+    ss_tips_base = sums&.ss_tips_base.to_f + historical_sum(historical, :social_security_taxable_tips)
+    medicare_wages_base = sums&.medicare_wages_base.to_f + historical_sum(historical, :medicare_taxable_wages)
     cash_tips_total = sums&.cash_tips_total.to_f
     qualified_overtime_total = sums&.qualified_overtime_total.to_f
 
@@ -163,7 +169,8 @@ class W2GuAggregator
     tipped_occupation_codes = tipped_occupation_codes_for(employee)
 
     # Box 13: Checkboxes
-    has_retirement_plan = (employee.retirement_rate.to_f > 0 || employee.roth_retirement_rate.to_f > 0)
+    has_retirement_plan = retirement_total.positive? || roth_retirement_total.positive? ||
+      employee.retirement_rate.to_f > 0 || employee.roth_retirement_rate.to_f > 0
 
     {
       employee_id: employee.id,
@@ -194,9 +201,14 @@ class W2GuAggregator
       # Non-taxable pay (informational)
       non_taxable_total: non_taxable_total.round(2),
 
+      source_summary: {
+        cornerstone_payroll_item_count: sums&.payroll_item_count.to_i,
+        quickbooks_bridge_balance_count: historical.length
+      },
+
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
-      missing_tip_classification: sums&.missing_tip_classification_count.to_i.positive?,
-      missing_qualified_overtime: sums&.missing_qualified_overtime_count.to_i.positive?,
+      missing_tip_classification: sums&.missing_tip_classification_count.to_i.positive? || historical.any? { |balance| balance.reported_tips.nonzero? },
+      missing_qualified_overtime: sums&.missing_qualified_overtime_count.to_i.positive? || historical_overtime?(historical),
       negative_box12_tp: cash_tips_total.negative?,
       negative_box12_tt: qualified_overtime_total.negative?,
 
@@ -274,6 +286,61 @@ class W2GuAggregator
     @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year)
   rescue KeyError
     raise ArgumentError, "SS wage base not configured for #{year}"
+  end
+
+  def historical_source
+    @historical_source ||= HistoricalPayrollFilingSource.new(company)
+  end
+
+  def locked_historical_imports?
+    company.historical_import_batches
+      .joins(:historical_paychecks)
+      .where(status: "locked", historical_paychecks: { pay_date: year_range })
+      .exists?
+  end
+
+  def historical_balances
+    @historical_balances ||= include_historical ? historical_source.annual_balances(year) : []
+  end
+
+  def historical_balances_by_employee
+    @historical_balances_by_employee ||= historical_balances.group_by(&:employee_id)
+  end
+
+  def historical_sum(balances, field)
+    balances.sum(0.to_d) { |balance| balance.public_send(field).to_d }.to_f
+  end
+
+  def historical_overtime?(balances)
+    balances.any? do |balance|
+      balance.source_breakdown.to_h.fetch("earnings_breakdown", {}).any? do |label, amount|
+        label.to_s.match?(/overtime/i) && (BigDecimal(amount.to_s, exception: false) || 0.to_d).nonzero?
+      end
+    end
+  end
+
+  def source_summary
+    {
+      mode: include_historical ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      cornerstone: {
+        payroll_item_count: aggregated_items.values.sum { |item| item.payroll_item_count.to_i }
+      },
+      quickbooks: {
+        included: include_historical,
+        bridge_balance_count: historical_balances.length,
+        opening_summary_count_included_via_bridge: include_historical ? historical_source.opening_summary_count(range: year_range) : 0
+      }
+    }
+  end
+
+  def historical_caveats
+    return [] unless include_historical
+
+    [
+      "QuickBooks values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
+      "Historical opening summaries and reviewed adjustments are included through the bridge exactly once; raw historical paychecks are not added again.",
+      "QuickBooks history does not classify 2026 cash tips or qualified overtime for W-2 Box 12; affected employees remain flagged for review."
+    ]
   end
 
   def missing_employer_address?
