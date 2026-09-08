@@ -38,10 +38,7 @@ class CreateEmployeeW4Elections < ActiveRecord::Migration[8.0]
         company_id,
         employee_id,
         effective_on,
-        CASE
-          WHEN filing_status IN ('single', 'married', 'married_separate', 'head_of_household') THEN filing_status
-          ELSE 'single'
-        END,
+        filing_status,
         allowances,
         additional_withholding,
         w4_dependent_credit,
@@ -58,7 +55,10 @@ class CreateEmployeeW4Elections < ActiveRecord::Migration[8.0]
         company_id,
         id,
         COALESCE(w4_effective_on, hire_date, created_at::date),
-        filing_status,
+        CASE
+          WHEN filing_status IN ('single', 'married', 'married_separate', 'head_of_household') THEN filing_status
+          ELSE 'single'
+        END,
         COALESCE(allowances, 0),
         COALESCE(additional_withholding, 0),
         COALESCE(w4_dependent_credit, 0),

@@ -42,9 +42,9 @@ class AddVerifiedOpeningBalancesToEmployeeLoans < ActiveRecord::Migration[8.0]
   def down
     remove_check_constraint :loan_transactions, name: "loan_transactions_source_check"
     remove_check_constraint :employee_loans, name: "employee_loans_balance_source_check"
-    remove_reference :loan_transactions, :recorded_by, foreign_key: true
+    remove_reference :loan_transactions, :recorded_by, foreign_key: { to_table: :users }
     remove_column :loan_transactions, :source
-    remove_reference :employee_loans, :created_by, foreign_key: true
+    remove_reference :employee_loans, :created_by, foreign_key: { to_table: :users }
     remove_column :employee_loans, :principal_amount_known
     remove_column :employee_loans, :balance_source
     remove_column :employee_loans, :balance_as_of
