@@ -19,7 +19,7 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
     create_table :historical_paycheck_adjustments do |t|
       t.references :company, null: false, foreign_key: true, index: false
       t.references :historical_paycheck, null: false, foreign_key: true, index: false
-      t.references :reverses_adjustment, foreign_key: { to_table: :historical_paycheck_adjustments }, index: false
+      t.references :reverses_adjustment, index: false
       t.references :created_by, null: false, foreign_key: { to_table: :users, on_delete: :restrict }, index: false
       t.string :kind, null: false
       t.date :effective_pay_date, null: false
@@ -68,11 +68,15 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
                     column: [ :historical_paycheck_id, :company_id ],
                     primary_key: [ :id, :company_id ],
                     name: "fk_historical_adjustments_paycheck_tenant"
+    add_foreign_key :historical_paycheck_adjustments, :historical_paycheck_adjustments,
+                    column: [ :reverses_adjustment_id, :company_id ],
+                    primary_key: [ :id, :company_id ],
+                    name: "fk_historical_adjustments_reversal_tenant"
 
     create_table :historical_paycheck_adjustment_events do |t|
       t.references :company, null: false, foreign_key: true, index: false
       t.references :historical_paycheck_adjustment, null: false, foreign_key: true, index: false
-      t.references :historical_ytd_bridge, foreign_key: true, index: false
+      t.references :historical_ytd_bridge, index: false
       t.references :created_by, null: false, foreign_key: { to_table: :users, on_delete: :restrict }, index: false
       t.string :event_type, null: false
       t.jsonb :metadata, null: false, default: {}
@@ -97,6 +101,10 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
                     column: [ :historical_paycheck_adjustment_id, :company_id ],
                     primary_key: [ :id, :company_id ],
                     name: "fk_historical_adjustment_events_tenant"
+    add_foreign_key :historical_paycheck_adjustment_events, :historical_ytd_bridges,
+                    column: [ :historical_ytd_bridge_id, :company_id ],
+                    primary_key: [ :id, :company_id ],
+                    name: "fk_historical_adjustment_events_bridge_tenant"
 
     remove_index :historical_ytd_bridges, name: "index_historical_ytd_bridges_on_historical_import_batch_id"
     remove_index :historical_ytd_bridges, name: "index_historical_ytd_bridges_on_historical_client_bootstrap_id"
@@ -115,6 +123,17 @@ class CreateHistoricalPaycheckAdjustments < ActiveRecord::Migration[8.0]
   end
 
   def down
+    if select_value(<<~SQL)
+      SELECT 1
+      FROM historical_ytd_bridges
+      GROUP BY historical_import_batch_id
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    SQL
+      raise ActiveRecord::IrreversibleMigration,
+            "Cannot roll back historical adjustments after multiple YTD bridge revisions exist"
+    end
+
     remove_check_constraint :historical_ytd_bridges, name: "historical_ytd_bridges_revision_positive"
     remove_index :historical_ytd_bridges, name: "idx_historical_ytd_bridges_one_successor"
     remove_index :historical_ytd_bridges, name: "idx_historical_ytd_bridges_bootstrap"

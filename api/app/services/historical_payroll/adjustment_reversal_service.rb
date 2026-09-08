@@ -17,6 +17,8 @@ module HistoricalPayroll
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
       raise ArgumentError, "A reason is required" if reason.blank?
       return adjustment.reversal if adjustment.reversal
+      existing = existing_for_idempotency_key
+      return existing if existing
 
       HistoricalPaycheckAdjustment.transaction do
         adjustment.company.lock!
@@ -58,11 +60,25 @@ module HistoricalPayroll
         reversal
       end
     rescue ActiveRecord::RecordNotUnique
-      adjustment.reload.reversal || HistoricalPaycheckAdjustment.find_by!(company_id: adjustment.company_id, idempotency_key: idempotency_key)
+      existing = adjustment.reload.reversal || existing_for_idempotency_key
+      return existing if existing
+
+      raise ArgumentError, "That idempotency key is already used by another historical adjustment"
     end
 
     private
 
     attr_reader :adjustment, :actor, :reason, :idempotency_key, :acknowledgement
+
+    def existing_for_idempotency_key
+      existing = HistoricalPaycheckAdjustment.find_by(
+        company_id: adjustment.company_id,
+        idempotency_key: idempotency_key
+      )
+      return unless existing
+      return existing if existing.reverses_adjustment_id == adjustment.id
+
+      raise ArgumentError, "That idempotency key is already used by another historical adjustment"
+    end
   end
 end

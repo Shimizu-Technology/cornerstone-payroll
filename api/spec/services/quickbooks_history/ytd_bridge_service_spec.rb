@@ -512,6 +512,16 @@ RSpec.describe "QuickBooks historical YTD bridge" do
     expect(blocked).to be_previewed
     expect(blocked.revision).to eq(2)
     expect(blocked.validation_errors.join(" ")).to include("requires filing review")
+    boundary_end = Date.iso8601(first_bridge.preview_summary.fetch("through_period_end"))
+    boundary_pay_date = Date.iso8601(first_bridge.preview_summary.fetch("through_pay_date"))
+    overlapping = company.pay_periods.build(
+      start_date: boundary_end,
+      end_date: boundary_end + 7.days,
+      pay_date: [ boundary_pay_date, boundary_end + 7.days ].max + 1.day,
+      status: "draft"
+    )
+    expect(overlapping).not_to be_valid
+    expect(overlapping.errors[:start_date]).to include(/must be after the imported QuickBooks history/)
 
     HistoricalPayroll::AdjustmentEventService.new(
       adjustment: adjustment,

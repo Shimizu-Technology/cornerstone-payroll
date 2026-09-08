@@ -16,7 +16,7 @@ class PayPeriodLifecycleService
   end
 
   def approve!
-    pay_period.with_lock do
+    with_financial_pay_period_lock do
       unless pay_period.calculated?
         raise InvalidTransitionError, "Can only approve a calculated pay period"
       end
@@ -32,7 +32,7 @@ class PayPeriodLifecycleService
   end
 
   def unapprove!
-    pay_period.with_lock do
+    with_financial_pay_period_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only unapprove an approved pay period"
       end
@@ -51,7 +51,7 @@ class PayPeriodLifecycleService
 
   def commit!
     acknowledgement_ids = { batch: [], entries: [] }
-    pay_period.with_lock do
+    with_financial_pay_period_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
       end
@@ -92,6 +92,14 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def with_financial_pay_period_lock
+    ApplicationRecord.transaction do
+      Company.lock.find(pay_period.company_id)
+      pay_period.lock!
+      yield
+    end
+  end
 
   def record_aire_processing_acknowledgements
     result = { batch: [], entries: [] }

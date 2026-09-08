@@ -125,6 +125,39 @@ RSpec.describe "Historical payroll adjustment ledger" do
     end.to raise_error(ArgumentError, /RECORD HISTORICAL ADJUSTMENT/)
   end
 
+  it "does not reuse idempotency keys across source paychecks or reversal targets" do
+    first = create_adjustment
+    second_paycheck = paycheck.dup
+    second_paycheck.assign_attributes(external_key: "adjustment-paycheck-2", source_row_number: 2)
+    second_paycheck.save!
+    second_input = adjustment_input.merge(idempotency_key: first.idempotency_key)
+    second_preview = HistoricalPayroll::AdjustmentPreviewService.new(
+      paycheck: second_paycheck, actor: actor, attributes: second_input
+    ).call
+
+    expect do
+      HistoricalPayroll::AdjustmentCreateService.new(
+        paycheck: second_paycheck,
+        actor: actor,
+        attributes: second_input,
+        acknowledgement: HistoricalPayroll::AdjustmentCreateService::ACKNOWLEDGEMENT,
+        preview_digest: second_preview.digest
+      ).call
+    end.to raise_error(ArgumentError, /another historical paycheck/)
+
+    other = create_adjustment(adjustment_input(key: "other-adjustment"))
+    expect do
+      HistoricalPayroll::AdjustmentReversalService.new(
+        adjustment: first,
+        actor: actor,
+        reason: "Wrong idempotency target",
+        idempotency_key: other.idempotency_key,
+        acknowledgement: HistoricalPayroll::AdjustmentReversalService::ACKNOWLEDGEMENT
+      ).call
+    end.to raise_error(ArgumentError, /another historical adjustment/)
+    expect(first.reload.reversal).to be_nil
+  end
+
   it "rejects corrections that would reduce retained totals below zero" do
     preview = HistoricalPayroll::AdjustmentPreviewService.new(
       paycheck: paycheck,
@@ -215,6 +248,39 @@ RSpec.describe "Historical payroll adjustment ledger" do
       event_type: "filing_amendment_filed_external"
     ).call
     expect(adjustment.filing_review_state).to eq("amendment_filed_external")
+  end
+
+  it "requires YTD activation events to reference a bridge from the same import" do
+    adjustment = create_adjustment
+    missing_bridge = HistoricalPaycheckAdjustmentEvent.new(
+      company: company,
+      historical_paycheck_adjustment: adjustment,
+      created_by: actor,
+      event_type: "ytd_revision_activated"
+    )
+    expect(missing_bridge).not_to be_valid
+    expect(missing_bridge.errors[:historical_ytd_bridge]).to include(/is required/)
+
+    other_batch = create(:historical_import_batch, company: company)
+    other_bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: other_batch)
+    other_bridge = HistoricalYtdBridge.create!(
+      company: company,
+      historical_import_batch: other_batch,
+      historical_client_bootstrap: other_bootstrap,
+      created_by: actor,
+      status: "previewed",
+      revision: 1,
+      plan_digest: Digest::SHA256.hexdigest("other-import-plan"),
+      preview_summary: {
+        "through_period_end" => "2026-03-14",
+        "through_pay_date" => "2026-03-20"
+      }
+    )
+    mismatched_bridge = missing_bridge.dup
+    mismatched_bridge.historical_ytd_bridge = other_bridge
+
+    expect(mismatched_bridge).not_to be_valid
+    expect(mismatched_bridge.errors[:historical_ytd_bridge]).to include(/adjustment's historical import/)
   end
 
   it "rolls back a ledger event when its audit record cannot be written" do

@@ -2716,10 +2716,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_010000) do
   add_foreign_key "historical_paycheck_adjustment_events", "companies"
   add_foreign_key "historical_paycheck_adjustment_events", "historical_paycheck_adjustments"
   add_foreign_key "historical_paycheck_adjustment_events", "historical_paycheck_adjustments", column: ["historical_paycheck_adjustment_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustment_events_tenant"
-  add_foreign_key "historical_paycheck_adjustment_events", "historical_ytd_bridges"
+  add_foreign_key "historical_paycheck_adjustment_events", "historical_ytd_bridges", column: ["historical_ytd_bridge_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustment_events_bridge_tenant"
   add_foreign_key "historical_paycheck_adjustment_events", "users", column: "created_by_id", on_delete: :restrict
   add_foreign_key "historical_paycheck_adjustments", "companies"
-  add_foreign_key "historical_paycheck_adjustments", "historical_paycheck_adjustments", column: "reverses_adjustment_id"
+  add_foreign_key "historical_paycheck_adjustments", "historical_paycheck_adjustments", column: ["reverses_adjustment_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustments_reversal_tenant"
   add_foreign_key "historical_paycheck_adjustments", "historical_paychecks"
   add_foreign_key "historical_paycheck_adjustments", "historical_paychecks", column: ["historical_paycheck_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_historical_adjustments_paycheck_tenant"
   add_foreign_key "historical_paycheck_adjustments", "users", column: "created_by_id", on_delete: :restrict

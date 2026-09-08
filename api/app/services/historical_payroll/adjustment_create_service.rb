@@ -17,7 +17,7 @@ module HistoricalPayroll
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
 
       idempotency_key = attributes.to_h.with_indifferent_access[:idempotency_key].to_s
-      existing = HistoricalPaycheckAdjustment.find_by(company_id: paycheck.company_id, idempotency_key: idempotency_key)
+      existing = existing_for_idempotency_key(idempotency_key)
       return existing if existing
 
       HistoricalPaycheckAdjustment.transaction do
@@ -37,12 +37,23 @@ module HistoricalPayroll
         adjustment
       end
     rescue ActiveRecord::RecordNotUnique
-      HistoricalPaycheckAdjustment.find_by!(company_id: paycheck.company_id, idempotency_key: idempotency_key)
+      existing_for_idempotency_key(idempotency_key) || raise
     end
 
     private
 
     attr_reader :paycheck, :actor, :attributes, :acknowledgement, :preview_digest
+
+    def existing_for_idempotency_key(idempotency_key)
+      existing = HistoricalPaycheckAdjustment.find_by(
+        company_id: paycheck.company_id,
+        idempotency_key: idempotency_key
+      )
+      return unless existing
+      return existing if existing.historical_paycheck_id == paycheck.id
+
+      raise ArgumentError, "That idempotency key is already used by another historical paycheck"
+    end
 
     def record_audit!(adjustment, preview)
       AuditLog.record!(
