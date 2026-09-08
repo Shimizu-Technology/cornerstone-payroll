@@ -72,7 +72,7 @@ TaxTable.find_or_create_by!(
   t.ss_wage_base = 184_500
   t.medicare_rate = 0.0145
   t.additional_medicare_rate = 0.009
-  t.additional_medicare_threshold = 250_000  # Higher threshold for married filing jointly
+  t.additional_medicare_threshold = 200_000  # Employer withholding threshold regardless of filing status
   t.allowance_amount = 192.31
 end
 

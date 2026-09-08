@@ -66,6 +66,7 @@ class ProductionReadiness
     time_sources: -> { TimeTrackingSource.active.to_a },
     encryption_credentials: Rails.application.credentials,
     encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
+    tax_configuration_valid: -> { AnnualTaxConfig.official_2026_configuration? },
     http_get: nil
   )
     @env = env
@@ -83,6 +84,7 @@ class ProductionReadiness
     @time_sources = time_sources
     @encryption_credentials = encryption_credentials
     @encrypted_data_probe = encrypted_data_probe
+    @tax_configuration_valid = tax_configuration_valid
     @http_get = http_get || method(:default_http_get)
   end
 
@@ -96,7 +98,7 @@ class ProductionReadiness
 
   attr_reader :env, :environment, :config, :primary_record, :cache, :cache_record,
     :queue_record, :queue_process, :cable_record, :job_adapter, :cable_adapter,
-    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :http_get
+    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :tax_configuration_valid, :http_get
 
   def configuration_checks
     [
@@ -124,7 +126,8 @@ class ProductionReadiness
           env: env,
           credentials: encryption_credentials
         )
-      end
+      end,
+      check("official 2026 payroll tax and withholding configuration is loaded") { tax_configuration_valid.call }
     ]
   end
 
