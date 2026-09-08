@@ -84,6 +84,7 @@ class Employee < ApplicationRecord
   has_many :payroll_field_definitions, through: :employee_payroll_fields
   has_many :employee_ytd_totals, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
+  has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
   has_many :employee_work_profiles, dependent: :restrict_with_error
@@ -229,6 +230,16 @@ class Employee < ApplicationRecord
 
   def work_profile_on(date)
     employee_work_profiles.effective_on(date).first
+  end
+
+  def w4_election_on(date)
+    if association(:employee_w4_elections).loaded?
+      employee_w4_elections
+        .select { |election| election.effective_on <= date.to_date }
+        .max_by { |election| [ election.effective_on, election.created_at, election.id ] }
+    else
+      employee_w4_elections.effective_on(date).first
+    end
   end
 
   def hourly?

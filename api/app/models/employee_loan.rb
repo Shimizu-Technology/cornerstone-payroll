@@ -2,15 +2,23 @@
 
 class EmployeeLoan < ApplicationRecord
   STATUSES = %w[active paid_off suspended].freeze
+  BALANCE_SOURCES = %w[new_loan quickbooks statement employee_confirmation other_verified].freeze
 
   belongs_to :employee
   belongs_to :company
   belongs_to :deduction_type, optional: true
+  belongs_to :created_by, class_name: "User", optional: true
   has_many :loan_transactions, dependent: :destroy
+  has_many :employee_payroll_fields, dependent: :nullify
+
+  before_validation :initialize_balance_provenance
 
   validates :name, presence: true
   validates :original_amount, presence: true, numericality: { greater_than: 0 }
   validates :current_balance, numericality: { greater_than_or_equal_to: 0 }
+  validates :opening_balance, presence: true, numericality: { greater_than: 0 }
+  validates :balance_as_of, presence: true
+  validates :balance_source, presence: true, inclusion: { in: BALANCE_SOURCES }
   validates :payment_amount, numericality: { greater_than: 0 }, allow_nil: true
   validates :status, presence: true, inclusion: { in: STATUSES }
 
@@ -26,7 +34,7 @@ class EmployeeLoan < ApplicationRecord
     status == "paid_off"
   end
 
-  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil, notes: nil)
+  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil, notes: nil, recorded_by: nil)
     raise ArgumentError, "Payment amount must be positive" unless amount.positive?
 
     with_lock do
@@ -44,7 +52,9 @@ class EmployeeLoan < ApplicationRecord
         balance_before: balance_before,
         balance_after: balance_before - actual_payment,
         transaction_date: transaction_date,
-        notes: notes
+        notes: notes,
+        source: payroll_item.present? ? "payroll" : "manual",
+        recorded_by: recorded_by
       )
 
       new_balance = (balance_before - actual_payment).round(2)
@@ -57,7 +67,7 @@ class EmployeeLoan < ApplicationRecord
     end
   end
 
-  def mark_paid_off!(date: nil, notes: nil)
+  def mark_paid_off!(date: nil, notes: nil, recorded_by: nil)
     with_lock do
       raise ArgumentError, "Loan is already paid off" if paid_off?
 
@@ -69,7 +79,9 @@ class EmployeeLoan < ApplicationRecord
           balance_before: current_balance,
           balance_after: 0,
           transaction_date: transaction_date,
-          notes: notes.presence || "Marked paid off"
+          notes: notes.presence || "Marked paid off",
+          source: "manual",
+          recorded_by: recorded_by
         )
       end
 
@@ -95,7 +107,7 @@ class EmployeeLoan < ApplicationRecord
     end
   end
 
-  def record_addition!(amount:, date: nil, notes: nil)
+  def record_addition!(amount:, date: nil, notes: nil, recorded_by: nil)
     raise ArgumentError, "Addition amount must be positive" unless amount.positive?
 
     with_lock do
@@ -106,7 +118,9 @@ class EmployeeLoan < ApplicationRecord
         balance_before: balance_before,
         balance_after: balance_before + amount,
         transaction_date: date || Date.current,
-        notes: notes
+        notes: notes,
+        source: "manual",
+        recorded_by: recorded_by
       )
 
       update!(
@@ -117,6 +131,12 @@ class EmployeeLoan < ApplicationRecord
   end
 
   private
+
+  def initialize_balance_provenance
+    self.opening_balance ||= original_amount
+    self.balance_as_of ||= start_date || Date.current
+    self.balance_source ||= "new_loan"
+  end
 
   def append_note(note)
     return notes if note.blank?

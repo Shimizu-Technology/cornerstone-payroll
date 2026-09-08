@@ -33,38 +33,63 @@ module Api
               include_department: true,
               include_sensitive: true,
               include_classification_history: true,
-              include_lifecycle: true
+              include_lifecycle: true,
+              include_w4_history: true
             )
           }
         end
 
         # POST /api/v1/admin/employees
         def create
-          @employee = Employee.new(employee_params.merge(company_id: current_company_id))
+          attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
+          @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
 
-          if @employee.save
-            render json: { data: serialize_employee(@employee, include_sensitive: true) }, status: :created
-          else
-            render json: {
-              error: "Validation failed",
-              details: @employee.errors.messages
-            }, status: :unprocessable_entity
+          Employee.transaction do
+            @employee.save!
+            EmployeeW4ElectionChangeService.new(
+              employee: @employee,
+              attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| @employee.public_send(attribute) },
+              actor: current_user,
+              source: "employee_creation",
+              reason: w4_reason
+            ).call!
           end
+
+          render json: { data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true) }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages
+          }, status: :unprocessable_entity
+        rescue EmployeeW4ElectionChangeService::Error => e
+          render json: { error: "Validation failed", details: { w4_effective_on: [ e.message ] } }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/employees/:id
         def update
+          attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present?
 
-          if @employee.update(employee_params)
-            render json: { data: serialize_employee(@employee, include_sensitive: true) }
-          else
-            render json: {
-              error: "Validation failed",
-              details: @employee.errors.messages
-            }, status: :unprocessable_entity
+          Employee.transaction do
+            @employee.update!(attributes.merge(w4_attributes))
+            EmployeeW4ElectionChangeService.new(
+              employee: @employee,
+              attributes: w4_attributes,
+              actor: current_user,
+              source: "staff",
+              reason: w4_reason
+            ).call!
           end
+
+          render json: { data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages
+          }, status: :unprocessable_entity
+        rescue EmployeeW4ElectionChangeService::Error => e
+          render json: { error: "Validation failed", details: { w4_change_reason: [ e.message ] } }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/employees/:id
@@ -172,6 +197,7 @@ module Api
             :w4_step4b_deductions,
             :w4_form_version,
             :w4_effective_on,
+            :w4_change_reason,
             :retirement_rate,
             :roth_retirement_rate,
             :employer_retirement_match_rate,
@@ -204,6 +230,13 @@ module Api
               permitted.delete(:ssn)
             end
           end
+        end
+
+        def split_w4_attributes(permitted)
+          attributes = permitted.to_h.symbolize_keys
+          reason = attributes.delete(:w4_change_reason)
+          w4_attributes = attributes.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+          [ attributes, w4_attributes, reason ]
         end
 
         def classification_transition_params
@@ -307,7 +340,8 @@ module Api
           include_department: false,
           include_sensitive: false,
           include_classification_history: false,
-          include_lifecycle: false
+          include_lifecycle: false,
+          include_w4_history: false
         )
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
@@ -352,7 +386,26 @@ module Api
             end
           end
 
+          if include_w4_history
+            elections = employee.employee_w4_elections.includes(:created_by).recent_first.to_a
+            latest_election = elections.first
+            data.merge!(latest_election.profile_attributes.stringify_keys) if latest_election
+            data["w4_elections"] = elections.map { |election| serialize_w4_election(election) }
+            data["current_w4_election"] = serialize_w4_election(employee.w4_election_on(Date.current))
+            data["upcoming_w4_election"] = serialize_w4_election(
+              elections.select { |election| election.effective_on > Date.current }.min_by { |election| [ election.effective_on, election.id ] }
+            )
+          end
+
           data
+        end
+
+        def serialize_w4_election(election)
+          return nil unless election
+
+          election.as_json(except: [ :created_by_id ]).merge(
+            "created_by_name" => election.created_by&.name
+          )
         end
 
         def serialize_work_profile(profile)

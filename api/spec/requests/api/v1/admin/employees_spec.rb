@@ -440,6 +440,53 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.pay_rate).to eq(25.00)
       end
 
+      it "appends effective-dated W-4 history while leaving the prior election intact" do
+        EmployeeW4ElectionChangeService.new(
+          employee: employee,
+          attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+            .merge(w4_effective_on: Date.new(2024, 1, 1)),
+          actor: admin_user,
+          source: "employee_creation",
+          reason: "Initial W-4"
+        ).call!
+
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            filing_status: "married",
+            w4_effective_on: "2026-10-01",
+            w4_change_reason: "New signed W-4 received"
+          }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.employee_w4_elections.count).to eq(2)
+        employee.employee_w4_elections.reload
+        expect(employee.w4_election_on(Date.new(2026, 9, 30)).filing_status).to eq("single")
+        expect(employee.w4_election_on(Date.new(2026, 10, 1)).filing_status).to eq("married")
+        expect(response.parsed_body.dig("data", "w4_elections").length).to eq(2)
+      end
+
+      it "rejects an unexplained W-4 change" do
+        EmployeeW4ElectionChangeService.new(
+          employee: employee,
+          attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+            .merge(w4_effective_on: Date.new(2024, 1, 1)),
+          actor: admin_user,
+          source: "employee_creation",
+          reason: "Initial W-4"
+        ).call!
+
+        expect {
+          patch "/api/v1/admin/employees/#{employee.id}", params: {
+            employee: { filing_status: "married", w4_effective_on: "2026-10-01" }
+          }
+        }.not_to change(EmployeeW4Election, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "w4_change_reason").join).to match(/explain/i)
+        expect(employee.reload.filing_status).to eq("single")
+      end
+
       it "updates and returns the employee job title" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { job_title: "Senior Payroll Specialist" }

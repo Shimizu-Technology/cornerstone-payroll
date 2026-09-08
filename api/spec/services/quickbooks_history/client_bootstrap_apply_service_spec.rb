@@ -40,6 +40,7 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
     end.to change(Employee, :count).by(3)
       .and change(EmployeeWageRate, :count).by(3)
       .and change(EmployeePayrollField, :count).by(2)
+      .and change(EmployeeW4Election, :count).by(3)
 
     expect(bootstrap.reload).to be_applied
     expect(batch.reload).to be_applied
@@ -58,6 +59,11 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
     )
     expect(active.employee_payroll_fields.joins(:payroll_field_definition).pluck("payroll_field_definitions.name", :amount)).to eq(
       [ [ "Health Insurance", 105.to_d ] ]
+    )
+    expect(active.employee_w4_elections.sole).to have_attributes(
+      source: "quickbooks_history",
+      created_by_id: actor.id,
+      effective_on: Date.current
     )
 
     commission = company.employees.find_by!(first_name: "Charlie")

@@ -40,6 +40,7 @@ module QuickbooksHistory
         created_employee_count = 0
         plan.profiles.each do |profile|
           employee = bootstrap.company.employees.create!(profile.employee_attributes)
+          create_w4_election!(employee)
           create_wage_rates!(employee, profile.wage_rates)
           create_payroll_fields!(employee, profile.payroll_fields, definition_cache)
           link_worker!(profile.worker, employee)
@@ -74,6 +75,19 @@ module QuickbooksHistory
 
     def create_wage_rates!(employee, wage_rates)
       wage_rates.each { |attributes| employee.employee_wage_rates.create!(attributes) }
+    end
+
+    def create_w4_election!(employee)
+      return if employee.contractor?
+
+      EmployeeW4ElectionChangeService.new(
+        employee: employee,
+        attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+          .merge(w4_effective_on: Date.current),
+        actor: actor,
+        source: "quickbooks_history",
+        reason: "Initial W-4 election prepared from retained QuickBooks setup"
+      ).call!
     end
 
     def create_payroll_fields!(employee, payroll_fields, definition_cache)
