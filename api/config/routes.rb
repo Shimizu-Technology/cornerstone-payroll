@@ -62,6 +62,14 @@ Rails.application.routes.draw do
 
       namespace :admin do
         resource :pay_schedule_settings, only: [ :show, :update ]
+        resource :payroll_go_live, only: [ :show ], controller: :payroll_go_live do
+          post :preview_setup
+          post :apply_setup
+          post :record_parallel_run
+          patch :update_review
+          post :sign_technical
+          post :sign_operations
+        end
         resources :payroll_history, only: [ :index ]
         resources :imported_pay_periods, only: [ :show ]
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
-import { ArrowRight, Loader2, UserPlus } from 'lucide-react';
+import { ArrowRight, Loader2, LockKeyhole, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -1343,9 +1343,9 @@ export function PayPeriodDetail({
           <Button variant="outline" onClick={handleUnapprove} disabled={processing}>
             Roll Back Approval
           </Button>
-          <Button onClick={handleCommit} disabled={processing}>
-            {processing ? 'Committing...' : 'Commit & Finalize'}
-          </Button>
+          {payPeriod.parallel_run
+            ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
+            : <Button onClick={handleCommit} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>

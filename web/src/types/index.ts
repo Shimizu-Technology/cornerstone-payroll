@@ -497,6 +497,7 @@ export interface PayPeriod {
   end_date: string;
   pay_date: string;
   status: PayPeriodStatus;
+  parallel_run?: boolean;
   run_purpose: PayRunPurpose;
   includes_base_salary: boolean;
   run_purpose_source?: 'operator_selected' | 'system_correction' | 'production_migration' | 'legacy_system_default';

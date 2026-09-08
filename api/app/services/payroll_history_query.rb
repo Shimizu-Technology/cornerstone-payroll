@@ -211,6 +211,7 @@ class PayrollHistoryQuery
 
   def serialize(row, native_periods:)
     imported = row.fetch("record_type") == "imported"
+    parallel_run = !imported && native_periods[row.fetch("id").to_i]&.parallel_run?
     status = row.fetch("status")
     correction_status = row["correction_status"]
     editable = @audience == :staff && !imported && status != "committed" && correction_status != "voided"
@@ -229,6 +230,7 @@ class PayrollHistoryQuery
       correction_status: correction_status,
       notes: row["notes"],
       compliance_warnings: imported ? [] : (native_periods[row.fetch("id").to_i]&.compliance_warnings || []),
+      parallel_run: parallel_run,
       employee_count: row.fetch("employee_count").to_i,
       total_gross: row.fetch("total_gross").to_d.to_f,
       total_net: row.fetch("total_net").to_d.to_f,
@@ -247,7 +249,7 @@ class PayrollHistoryQuery
         enter_hours: @audience == :staff && !imported && status == "draft" && correction_status != "voided",
         run: @audience == :staff && !imported && %w[draft calculated].include?(status) && correction_status != "voided",
         approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided",
-        commit: @audience == :staff && !imported && status == "approved" && correction_status != "voided"
+        commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
       }
     }
   end
