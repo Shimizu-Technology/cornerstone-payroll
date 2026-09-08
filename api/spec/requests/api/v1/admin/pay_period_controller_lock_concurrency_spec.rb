@@ -3,6 +3,19 @@
 require "rails_helper"
 require "timeout"
 
+module PayPeriodControllerLockConcurrencyHook
+  private
+
+  def with_financial_pay_period_lock
+    queue = Thread.current[:pay_period_controller_lock_backend]
+    queue << ApplicationRecord.connection.select_value("SELECT pg_backend_pid()") if queue
+    super
+  end
+end
+
+Api::V1::Admin::PayPeriodsController.prepend(PayPeriodControllerLockConcurrencyHook) unless
+  Api::V1::Admin::PayPeriodsController < PayPeriodControllerLockConcurrencyHook
+
 RSpec.describe "Admin pay-period financial locking", :postgres_concurrency, type: :request do
   self.use_transactional_tests = false
 
@@ -27,6 +40,7 @@ RSpec.describe "Admin pay-period financial locking", :postgres_concurrency, type
 
   it "holds a protected update until the company and pay-period locks are released" do
     locked = Queue.new
+    request_backend = Queue.new
     release_locks = Queue.new
     results = Queue.new
     locker_thread = nil
@@ -46,24 +60,28 @@ RSpec.describe "Admin pay-period financial locking", :postgres_concurrency, type
       pop_with_timeout(locked)
 
       request_thread = Thread.new do
+        Thread.current[:pay_period_controller_lock_backend] = request_backend
         session = ActionDispatch::Integration::Session.new(Rails.application)
         session.patch(
           "/api/v1/admin/pay_periods/#{pay_period.id}",
           params: { pay_period: { run_purpose: "bonus" } }
         )
-        results << [ session.response.status, session.response.parsed_body ]
+        results << [ session.response.status, JSON.parse(session.response.body) ]
       rescue StandardError => e
         results << [ :error, e ]
+      ensure
+        Thread.current[:pay_period_controller_lock_backend] = nil
       end
 
-      expect { pop_with_timeout(results, seconds: 0.2) }.to raise_error(Timeout::Error)
+      wait_for_postgres_lock(pop_with_timeout(request_backend))
+      expect(results).to be_empty
     ensure
       release_locks << true
       [ locker_thread, request_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     end
 
     status, body = pop_with_timeout(results)
-    expect(status).to eq(200), body.inspect
+    expect(status).to eq(Rack::Utils.status_code(:ok)), body.inspect
     expect(pay_period.reload).to have_attributes(run_purpose: "bonus", includes_base_salary: false)
   end
 
@@ -73,5 +91,23 @@ RSpec.describe "Admin pay-period financial locking", :postgres_concurrency, type
     queue.pop(timeout: seconds) || raise(Timeout::Error, "Timed out waiting for a queue value")
   rescue ThreadError
     raise Timeout::Error, "Timed out waiting for a queue value"
+  end
+
+  def wait_for_postgres_lock(backend_pid, seconds: 10)
+    Timeout.timeout(seconds) do
+      loop do
+        waiting = ApplicationRecord.connection.select_value(<<~SQL.squish)
+          SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE pid = #{Integer(backend_pid)} AND granted = false
+          )
+        SQL
+        return if waiting
+
+        sleep 0.01
+      end
+    end
+  rescue Timeout::Error
+    raise Timeout::Error, "Timed out waiting for PostgreSQL backend #{backend_pid} to wait on a lock"
   end
 end
