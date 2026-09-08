@@ -15,6 +15,19 @@ end
 HistoricalPayroll::AdjustmentCreateService.prepend(HistoricalAdjustmentPayPeriodConcurrencyHook) unless
   HistoricalPayroll::AdjustmentCreateService < HistoricalAdjustmentPayPeriodConcurrencyHook
 
+module HistoricalAdjustmentLifecycleConcurrencyHook
+  private
+
+  def with_financial_pay_period_lock
+    queue = Thread.current[:historical_adjustment_lifecycle_backend]
+    queue << ApplicationRecord.connection.select_value("SELECT pg_backend_pid()") if queue
+    super
+  end
+end
+
+PayPeriodLifecycleService.prepend(HistoricalAdjustmentLifecycleConcurrencyHook) unless
+  PayPeriodLifecycleService < HistoricalAdjustmentLifecycleConcurrencyHook
+
 RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_concurrency do
   self.use_transactional_tests = false
 
@@ -116,6 +129,7 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
 
   it "makes approval observe an adjustment that is committing concurrently" do
     adjustment_at_audit = Queue.new
+    approval_backend = Queue.new
     release_adjustment = Queue.new
     results = Queue.new
     attributes = {
@@ -160,6 +174,7 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
       pop_with_timeout(adjustment_at_audit)
 
       approval_thread = Thread.new do
+        Thread.current[:historical_adjustment_lifecycle_backend] = approval_backend
         ActiveRecord::Base.connection_pool.with_connection do
           thread_period = PayPeriod.find(pay_period.id)
           thread_actor = User.find(actor.id)
@@ -167,9 +182,12 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
           results << [ :ok, :approval ]
         rescue StandardError => e
           results << [ :error, e ]
+        ensure
+          Thread.current[:historical_adjustment_lifecycle_backend] = nil
         end
       end
-      expect { pop_with_timeout(results, seconds: 0.2) }.to raise_error(Timeout::Error)
+      wait_for_postgres_lock(pop_with_timeout(approval_backend))
+      expect(results).to be_empty
     ensure
       release_adjustment << true
       [ adjustment_thread, approval_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
@@ -189,6 +207,24 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
     queue.pop(timeout: seconds) || raise(Timeout::Error, "Timed out waiting for a queue value")
   rescue ThreadError
     raise Timeout::Error, "Timed out waiting for a queue value"
+  end
+
+  def wait_for_postgres_lock(backend_pid, seconds: 10)
+    Timeout.timeout(seconds) do
+      loop do
+        waiting = ApplicationRecord.connection.select_value(<<~SQL.squish)
+          SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE pid = #{Integer(backend_pid)} AND granted = false
+          )
+        SQL
+        return if waiting
+
+        sleep 0.01
+      end
+    end
+  rescue Timeout::Error
+    raise Timeout::Error, "Timed out waiting for PostgreSQL backend #{backend_pid} to wait on a lock"
   end
 
   def cleanup_records
