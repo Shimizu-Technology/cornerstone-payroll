@@ -342,12 +342,12 @@ class PayPeriod < ApplicationRecord
       status: "locked",
       importer_version: HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS
     )
-                                   .includes(:historical_ytd_bridge)
+                                   .includes(:latest_applied_historical_ytd_bridge)
                                    .to_a
     return if batches.empty?
 
-    bridges = batches.filter_map(&:historical_ytd_bridge).select(&:applied?)
-    unbridged_batch = batches.any? { |batch| !batch.historical_ytd_bridge&.applied? }
+    bridges = batches.filter_map(&:latest_applied_historical_ytd_bridge)
+    unbridged_batch = batches.any? { |batch| batch.latest_applied_historical_ytd_bridge.nil? }
     if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
       errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return

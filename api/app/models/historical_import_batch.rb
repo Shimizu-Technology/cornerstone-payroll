@@ -20,6 +20,8 @@ class HistoricalImportBatch < ApplicationRecord
   has_many :historical_ytd_bridges, dependent: :restrict_with_error
   has_one :historical_ytd_bridge, -> { order(revision: :desc, id: :desc) },
           class_name: "HistoricalYtdBridge", dependent: :restrict_with_error
+  has_one :latest_applied_historical_ytd_bridge, -> { where(status: "applied").order(revision: :desc, id: :desc) },
+          class_name: "HistoricalYtdBridge", dependent: :restrict_with_error
 
   validates :source_system, inclusion: { in: SOURCE_SYSTEMS }
   validates :source_label, :bundle_digest, :importer_version, presence: true

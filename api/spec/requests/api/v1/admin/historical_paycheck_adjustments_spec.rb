@@ -62,9 +62,11 @@ RSpec.describe "Api::V1::Admin::HistoricalPaycheckAdjustments", type: :request d
 
     post "/api/v1/admin/historical_paycheck_adjustments/#{adjustment_id}/event", params: {
       event_type: "filing_reviewed_no_amendment",
-      note: "Reviewed against the filed quarter"
+      note: "Reviewed against the filed quarter",
+      metadata: { "review_ticket" => "TAX-42" }
     }
     expect(response).to have_http_status(:created), response.body
+    expect(response.parsed_body.dig("data", "metadata")).to eq("review_ticket" => "TAX-42")
 
     get "/api/v1/admin/historical_paychecks/#{paycheck.id}/adjustments"
     expect(response).to have_http_status(:ok)
@@ -97,6 +99,18 @@ RSpec.describe "Api::V1::Admin::HistoricalPaycheckAdjustments", type: :request d
 
     post "/api/v1/admin/historical_paychecks/#{paycheck.id}/adjustments/preview", params: { adjustment: input }
     expect(response).to have_http_status(:forbidden)
+  end
+
+  it "rejects malformed financial input with the API error contract" do
+    post "/api/v1/admin/historical_paychecks/#{paycheck.id}/adjustments/preview", params: {
+      adjustment: input.merge(gross_pay: "1O0")
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq(
+      "error" => "Gross pay must be a number",
+      "details" => {}
+    )
   end
 
   it "returns not found for another client's source paycheck and adjustment" do

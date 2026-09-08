@@ -377,7 +377,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
                   <TableCell>{item.check_number || 'Not assigned'}</TableCell>
-                  <TableCell className="text-right"><Link aria-label={`Open ${item.record_type === 'imported' ? 'imported pay run' : 'payroll item'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
+                  <TableCell className="text-right"><Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
                 </TableRow>
               ))}
             </TableBody>

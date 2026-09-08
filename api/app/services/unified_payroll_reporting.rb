@@ -22,7 +22,7 @@ class UnifiedPayrollReporting
 
   def historical_adjustments(employee_id: nil)
     scope = HistoricalPaycheckAdjustment.joins(historical_paycheck: :historical_import_batch)
-                                        .includes(:historical_paycheck)
+                                        .includes(historical_paycheck: :historical_pay_period)
                                         .where(company_id: @company_id, effective_pay_date: @period.range)
                                         .where(historical_import_batches: { company_id: @company_id, status: "locked" })
     scope = scope.where(historical_paychecks: { employee_id: employee_id }) if employee_id

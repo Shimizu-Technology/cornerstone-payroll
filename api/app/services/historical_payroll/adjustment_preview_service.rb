@@ -81,7 +81,7 @@ module HistoricalPayroll
       end
 
       HistoricalPayroll::Ledger::FIELDS.each do |field|
-        attributes[field] = BigDecimal(input.fetch(field, 0).to_s, exception: false) || 0.to_d
+        attributes[field] = decimal_value(field)
       end
       attributes[:employee_taxes] = attributes.values_at(:federal_income_tax, :social_security_tax, :medicare_tax).sum(0.to_d) unless input.key?(:employee_taxes)
       attributes[:adjusted_gross] = attributes[:gross_pay] - attributes[:pretax_deductions] unless input.key?(:adjusted_gross)
@@ -113,6 +113,15 @@ module HistoricalPayroll
     def downstream_pay_period_ids(effective_date)
       PayPeriod.reportable_committed.where(company_id: paycheck.company_id)
                .where("pay_date > ?", effective_date).order(:pay_date, :id).pluck(:id)
+    end
+
+    def decimal_value(field)
+      return 0.to_d unless input.key?(field)
+
+      value = BigDecimal(input[field].to_s, exception: false)
+      raise ArgumentError, "#{field.to_s.humanize} must be a number" unless value
+
+      value
     end
 
     def ledger

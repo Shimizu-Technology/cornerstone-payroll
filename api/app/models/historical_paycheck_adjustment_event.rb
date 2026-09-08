@@ -13,6 +13,7 @@ class HistoricalPaycheckAdjustmentEvent < ApplicationRecord
 
   validates :event_type, inclusion: { in: EVENT_TYPES }
   validate :tenant_is_consistent
+  validate :activation_bridge_matches_adjustment
 
   before_update :prevent_change
   before_destroy :prevent_change
@@ -29,6 +30,19 @@ class HistoricalPaycheckAdjustmentEvent < ApplicationRecord
     if created_by && company && created_by.organization_id != company.organization_id
       errors.add(:created_by, "must belong to the same organization")
     end
+  end
+
+  def activation_bridge_matches_adjustment
+    return unless event_type == "ytd_revision_activated"
+    unless historical_ytd_bridge
+      errors.add(:historical_ytd_bridge, "is required for a YTD revision activation")
+      return
+    end
+    return unless historical_paycheck_adjustment
+    return if historical_ytd_bridge.historical_import_batch_id ==
+              historical_paycheck_adjustment.historical_paycheck.historical_import_batch_id
+
+    errors.add(:historical_ytd_bridge, "must belong to the adjustment's historical import")
   end
 
   def prevent_change

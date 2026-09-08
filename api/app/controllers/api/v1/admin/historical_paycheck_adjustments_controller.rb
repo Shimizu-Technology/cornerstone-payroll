@@ -20,7 +20,7 @@ module Api
           ).call
           render json: { data: preview_json(result) }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_adjustment_error(e)
         end
 
         def create
@@ -33,7 +33,7 @@ module Api
           ).call
           render json: { data: adjustment_json(adjustment) }, status: :created
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_adjustment_error(e)
         end
 
         def reverse
@@ -46,7 +46,7 @@ module Api
           ).call
           render json: { data: adjustment_json(reversal) }, status: :created
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_adjustment_error(e)
         end
 
         def event
@@ -55,11 +55,11 @@ module Api
             actor: current_user,
             event_type: params[:event_type],
             note: params[:note],
-            metadata: params[:metadata] || {}
+            metadata: params.permit(metadata: {})[:metadata] || {}
           ).call
           render json: { data: event_json(event) }, status: :created
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_adjustment_error(e)
         end
 
         private
@@ -88,6 +88,15 @@ module Api
             employer_tax_breakdown: %i[label amount],
             employer_contribution_breakdown: %i[label amount]
           ).to_h
+        end
+
+        def render_adjustment_error(error)
+          if error.is_a?(ActiveRecord::RecordInvalid)
+            render json: { error: "Validation failed", details: error.record.errors.messages },
+                   status: :unprocessable_entity
+          else
+            render json: { error: error.message, details: {} }, status: :unprocessable_entity
+          end
         end
 
         def preview_json(result)
