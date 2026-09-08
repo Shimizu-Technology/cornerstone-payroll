@@ -87,7 +87,8 @@ RSpec.describe AnnualPayrollSummary do
       retirement_payment: 50,
       roth_retirement_payment: 25,
       custom_deductions: [ { "label" => "Allotment", "amount" => 10 } ],
-      net_pay: 747.50,
+      total_deductions: 321.50,
+      net_pay: 703.50,
       employer_social_security_tax: 62,
       employer_medicare_tax: 14.50,
       employer_retirement_match: 40
@@ -148,7 +149,7 @@ RSpec.describe AnnualPayrollSummary do
       pretax_deductions: 70.0,
       employee_taxes: 186.5,
       after_tax_deductions: 65.0,
-      net_pay: 747.5,
+      net_pay: 703.5,
       employer_taxes: 76.5,
       employer_contributions: 40.0,
       total_payroll_cost: 1_141.5
@@ -176,11 +177,52 @@ RSpec.describe AnnualPayrollSummary do
       year_count: 2,
       employee_count: 1,
       gross_pay: 1_600.0,
-      net_pay: 1_172.5,
+      net_pay: 1_128.5,
       total_payroll_cost: 1_806.5,
       excluded_unlinked_paycheck_count: 1
     )
     expect(report[:source_statement]).to include("never rewrite the source")
+  end
+
+  it "reconciles corrective paycheck deltas when component rows are intentionally absent" do
+    original_period = create(:pay_period, company: company, pay_date: Date.new(2026, 6, 1))
+    original_item = create(:payroll_item, company: company, employee: employee, pay_period: original_period)
+    correction_period = create(
+      :pay_period,
+      :committed,
+      company: company,
+      cycle: "supplemental",
+      run_purpose: "correction",
+      corrects_pay_period: original_period,
+      pay_date: Date.new(2026, 7, 1)
+    )
+    create(
+      :payroll_item,
+      company: company,
+      employee: employee,
+      pay_period: correction_period,
+      correction_for_payroll_item: original_item,
+      gross_pay: 100,
+      retirement_payment: 5,
+      withholding_tax: 10,
+      total_deductions: 25,
+      net_pay: 95,
+      non_taxable_pay: 0
+    )
+
+    year = described_class.new(company: company).call.fetch(:years).sole
+
+    expect(year).to include(
+      gross_pay: 100.0,
+      non_taxable_pay: 20.0,
+      pretax_deductions: 5.0,
+      employee_taxes: 10.0,
+      after_tax_deductions: 10.0,
+      net_pay: 95.0
+    )
+    reconciled_net = year[:gross_pay] + year[:non_taxable_pay] - year[:pretax_deductions] -
+      year[:employee_taxes] - year[:after_tax_deductions]
+    expect(reconciled_net).to eq(year[:net_pay])
   end
 
   it "returns a stable empty report when no payroll is available" do
