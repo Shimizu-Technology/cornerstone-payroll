@@ -401,8 +401,10 @@ module QuickbooksHistory
     end
 
     def relation_money_totals(scope)
+      paycheck_table = HistoricalPaycheck.arel_table
       expressions = TOTAL_FIELDS.map do |field|
-        Arel.sql("COALESCE(SUM(historical_paychecks.#{field}), 0)")
+        sum = Arel::Nodes::NamedFunction.new("SUM", [ paycheck_table[field] ])
+        Arel::Nodes::NamedFunction.new("COALESCE", [ sum, Arel::Nodes.build_quoted(0) ])
       end
       values = scope.pick(*expressions) || Array.new(TOTAL_FIELDS.size, 0)
       TOTAL_FIELDS.zip(Array(values)).to_h.transform_values(&:to_d)
