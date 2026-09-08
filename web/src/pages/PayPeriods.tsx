@@ -96,6 +96,7 @@ function PayPeriodMobileCard({
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
           {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
+        {period.parallel_run && <Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -933,6 +934,7 @@ export function PayPeriods() {
                               </Button>}
                             </div>
                           )}
+                          {period.parallel_run && <Badge variant="info">Parallel · cannot commit</Badge>}
                           {period.capabilities.commit && (
                             <Button
                               size="sm"

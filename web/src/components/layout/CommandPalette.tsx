@@ -18,6 +18,7 @@ import {
   Link2,
   Printer,
   ReceiptText,
+  Route,
   ScanLine,
   Search,
   SlidersHorizontal,
@@ -31,7 +32,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeesPath, newEmployeePath, payRunsPath } from '@/lib/routes';
+import { employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 
 type CommandPaletteMode = 'all' | 'companies';
@@ -205,6 +206,18 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
           kind: 'navigation',
           href: '/historical-payroll',
         });
+        if (activeCompanyId) {
+          add({
+            id: 'payroll-go-live',
+            label: 'Payroll Go-live',
+            description: 'Transfer reviewed setup, reconcile parallel runs, and approve launch.',
+            group: 'Tools',
+            keywords: ['quickbooks', 'parallel payroll', 'cutover', 'migration'],
+            icon: <Route className="h-4 w-4" />,
+            kind: 'navigation',
+            href: payrollGoLivePath(activeCompanyId),
+          });
+        }
       }
 
       if (isAdmin) {

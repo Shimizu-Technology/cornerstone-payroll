@@ -44,6 +44,7 @@ const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
 const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
+const PayrollGoLive = lazy(() => import('@/pages/PayrollGoLive').then((module) => ({ default: module.PayrollGoLive })));
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
@@ -324,6 +325,7 @@ function AppRoutes() {
           <Route path="pay-runs/imported/:id" element={<ImportedPayRunDetail audience={isClient ? 'client' : 'staff'} />} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
+          <Route path="payroll-go-live" element={<StaffOnlyRoute><PayrollGoLive /></StaffOnlyRoute>} />
         </Route>
         <Route path="historical-payroll" element={<HistoricalPayrollRoute><HistoricalPayroll /></HistoricalPayrollRoute>} />
         <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />

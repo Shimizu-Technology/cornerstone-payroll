@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardList,
   FileClock,
+  LockKeyhole,
   Printer,
   RefreshCw,
   ReceiptText,
@@ -172,6 +173,7 @@ export function PayRunWorkspace(): ReactElement {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payRun.correction_status === 'voided' ? 'danger' : payRun.status === 'committed' ? 'success' : payRun.status === 'approved' ? 'info' : payRun.status === 'calculated' ? 'warning' : 'default'}>{payRun.correction_status === 'voided' ? 'Voided' : statusConfig?.label || payRun.status}</Badge>
           <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
+          {payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
           <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
         </div>
       </section>

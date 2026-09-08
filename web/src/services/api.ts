@@ -4254,6 +4254,7 @@ export interface PayrollHistoryRecord {
   run_purpose: import('@/types').PayRunPurpose;
   includes_base_salary: boolean;
   correction_status?: import('@/types').CorrectionStatus | null;
+  parallel_run?: boolean;
   notes?: string | null;
   compliance_warnings?: string[];
   employee_count: number;
@@ -4300,6 +4301,100 @@ export const payrollHistoryApi = {
     companyId: number,
   ): Promise<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }> =>
     api.get<{ data: ImportedPayPeriodDetail; meta: PaginationMeta }>(`/admin/imported_pay_periods/${id}`, params, { companyId }),
+};
+
+export interface PayrollGoLiveParallelRun {
+  id: number;
+  pay_period_id: number;
+  period_start: string;
+  period_end: string;
+  pay_date: string;
+  result: 'pass' | 'fail';
+  source_employee_count: number;
+  cornerstone_employee_count: number;
+  source_gross_pay: string;
+  source_net_pay: string;
+  source_taxes: string;
+  source_deductions: string;
+  cornerstone_gross_pay: string;
+  cornerstone_net_pay: string;
+  cornerstone_taxes: string;
+  cornerstone_deductions: string;
+  differences: Record<string, string | number>;
+  notes: string;
+  recorded_by_name?: string | null;
+  recorded_at: string;
+}
+
+export interface PayrollGoLiveReview {
+  id: number;
+  status: 'draft' | 'setup_applied' | 'approved';
+  source_company: { id: number; name: string };
+  historical_import_batch_id: number;
+  effective_on: string;
+  plan_digest: string;
+  setup_summary: Record<string, number>;
+  setup_plan: { employee_matches?: Array<{ source_employee_id: number; employee_id: number; employee_name: string }> };
+  warnings: string[];
+  errors: string[];
+  setup_applied_at?: string | null;
+  setup_applied_by_name?: string | null;
+  attestations: Record<string, boolean>;
+  attestation_labels: Record<string, string>;
+  review_notes?: string | null;
+  ready_for_signoff: boolean;
+  blockers: string[];
+  readiness: Record<string, boolean | number>;
+  parallel_runs: PayrollGoLiveParallelRun[];
+  technical_signed_at?: string | null;
+  technical_signed_by_name?: string | null;
+  operations_signed_at?: string | null;
+  operations_signed_by_name?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PayrollGoLivePayload {
+  data: PayrollGoLiveReview | null;
+  source_companies: Array<{ id: number; name: string; active: boolean; employee_count: number }>;
+  historical_imports: Array<{ id: number; source_label: string; status: string; bootstrap_applied: boolean; ytd_bridge_applied: boolean }>;
+  eligible_pay_periods: Array<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: string;
+    parallel_run: boolean;
+    employee_count: number;
+    gross_pay: string;
+    net_pay: string;
+  }>;
+  permissions: {
+    can_preview_setup: boolean;
+    can_apply_setup: boolean;
+    can_record_parallel: boolean;
+    can_sign_technical: boolean;
+    can_sign_operations: boolean;
+  };
+  acknowledgements: { apply_setup: string; technical: string; operations: string };
+}
+
+export const payrollGoLiveApi = {
+  show: (companyId: number): Promise<PayrollGoLivePayload> =>
+    api.get<PayrollGoLivePayload>('/admin/payroll_go_live', undefined, { companyId }),
+  preview: (input: { source_company_id: number; historical_import_batch_id: number; effective_on: string }, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/preview_setup', input, { companyId }),
+  apply: (acknowledgement: string, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/apply_setup', { acknowledgement }, { companyId }),
+  recordParallel: (input: { pay_period_id: number; source_totals: Record<string, string | number>; notes: string }, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/record_parallel_run', input, { companyId }),
+  updateReview: (input: { attestations: Record<string, boolean>; review_notes: string }, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.patch<PayrollGoLivePayload>('/admin/payroll_go_live/update_review', input, { companyId }),
+  signTechnical: (acknowledgement: string, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/sign_technical', { acknowledgement }, { companyId }),
+  signOperations: (acknowledgement: string, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/sign_operations', { acknowledgement }, { companyId }),
 };
 
 export const historicalAdjustmentsApi = {
