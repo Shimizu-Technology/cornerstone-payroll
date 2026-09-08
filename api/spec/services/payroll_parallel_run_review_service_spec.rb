@@ -34,6 +34,9 @@ RSpec.describe PayrollParallelRunReviewService do
     expect(record.cornerstone_taxes).to eq(176.50.to_d)
     expect(record.cornerstone_deductions).to eq(73.50.to_d)
     expect(pay_period.reload).to be_parallel_run
+    expect { pay_period.update!(parallel_run: false) }
+      .to raise_error(ActiveRecord::RecordInvalid, /cannot be cleared/)
+    pay_period.reload
     expect { pay_period.update!(status: "committed") }.to raise_error(ActiveRecord::RecordInvalid, /parallel comparison run/)
     pay_period.reload
     expect do
@@ -49,5 +52,14 @@ RSpec.describe PayrollParallelRunReviewService do
 
     expect(record).not_to be_pass
     expect(record.differences.fetch("employee_count")).to eq(-1)
+  end
+
+  it "rejects negative source aggregates" do
+    expect do
+      described_class.new(
+        review:, pay_period:, actor:, notes: "Invalid source export",
+        source_totals: { employee_count: 1, gross_pay: -1, net_pay: 750, taxes: 176.50, deductions: 73.50 }
+      ).call!
+    end.to raise_error(ArgumentError, /gross pay must be zero or greater/)
   end
 end

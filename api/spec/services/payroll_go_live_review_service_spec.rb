@@ -44,4 +44,17 @@ RSpec.describe PayrollGoLiveReviewService do
     expect { review.update!(review_notes: "Changed") }.to raise_error(ActiveRecord::RecordNotSaved)
     expect(review.errors.full_messages).to include("Approved go-live evidence cannot be changed")
   end
+
+  it "rejects the same person after a role change would otherwise allow both signoffs" do
+    described_class.new(review:, actor: technical_actor).sign_technical!(
+      acknowledgement: PayrollGoLiveReview::TECHNICAL_ACKNOWLEDGEMENT
+    )
+    technical_actor.update!(role: "org_admin")
+
+    expect do
+      described_class.new(review:, actor: technical_actor).sign_operations!(
+        acknowledgement: PayrollGoLiveReview::OPERATIONS_ACKNOWLEDGEMENT
+      )
+    end.to raise_error(ArgumentError, /different people/)
+  end
 end

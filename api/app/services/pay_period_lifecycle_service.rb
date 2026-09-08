@@ -55,7 +55,7 @@ class PayPeriodLifecycleService
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
       end
-      if pay_period.parallel_run?
+      if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
         raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
       end
       unless pay_period.payroll_items.exists?

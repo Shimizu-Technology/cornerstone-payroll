@@ -13,7 +13,7 @@ class PayrollParallelRunReview < ApplicationRecord
     numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :source_gross_pay, :source_net_pay, :source_taxes, :source_deductions,
     :cornerstone_gross_pay, :cornerstone_net_pay, :cornerstone_taxes, :cornerstone_deductions,
-    numericality: true
+    numericality: { greater_than_or_equal_to: 0 }
   validates :notes, presence: true, length: { maximum: 2_000 }
   validate :company_matches_review_and_period
 

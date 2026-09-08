@@ -93,4 +93,17 @@ RSpec.describe PayrollGoLiveSetupTransferService do
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
     end.to raise_error(ArgumentError, /no active source employee match/)
   end
+
+  it "rejects a stale preview after successor employee setup changes" do
+    create(:employee, company: source_company, first_name: "Eithen", last_name: "Hadley", pay_rate: 30)
+    target = create(:employee, company:, first_name: "Eithen", last_name: "Hadley", pay_rate: 15)
+    review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
+
+    target.employee_wage_rates.create!(label: "Corrected rate", rate: 25, active: true, is_primary: false)
+
+    expect do
+      described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+    end.to raise_error(ArgumentError, /Source or successor setup changed/)
+    expect(target.reload.pay_rate).to eq(15.to_d)
+  end
 end

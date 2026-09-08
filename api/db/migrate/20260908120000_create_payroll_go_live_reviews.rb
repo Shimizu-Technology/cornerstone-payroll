@@ -7,6 +7,33 @@ class CreatePayrollGoLiveReviews < ActiveRecord::Migration[8.0]
     add_check_constraint :pay_periods,
       "parallel_run = FALSE OR status <> 'committed'",
       name: "pay_periods_parallel_runs_not_committed"
+    reversible do |direction|
+      direction.up do
+        execute <<~SQL
+          CREATE FUNCTION prevent_pay_period_parallel_run_clear()
+          RETURNS trigger AS $$
+          BEGIN
+            IF OLD.parallel_run = TRUE AND NEW.parallel_run = FALSE THEN
+              RAISE EXCEPTION 'parallel_run cannot be cleared after a payroll is used for comparison'
+                USING ERRCODE = 'check_violation';
+            END IF;
+            RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          CREATE TRIGGER pay_periods_parallel_run_immutable
+          BEFORE UPDATE OF parallel_run ON pay_periods
+          FOR EACH ROW
+          EXECUTE FUNCTION prevent_pay_period_parallel_run_clear();
+        SQL
+      end
+      direction.down do
+        execute <<~SQL
+          DROP TRIGGER IF EXISTS pay_periods_parallel_run_immutable ON pay_periods;
+          DROP FUNCTION IF EXISTS prevent_pay_period_parallel_run_clear();
+        SQL
+      end
+    end
 
     create_table :payroll_go_live_reviews do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }, index: { unique: true }

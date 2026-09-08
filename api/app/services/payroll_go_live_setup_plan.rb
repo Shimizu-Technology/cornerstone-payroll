@@ -112,13 +112,11 @@ class PayrollGoLiveSetupPlan
   end
 
   def current_source_schedule
-    @current_source_schedule ||= CompanyPaySchedule.for_date(source_company.id, effective_on) ||
-      source_company.company_pay_schedules.where("effective_on <= ?", effective_on).order(effective_on: :desc).first
+    @current_source_schedule ||= CompanyPaySchedule.for_date(source_company.id, effective_on)
   end
 
   def current_source_workweek
-    @current_source_workweek ||= CompanyWorkweek.for_date(source_company.id, effective_on) ||
-      source_company.company_workweeks.where("effective_on <= ?", effective_on).order(effective_on: :desc).first
+    @current_source_workweek ||= CompanyWorkweek.for_date(source_company.id, effective_on)
   end
 
   def build_warnings
@@ -155,10 +153,18 @@ class PayrollGoLiveSetupPlan
       records.concat(source.employee_deductions.to_a)
       records.concat(source.employee_payroll_fields.to_a)
       records.concat(source.employee_work_profiles.to_a)
+      records.concat(target.employee_w4_elections.to_a)
+      records.concat(target.employee_wage_rates.to_a)
+      records.concat(target.employee_deductions.to_a)
+      records.concat(target.employee_payroll_fields.to_a)
+      records.concat(target.employee_work_profiles.to_a)
     end
     records.concat(source_company.departments.to_a)
     records.concat(source_company.payroll_field_definitions.to_a)
     records.concat(source_company.deduction_types.to_a)
+    records.concat(company.departments.to_a)
+    records.concat(company.payroll_field_definitions.to_a)
+    records.concat(company.deduction_types.to_a)
 
     {
       "plan" => plan,

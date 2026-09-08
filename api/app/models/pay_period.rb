@@ -99,6 +99,7 @@ class PayPeriod < ApplicationRecord
   validate :supplemental_target_must_be_regular
   validate :off_cycle_tips_excludes_base_salary
   validate :purpose_fields_change_only_in_draft
+  validate :parallel_run_marker_cannot_be_cleared
   validate :parallel_run_cannot_be_committed
   validate :starts_after_historical_ytd_boundary,
            if: lambda {
@@ -303,8 +304,16 @@ class PayPeriod < ApplicationRecord
 
   private
 
+  def parallel_run_marker_cannot_be_cleared
+    if will_save_change_to_parallel_run? && parallel_run_in_database
+      errors.add(:parallel_run, "cannot be cleared after this payroll is used for comparison")
+    end
+  end
+
   def parallel_run_cannot_be_committed
-    errors.add(:status, "cannot be committed because this is a parallel comparison run") if parallel_run? && committed?
+    return unless committed? && (parallel_run? || payroll_parallel_run_review.present?)
+
+    errors.add(:status, "cannot be committed because this is a parallel comparison run")
   end
 
   def assign_schedule_foundation

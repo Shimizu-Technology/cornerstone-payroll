@@ -73,7 +73,9 @@ class PayrollParallelRunReviewService
     values = { employee_count: employee_count }
     MONEY_FIELDS.each do |field|
       value = BigDecimal(source_totals.fetch(field).to_s, exception: false)
-      raise ArgumentError, "QuickBooks #{field.to_s.tr('_', ' ')} is invalid" unless value
+      unless value && value >= 0
+        raise ArgumentError, "QuickBooks #{field.to_s.tr('_', ' ')} must be zero or greater"
+      end
 
       values[field] = value.round(2)
     end

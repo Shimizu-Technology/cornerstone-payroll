@@ -21,7 +21,7 @@ module Api
           )
           render json: payload(review.reload)
         rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         def apply_setup
@@ -34,7 +34,7 @@ module Api
           render json: payload(review.reload)
         rescue ArgumentError, ActiveRecord::RecordInvalid, CompanyPayScheduleChangeService::ChangeError,
                EmployeeW4ElectionChangeService::Error, EmployeeWorkProfileChangeService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         def record_parallel_run
@@ -49,18 +49,19 @@ module Api
           ).call!
           render json: payload(review.reload)
         rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         def update_review
           review = review!
+          permitted = review_params
           PayrollGoLiveReviewService.new(review: review, actor: current_user).save!(
-            attestations: params[:attestations],
-            review_notes: params[:review_notes]
+            attestations: permitted[:attestations] || {},
+            review_notes: permitted[:review_notes]
           )
           render json: payload(review.reload)
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         def sign_technical
@@ -69,7 +70,7 @@ module Api
             .sign_technical!(acknowledgement: params[:acknowledgement])
           render json: payload(review.reload)
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         def sign_operations
@@ -78,10 +79,19 @@ module Api
             .sign_operations!(acknowledgement: params[:acknowledgement])
           render json: payload(review.reload)
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_go_live_error(e)
         end
 
         private
+
+        def review_params
+          params.permit(:review_notes, attestations: PayrollGoLiveReview::ATTESTATIONS.keys)
+        end
+
+        def render_go_live_error(error)
+          details = error.respond_to?(:record) ? error.record.errors.to_hash : {}
+          render json: { error: error.message, details: details }, status: :unprocessable_entity
+        end
 
         def review!
           current_company.payroll_go_live_review || raise(ArgumentError, "Build the setup transfer preview first")
