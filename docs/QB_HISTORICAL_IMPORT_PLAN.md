@@ -318,6 +318,8 @@ Open question:
 
 The MoSa package supplied the required reports and enough supporting quarterly, annual, tax, deduction, retirement, directory, time-off, check, PDF, and image evidence to design and validate the first importer. New clients must still be previewed because report shape and data quality can differ by company and QuickBooks usage.
 
+The reusable provider contract and the checklist for safely adding another reviewed source are documented in [Historical payroll import providers](HISTORICAL_PAYROLL_IMPORT_PROVIDERS.md). QuickBooks Online Payroll remains the only registered provider; the registry is an allowlist, not a claim that arbitrary payroll exports are supported.
+
 ### Files we need from Cornerstone
 
 For one representative client, collect:

@@ -15,14 +15,20 @@ module QuickbooksHistory
       end
     end
 
-    def initialize(company:, files:, actor: nil)
+    def initialize(
+      company:,
+      files:,
+      actor: nil,
+      adapter: HistoricalPayrollImports::Registry.default.fetch!(HistoricalPayrollImports::Registry::DEFAULT_SOURCE_SYSTEM)
+    )
       @company = company
       @files = files
       @actor = actor
+      @adapter = adapter
     end
 
     def call
-      parsed = BundleParser.new(files: files).call
+      parsed = adapter.parse(files: files)
       existing = find_existing_batch(parsed)
       return Result.new(batch: existing, idempotent: true) if existing&.source_files_complete_and_verified?
 
@@ -47,15 +53,15 @@ module QuickbooksHistory
       HistoricalImportBatch.transaction do
         duplicate_count = duplicate_source_count(parsed.paychecks)
         errors = Array(parsed.errors).dup
-        errors << "#{duplicate_count} paycheck snapshot(s) already exist in applied QuickBooks history" if duplicate_count.positive?
+        errors << "#{duplicate_count} paycheck snapshot(s) already exist in applied #{adapter.label} history" if duplicate_count.positive?
 
         batch = HistoricalImportBatch.create!(
           company: company,
           created_by: actor,
-          source_system: "quickbooks_online",
+          source_system: adapter.key,
           source_label: parsed.source_label,
           bundle_digest: parsed.bundle_digest,
-          importer_version: BundleParser::IMPORTER_VERSION,
+          importer_version: adapter.importer_version,
           status: "previewed",
           source_file_manifest: parsed.manifest,
           preview_summary: parsed.summary,
@@ -87,7 +93,7 @@ module QuickbooksHistory
           return Result.new(
             idempotent: false,
             error: ArgumentError.new(
-              "This bundle was already imported as #{other_version.importer_version}. " \
+              "This #{adapter.label} bundle was already imported as #{other_version.importer_version}. " \
               "Complete the importer-version migration before re-importing it."
             )
           )
@@ -105,28 +111,28 @@ module QuickbooksHistory
 
     private
 
-    attr_reader :company, :files, :actor
+    attr_reader :company, :files, :actor, :adapter
 
     def find_existing_batch(parsed)
       HistoricalImportBatch.find_by(
         company: company,
-        source_system: "quickbooks_online",
+        source_system: adapter.key,
         bundle_digest: parsed.bundle_digest,
-        importer_version: BundleParser::IMPORTER_VERSION
+        importer_version: adapter.importer_version
       )
     end
 
     def find_existing_bundle(parsed)
       HistoricalImportBatch.find_by(
         company: company,
-        source_system: "quickbooks_online",
+        source_system: adapter.key,
         bundle_digest: parsed.bundle_digest
       )
     end
 
     def attach_source_files!(batch, stored_source_files)
       if batch.historical_import_source_files.exists?
-        raise ArgumentError, "This QuickBooks preview has incomplete source-file evidence and cannot be repaired automatically"
+        raise ArgumentError, "This #{adapter.label} preview has incomplete source-file evidence and cannot be repaired automatically"
       end
 
       stored_source_files.each { |attributes| batch.historical_import_source_files.create!(attributes) }
