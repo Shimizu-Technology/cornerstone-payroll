@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_09_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1747,6 +1747,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_090000) do
     t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
   end
 
+  create_table "payroll_filing_responsibilities", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "filing_type", null: false
+    t.string "imported_payroll_inclusion", null: false
+    t.text "notes"
+    t.integer "quarter"
+    t.string "responsible_party", null: false
+    t.datetime "reviewed_at", null: false
+    t.string "reviewed_by_email", null: false
+    t.bigint "reviewed_by_id"
+    t.string "reviewed_by_name", null: false
+    t.string "reviewed_by_role", null: false
+    t.date "source_cutoff_date"
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "tax_year", "filing_type"], name: "idx_payroll_filing_responsibilities_annual", unique: true, where: "(quarter IS NULL)"
+    t.index ["company_id", "tax_year", "quarter", "filing_type"], name: "idx_payroll_filing_responsibilities_quarterly", unique: true, where: "(quarter IS NOT NULL)"
+    t.index ["company_id"], name: "index_payroll_filing_responsibilities_on_company_id"
+    t.index ["reviewed_by_id"], name: "index_payroll_filing_responsibilities_on_reviewed_by_id"
+    t.check_constraint "filing_type::text = 'w2_gu'::text AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_941'::character varying, 'guam_withholding'::character varying, 'swica'::character varying]::text[])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_responsibilities_period_check"
+    t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying, 'guam_withholding'::character varying, 'swica'::character varying, 'w2_gu'::character varying]::text[])", name: "payroll_filing_responsibilities_type_check"
+    t.check_constraint "imported_payroll_inclusion::text = ANY (ARRAY['included'::character varying, 'excluded'::character varying]::text[])", name: "payroll_filing_responsibilities_inclusion_check"
+    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying, 'cornerstone'::character varying]::text[])", name: "payroll_filing_responsibilities_party_check"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_responsibilities_year_check"
+  end
+
   create_table "payroll_go_live_reviews", force: :cascade do |t|
     t.datetime "approved_at"
     t.jsonb "attestations", default: {}, null: false
@@ -2916,6 +2943,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_090000) do
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
+  add_foreign_key "payroll_filing_responsibilities", "companies"
+  add_foreign_key "payroll_filing_responsibilities", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "companies", column: "source_company_id", on_delete: :restrict
   add_foreign_key "payroll_go_live_reviews", "companies", on_delete: :restrict
   add_foreign_key "payroll_go_live_reviews", "historical_import_batches", on_delete: :restrict
