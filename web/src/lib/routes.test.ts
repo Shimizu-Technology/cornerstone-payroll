@@ -7,6 +7,7 @@ import {
   importedPayRunPath,
   newEmployeePath,
   payrollItemPath,
+  payrollGoLivePath,
   payRunPath,
   payRunsPath,
   safeInternalReturnPath,
@@ -24,6 +25,7 @@ describe('canonical payroll routes', (): void => {
     expect(payRunPath(12, 91, 'checks')).toBe('/companies/12/pay-runs/91/checks');
     expect(importedPayRunPath(12, 55)).toBe('/companies/12/pay-runs/imported/55');
     expect(payrollItemPath(12, 91, 305)).toBe('/companies/12/pay-runs/91/payroll-items/305');
+    expect(payrollGoLivePath(12)).toBe('/companies/12/payroll-go-live');
   });
 
   it('encodes an explicit return destination without losing its query', (): void => {

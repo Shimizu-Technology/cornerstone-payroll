@@ -35,6 +35,7 @@ class PayPeriod < ApplicationRecord
   has_one :check_signoff_sheet, dependent: :destroy
   has_one :form500_filing, dependent: :destroy
   has_many :payroll_liability_postings, dependent: :restrict_with_error
+  has_one :payroll_parallel_run_review, dependent: :restrict_with_error
 
   # Corrective paycheck linkage — original ←──── supplemental
   # A regular period may have many supplementals (one per correction).
@@ -98,6 +99,7 @@ class PayPeriod < ApplicationRecord
   validate :supplemental_target_must_be_regular
   validate :off_cycle_tips_excludes_base_salary
   validate :purpose_fields_change_only_in_draft
+  validate :parallel_run_cannot_be_committed
   validate :starts_after_historical_ytd_boundary,
            if: lambda {
              validation_context == :payroll_calculation ||
@@ -300,6 +302,10 @@ class PayPeriod < ApplicationRecord
   end
 
   private
+
+  def parallel_run_cannot_be_committed
+    errors.add(:status, "cannot be committed because this is a parallel comparison run") if parallel_run? && committed?
+  end
 
   def assign_schedule_foundation
     return if company_id.blank? || start_date.blank?

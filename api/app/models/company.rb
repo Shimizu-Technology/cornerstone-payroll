@@ -50,6 +50,13 @@ class Company < ApplicationRecord
   has_many :historical_tax_wage_reports, dependent: :restrict_with_error
   has_many :historical_ytd_bridges, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
+  has_one :payroll_go_live_review, dependent: :restrict_with_error
+  has_many :source_payroll_go_live_reviews,
+           class_name: "PayrollGoLiveReview",
+           foreign_key: :source_company_id,
+           inverse_of: :source_company,
+           dependent: :restrict_with_error
+  has_many :payroll_parallel_run_reviews, dependent: :restrict_with_error
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
   # Printer profiles are organization-scoped so every operator in the same

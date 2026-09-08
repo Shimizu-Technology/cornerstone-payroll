@@ -984,6 +984,7 @@ module Api
             run_purpose: pay_period.run_purpose,
             includes_base_salary: pay_period.includes_base_salary,
             run_purpose_source: pay_period.run_purpose_source,
+            parallel_run: pay_period.parallel_run,
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,

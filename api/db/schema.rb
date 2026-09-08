@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_08_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -559,18 +559,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.check_constraint "occupation_code::text ~ '^[0-9]{3}$'::text", name: "employee_tipped_occupation_code_format"
   end
 
-  create_table "employee_wage_rates", force: :cascade do |t|
-    t.boolean "active", default: true, null: false
-    t.datetime "created_at", null: false
-    t.bigint "employee_id", null: false
-    t.boolean "is_primary", default: false, null: false
-    t.string "label", null: false
-    t.decimal "rate", precision: 12, scale: 6
-    t.datetime "updated_at", null: false
-    t.index ["employee_id", "label"], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
-    t.index ["employee_id"], name: "index_employee_wage_rates_on_employee_id"
-  end
-
   create_table "employee_w4_elections", force: :cascade do |t|
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0", null: false
     t.integer "allowances", default: 0, null: false
@@ -595,6 +583,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["employee_id"], name: "index_employee_w4_elections_on_employee_id"
     t.check_constraint "filing_status::text = ANY (ARRAY['single'::character varying::text, 'married'::character varying::text, 'married_separate'::character varying::text, 'head_of_household'::character varying::text])", name: "employee_w4_elections_filing_status_check"
     t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text])", name: "employee_w4_elections_source_check"
+  end
+
+  create_table "employee_wage_rates", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.boolean "is_primary", default: false, null: false
+    t.string "label", null: false
+    t.decimal "rate", precision: 12, scale: 6
+    t.datetime "updated_at", null: false
+    t.index ["employee_id", "label"], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
+    t.index ["employee_id"], name: "index_employee_wage_rates_on_employee_id"
   end
 
   create_table "employee_work_profiles", force: :cascade do |t|
@@ -1020,7 +1020,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["created_by_id"], name: "idx_historical_adjustment_events_creator"
     t.index ["historical_paycheck_adjustment_id"], name: "idx_historical_adjustment_events_adjustment"
     t.index ["historical_ytd_bridge_id"], name: "idx_historical_adjustment_events_bridge"
-    t.check_constraint "event_type::text = ANY (ARRAY['filing_reviewed_no_amendment'::character varying, 'filing_amendment_required'::character varying, 'filing_amendment_filed_external'::character varying, 'filing_review_reopened'::character varying, 'downstream_impact_acknowledged'::character varying, 'ytd_revision_activated'::character varying]::text[])", name: "historical_adjustment_events_type_check"
+    t.check_constraint "event_type::text = ANY (ARRAY['filing_reviewed_no_amendment'::character varying::text, 'filing_amendment_required'::character varying::text, 'filing_amendment_filed_external'::character varying::text, 'filing_review_reopened'::character varying::text, 'downstream_impact_acknowledged'::character varying::text, 'ytd_revision_activated'::character varying::text])", name: "historical_adjustment_events_type_check"
     t.check_constraint "jsonb_typeof(metadata) = 'object'::text", name: "historical_adjustment_events_metadata_object"
   end
 
@@ -1074,7 +1074,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.check_constraint "jsonb_typeof(evidence_metadata) = 'object'::text", name: "historical_adjustments_evidence_object"
     t.check_constraint "jsonb_typeof(hours_breakdown) = 'array'::text", name: "historical_adjustments_hours_array"
     t.check_constraint "jsonb_typeof(pretax_deduction_breakdown) = 'array'::text", name: "historical_adjustments_pretax_deduction_array"
-    t.check_constraint "kind::text = ANY (ARRAY['correction'::character varying, 'void'::character varying, 'reversal'::character varying]::text[])", name: "historical_adjustments_kind_check"
+    t.check_constraint "kind::text = ANY (ARRAY['correction'::character varying::text, 'void'::character varying::text, 'reversal'::character varying::text])", name: "historical_adjustments_kind_check"
   end
 
   create_table "historical_paychecks", force: :cascade do |t|
@@ -1677,6 +1677,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.date "end_date", null: false
     t.boolean "includes_base_salary", default: true, null: false
     t.text "notes"
+    t.boolean "parallel_run", default: false, null: false
     t.date "pay_date", null: false
     t.string "run_purpose", default: "regular", null: false
     t.string "run_purpose_source", default: "legacy_system_default", null: false
@@ -1698,6 +1699,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["calculated_by_id"], name: "index_pay_periods_on_calculated_by_id"
     t.index ["committed_by_id"], name: "index_pay_periods_on_committed_by_id"
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
+    t.index ["company_id", "parallel_run", "pay_date"], name: "idx_pay_periods_parallel_runs"
     t.index ["company_id", "run_purpose"], name: "idx_pay_periods_company_purpose"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
@@ -1715,6 +1717,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
+    t.check_constraint "parallel_run = false OR status::text <> 'committed'::text", name: "pay_periods_parallel_runs_not_committed"
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
     t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
@@ -1742,6 +1745,41 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["company_id", "name"], name: "idx_payroll_fields_company_name", unique: true
     t.index ["company_id", "reporting_group"], name: "idx_payroll_fields_company_reporting_group"
     t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
+  end
+
+  create_table "payroll_go_live_reviews", force: :cascade do |t|
+    t.datetime "approved_at"
+    t.jsonb "attestations", default: {}, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.date "effective_on", null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.datetime "operations_signed_at"
+    t.bigint "operations_signed_by_id"
+    t.string "plan_digest", null: false
+    t.text "review_notes"
+    t.datetime "setup_applied_at"
+    t.bigint "setup_applied_by_id"
+    t.jsonb "setup_plan", default: {}, null: false
+    t.jsonb "setup_summary", default: {}, null: false
+    t.bigint "source_company_id", null: false
+    t.string "status", default: "draft", null: false
+    t.datetime "technical_signed_at"
+    t.bigint "technical_signed_by_id"
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: [], null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["company_id"], name: "index_payroll_go_live_reviews_on_company_id", unique: true
+    t.index ["created_by_id"], name: "index_payroll_go_live_reviews_on_created_by_id"
+    t.index ["historical_import_batch_id"], name: "index_payroll_go_live_reviews_on_historical_import_batch_id", unique: true
+    t.index ["operations_signed_by_id"], name: "index_payroll_go_live_reviews_on_operations_signed_by_id"
+    t.index ["setup_applied_by_id"], name: "index_payroll_go_live_reviews_on_setup_applied_by_id"
+    t.index ["source_company_id"], name: "index_payroll_go_live_reviews_on_source_company_id"
+    t.index ["technical_signed_by_id"], name: "index_payroll_go_live_reviews_on_technical_signed_by_id"
+    t.check_constraint "jsonb_typeof(setup_summary) = 'object'::text AND jsonb_typeof(setup_plan) = 'object'::text AND jsonb_typeof(attestations) = 'object'::text", name: "payroll_go_live_reviews_object_json_check"
+    t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text", name: "payroll_go_live_reviews_array_json_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'setup_applied'::character varying, 'approved'::character varying]::text[])", name: "payroll_go_live_reviews_status_check"
   end
 
   create_table "payroll_imports", force: :cascade do |t|
@@ -2107,6 +2145,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
     t.index ["posted_by_id"], name: "index_payroll_liability_postings_on_posted_by_id"
     t.index ["source_posting_id"], name: "idx_liability_postings_one_reversal", unique: true, where: "(source_posting_id IS NOT NULL)"
     t.index ["source_posting_id"], name: "index_payroll_liability_postings_on_source_posting_id"
+  end
+
+  create_table "payroll_parallel_run_reviews", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.decimal "cornerstone_deductions", precision: 15, scale: 2, null: false
+    t.integer "cornerstone_employee_count", null: false
+    t.decimal "cornerstone_gross_pay", precision: 15, scale: 2, null: false
+    t.decimal "cornerstone_net_pay", precision: 15, scale: 2, null: false
+    t.decimal "cornerstone_taxes", precision: 15, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.jsonb "differences", default: {}, null: false
+    t.text "notes"
+    t.bigint "pay_period_id", null: false
+    t.bigint "payroll_go_live_review_id", null: false
+    t.bigint "recorded_by_id"
+    t.string "result", null: false
+    t.decimal "source_deductions", precision: 15, scale: 2, null: false
+    t.integer "source_employee_count", null: false
+    t.decimal "source_gross_pay", precision: 15, scale: 2, null: false
+    t.decimal "source_net_pay", precision: 15, scale: 2, null: false
+    t.string "source_system", default: "quickbooks", null: false
+    t.decimal "source_taxes", precision: 15, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_payroll_parallel_run_reviews_on_company_id"
+    t.index ["pay_period_id"], name: "index_payroll_parallel_run_reviews_on_pay_period_id", unique: true
+    t.index ["payroll_go_live_review_id", "id"], name: "idx_parallel_reviews_chronological"
+    t.index ["payroll_go_live_review_id"], name: "idx_parallel_reviews_go_live"
+    t.index ["recorded_by_id"], name: "index_payroll_parallel_run_reviews_on_recorded_by_id"
+    t.check_constraint "jsonb_typeof(differences) = 'object'::text", name: "payroll_parallel_run_reviews_differences_check"
+    t.check_constraint "result::text = ANY (ARRAY['pass'::character varying, 'fail'::character varying]::text[])", name: "payroll_parallel_run_reviews_result_check"
+    t.check_constraint "source_system::text = 'quickbooks'::text", name: "payroll_parallel_run_reviews_source_check"
   end
 
   create_table "payroll_reminder_configs", force: :cascade do |t|
@@ -2705,10 +2774,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
   add_foreign_key "employee_status_events", "employees"
   add_foreign_key "employee_status_events", "users", column: "actor_id"
   add_foreign_key "employee_tipped_occupations", "employees", on_delete: :cascade
-  add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_w4_elections", "companies", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "employees", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_work_profiles", "companies"
   add_foreign_key "employee_work_profiles", "employees"
   add_foreign_key "employee_work_profiles", "users", column: "confirmed_by_id"
@@ -2847,6 +2916,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
+  add_foreign_key "payroll_go_live_reviews", "companies", column: "source_company_id", on_delete: :restrict
+  add_foreign_key "payroll_go_live_reviews", "companies", on_delete: :restrict
+  add_foreign_key "payroll_go_live_reviews", "historical_import_batches", on_delete: :restrict
+  add_foreign_key "payroll_go_live_reviews", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "payroll_go_live_reviews", "users", column: "operations_signed_by_id", on_delete: :nullify
+  add_foreign_key "payroll_go_live_reviews", "users", column: "setup_applied_by_id", on_delete: :nullify
+  add_foreign_key "payroll_go_live_reviews", "users", column: "technical_signed_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_intake_documents", "payroll_intake_sessions"
   add_foreign_key "payroll_intake_rows", "employees"
@@ -2889,6 +2965,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_08_111000) do
   add_foreign_key "payroll_liability_postings", "pay_periods", on_delete: :restrict
   add_foreign_key "payroll_liability_postings", "payroll_liability_postings", column: "source_posting_id", on_delete: :restrict
   add_foreign_key "payroll_liability_postings", "users", column: "posted_by_id", on_delete: :nullify
+  add_foreign_key "payroll_parallel_run_reviews", "companies", on_delete: :restrict
+  add_foreign_key "payroll_parallel_run_reviews", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_parallel_run_reviews", "payroll_go_live_reviews", on_delete: :restrict
+  add_foreign_key "payroll_parallel_run_reviews", "users", column: "recorded_by_id", on_delete: :nullify
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"

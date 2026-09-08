@@ -32,13 +32,14 @@ import {
   LogOut,
   UserCircle,
   ArchiveRestore,
+  Route,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeesPath, payRunsPath } from '@/lib/routes';
+import { employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -76,6 +77,7 @@ const portalNavigation: NavItem[] = [
 
 const toolsNavigation: NavItem[] = [
   { name: 'Data Migration', href: '/historical-payroll', icon: <ArchiveRestore className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Payroll Go-live', href: '/payroll-go-live', icon: <Route className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Transmittal Builder', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Invoice Center', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
@@ -242,10 +244,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     return item;
   });
   const visibleToolsNavigation = toolsNavigation.filter((item) => {
-    if (item.href === '/historical-payroll') return historicalPayrollEnabled;
+    if (item.href === '/historical-payroll' || item.href === '/payroll-go-live') return historicalPayrollEnabled;
     if (item.href === '/tools/invoices') return isAdmin;
     return true;
-  });
+  }).map((item) => item.href === '/payroll-go-live' && activeCompanyId
+    ? { ...item, href: payrollGoLivePath(activeCompanyId) }
+    : item);
 
   useEffect(() => {
     if (!userMenuOpen) return;
