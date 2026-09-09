@@ -59,7 +59,7 @@ RSpec.describe MigrationRehearsal::Cloner do
   before do
     ActiveJob::Base.queue_adapter = :test
     storage.upload(source_key, source_bytes, content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    HistoricalImportSourceFile.create!(
+    @source_file = HistoricalImportSourceFile.create!(
       historical_import_batch: batch,
       company: source_company,
       uploaded_by: actor,
@@ -148,6 +148,17 @@ RSpec.describe MigrationRehearsal::Cloner do
   end
 
   it "copies setup and the immutable archive, re-verifies source bytes, and leaves the source unchanged" do
+    HistoricalTaxWageReport.create!(
+      company: source_company,
+      historical_import_batch: batch,
+      historical_import_source_file: @source_file,
+      scope: "year_to_date",
+      source_position: 0,
+      period_start: Date.new(2026, 1, 1),
+      period_end: Date.new(2026, 8, 21),
+      report_digest: Digest::SHA256.hexdigest("tax-wage-report"),
+      tax_lines: { "federal_income_tax" => "200.00" }
+    )
     bootstrap = HistoricalClientBootstrap.create!(
       company: source_company,
       historical_import_batch: batch,
@@ -207,6 +218,9 @@ RSpec.describe MigrationRehearsal::Cloner do
     ])
     expect(copied_batch.historical_paychecks.sole).to have_attributes(gross_pay: 1_500.to_d, net_pay: 1_200.to_d)
     expect(copied_batch.historical_paychecks.sole.employee).to eq(copied_employee)
+    expect(copied_batch.historical_tax_wage_reports.sole.historical_import_source_file).to eq(
+      copied_batch.historical_import_source_files.sole
+    )
     expect(copied_batch.historical_ytd_bridges.sole.historical_employee_ytd_balances.sole).to have_attributes(
       employee: copied_employee,
       gross_pay: 1_500.to_d

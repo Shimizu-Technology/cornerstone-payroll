@@ -193,7 +193,7 @@ module MigrationRehearsal
     end
 
     def copy_source_files!(target_batch)
-      source_batch.historical_import_source_files.in_manifest_order.index_with do |source_file|
+      source_batch.historical_import_source_files.in_manifest_order.each_with_object({}) do |source_file, result|
         bytes = storage.download_with_limit(
           source_file.storage_key,
           max_bytes: QuickbooksHistory::BundleParser::MAX_FILE_BYTES
@@ -204,7 +204,7 @@ module MigrationRehearsal
         uploaded_keys << key
         validate_source_bytes!(source_file, storage.download_with_limit(key, max_bytes: QuickbooksHistory::BundleParser::MAX_FILE_BYTES))
 
-        copy_record!(
+        result[source_file.id] = copy_record!(
           source_file,
           company: company,
           historical_import_batch: target_batch,
