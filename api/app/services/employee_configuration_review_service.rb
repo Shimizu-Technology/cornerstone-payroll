@@ -64,15 +64,19 @@ class EmployeeConfigurationReviewService
   attr_reader :employee, :actor
 
   def current_items
-    Array(employee.configuration_review_items).select do |item|
-      item.is_a?(Hash) && item["code"].present? && item["message"].present? && item["fields"].is_a?(Array)
-    end
+    Array(employee.configuration_review_items)
   end
 
   def ensure_review_items_are_well_formed!
-    return if current_items.size == Array(employee.configuration_review_items).size
+    return if current_items.all? { |item| well_formed_review_item?(item) }
 
     raise InvalidResolution, "Employee setup review data is malformed; repair it before resolving items"
+  end
+
+  def well_formed_review_item?(item)
+    item.is_a?(Hash) && item["code"].is_a?(String) && item["code"].present? &&
+      item["message"].is_a?(String) && item["message"].present? &&
+      item["fields"].is_a?(Array) && item["fields"].all? { |field| field.is_a?(String) }
   end
 
   def ensure_required_source_fields!(item)
