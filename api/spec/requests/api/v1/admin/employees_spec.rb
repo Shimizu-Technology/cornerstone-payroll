@@ -273,6 +273,31 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(response.parsed_body.fetch("error")).to eq("Document what was verified or corrected")
       expect(employee.reload.configuration_review_status).to eq("needs_review")
     end
+
+    it "returns forbidden without changing review evidence for an unauthorized actor" do
+      inactive_accountant = create(
+        :user,
+        company:,
+        organization: company.organization,
+        role: "accountant",
+        active: false
+      )
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(inactive_accountant)
+      original_items = employee.configuration_review_items.deep_dup
+
+      expect do
+        post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
+          code: "time_off_setup_not_imported",
+          resolution_note: "Attempted client review.",
+          acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT
+        }
+      end.not_to change(EmployeeConfigurationReviewResolution, :count)
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => "Cornerstone payroll access is required")
+      expect(employee.reload.configuration_review_items).to eq(original_items)
+      expect(employee.configuration_review_status).to eq("needs_review")
+    end
   end
 
   describe "POST /api/v1/admin/employees" do
