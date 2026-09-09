@@ -372,6 +372,10 @@ import type {
   EmployeePayrollField,
   PayPeriodPayrollFieldInputs,
   PayrollLiabilityReconciliation,
+  PayrollFilingGateGroup,
+  PayrollFilingResponsibilityResponse,
+  PayrollFilingResponsibilityUpdateResponse,
+  PayrollFilingType,
 } from '@/types';
 
 // Employees (Admin API)
@@ -2186,6 +2190,7 @@ export interface QuarterlyCompliancePacketReport {
     medicare_wages_tips: boolean;
     non_taxable: boolean;
   }[];
+  filing_gate: PayrollFilingGateGroup;
 }
 
 export interface QuarterlyComplianceTask {
@@ -2322,6 +2327,23 @@ export const reportsApi = {
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
   w2GuMarkReady: (year: number, notes?: string) =>
     api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
+  payrollFilingResponsibilities: (taxYear: number, quarter?: number) =>
+    api.get<PayrollFilingResponsibilityResponse>('/admin/payroll_filing_responsibilities', {
+      tax_year: taxYear,
+      quarter,
+    }),
+  updatePayrollFilingResponsibility: (responsibility: {
+    tax_year: number;
+    quarter?: number;
+    filing_types: PayrollFilingType[];
+    responsible_party: 'external_provider' | 'cornerstone';
+    imported_payroll_inclusion: 'included' | 'excluded';
+    source_cutoff_date?: string;
+    notes?: string;
+  }) => api.put<PayrollFilingResponsibilityUpdateResponse>(
+    '/admin/payroll_filing_responsibilities',
+    { responsibility },
+  ),
   // Federal Form 941 worksheet (legacy route name kept for compatibility)
   form941Gu: (year: number, quarter: number) =>
     api.get<{ report: Form941GuReport }>('/admin/reports/form_941_gu', { year, quarter }),

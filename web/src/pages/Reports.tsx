@@ -19,6 +19,7 @@ import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
+import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   PayPeriod,
@@ -28,6 +29,7 @@ import type {
   W2GuPreflightResult,
   W2GuFilingReadiness,
   W2GuMarkReadyResponse,
+  PayrollFilingGateGroup,
 } from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -539,6 +541,8 @@ function W2GuPanel() {
   const [markReadyError, setMarkReadyError] = useState<string | null>(null);
   const [markingReady, setMarkingReady] = useState(false);
   const [filingNotes, setFilingNotes] = useState('');
+  const [filingGate, setFilingGate] = useState<PayrollFilingGateGroup | null>(null);
+  const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
 
   useEffect(() => {
     void loadPersistedFilingReadiness();
@@ -549,9 +553,18 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuFilingReadiness(year);
       setFiling(res.filing);
+      setFilingGate(res.filing_gate);
     } catch {
       // Non-blocking: filing readiness can be absent or temporarily unavailable.
       setFiling(null);
+    }
+
+    try {
+      const response = await reportsApi.payrollFilingResponsibilities(year);
+      if ('filings' in response.data) setFilingGate(response.data);
+      setCanRecordFilingResponsibility(response.permissions.can_record);
+    } catch {
+      setCanRecordFilingResponsibility(false);
     }
   }
 
@@ -562,6 +575,7 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2Gu(year);
       setReport(res.report);
+      setFilingGate(res.report.filing_gate);
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
     } finally {
@@ -577,6 +591,7 @@ function W2GuPanel() {
       const res = await reportsApi.w2GuPreflight(year);
       setPreflight(res.preflight);
       setFiling(res.filing);
+      setFilingGate(res.filing_gate);
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));
     } finally {
@@ -590,6 +605,7 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
+      setFilingGate(res.filing_gate);
       const revalidatedPreflight = buildRevalidationPreflight(res.revalidation);
       if (revalidatedPreflight) {
         setPreflight(revalidatedPreflight);
@@ -605,6 +621,9 @@ function W2GuPanel() {
 
         if (errorData.filing) {
           setFiling(errorData.filing);
+        }
+        if (errorData.filing_gate) {
+          setFilingGate(errorData.filing_gate);
         }
 
         const revalidatedPreflight = buildRevalidationPreflight(errorData.revalidation);
@@ -714,6 +733,7 @@ function W2GuPanel() {
                   setError(null);
                   setPreflight(null);
                   setFiling(null);
+                  setFilingGate(null);
                   setPreflightError(null);
                   setMarkReadyError(null);
                   setFilingNotes('');
@@ -735,12 +755,14 @@ function W2GuPanel() {
             </Button>
             <Button
               onClick={markFilingReady}
-              disabled={busy || !filing || filing.blocking_count > 0 || filing.status === 'filing_ready'}
+              disabled={busy || !filing || filing.blocking_count > 0 || filing.status === 'filing_ready' || !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready}
               title={
                 !filing
                   ? 'Run preflight first'
                   : filing.status === 'filing_ready'
                     ? 'Already marked filing ready'
+                    : !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready
+                      ? 'Complete the filing source responsibility review first'
                     : filing.blocking_count > 0
                       ? 'Resolve blocking findings before marking ready'
                       : 'Mark filing as ready for submission'
@@ -775,6 +797,14 @@ function W2GuPanel() {
           )}
         </CardContent>
       </Card>
+
+      {filingGate && (
+        <FilingResponsibilityPanel
+          gate={filingGate}
+          canRecord={canRecordFilingResponsibility}
+          onUpdated={setFilingGate}
+        />
+      )}
 
       {preflightError && (
         <Card>
@@ -1894,6 +1924,7 @@ function QuarterlyCompliancePacketPanel() {
   const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
+  const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
 
   async function loadReport() {
     setLoading(true);
@@ -1902,6 +1933,15 @@ function QuarterlyCompliancePacketPanel() {
     try {
       const res = await reportsApi.quarterlyCompliancePacket(year, quarter);
       setReport(res.report);
+      try {
+        const responsibility = await reportsApi.payrollFilingResponsibilities(year, quarter);
+        if ('filings' in responsibility.data) {
+          setReport((current) => current ? { ...current, filing_gate: responsibility.data as PayrollFilingGateGroup } : current);
+        }
+        setCanRecordFilingResponsibility(responsibility.permissions.can_record);
+      } catch {
+        setCanRecordFilingResponsibility(false);
+      }
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -2027,7 +2067,7 @@ function QuarterlyCompliancePacketPanel() {
               <select
                 id="qcp-year"
                 value={year}
-                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
@@ -2039,7 +2079,7 @@ function QuarterlyCompliancePacketPanel() {
               <select
                 id="qcp-quarter"
                 value={quarter}
-                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); }}
+                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
@@ -2066,6 +2106,11 @@ function QuarterlyCompliancePacketPanel() {
               Cornerstone prepares review copies from committed payroll. These reports do not prove agency submission, payment, or acceptance.
             </p>
           </div>
+          <FilingResponsibilityPanel
+            gate={report.filing_gate}
+            canRecord={canRecordFilingResponsibility}
+            onUpdated={(filingGate) => setReport((current) => current ? { ...current, filing_gate: filingGate } : current)}
+          />
           <Card>
             <CardHeader>
               <CardTitle>{report.meta.company_name} - {report.meta.quarter_label}</CardTitle>
