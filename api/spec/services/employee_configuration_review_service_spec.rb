@@ -79,6 +79,73 @@ RSpec.describe EmployeeConfigurationReviewService do
         resolution_note: "Reviewed source record.",
         acknowledgement: described_class::ACKNOWLEDGEMENT
       )
-    end.to raise_error(ArgumentError, /Hire date/)
+    end.to raise_error(described_class::InvalidResolution, /Hire date/)
+  end
+
+  it "denies an actor without payroll operations access" do
+    client = create(:user, company:, organization: company.organization, role: "client")
+
+    expect do
+      described_class.new(employee:, actor: client).resolve!(
+        code: "legacy_w4_allowances",
+        resolution_note: "Reviewed source record.",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::NotAuthorized, /payroll access/)
+    expect(EmployeeConfigurationReviewResolution.count).to eq(0)
+  end
+
+  it "requires the exact acknowledgement and enforces the note limit" do
+    service = described_class.new(employee:, actor:)
+
+    expect do
+      service.resolve!(code: "legacy_w4_allowances", resolution_note: "Reviewed.", acknowledgement: "REVIEWED")
+    end.to raise_error(described_class::InvalidResolution, /Type MARK SETUP ITEM REVIEWED/)
+
+    expect do
+      service.resolve!(
+        code: "legacy_w4_allowances",
+        resolution_note: "a" * 1_001,
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::InvalidResolution, /too long/)
+  end
+
+  it "fails closed without dropping malformed retained review data" do
+    valid_item = employee.configuration_review_items.first
+    employee.update_columns(
+      configuration_review_items: [ valid_item, { "code" => "malformed" } ],
+      configuration_review_status: "needs_review"
+    )
+
+    expect do
+      described_class.new(employee:, actor:).resolve!(
+        code: valid_item.fetch("code"),
+        resolution_note: "Reviewed source record.",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::InvalidResolution, /malformed/)
+    expect(EmployeeConfigurationReviewResolution.count).to eq(0)
+
+    expect(employee.reload.configuration_review_items).to include({ "code" => "malformed" })
+    expect(employee.configuration_review_status).to eq("needs_review")
+  end
+
+  it "never invokes an unapproved employee method from retained item fields" do
+    employee.update_columns(
+      configuration_review_items: [
+        { "code" => "verify_hire_date", "message" => "Confirm hire date", "fields" => [ "destroy" ] }
+      ]
+    )
+
+    expect do
+      described_class.new(employee:, actor:).resolve!(
+        code: "verify_hire_date",
+        resolution_note: "Reviewed source record.",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::InvalidResolution, /unsupported employee fields/)
+
+    expect(Employee.exists?(employee.id)).to be(true)
   end
 end

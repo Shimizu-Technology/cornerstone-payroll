@@ -156,7 +156,7 @@ module Api
         def resolve_configuration_review_item
           EmployeeConfigurationReviewService.new(employee: @employee, actor: current_user).resolve!(
             code: params.require(:code),
-            resolution_note: params.require(:resolution_note),
+            resolution_note: params.fetch(:resolution_note, ""),
             acknowledgement: params.require(:acknowledgement)
           )
           render json: {
@@ -170,7 +170,10 @@ module Api
               include_configuration_review_history: true
             )
           }
-        rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
+        rescue EmployeeConfigurationReviewService::NotAuthorized => e
+          render json: { error: e.message }, status: :forbidden
+        rescue ActionController::ParameterMissing, EmployeeConfigurationReviewService::InvalidResolution,
+               ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 

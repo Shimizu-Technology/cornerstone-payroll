@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   AlertTriangle,
@@ -81,6 +81,8 @@ export function PayrollGoLive(): ReactElement {
   const [operationsAcknowledgement, setOperationsAcknowledgement] = useState('');
   const [companySetupNotes, setCompanySetupNotes] = useState('');
   const [companySetupAcknowledgement, setCompanySetupAcknowledgement] = useState('');
+  const companySetupNotesDirtyRef = useRef(false);
+  const hydratedReviewIdRef = useRef<number | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     if (!Number.isInteger(companyId) || companyId <= 0 || activeCompanyId !== companyId) return;
@@ -102,13 +104,23 @@ export function PayrollGoLive(): ReactElement {
   useEffect(() => {
     const review = loadedReview;
     if (!review) return;
+    const reviewChanged = hydratedReviewIdRef.current !== review.id;
     setSourceCompanyId(String(review.source_company.id));
     setBatchId(String(review.historical_import_batch_id));
     setEffectiveOn(review.effective_on);
     setAttestations(review.attestations || {});
     setReviewNotes(review.review_notes || '');
-    setCompanySetupNotes(review.company_setup.review_notes || '');
+    if (reviewChanged || !companySetupNotesDirtyRef.current || review.company_setup.current) {
+      setCompanySetupNotes(review.company_setup.review_notes || '');
+      companySetupNotesDirtyRef.current = false;
+    }
+    hydratedReviewIdRef.current = review.id;
   }, [loadedReview]);
+
+  const updateCompanySetupNotes = (value: string): void => {
+    companySetupNotesDirtyRef.current = true;
+    setCompanySetupNotes(value);
+  };
 
   const selectedPeriod = useMemo(
     () => payload?.eligible_pay_periods.find((period) => period.id === Number(payPeriodId)),
@@ -214,7 +226,7 @@ export function PayrollGoLive(): ReactElement {
               review={review.company_setup}
               notes={companySetupNotes}
               acknowledgement={companySetupAcknowledgement}
-              onNotesChange={setCompanySetupNotes}
+              onNotesChange={updateCompanySetupNotes}
               onAcknowledgementChange={setCompanySetupAcknowledgement}
               canReview={payload.permissions.can_review_company_setup && !sealed}
               busy={busy === 'company-setup'}

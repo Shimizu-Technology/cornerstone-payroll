@@ -51,7 +51,7 @@ class PayrollCompanySetupReview
       missing_required_fields: missing,
       sections: sections,
       reviewed_at: review.company_setup_reviewed_at,
-      reviewed_by_name: review.company_setup_reviewed_by&.name,
+      reviewed_by_name: review.company_setup_reviewed_by_name || review.company_setup_reviewed_by&.name,
       review_notes: review.company_setup_review_notes,
       acknowledgement: ACKNOWLEDGEMENT
     }
@@ -77,6 +77,9 @@ class PayrollCompanySetupReview
       company_setup_review_notes: normalized_notes,
       company_setup_reviewed_at: Time.current,
       company_setup_reviewed_by: actor,
+      company_setup_reviewed_by_name: actor.name,
+      company_setup_reviewed_by_email: actor.email,
+      company_setup_reviewed_by_role: actor.role,
       technical_signed_by: nil,
       technical_signed_at: nil,
       operations_signed_by: nil,
@@ -109,7 +112,7 @@ class PayrollCompanySetupReview
 
   def sections
     SECTIONS.map do |section|
-      fields = section.fetch(:fields).index_with { |field| present?(company.public_send(field)) }
+      fields = section.fetch(:fields).index_with { |field| value_present?(company.public_send(field)) }
       missing_required = section.fetch(:required).reject { |field| fields.fetch(field) }
       {
         key: section.fetch(:key),
@@ -135,8 +138,8 @@ class PayrollCompanySetupReview
     Digest::SHA256.hexdigest(JSON.generate(values))
   end
 
-  def present?(value)
-    value.present? || value == false || value == 0
+  def value_present?(value)
+    !value.blank?
   end
 
   def field_label(field)
