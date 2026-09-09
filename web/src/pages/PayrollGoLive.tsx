@@ -110,7 +110,7 @@ export function PayrollGoLive(): ReactElement {
     setEffectiveOn(review.effective_on);
     setAttestations(review.attestations || {});
     setReviewNotes(review.review_notes || '');
-    if (reviewChanged || !companySetupNotesDirtyRef.current || review.company_setup.current) {
+    if (reviewChanged || !companySetupNotesDirtyRef.current) {
       setCompanySetupNotes(review.company_setup.review_notes || '');
       companySetupNotesDirtyRef.current = false;
     }
@@ -127,12 +127,18 @@ export function PayrollGoLive(): ReactElement {
     [payPeriodId, payload?.eligible_pay_periods],
   );
 
-  const runAction = async (name: string, action: () => Promise<PayrollGoLivePayload>, success: string): Promise<void> => {
+  const runAction = async (
+    name: string,
+    action: () => Promise<PayrollGoLivePayload>,
+    success: string,
+    onSuccess?: () => void,
+  ): Promise<void> => {
     try {
       setBusy(name);
       setError(null);
       setNotice(null);
       const next = await action();
+      onSuccess?.();
       setPayload(next);
       setNotice(success);
     } catch (caught) {
@@ -230,7 +236,12 @@ export function PayrollGoLive(): ReactElement {
               onAcknowledgementChange={setCompanySetupAcknowledgement}
               canReview={payload.permissions.can_review_company_setup && !sealed}
               busy={busy === 'company-setup'}
-              onConfirm={() => void runAction('company-setup', () => payrollGoLiveApi.reviewCompanySetup({ acknowledgement: companySetupAcknowledgement, notes: companySetupNotes }, companyId), 'Company setup review recorded.')}
+              onConfirm={() => void runAction(
+                'company-setup',
+                () => payrollGoLiveApi.reviewCompanySetup({ acknowledgement: companySetupAcknowledgement, notes: companySetupNotes }, companyId),
+                'Company setup review recorded.',
+                () => { companySetupNotesDirtyRef.current = false; },
+              )}
             />}
             <div className="flex flex-wrap gap-2">
               <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={`${employeesPath(companyId)}?configuration_review_status=needs_review`}>Review imported employee setup <ArrowRight className="h-4 w-4" /></Link>

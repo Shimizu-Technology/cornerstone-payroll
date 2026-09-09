@@ -662,10 +662,11 @@ test('makes successor company setup an attributed go-live gate', async ({ page }
     permissions: { can_preview_setup: true, can_apply_setup: false, can_record_parallel: true, can_review_company_setup: true, can_sign_technical: false, can_sign_operations: false },
     acknowledgements: { apply_setup: 'COPY REVIEWED LIVE SETUP', technical: 'TECHNICAL GO-LIVE CHECKS COMPLETE', operations: 'OPERATIONS GO-LIVE CHECKS COMPLETE' },
   };
+  let currentPayload = basePayload;
   let submittedReview: Record<string, string> | undefined;
   await page.route('**/api/v1/admin/payroll_go_live/review_company_setup', async (route) => {
     submittedReview = await route.request().postDataJSON();
-    await fulfillJson(route, {
+    currentPayload = {
       ...basePayload,
       data: {
         ...basePayload.data!,
@@ -678,9 +679,10 @@ test('makes successor company setup an attributed go-live gate', async ({ page }
           review_notes: submittedReview?.notes || '',
         },
       },
-    });
+    };
+    await fulfillJson(route, currentPayload);
   });
-  await page.route('**/api/v1/admin/payroll_go_live/update_review', (route) => fulfillJson(route, basePayload));
+  await page.route('**/api/v1/admin/payroll_go_live/update_review', (route) => fulfillJson(route, currentPayload));
   await page.route('**/api/v1/admin/payroll_go_live', async (route) => {
     await fulfillJson(route, basePayload);
   });
