@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -190,6 +190,54 @@ function detailWithVerifiedSource(id: number): HistoricalImportDetail {
       last_verified_at: source.verified_at,
     },
     source_files: [source],
+    evidence_manifest: {
+      version: 1,
+      batch_id: id,
+      source_system: 'quickbooks_online',
+      source_label: `Batch ${id}`,
+      bundle_digest: `digest-${id}`,
+      batch_status: 'previewed',
+      generated_at: '2026-09-06T01:00:00Z',
+      summary: {
+        file_count: 1,
+        verified_file_count: 1,
+        required_report_count: 5,
+        required_present_count: 1,
+        required_headers_validated_count: 1,
+        tax_wage_report_count: 0,
+        tax_wage_years: [],
+        first_detailed_pay_date: '2024-01-15',
+        last_detailed_pay_date: '2024-12-31',
+        source_retention_ready: true,
+        paycheck_reconciliation_ready: false,
+        ytd_evidence_ready: false,
+      },
+      taxonomy: {
+        paycheck_reconciliation: 'Payroll Details is authoritative. Paycheck History and Payroll Summary independently cross-check each paid paycheck.',
+        tax_wage_ytd: 'Tax & Wage Summary files are the separate quarterly, annual, and year-to-date tax evidence layer.',
+        privacy: 'The downloadable manifest excludes filenames, employee rows, and private source contents.',
+      },
+      rows: [{
+        position: 1,
+        filename: source.original_filename,
+        report_type: source.report_type,
+        report_label: 'Payroll Details',
+        evidence_layer: 'paycheck_reconciliation',
+        evidence_role: 'Authoritative paycheck values',
+        description: 'Supplies the imported paycheck amounts and itemized payroll components.',
+        required: true,
+        required_headers: ['Name', 'Pay date', 'Gross pay - total', 'Net pay'],
+        header_validation: 'validated',
+        row_count: 12,
+        coverage_start: '2024-01-15',
+        coverage_end: '2024-12-31',
+        coverage_scope: 'pay dates',
+        retention_status: 'verified',
+        verified_at: source.verified_at,
+        byte_size: source.byte_size,
+        sha256: source.sha256,
+      }],
+    } satisfies HistoricalEvidenceManifest,
   };
 }
 
@@ -765,7 +813,7 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   });
 
   await page.goto('/historical-payroll');
-  await expect(page.getByRole('heading', { name: 'Data Migration' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Payroll Migration' })).toBeVisible();
   await expect(page.getByText('Batch page 1 of 2 · 51 total')).toBeVisible();
   await expect(page.locator('#historical-batch option')).toHaveCount(50);
 
@@ -775,7 +823,7 @@ test('keeps every historical batch reachable with simple pagination', async ({ p
   await expect(page.locator('#historical-batch option')).toHaveCount(1);
   await expect(page.locator('#historical-batch')).toHaveValue('1');
   await expect(page.getByRole('heading', { name: 'Batch 1' })).toBeVisible();
-  await expect(page.getByText('No source inventory is attached')).toBeVisible();
+  await expect(page.getByText('No evidence inventory is attached')).toBeVisible();
 });
 
 test('drives the upload control from the registered provider contract', async ({ page }) => {
@@ -1212,10 +1260,18 @@ test('makes retained source verification and exact download clear to an administ
     headers: { 'Content-Disposition': 'attachment; filename="Payroll Details.xls"' },
     body: 'exact-source-bytes',
   }));
+  await page.route('**/api/v1/admin/historical_imports/1/download_evidence_manifest', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/csv',
+    headers: { 'Content-Disposition': 'attachment; filename="quickbooks_evidence_manifest.csv"' },
+    body: 'Position,Source file,Report classification\n1,Source file 1,Payroll Details',
+  }));
 
   await page.goto('/historical-payroll');
-  await expect(page.getByText('1/1')).toBeVisible();
+  await expect(page.locator('#migration-setup').getByText('1/1')).toBeVisible();
   await expect(page.getByText('Verified', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Evidence inventory' })).toBeVisible();
+  await expect(page.getByText('Authoritative paycheck values')).toBeVisible();
 
   await page.getByRole('button', { name: 'Verify all files' }).click();
   await expect(page.getByText('Every retained QuickBooks source file matches its original SHA-256 fingerprint.')).toBeVisible();
@@ -1224,6 +1280,11 @@ test('makes retained source verification and exact download clear to an administ
   await page.getByRole('button', { name: 'Download original' }).click();
   await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
+
+  const manifestDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download evidence manifest' }).click();
+  await expect((await manifestDownload).suggestedFilename()).toBe('quickbooks_evidence_manifest_batch_1.csv');
+  await expect(page.getByText('The non-PII QuickBooks evidence manifest was downloaded.')).toBeVisible();
 });
 
 test('previews and creates a clean current-payroll roster after history is applied without running payroll', async ({ page }): Promise<void> => {
@@ -1391,7 +1452,6 @@ test('previews and activates exact historical YTD before the first live payroll'
     data: historicalReport('register'),
     meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
   }));
-
   await page.goto('/historical-payroll');
   await expect(page.getByRole('heading', { name: 'Carry verified history into the next payroll' })).toBeVisible();
   await page.getByRole('button', { name: 'Prepare YTD preview' }).click();
@@ -1732,6 +1792,11 @@ test('gives an accountant the accepted evidence without import or source-file co
     data: historicalReport('register'),
     meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
   }));
+  await page.route('**/api/v1/admin/historical_imports/1/download_evidence_manifest', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/csv',
+    body: 'Position,Source file,Report classification\n1,Source file 1,Payroll Details',
+  }));
 
   await page.goto('/historical-payroll');
 
@@ -1740,11 +1805,16 @@ test('gives an accountant the accepted evidence without import or source-file co
   await expect(page.getByText('Approved', { exact: true })).toBeVisible();
   await expect(page.getByText(/by History Admin/)).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Evidence workbook' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download evidence manifest' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Build preview' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Verify all files' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Download original' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Re-run verification' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Save review' })).toHaveCount(0);
+
+  const manifestDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download evidence manifest' }).click();
+  await expect((await manifestDownload).suggestedFilename()).toBe('quickbooks_evidence_manifest_batch_1.csv');
 });
 
 test('withholds unapproved cutover evidence from an accountant', async ({ page }): Promise<void> => {

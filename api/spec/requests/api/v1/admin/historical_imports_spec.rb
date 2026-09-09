@@ -372,6 +372,75 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
     expect(AuditLog.where(action: "historical_imports#download_source_file", record_id: source_file.id)).to exist
   end
 
+  it "shows report taxonomy and date coverage without exposing source contents" do
+    batch = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: admin
+    ).call.batch
+
+    get "/api/v1/admin/historical_imports/#{batch.id}"
+
+    expect(response).to have_http_status(:ok), response.body
+    manifest = response.parsed_body.dig("data", "evidence_manifest")
+    expect(manifest.fetch("summary")).to include(
+      "required_report_count" => 5,
+      "required_present_count" => 5,
+      "required_headers_validated_count" => 5,
+      "source_retention_ready" => true,
+      "paycheck_reconciliation_ready" => true,
+      "ytd_evidence_ready" => true
+    )
+    payroll_summary = manifest.fetch("rows").find { |row| row.fetch("report_type") == "payroll_summary" }
+    expect(payroll_summary).to include(
+      "evidence_layer" => "paycheck_reconciliation",
+      "evidence_role" => "Paycheck-level totals cross-check",
+      "header_validation" => "validated"
+    )
+    expect(payroll_summary.fetch("description")).to include("not the quarterly or year-to-date evidence")
+    tax_rows = manifest.fetch("rows").select { |row| row.fetch("report_type") == "tax_and_wage_summary" }
+    expect(tax_rows).not_to be_empty
+    expect(tax_rows).to all(include(
+      "evidence_layer" => "tax_wage_ytd",
+      "header_validation" => "validated"
+    ))
+    expect(tax_rows).to all(satisfy { |row| row.fetch("coverage_start").present? && row.fetch("coverage_end").present? })
+    expect(manifest.dig("taxonomy", "tax_wage_ytd")).to include("year-to-date tax evidence")
+  end
+
+  it "lets accountants download an audited non-PII evidence manifest without raw source access" do
+    batch = QuickbooksHistory::ImportService.new(
+      company: company,
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads,
+      actor: admin
+    ).call.batch
+    original_filename = batch.historical_import_source_files.first.original_filename
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::HistoricalImportsController).to receive(:current_user).and_return(accountant)
+
+    get "/api/v1/admin/historical_imports/#{batch.id}/download_evidence_manifest"
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.media_type).to eq("text/csv")
+    expect(response.headers.fetch("Content-Disposition")).to include("quickbooks_evidence_manifest")
+    rows = CSV.parse(response.body, headers: true)
+    expect(rows.headers).to include("Source file", "Report classification", "Required headers", "Coverage start", "SHA-256")
+    expect(rows["Report classification"]).to include("Payroll Details", "Payroll Summary", "Tax & Wage Summary")
+    expect(rows["Evidence role"]).to include("Paycheck-level totals cross-check", "Quarterly, annual, and YTD tax evidence")
+    expect(rows["Source file"]).to all(match(/\ASource file \d+\z/))
+    expect(response.body).not_to include(original_filename)
+    expect(response.body).not_to include("Worker, Alice")
+    expect(AuditLog.where(
+      user: accountant,
+      action: "historical_imports#download_evidence_manifest",
+      record_id: batch.id
+    )).to exist
+
+    source_file = batch.historical_import_source_files.first
+    get "/api/v1/admin/historical_imports/#{batch.id}/source_files/#{source_file.id}/download"
+    expect(response).to have_http_status(:forbidden)
+  end
+
   it "lets accountants download approved cutover evidence without granting source-file access" do
     batch = QuickbooksHistory::ImportService.new(
       company: company,

@@ -131,6 +131,7 @@ Rails.application.routes.draw do
             post :apply
             post :lock
             post :verify_source_files
+            get :download_evidence_manifest
             get "source_files/:source_file_id/download", action: :download_source_file, as: :source_file_download
             post :verify_cutover
             patch :update_cutover_review
