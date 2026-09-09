@@ -130,6 +130,8 @@ module MigrationRehearsal
 
     def copy_staff_assignments!
       CompanyAssignment.where(company_id: source_company.id).find_each do |assignment|
+        next unless assignment.user.staff_member?
+
         CompanyAssignment.find_or_create_by!(user_id: assignment.user_id, company: company)
       end
     end

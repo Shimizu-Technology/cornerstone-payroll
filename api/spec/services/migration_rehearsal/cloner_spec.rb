@@ -16,6 +16,7 @@ RSpec.describe MigrationRehearsal::Cloner do
     )
   end
   let(:actor) { create(:user, company: source_company, organization: organization, role: "admin") }
+  let(:client_user) { create(:user, company: source_company, organization: organization, role: "client") }
   let(:employee) do
     create(
       :employee,
@@ -113,6 +114,7 @@ RSpec.describe MigrationRehearsal::Cloner do
       total_payroll_cost: 1_615
     )
     CompanyAssignment.create!(user: actor, company: source_company)
+    CompanyAssignment.create!(user: client_user, company: source_company)
   end
 
   after do
@@ -229,6 +231,7 @@ RSpec.describe MigrationRehearsal::Cloner do
     expect(storage.download(copied_batch.historical_import_source_files.sole.storage_key)).to eq(source_bytes)
     expect(batch.reload.historical_paychecks.sole.gross_pay).to eq(1_500.to_d)
     expect(CompanyAssignment.exists?(user: actor, company: target)).to be(true)
+    expect(CompanyAssignment.exists?(user: client_user, company: target)).to be(false)
   end
 
   it "forces every rehearsal pay period into non-committable parallel mode" do

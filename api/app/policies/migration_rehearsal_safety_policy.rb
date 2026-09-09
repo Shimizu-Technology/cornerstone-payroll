@@ -13,7 +13,7 @@ class MigrationRehearsalSafetyPolicy
     "api/v1/admin/reports" => %w[
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
       quarterly_compliance_packet_official_form_download w2_gu_mark_ready
-      transmittal_log_pdf full_print_package_pdf check_signoff_pdf
+      transmittal_log_pdf full_print_package_pdf check_signoff_sheet check_signoff_pdf
     ],
     "api/v1/admin/invoices" => %w[create update destroy issue record_delivery import update_status generate_pdf],
     "api/v1/admin/invoice_payments" => %w[create reverse],
