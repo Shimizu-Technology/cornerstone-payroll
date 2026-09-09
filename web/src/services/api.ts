@@ -2758,6 +2758,32 @@ export interface CompanyListItem {
   total_employees: number;
   pay_frequency: string;
   historical_payroll_enabled: boolean;
+  payroll_environment: 'live' | 'migration_rehearsal';
+  migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
+  migration_source_company_id?: number | null;
+  migration_source_company_name?: string | null;
+  migration_source_batch_id?: number | null;
+  migration_rehearsal_completed_at?: string | null;
+  migration_rehearsal_error?: string | null;
+}
+
+export interface MigrationRehearsalPreview {
+  source_company: { id: number; name: string };
+  historical_import_batch_id: number | null;
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  existing_rehearsal?: { id: number; name: string; status: 'pending' | 'ready' | 'failed' } | null;
+  copy_summary: {
+    employees?: number;
+    active_employees?: number;
+    imported_pay_periods?: number;
+    imported_paychecks?: number;
+    retained_source_files?: number;
+    source_file_bytes?: number;
+    historical_adjustments?: number;
+    ytd_balance_rows?: number;
+  };
 }
 
 export interface CompanyDetail extends CompanyListItem {
@@ -2834,6 +2860,12 @@ export const companiesApi = {
     api.post<{ company: CompanyDetail }>('/admin/companies', { company: data }),
   update: (id: number, data: Partial<CompanyFormData>) =>
     api.put<{ company: CompanyDetail }>(`/admin/companies/${id}`, { company: data }),
+  migrationRehearsalPreview: (id: number) =>
+    api.get<{ migration_rehearsal: MigrationRehearsalPreview }>(`/admin/companies/${id}/migration_rehearsal_preview`),
+  createMigrationRehearsal: (id: number, input: { name?: string; historical_import_batch_id?: number; acknowledgement: string }) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_rehearsal`, input),
+  retryMigrationRehearsal: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_migration_rehearsal`),
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));

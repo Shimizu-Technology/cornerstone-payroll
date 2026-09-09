@@ -30,6 +30,7 @@ class User < ApplicationRecord
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
   validate :company_must_belong_to_organization
+  validate :migration_rehearsal_company_requires_staff_role
   validate :platform_owner_requirements
   validate :platform_owner_identity_is_immutable, on: :update
 
@@ -174,6 +175,12 @@ class User < ApplicationRecord
     return if company.organization_id == organization_id
 
     errors.add(:company, "must belong to the user's organization")
+  end
+
+  def migration_rehearsal_company_requires_staff_role
+    return if company.blank? || !company.migration_rehearsal? || staff_member?
+
+    errors.add(:company, "migration rehearsals are available only to payroll staff")
   end
 
   def organization_company_ids

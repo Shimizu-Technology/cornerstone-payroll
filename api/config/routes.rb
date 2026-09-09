@@ -94,7 +94,13 @@ Rails.application.routes.draw do
           end
         end
 
-        resources :companies, only: [:index, :show, :create, :update]
+        resources :companies, only: [:index, :show, :create, :update] do
+          member do
+            get :migration_rehearsal_preview
+            post :migration_rehearsal, action: :create_migration_rehearsal
+            post :retry_migration_rehearsal
+          end
+        end
         resources :organizations, only: [ :index, :show, :create, :update ] do
           member do
             post "admin_users", to: "organizations#create_admin_user"

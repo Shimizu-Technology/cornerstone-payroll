@@ -5,6 +5,7 @@ module Api
     class Form500sController < ApplicationController
       before_action :require_staff_access!
       before_action :set_pay_period!
+      before_action :forbid_migration_rehearsal_official_action!, only: %i[save download]
 
       def defaults
         render json: {

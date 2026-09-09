@@ -33,7 +33,7 @@ RSpec.describe User, type: :model do
         active: true
       )
 
-      expect(user.accessible_company_ids).to match_array([company.id, sibling_company.id])
+      expect(user.accessible_company_ids).to match_array([ company.id, sibling_company.id ])
       expect(user.accessible_company_ids).not_to include(foreign_company.id)
     end
 
@@ -49,7 +49,7 @@ RSpec.describe User, type: :model do
         active: true
       )
 
-      expect(user.accessible_company_ids).to match_array([company.id, foreign_company.id])
+      expect(user.accessible_company_ids).to match_array([ company.id, foreign_company.id ])
     end
 
     it "ignores stale assignments to companies outside the user's organization" do
@@ -62,7 +62,7 @@ RSpec.describe User, type: :model do
       stale_assignment = CompanyAssignment.new(user: user, company: foreign_company)
       stale_assignment.save!(validate: false)
 
-      expect(user.accessible_company_ids).to eq([assigned_company.id])
+      expect(user.accessible_company_ids).to eq([ assigned_company.id ])
     end
 
     it "rejects users whose home company belongs to another organization" do
@@ -73,6 +73,17 @@ RSpec.describe User, type: :model do
 
       expect(user).not_to be_valid
       expect(user.errors[:company]).to include("must belong to the user's organization")
+    end
+  end
+
+  describe "migration rehearsal access" do
+    it "rejects a rehearsal as a client portal user's home company" do
+      organization = create(:organization)
+      rehearsal = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
+      user = build(:user, company: rehearsal, organization: organization, role: "client")
+
+      expect(user).not_to be_valid
+      expect(user.errors[:company]).to include("migration rehearsals are available only to payroll staff")
     end
   end
 
