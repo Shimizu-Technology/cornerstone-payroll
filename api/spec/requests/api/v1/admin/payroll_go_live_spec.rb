@@ -63,4 +63,17 @@ RSpec.describe "Api::V1::Admin::PayrollGoLive", type: :request do
       "reviewed_by_name" => accountant.name
     )
   end
+
+  it "denies a client user without changing company setup review evidence" do
+    client = create(:user, company:, organization:, role: "client")
+    allow_any_instance_of(Api::V1::Admin::PayrollGoLiveController).to receive(:current_user).and_return(client)
+
+    post "/api/v1/admin/payroll_go_live/review_company_setup", params: {
+      acknowledgement: PayrollCompanySetupReview::ACKNOWLEDGEMENT,
+      notes: "Attempted review."
+    }
+
+    expect(response).to have_http_status(:forbidden)
+    expect(review.reload.company_setup_reviewed_at).to be_nil
+  end
 end

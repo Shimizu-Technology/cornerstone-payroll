@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   AlertTriangle,
@@ -81,6 +81,8 @@ export function PayrollGoLive(): ReactElement {
   const [operationsAcknowledgement, setOperationsAcknowledgement] = useState('');
   const [companySetupNotes, setCompanySetupNotes] = useState('');
   const [companySetupAcknowledgement, setCompanySetupAcknowledgement] = useState('');
+  const companySetupNotesDirtyRef = useRef(false);
+  const hydratedReviewIdRef = useRef<number | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     if (!Number.isInteger(companyId) || companyId <= 0 || activeCompanyId !== companyId) return;
@@ -102,25 +104,41 @@ export function PayrollGoLive(): ReactElement {
   useEffect(() => {
     const review = loadedReview;
     if (!review) return;
+    const reviewChanged = hydratedReviewIdRef.current !== review.id;
     setSourceCompanyId(String(review.source_company.id));
     setBatchId(String(review.historical_import_batch_id));
     setEffectiveOn(review.effective_on);
     setAttestations(review.attestations || {});
     setReviewNotes(review.review_notes || '');
-    setCompanySetupNotes(review.company_setup.review_notes || '');
+    if (reviewChanged || !companySetupNotesDirtyRef.current) {
+      setCompanySetupNotes(review.company_setup.review_notes || '');
+      companySetupNotesDirtyRef.current = false;
+    }
+    hydratedReviewIdRef.current = review.id;
   }, [loadedReview]);
+
+  const updateCompanySetupNotes = (value: string): void => {
+    companySetupNotesDirtyRef.current = true;
+    setCompanySetupNotes(value);
+  };
 
   const selectedPeriod = useMemo(
     () => payload?.eligible_pay_periods.find((period) => period.id === Number(payPeriodId)),
     [payPeriodId, payload?.eligible_pay_periods],
   );
 
-  const runAction = async (name: string, action: () => Promise<PayrollGoLivePayload>, success: string): Promise<void> => {
+  const runAction = async (
+    name: string,
+    action: () => Promise<PayrollGoLivePayload>,
+    success: string,
+    onSuccess?: () => void,
+  ): Promise<void> => {
     try {
       setBusy(name);
       setError(null);
       setNotice(null);
       const next = await action();
+      onSuccess?.();
       setPayload(next);
       setNotice(success);
     } catch (caught) {
@@ -214,11 +232,16 @@ export function PayrollGoLive(): ReactElement {
               review={review.company_setup}
               notes={companySetupNotes}
               acknowledgement={companySetupAcknowledgement}
-              onNotesChange={setCompanySetupNotes}
+              onNotesChange={updateCompanySetupNotes}
               onAcknowledgementChange={setCompanySetupAcknowledgement}
               canReview={payload.permissions.can_review_company_setup && !sealed}
               busy={busy === 'company-setup'}
-              onConfirm={() => void runAction('company-setup', () => payrollGoLiveApi.reviewCompanySetup({ acknowledgement: companySetupAcknowledgement, notes: companySetupNotes }, companyId), 'Company setup review recorded.')}
+              onConfirm={() => void runAction(
+                'company-setup',
+                () => payrollGoLiveApi.reviewCompanySetup({ acknowledgement: companySetupAcknowledgement, notes: companySetupNotes }, companyId),
+                'Company setup review recorded.',
+                () => { companySetupNotesDirtyRef.current = false; },
+              )}
             />}
             <div className="flex flex-wrap gap-2">
               <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={`${employeesPath(companyId)}?configuration_review_status=needs_review`}>Review imported employee setup <ArrowRight className="h-4 w-4" /></Link>
