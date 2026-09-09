@@ -21,6 +21,7 @@ class PayrollGoLiveReview < ApplicationRecord
   belongs_to :setup_applied_by, class_name: "User", optional: true
   belongs_to :technical_signed_by, class_name: "User", optional: true
   belongs_to :operations_signed_by, class_name: "User", optional: true
+  belongs_to :company_setup_reviewed_by, class_name: "User", optional: true
   has_many :payroll_parallel_run_reviews, dependent: :restrict_with_error
 
   validates :company_id, uniqueness: true
@@ -29,6 +30,7 @@ class PayrollGoLiveReview < ApplicationRecord
   validates :plan_digest, presence: true
   validates :effective_on, presence: true
   validates :review_notes, length: { maximum: 2_000 }, allow_blank: true
+  validates :company_setup_review_notes, length: { maximum: 2_000 }, allow_blank: true
   validate :companies_share_organization
   validate :batch_matches_destination
   validate :different_companies
