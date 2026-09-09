@@ -24,6 +24,14 @@ class AddCompanySetupReviewerSnapshots < ActiveRecord::Migration[8.0]
       WHERE reviews.company_setup_reviewed_by_id = users.id
         AND reviews.company_setup_digest IS NOT NULL
     SQL
+
+    execute <<~SQL.squish
+      UPDATE payroll_go_live_reviews
+      SET company_setup_reviewed_by_name = COALESCE(company_setup_reviewed_by_name, 'Deleted reviewer'),
+          company_setup_reviewed_by_email = COALESCE(company_setup_reviewed_by_email, 'unavailable'),
+          company_setup_reviewed_by_role = COALESCE(company_setup_reviewed_by_role, 'unknown')
+      WHERE company_setup_digest IS NOT NULL
+    SQL
   end
 
   def down
