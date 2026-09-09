@@ -9,7 +9,7 @@
 # - Database-driven tax tables via normalized schema
 # - SS wage base cap - stops withholding after cap
 # - Additional Medicare Tax (0.9% on wages over threshold)
-# - Standard deduction per filing status
+# - IRS Publication 15-T Worksheet 1A for official 2026 configurations
 #
 class GuamTaxCalculatorV2
   # Pay frequency to periods per year mapping
@@ -35,6 +35,8 @@ class GuamTaxCalculatorV2
       normalized_filing_status = FilingStatusConfig.normalize(filing_status)
       @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
                               raise(ArgumentError, "No filing status config found for #{filing_status}")
+      @withholding_method = @annual_config.official_2026_withholding_config?(@filing_status_config) ?
+        "irs_pub_15_t_worksheet_1a_2026" : "legacy_progressive"
     end
     if w4_form_version.to_i < Employee::MIN_SUPPORTED_W4_FORM_VERSION
       raise ArgumentError, "Pre-2020 Form W-4 calculations are not supported by the annual tax configuration engine"
@@ -87,7 +89,7 @@ class GuamTaxCalculatorV2
   def rule_snapshot
     return @source_rule_snapshot.deep_dup if @source_rule_snapshot.present?
 
-    {
+    snapshot = {
       "engine" => "annual_tax_config_v2",
       "annual_tax_config_id" => annual_config.id,
       "tax_year" => annual_config.tax_year,
@@ -97,6 +99,9 @@ class GuamTaxCalculatorV2
       "medicare_rate" => annual_config.medicare_rate.to_f,
       "additional_medicare_rate" => annual_config.additional_medicare_rate.to_f,
       "additional_medicare_threshold" => annual_config.additional_medicare_threshold.to_f,
+      "withholding_method" => @withholding_method,
+      "payroll_tax_source" => (annual_config.tax_year.to_i == 2026 ? AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAX_SOURCE : nil),
+      "withholding_source" => (@withholding_method == "irs_pub_15_t_worksheet_1a_2026" ? AnnualTaxConfig::OFFICIAL_2026_WITHHOLDING_SOURCE : nil),
       "filing_status_config_id" => filing_status_config.id,
       "filing_status" => filing_status_config.filing_status,
       "standard_deduction" => filing_status_config.standard_deduction.to_f,
@@ -110,6 +115,12 @@ class GuamTaxCalculatorV2
         }
       end
     }
+    if @withholding_method == "irs_pub_15_t_worksheet_1a_2026"
+      snapshot["step2_brackets"] = official_step2_brackets.map do |minimum, maximum, rate|
+        { "min_income" => minimum.to_f, "max_income" => maximum&.to_f, "rate" => rate.to_f }
+      end
+    end
+    snapshot
   end
 
   def taxable_bases(gross_pay:, reported_tips:, ytd_ss_taxable_wages:, ytd_medicare_wages:)
@@ -144,50 +155,49 @@ class GuamTaxCalculatorV2
     }
   end
 
-  # Calculate federal/Guam income tax withholding using progressive tax brackets
+  # Calculate Guam income tax withholding. Official 2026 seeded configurations
+  # use IRS Publication 15-T Worksheet 1A. Older/custom configurations retain
+  # their prior progressive-bracket behavior for deterministic snapshot replay.
   #
   # Per IRS Publication 15-T (2020+ W-4) methodology:
   # 1. Annualize the gross pay
   # 2. Add Step 4a other income (annualized)
-  # 3. Subtract the standard deduction (halved if Step 2 checkbox is checked)
+  # 3. Subtract the Worksheet 1A adjustment when Step 2 is not checked
   # 4. Subtract Step 4b extra deductions
   # 5. Apply progressive tax brackets
   # 6. De-annualize to get per-period withholding
   # 7. Subtract per-period W-4 Step 3 dependent credit
   #
-  # Step 2 (Multiple Jobs): Per Pub 15-T, when checked the withholding is
-  # computed using the "higher withholding rate" schedule, which effectively
-  # halves the standard deduction and bracket widths. We implement this by
-  # halving the standard deduction and dividing bracket boundaries by 2.
+  # Step 2 (Multiple Jobs): Use Publication 15-T's separate Step 2 checkbox
+  # schedule and do not subtract the Worksheet 1A adjustment.
   #
   # @param gross_pay [Decimal] Gross pay subject to withholding
   # @param w4_dependent_credit [Decimal] Annual W-4 Step 3 credit (default 0)
   def calculate_withholding(gross_pay, w4_dependent_credit: 0)
+    return calculate_pub_15_t_withholding(gross_pay, w4_dependent_credit:) if @withholding_method == "irs_pub_15_t_worksheet_1a_2026"
+
+    calculate_legacy_withholding(gross_pay, w4_dependent_credit:)
+  end
+
+  def calculate_pub_15_t_withholding(gross_pay, w4_dependent_credit:)
     annual_gross = gross_pay * periods_per_year
-
-    # Step 4a: Add other income to annualized wages
     annual_gross += w4_step4a_other_income
+    worksheet_adjustment = w4_step2_multiple_jobs ? 0.to_d : filing_status_config.standard_deduction.to_d
+    adjusted_annual_wages = [ annual_gross.to_d - w4_step4b_deductions.to_d - worksheet_adjustment, 0.to_d ].max
+    schedule = w4_step2_multiple_jobs ? official_step2_brackets : filing_status_config.tax_brackets.order(:bracket_order)
+    annual_tax = progressive_tax_for(adjusted_annual_wages, schedule)
+    per_period_tax = annual_tax / periods_per_year
+    per_period_credit = w4_dependent_credit.to_d / periods_per_year
+    [ per_period_tax - per_period_credit, 0.to_d ].max.round(2)
+  end
 
-    # Standard deduction is halved when Step 2 (multiple jobs) is checked
+  def calculate_legacy_withholding(gross_pay, w4_dependent_credit:)
+    annual_gross = (gross_pay * periods_per_year) + w4_step4a_other_income
     standard_deduction = filing_status_config.standard_deduction
     effective_deduction = w4_step2_multiple_jobs ? (standard_deduction / 2.0) : standard_deduction
-
-    # Step 4b: Additional deductions claimed on W-4
-    total_deduction = effective_deduction + w4_step4b_deductions
-
-    annual_taxable = [ annual_gross - total_deduction, 0 ].max
-
-    # When Step 2 is checked, use half-bracket method per Pub 15-T
-    annual_tax = if w4_step2_multiple_jobs
-      calculate_progressive_tax_step2(annual_taxable)
-    else
-      calculate_progressive_tax(annual_taxable)
-    end
-
-    # Step 3: Subtract annual dependent credit
+    annual_taxable = [ annual_gross - effective_deduction - w4_step4b_deductions, 0 ].max
+    annual_tax = w4_step2_multiple_jobs ? calculate_progressive_tax_step2(annual_taxable) : calculate_progressive_tax(annual_taxable)
     annual_tax_after_credit = [ annual_tax - w4_dependent_credit.to_f, 0 ].max
-
-    # De-annualize to get per-period withholding
     (annual_tax_after_credit / periods_per_year).round(2)
   end
 
@@ -292,6 +302,14 @@ class GuamTaxCalculatorV2
       standard_deduction: snapshot.fetch("standard_deduction").to_d,
       tax_brackets: brackets
     )
+    @withholding_method = snapshot.fetch("withholding_method", "legacy_progressive")
+    @snapshot_step2_brackets = Array(snapshot["step2_brackets"]).map do |bracket|
+      SnapshotBracket.new(
+        min_income: bracket.fetch("min_income").to_d,
+        max_income: bracket["max_income"]&.to_d,
+        rate: bracket.fetch("rate").to_d
+      )
+    end
   rescue KeyError, ArgumentError => e
     raise ArgumentError, "Invalid annual tax-rule snapshot: #{e.message}"
   end
@@ -317,6 +335,27 @@ class GuamTaxCalculatorV2
     end
 
     total_tax.round(2)
+  end
+
+  def progressive_tax_for(taxable_income, brackets)
+    return 0.to_d if taxable_income <= 0
+
+    brackets.sum(0.to_d) do |bracket|
+      minimum, maximum, rate = if bracket.respond_to?(:min_income)
+        [ bracket.min_income.to_d, bracket.max_income&.to_d, bracket.rate.to_d ]
+      else
+        [ bracket.fetch(0).to_d, bracket[1]&.to_d, bracket.fetch(2).to_d ]
+      end
+      next 0.to_d if taxable_income <= minimum
+
+      ([ taxable_income, maximum || taxable_income ].min - minimum) * rate
+    end.round(2)
+  end
+
+  def official_step2_brackets
+    return @snapshot_step2_brackets if @source_rule_snapshot.present?
+
+    AnnualTaxConfig::OFFICIAL_2026_WITHHOLDING.fetch(filing_status_config.filing_status).fetch(:step2)
   end
 
   # Step 2 "higher withholding rate" schedule per Pub 15-T:

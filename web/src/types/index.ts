@@ -1216,6 +1216,95 @@ export interface CheckLayoutResponse {
 // W-2GU Report (CPR-68)
 // ----------------
 
+export type PayrollFilingType = 'form_941' | 'guam_withholding' | 'swica' | 'w2_gu';
+
+export interface PayrollFilingSourceCoverage {
+  native_pay_period_count: number;
+  historical_pay_period_count: number;
+  has_native_payroll: boolean;
+  has_historical_payroll: boolean;
+  mixed_sources: boolean;
+  latest_historical_lock_at: string | null;
+  historical_scope: 'locked_regular_pay_periods';
+  period_basis: 'pay_date';
+}
+
+export interface PayrollFilingResponsibilityDecision {
+  id: number;
+  filing_type: PayrollFilingType;
+  tax_year: number;
+  quarter: number | null;
+  responsible_party: 'external_provider' | 'cornerstone';
+  imported_payroll_inclusion: 'included' | 'excluded';
+  source_cutoff_date: string | null;
+  reviewed_at: string | null;
+  reviewed_by: {
+    id: number | null;
+    name: string;
+    email: string;
+    role: string;
+  };
+  notes: string | null;
+  updated_at: string | null;
+}
+
+export interface PayrollFilingBlocker {
+  code: string;
+  severity: 'blocking';
+  message: string;
+  filing_type?: PayrollFilingType;
+}
+
+export interface PayrollFilingGate {
+  filing_type: PayrollFilingType;
+  scope: 'quarterly' | 'annual';
+  tax_year: number;
+  quarter: number | null;
+  source_coverage: PayrollFilingSourceCoverage;
+  responsibility_required: boolean;
+  decision_recorded: boolean;
+  responsibility: PayrollFilingResponsibilityDecision | null;
+  status: 'responsibility_not_required' | 'responsibility_required' | 'external_provider_responsible' | 'historical_payroll_excluded' | 'review_stale' | 'cornerstone_responsible';
+  blockers: PayrollFilingBlocker[];
+  capabilities: {
+    can_review_draft: boolean;
+    can_export_draft: boolean;
+    can_mark_filing_ready: boolean;
+    can_export_filing_ready: boolean;
+  };
+}
+
+export interface PayrollFilingGateGroup {
+  scope: 'quarterly' | 'annual';
+  tax_year: number;
+  quarter: number | null;
+  source_coverage: PayrollFilingSourceCoverage;
+  filings: Partial<Record<PayrollFilingType, PayrollFilingGate>>;
+  blockers: PayrollFilingBlocker[];
+  capabilities: {
+    can_review_draft: boolean;
+    can_export_draft: boolean;
+    all_filing_ready_exports_allowed: boolean;
+  };
+}
+
+export interface PayrollFilingResponsibilityResponse {
+  data: PayrollFilingGate | PayrollFilingGateGroup;
+  permissions: {
+    can_view: boolean;
+    can_record: boolean;
+  };
+}
+
+export interface PayrollFilingResponsibilityUpdateResponse {
+  data: PayrollFilingResponsibilityDecision[];
+  filing_gate: PayrollFilingGateGroup;
+  permissions: {
+    can_view: boolean;
+    can_record: boolean;
+  };
+}
+
 export interface W2GuEmployeeRow {
   employee_id: number;
   employee_name: string;
@@ -1261,6 +1350,7 @@ export interface W2GuReport {
   };
   compliance_issues: string[];
   employees: W2GuEmployeeRow[];
+  filing_gate: PayrollFilingGateGroup;
 }
 
 export interface W2GuReportResponse {
@@ -1300,6 +1390,7 @@ export interface W2GuFilingReadiness {
 export interface W2GuPreflightResponse {
   preflight: W2GuPreflightResult;
   filing: W2GuFilingReadiness;
+  filing_gate: PayrollFilingGateGroup;
 }
 
 export interface W2GuRevalidationResult {
@@ -1315,11 +1406,13 @@ export interface W2GuRevalidationResult {
 
 export interface W2GuFilingReadinessResponse {
   filing: W2GuFilingReadiness | null;
+  filing_gate: PayrollFilingGateGroup;
 }
 
 export interface W2GuMarkReadyResponse {
   filing: W2GuFilingReadiness;
   revalidation?: W2GuRevalidationResult;
+  filing_gate: PayrollFilingGateGroup;
 }
 
 

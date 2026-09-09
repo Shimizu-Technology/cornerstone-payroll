@@ -337,6 +337,9 @@ Rails.application.routes.draw do
         get "reports/form_1099_nec_pdf", to: "reports#form_1099_nec_pdf"
         get "reports/form_1099_nec_xlsx", to: "reports#form_1099_nec_xlsx"
 
+        get "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#index"
+        put "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#upsert"
+
         # New payroll parity reports
         get "reports/payroll_summary_by_employee_pdf", to: "reports#payroll_summary_by_employee_pdf"
         get "reports/payroll_summary_by_employee_xlsx", to: "reports#payroll_summary_by_employee_xlsx"

@@ -4,6 +4,7 @@ class StaffRolePolicy
   CAPABILITY_ROLES = {
     staff_workspace: %w[super_admin org_admin admin manager accountant],
     payroll_operations: %w[super_admin org_admin admin manager accountant],
+    manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
     manage_organization: %w[super_admin org_admin admin],
@@ -13,6 +14,7 @@ class StaffRolePolicy
   CAPABILITY_ERRORS = {
     staff_workspace: "Staff access required",
     payroll_operations: "Payroll operations access required",
+    manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager or admin access required",
     manage_organization: "Admin access required",
@@ -30,6 +32,7 @@ class StaffRolePolicy
     "api/v1/admin/payroll_history" => :payroll_operations,
     "api/v1/admin/imported_pay_periods" => :payroll_operations,
     "api/v1/admin/payroll_go_live" => :payroll_operations,
+    "api/v1/admin/payroll_filing_responsibilities" => :payroll_operations,
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
@@ -51,6 +54,7 @@ class StaffRolePolicy
     "api/v1/admin/pay_schedule_settings#update" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
+    "api/v1/admin/payroll_filing_responsibilities#upsert" => :manage_filing_review,
     "api/v1/admin/pay_periods#adopt_confirmed_workweek" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#create" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#update" => :manage_client_configuration,

@@ -66,6 +66,7 @@ RSpec.describe ProductionReadiness do
   let(:queue_process) { class_double(SolidQueue::Process, where: queue_relation) }
   let(:encryption_credentials) { ActiveSupport::InheritableOptions.new }
   let(:encrypted_data_probe) { -> { true } }
+  let(:tax_configuration_valid) { -> { true } }
   let(:storage) do
     Class.new do
       attr_reader :objects, :deleted
@@ -121,6 +122,7 @@ RSpec.describe ProductionReadiness do
       time_sources: -> { [] },
       encryption_credentials: encryption_credentials,
       encrypted_data_probe: encrypted_data_probe,
+      tax_configuration_valid: tax_configuration_valid,
       http_get: http_get
     )
   end
@@ -133,7 +135,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: true)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(28)
+    expect(report.checks.length).to eq(29)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -147,7 +149,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(17)
+    expect(report.checks.length).to eq(18)
   end
 
   it "fails closed when complete production encryption sources conflict" do
@@ -187,6 +189,14 @@ RSpec.describe ProductionReadiness do
       "allowed frontend origins are explicit production HTTPS origins",
       "production Clerk keys are configured"
     )
+  end
+
+  it "fails closed when the stored 2026 payroll tax constants drift" do
+    allow(tax_configuration_valid).to receive(:call).and_return(false)
+
+    report = readiness.run(live: false)
+
+    expect(report.failures.map(&:name)).to include("official 2026 payroll tax and withholding configuration is loaded")
   end
 
   it "rejects broad and narrowly scoped public trusted-proxy ranges" do
