@@ -13,6 +13,14 @@ class PayrollGoLiveReadiness
     values << "Lock the verified historical import" unless review.historical_import_batch.locked?
     values << "Activate the latest historical YTD bridge" unless review.historical_import_batch.historical_ytd_bridge&.applied?
     values << "Resolve every imported employee setup item" if company.employees.active.where(configuration_review_status: "needs_review").exists?
+    if review.setup_applied?
+      company_setup = PayrollCompanySetupReview.new(review)
+      if company_setup.missing_required_fields.any?
+        values << "Complete the successor company's legal employer and filing address"
+      elsif !company_setup.reviewed_current?
+        values << (review.company_setup_digest.present? ? "Re-review company setup because the saved values changed" : "Review and confirm the successor company setup")
+      end
+    end
     values << "Add an effective W-4 election for every active W-2 employee" if missing_w4_count.positive?
     values << "Verify opening balances for every active recurring loan deduction" if loan_setup_gap_count.positive?
     values << "Confirm the successor pay schedule" unless current_schedule&.confirmed?
@@ -28,6 +36,8 @@ class PayrollGoLiveReadiness
       "historical_import_locked" => review.historical_import_batch.locked?,
       "historical_ytd_active" => review.historical_import_batch.historical_ytd_bridge&.applied? || false,
       "employees_needing_review" => company.employees.active.where(configuration_review_status: "needs_review").count,
+      "company_setup_reviewed" => PayrollCompanySetupReview.new(review).reviewed_current?,
+      "company_setup_gaps" => PayrollCompanySetupReview.new(review).missing_required_fields.count,
       "employees_missing_w4" => missing_w4_count,
       "loan_setup_gaps" => loan_setup_gap_count,
       "pay_schedule_confirmed" => current_schedule&.confirmed? || false,

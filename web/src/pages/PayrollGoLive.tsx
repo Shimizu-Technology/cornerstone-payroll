@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
+  Building2,
   CheckCircle2,
   CircleDashed,
   LockKeyhole,
@@ -17,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath } from '@/lib/routes';
 import { formatDate, formatGuamDateTime } from '@/lib/utils';
-import { payrollGoLiveApi, type PayrollGoLivePayload } from '@/services/api';
+import { payrollGoLiveApi, type PayrollGoLivePayload, type PayrollGoLiveReview } from '@/services/api';
 
 type SourceTotals = {
   employee_count: string;
@@ -39,6 +40,8 @@ const money = (value: string | number | undefined): string => {
 const readinessLabels: Record<string, string> = {
   historical_import_locked: 'Historical import locked',
   historical_ytd_active: 'Historical YTD active',
+  company_setup_reviewed: 'Company setup reviewed',
+  company_setup_gaps: 'Required company fields missing',
   employees_needing_review: 'Employee setup items open',
   employees_missing_w4: 'Employees missing W-4',
   loan_setup_gaps: 'Loan balance gaps',
@@ -51,7 +54,7 @@ const readinessLabels: Record<string, string> = {
 };
 
 function readinessPassed(key: string, value: boolean | number): boolean {
-  if (key === 'employees_needing_review' || key === 'employees_missing_w4' || key === 'loan_setup_gaps') return value === 0;
+  if (key === 'employees_needing_review' || key === 'employees_missing_w4' || key === 'loan_setup_gaps' || key === 'company_setup_gaps') return value === 0;
   if (key === 'consecutive_parallel_passes') return Number(value) >= 2;
   return value === true;
 }
@@ -76,6 +79,8 @@ export function PayrollGoLive(): ReactElement {
   const [reviewNotes, setReviewNotes] = useState('');
   const [technicalAcknowledgement, setTechnicalAcknowledgement] = useState('');
   const [operationsAcknowledgement, setOperationsAcknowledgement] = useState('');
+  const [companySetupNotes, setCompanySetupNotes] = useState('');
+  const [companySetupAcknowledgement, setCompanySetupAcknowledgement] = useState('');
 
   const load = useCallback(async (): Promise<void> => {
     if (!Number.isInteger(companyId) || companyId <= 0 || activeCompanyId !== companyId) return;
@@ -102,6 +107,7 @@ export function PayrollGoLive(): ReactElement {
     setEffectiveOn(review.effective_on);
     setAttestations(review.attestations || {});
     setReviewNotes(review.review_notes || '');
+    setCompanySetupNotes(review.company_setup.review_notes || '');
   }, [loadedReview]);
 
   const selectedPeriod = useMemo(
@@ -204,8 +210,18 @@ export function PayrollGoLive(): ReactElement {
           <CardHeader><CardTitle>2. Resolve readiness checks</CardTitle><CardDescription className="mt-1">Cornerstone staff can open and correct employee setup, W-4 history, loan ledgers, pay schedules, and reports. Imported paid payroll remains read-only.</CardDescription></CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(review.readiness).map(([key, value]) => <ReadinessFact key={key} label={readinessLabels[key] || key.replaceAll('_', ' ')} value={value} passed={readinessPassed(key, value)} />)}</div>
+            {review.setup_applied_at && <CompanySetupReviewPanel
+              review={review.company_setup}
+              notes={companySetupNotes}
+              acknowledgement={companySetupAcknowledgement}
+              onNotesChange={setCompanySetupNotes}
+              onAcknowledgementChange={setCompanySetupAcknowledgement}
+              canReview={payload.permissions.can_review_company_setup && !sealed}
+              busy={busy === 'company-setup'}
+              onConfirm={() => void runAction('company-setup', () => payrollGoLiveApi.reviewCompanySetup({ acknowledgement: companySetupAcknowledgement, notes: companySetupNotes }, companyId), 'Company setup review recorded.')}
+            />}
             <div className="flex flex-wrap gap-2">
-              <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={employeesPath(companyId)}>Review employees <ArrowRight className="h-4 w-4" /></Link>
+              <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={`${employeesPath(companyId)}?configuration_review_status=needs_review`}>Review imported employee setup <ArrowRight className="h-4 w-4" /></Link>
               <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to="/employee-loans">Review loan ledgers <ArrowRight className="h-4 w-4" /></Link>
               <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to="/pay-schedule-settings">Review pay schedule <ArrowRight className="h-4 w-4" /></Link>
               <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to="/reports">Reconcile annual totals <ArrowRight className="h-4 w-4" /></Link>
@@ -247,6 +263,77 @@ export function PayrollGoLive(): ReactElement {
           </CardContent>
         </Card>
       </>}
+    </div>
+  );
+}
+
+function CompanySetupReviewPanel({
+  review,
+  notes,
+  acknowledgement,
+  onNotesChange,
+  onAcknowledgementChange,
+  canReview,
+  busy,
+  onConfirm,
+}: {
+  review: PayrollGoLiveReview['company_setup'];
+  notes: string;
+  acknowledgement: string;
+  onNotesChange: (value: string) => void;
+  onAcknowledgementChange: (value: string) => void;
+  canReview: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+}): ReactElement {
+  const label = review.current
+    ? 'Reviewed'
+    : review.status === 'stale'
+      ? 'Review changed values'
+      : review.status === 'missing_required'
+        ? 'Missing required fields'
+        : 'Needs review';
+  const variant = review.current ? 'success' : review.status === 'missing_required' ? 'danger' : 'warning';
+
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <p className="flex items-center gap-2 font-semibold text-neutral-950"><Building2 className="h-4 w-4 text-primary-700" />Company setup review</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">Confirm the successor client—not the predecessor—before live payroll. The EIN is intentionally never copied, so Cornerstone must enter and verify it here.</p>
+        </div>
+        <Badge variant={variant}>{label}</Badge>
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {review.sections.map((section) => (
+          <div key={section.key} className={`rounded-xl border bg-white p-4 ${section.complete ? 'border-success-200' : 'border-warning-200'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold text-neutral-900">{section.label}</p>
+              <Badge variant={section.complete ? 'success' : 'warning'}>{section.complete ? 'Ready to review' : 'Incomplete'}</Badge>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">{section.description}</p>
+            {section.missing_required_fields.length > 0 && <p className="mt-2 text-xs font-semibold text-warning-800">Missing: {section.missing_required_fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to="/settings/clients">Review client information <ArrowRight className="h-4 w-4" /></Link>
+        <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to="/check-settings">Review check settings <ArrowRight className="h-4 w-4" /></Link>
+      </div>
+      {review.current ? (
+        <div className="mt-5 rounded-xl border border-success-200 bg-success-50 p-4 text-sm text-success-800">
+          <p className="font-semibold">Confirmed {review.reviewed_at ? formatGuamDateTime(review.reviewed_at) : ''}{review.reviewed_by_name ? ` by ${review.reviewed_by_name}` : ''}</p>
+          {review.review_notes && <p className="mt-2 leading-6">{review.review_notes}</p>}
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
+          <FieldTextarea label="Company setup review note" value={notes} onChange={onNotesChange} disabled={!canReview} required helperText="Record which employer document was checked and any remaining non-blocking follow-up." />
+          <div>
+            <Input label={`Type ${review.acknowledgement}`} value={acknowledgement} onChange={(event) => onAcknowledgementChange(event.target.value)} disabled={!canReview} />
+            <Button className="mt-4" disabled={!canReview || review.missing_required_fields.length > 0 || !notes.trim() || acknowledgement !== review.acknowledgement || busy} onClick={onConfirm}>{busy ? 'Recording review…' : 'Mark company setup reviewed'}</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

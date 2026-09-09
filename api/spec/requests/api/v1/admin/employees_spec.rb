@@ -54,6 +54,26 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"].all? { |e| e["status"] == "active" }).to be true
       end
 
+      it "filters the migrated employee setup review queue" do
+        review_employee = create(
+          :employee,
+          company:,
+          configuration_source: "quickbooks_history",
+          configuration_review_status: "needs_review",
+          configuration_review_items: [
+            { "code" => "time_off_setup_not_imported", "message" => "Review time off", "fields" => [] }
+          ]
+        )
+
+        get "/api/v1/admin/employees", params: {
+          company_id: company.id,
+          configuration_review_status: "needs_review"
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("data").pluck("id")).to eq([ review_employee.id ])
+      end
+
       it "filters by department" do
         other_dept = create(:department, company: company)
         create(:employee, company: company, department: other_dept)
@@ -207,6 +227,48 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       get "/api/v1/admin/employees/#{other_employee.id}"
 
       expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "POST /api/v1/admin/employees/:id/resolve_configuration_review_item" do
+    let!(:employee) do
+      create(
+        :employee,
+        company:,
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          { "code" => "time_off_setup_not_imported", "message" => "Review time off", "fields" => [] }
+        ]
+      )
+    end
+
+    it "lets assigned Cornerstone accountants document and finish an imported setup review" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+      post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
+        code: "time_off_setup_not_imported",
+        resolution_note: "Employer confirmed this balance is not carried into payroll.",
+        acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "configuration_review_status")).to eq("complete")
+      expect(response.parsed_body.dig("data", "configuration_review_resolutions", 0)).to include(
+        "item_code" => "time_off_setup_not_imported",
+        "reviewed_by_name" => accountant_user.name
+      )
+    end
+
+    it "does not accept a resolution without a documented review" do
+      post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
+        code: "time_off_setup_not_imported",
+        resolution_note: "",
+        acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.reload.configuration_review_status).to eq("needs_review")
     end
   end
 

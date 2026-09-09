@@ -95,12 +95,12 @@ class Employee < ApplicationRecord
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
+  has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
   before_validation :normalize_default_payroll_adjustments
-  before_validation :clear_resolved_import_review_items
 
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
@@ -446,30 +446,9 @@ class Employee < ApplicationRecord
 
   private
 
-  AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES = %w[
+  SOURCE_FIELD_CONFIGURATION_REVIEW_CODES = %w[
     verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
   ].freeze
-
-  def clear_resolved_import_review_items
-    return unless configuration_source == "quickbooks_history" && configuration_review_items.is_a?(Array)
-
-    remaining = configuration_review_items.reject do |item|
-      next false unless item.is_a?(Hash)
-      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
-
-      fields = Array(item["fields"])
-      next false if fields.empty?
-
-      fields.all? do |field|
-        field = field.to_s
-        self.class.column_names.include?(field) && read_attribute(field).present?
-      end
-    end
-    return if remaining.size == configuration_review_items.size
-
-    self.configuration_review_items = remaining
-    self.configuration_review_status = remaining.empty? ? "complete" : "needs_review"
-  end
 
   def configuration_review_items_are_valid
     unless configuration_review_items.is_a?(Array)
@@ -538,7 +517,7 @@ class Employee < ApplicationRecord
 
     Array(configuration_review_items).any? do |item|
       next false unless item.is_a?(Hash)
-      next false unless AUTO_RESOLVABLE_CONFIGURATION_REVIEW_CODES.include?(item["code"])
+      next false unless SOURCE_FIELD_CONFIGURATION_REVIEW_CODES.include?(item["code"])
 
       Array(item["fields"]).include?(field.to_s)
     end

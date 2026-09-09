@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge, PayrollGoLivePayload } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -569,6 +569,133 @@ test('hides QuickBooks setup review outside a migrated employee needing review',
   await page.goto('/employees/new');
   await expect(page.getByRole('heading', { name: 'Add Employee / Contractor' })).toBeVisible();
   await expect(page.getByText('QuickBooks setup needs review')).toHaveCount(0);
+});
+
+test('lets Cornerstone document imported employee setup review from the employee workspace', async ({ page }) => {
+  await mockApplicationShell(page, 'accountant');
+  let resolvedCode: string | undefined;
+  await page.route('**/api/v1/admin/employees/900/resolve_configuration_review_item', async (route) => {
+    const input = await route.request().postDataJSON();
+    resolvedCode = input.code;
+    await fulfillJson(route, {
+      data: {
+        ...migratedEmployee('complete'),
+        configuration_review_resolutions: [{
+          id: 71,
+          item_code: input.code,
+          item_message: 'Confirm the effective hire date.',
+          item_fields: ['hire_date'],
+          resolution_note: input.resolution_note,
+          reviewed_by_name: 'Test User',
+          reviewed_by_email: 'user@example.test',
+          reviewed_by_role: 'accountant',
+          reviewed_at: '2026-09-09T04:00:00Z',
+          created_at: '2026-09-09T04:00:00Z',
+        }],
+      },
+    });
+  });
+  await page.route('**/api/v1/admin/employees/900', (route) => fulfillJson(route, {
+    data: { ...migratedEmployee(), configuration_review_items: [{ code: 'verify_hire_date', message: 'Confirm the effective hire date.', fields: ['hire_date'] }] },
+  }));
+  await page.route('**/api/v1/admin/reports/employee_pay_history**', (route) => fulfillJson(route, {
+    report: { history: [], summary: {}, period: {}, excluded_unlinked_imported: { count: 0, gross_pay: '0', net_pay: '0' } },
+  }));
+
+  await page.goto('/companies/1/employees/900/pay-setup');
+
+  await expect(page.getByText('Imported setup review', { exact: true }).first()).toBeVisible();
+  await page.getByLabel('What was verified or corrected?').fill('Confirmed against the signed personnel record.');
+  await page.getByRole('button', { name: 'Mark reviewed' }).click();
+
+  await expect.poll(() => resolvedCode).toBe('verify_hire_date');
+  await expect(page.getByText('Setup review item documented.')).toBeVisible();
+  await expect(page.getByText('Confirmed against the signed personnel record.')).toBeVisible();
+  await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+});
+
+test('makes successor company setup an attributed go-live gate', async ({ page }) => {
+  await mockApplicationShell(page, 'accountant');
+  const basePayload: PayrollGoLivePayload = {
+    data: {
+      id: 14,
+      status: 'setup_applied',
+      source_company: { id: 2, name: "MoSa's predecessor" },
+      historical_import_batch_id: 11,
+      effective_on: '2026-09-21',
+      plan_digest: 'a'.repeat(64),
+      setup_summary: { employee_count: 57 },
+      setup_plan: {},
+      warnings: ['The source EIN is not moved during setup transfer.'],
+      errors: [],
+      setup_applied_at: '2026-09-09T03:00:00Z',
+      setup_applied_by_name: 'Platform Admin',
+      attestations: {},
+      attestation_labels: {},
+      review_notes: null,
+      ready_for_signoff: false,
+      blockers: ['Review and confirm the successor company setup'],
+      readiness: { company_setup_reviewed: false, company_setup_gaps: 0, employees_needing_review: 0 },
+      company_setup: {
+        status: 'needs_review',
+        current: false,
+        missing_required_fields: [],
+        sections: [
+          { key: 'legal_employer', label: 'Legal employer', description: 'Confirm the legal business name and EIN used on payroll filings.', fields: { name: true, ein: true }, missing_required_fields: [], complete: true },
+          { key: 'filing_address', label: 'Filing address', description: 'Confirm the employer address used on checks and government filings.', fields: { address_line1: true, city: true, state: true, zip: true }, missing_required_fields: [], complete: true },
+        ],
+        reviewed_at: null,
+        reviewed_by_name: null,
+        review_notes: null,
+        acknowledgement: 'COMPANY SETUP REVIEWED',
+      },
+      parallel_runs: [],
+      technical_signed_at: null,
+      operations_signed_at: null,
+      approved_at: null,
+      created_at: '2026-09-09T03:00:00Z',
+      updated_at: '2026-09-09T03:00:00Z',
+    },
+    source_companies: [{ id: 2, name: "MoSa's predecessor", active: true, employee_count: 57 }],
+    historical_imports: [{ id: 11, source_label: 'MoSa QuickBooks', status: 'locked', bootstrap_applied: true, ytd_bridge_applied: true }],
+    eligible_pay_periods: [],
+    permissions: { can_preview_setup: true, can_apply_setup: false, can_record_parallel: true, can_review_company_setup: true, can_sign_technical: false, can_sign_operations: false },
+    acknowledgements: { apply_setup: 'COPY REVIEWED LIVE SETUP', technical: 'TECHNICAL GO-LIVE CHECKS COMPLETE', operations: 'OPERATIONS GO-LIVE CHECKS COMPLETE' },
+  };
+  let submittedReview: Record<string, string> | undefined;
+  await page.route('**/api/v1/admin/payroll_go_live**', async (route) => {
+    if (route.request().method() === 'POST') {
+      submittedReview = await route.request().postDataJSON();
+      await fulfillJson(route, {
+        ...basePayload,
+        data: {
+          ...basePayload.data!,
+          company_setup: {
+            ...basePayload.data!.company_setup,
+            status: 'current',
+            current: true,
+            reviewed_at: '2026-09-09T04:00:00Z',
+            reviewed_by_name: 'Test User',
+            review_notes: submittedReview?.notes || '',
+          },
+        },
+      });
+      return;
+    }
+    await fulfillJson(route, basePayload);
+  });
+
+  await page.goto('/companies/1/payroll-go-live');
+
+  await expect(page.getByText('Company setup review', { exact: true })).toBeVisible();
+  await expect(page.getByText('The EIN is intentionally never copied')).toBeVisible();
+  await page.getByLabel('Company setup review note').fill('Matched the EIN and filing address to the signed employer record.');
+  await page.getByLabel('Type COMPANY SETUP REVIEWED').fill('COMPANY SETUP REVIEWED');
+  await page.getByRole('button', { name: 'Mark company setup reviewed' }).click();
+
+  await expect.poll(() => submittedReview?.acknowledgement).toBe('COMPANY SETUP REVIEWED');
+  await expect(page.getByText('Confirmed', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('Matched the EIN and filing address to the signed employer record.')).toBeVisible();
 });
 
 test('blocks an out-of-range imported employer match before employee submission', async ({ page }) => {

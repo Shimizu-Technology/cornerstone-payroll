@@ -6,7 +6,10 @@ module Api
       class EmployeesController < BaseController
         include Auditable
         audit_actions :terminate, :reactivate
-        before_action :set_employee, only: [ :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification ]
+        before_action :set_employee, only: [
+          :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification,
+          :resolve_configuration_review_item
+        ]
         before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
         before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
@@ -34,7 +37,8 @@ module Api
               include_sensitive: true,
               include_classification_history: true,
               include_lifecycle: true,
-              include_w4_history: true
+              include_w4_history: true,
+              include_configuration_review_history: true
             )
           }
         end
@@ -147,6 +151,27 @@ module Api
             error: "Validation failed",
             details: e.record.errors.messages
           }, status: :unprocessable_entity
+        end
+
+        def resolve_configuration_review_item
+          EmployeeConfigurationReviewService.new(employee: @employee, actor: current_user).resolve!(
+            code: params.require(:code),
+            resolution_note: params.require(:resolution_note),
+            acknowledgement: params.require(:acknowledgement)
+          )
+          render json: {
+            data: serialize_employee(
+              @employee.reload,
+              include_department: true,
+              include_sensitive: true,
+              include_classification_history: true,
+              include_lifecycle: true,
+              include_w4_history: true,
+              include_configuration_review_history: true
+            )
+          }
+        rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -279,6 +304,10 @@ module Api
           scope = scope.where(department_id: params[:department_id]) if params[:department_id].present?
           scope = scope.where(status: params[:status]) if params[:status].present?
           scope = scope.where(employment_type: params[:employment_type]) if params[:employment_type].present?
+          if params[:configuration_review_status].present?
+            allowed_status = params[:configuration_review_status].presence_in(Employee::CONFIGURATION_REVIEW_STATUSES)
+            scope = scope.where(configuration_review_status: allowed_status) if allowed_status
+          end
           if params[:search].present?
             tokens = params[:search].to_s.strip.split(/\s+/).map do |token|
               "%#{ActiveRecord::Base.sanitize_sql_like(token)}%"
@@ -341,7 +370,8 @@ module Api
           include_sensitive: false,
           include_classification_history: false,
           include_lifecycle: false,
-          include_w4_history: false
+          include_w4_history: false,
+          include_configuration_review_history: false
         )
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
@@ -395,6 +425,15 @@ module Api
             data["upcoming_w4_election"] = serialize_w4_election(
               elections.select { |election| election.effective_on > Date.current }.min_by { |election| [ election.effective_on, election.id ] }
             )
+          end
+
+          if include_configuration_review_history
+            data["configuration_review_resolutions"] = employee.employee_configuration_review_resolutions
+              .order(reviewed_at: :desc, id: :desc).map do |resolution|
+                resolution.as_json(except: [ :company_id, :employee_id, :reviewed_by_id ]).merge(
+                  "reviewed_by_name" => resolution.reviewed_by_name
+                )
+              end
           end
 
           data

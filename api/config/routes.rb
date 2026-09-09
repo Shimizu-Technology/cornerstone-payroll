@@ -66,6 +66,7 @@ Rails.application.routes.draw do
           post :preview_setup
           post :apply_setup
           post :record_parallel_run
+          post :review_company_setup
           patch :update_review
           post :sign_technical
           post :sign_operations
@@ -191,6 +192,7 @@ Rails.application.routes.draw do
             post :terminate
             post :reactivate
             post :transition_tax_classification
+            post :resolve_configuration_review_item
           end
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records

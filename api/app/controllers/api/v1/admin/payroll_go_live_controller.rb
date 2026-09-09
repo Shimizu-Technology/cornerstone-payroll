@@ -52,6 +52,18 @@ module Api
           render_go_live_error(e)
         end
 
+        def review_company_setup
+          review = review!
+          PayrollCompanySetupReview.new(review).confirm!(
+            actor: current_user,
+            acknowledgement: params[:acknowledgement],
+            notes: params[:notes]
+          )
+          render json: payload(review.reload)
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_go_live_error(e)
+        end
+
         def update_review
           review = review!
           permitted = review_params
@@ -121,6 +133,7 @@ module Api
               can_preview_setup: StaffRolePolicy.allowed?(current_user, :manage_client_configuration),
               can_apply_setup: StaffRolePolicy.allowed?(current_user, :manage_platform),
               can_record_parallel: StaffRolePolicy.allowed?(current_user, :payroll_operations),
+              can_review_company_setup: StaffRolePolicy.allowed?(current_user, :payroll_operations),
               can_sign_technical: StaffRolePolicy.allowed?(current_user, :manage_platform),
               can_sign_operations: current_user.role.in?(%w[org_admin admin manager])
             },
@@ -171,6 +184,7 @@ module Api
 
         def review_json(review)
           readiness = PayrollGoLiveReadiness.new(review)
+          company_setup = PayrollCompanySetupReview.new(review)
           {
             id: review.id,
             status: review.status,
@@ -190,6 +204,7 @@ module Api
             ready_for_signoff: review.ready_for_signoff?,
             blockers: readiness.blockers,
             readiness: readiness.facts,
+            company_setup: company_setup.state,
             parallel_runs: review.payroll_parallel_run_reviews.includes(:pay_period, :recorded_by)
               .sort_by { |entry| [ entry.pay_period.pay_date, entry.id ] }.reverse.map { |entry| parallel_run_json(entry) },
             technical_signed_at: review.technical_signed_at,

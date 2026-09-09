@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BadgeDollarSign,
   Banknote,
   CalendarDays,
+  CheckCircle2,
   Pencil,
   ReceiptText,
   RefreshCw,
@@ -20,6 +22,7 @@ import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
@@ -79,6 +82,10 @@ export function EmployeeWorkspace(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
@@ -150,6 +157,31 @@ export function EmployeeWorkspace(): ReactElement {
 
   const currentPath = currentAppPath(location.pathname, location.search);
 
+  const resolveConfigurationReview = async (code: string): Promise<void> => {
+    const note = reviewNotes[code]?.trim() || '';
+    if (!note) {
+      setReviewError('Add a short note describing what was verified or corrected.');
+      return;
+    }
+    try {
+      setReviewBusyCode(code);
+      setReviewError(null);
+      setReviewNotice(null);
+      const result = await employeesApi.resolveConfigurationReviewItem(employeeId, {
+        code,
+        resolution_note: note,
+        acknowledgement: 'MARK SETUP ITEM REVIEWED',
+      });
+      setEmployee(result.data);
+      setReviewNotes((current) => ({ ...current, [code]: '' }));
+      setReviewNotice('Setup review item documented.');
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : 'Could not record this setup review.');
+    } finally {
+      setReviewBusyCode(null);
+    }
+  };
+
   if (loading || activeCompanyId !== companyId || resolvedRouteKey !== routeKey) {
     return <WorkspaceLoader label="Loading employee workspace" />;
   }
@@ -212,6 +244,7 @@ export function EmployeeWorkspace(): ReactElement {
             {statusConfig?.label || employee.status}
           </Badge>
           <Badge variant="default">{employee.tax_classification?.toUpperCase() || (employee.employment_type === 'contractor' ? '1099' : 'W-2')}</Badge>
+          {employee.configuration_source === 'quickbooks_history' && <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? 'Imported setup review' : 'Imported setup reviewed'}</Badge>}
           <span className="text-sm font-medium text-neutral-500">Employee #{employee.id}</span>
         </div>
       </section>
@@ -226,6 +259,7 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+        {(reviewError || reviewNotice) && <div className={`rounded-2xl border px-4 py-3 text-sm ${reviewError ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-800'}`} role={reviewError ? 'alert' : 'status'}>{reviewError || reviewNotice}</div>}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
             <span>{payHistoryError}</span>
@@ -244,7 +278,14 @@ export function EmployeeWorkspace(): ReactElement {
           />
         )}
         {activeTab === 'pay-setup' && (
-          <PaySetup employee={employee} editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })} />
+          <PaySetup
+            employee={employee}
+            editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}
+            reviewNotes={reviewNotes}
+            reviewBusyCode={reviewBusyCode}
+            onReviewNoteChange={(code, value) => setReviewNotes((current) => ({ ...current, [code]: value }))}
+            onResolveReview={(code) => void resolveConfigurationReview(code)}
+          />
         )}
         {activeTab === 'pay-history' && (
           <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} />
@@ -321,15 +362,63 @@ function EmployeeOverview({
 interface PaySetupProps {
   employee: Employee;
   editHref: string;
+  reviewNotes: Record<string, string>;
+  reviewBusyCode: string | null;
+  onReviewNoteChange: (code: string, value: string) => void;
+  onResolveReview: (code: string) => void;
 }
 
-function PaySetup({ employee, editHref }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNoteChange, onResolveReview }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
   const upcomingW4 = employee.upcoming_w4_election;
   return (
     <div className="space-y-6">
+      {employee.configuration_source === 'quickbooks_history' && (
+        <Card className={employee.configuration_review_status === 'needs_review' ? 'border-warning-200 bg-warning-50/40' : 'border-success-200 bg-success-50/40'}>
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">{employee.configuration_review_status === 'needs_review' ? <AlertTriangle className="h-5 w-5 text-warning-700" /> : <CheckCircle2 className="h-5 w-5 text-success-700" />}Imported setup review</CardTitle>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">Correct employee fields on the standard form, then document each manual verification here. Paid QuickBooks payroll remains locked.</p>
+            </div>
+            <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? `${employee.configuration_review_items?.length || 0} open` : 'Complete'}</Badge>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(employee.configuration_review_items || []).map((item) => (
+              <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
+                <p className="font-semibold text-neutral-950">{item.message}</p>
+                {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <label className="block space-y-1.5">
+                    <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
+                    <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
+                  </label>
+                  <Button disabled={!reviewNotes[item.code]?.trim() || reviewBusyCode !== null} onClick={() => onResolveReview(item.code)}>{reviewBusyCode === item.code ? 'Recording…' : 'Mark reviewed'}</Button>
+                </div>
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-neutral-600">Need to correct a date, address, W-4, rate, or recurring payroll item first?</p>
+              <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
+            </div>
+            {(employee.configuration_review_resolutions || []).length > 0 && (
+              <div className="border-t border-neutral-200 pt-4">
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Completed review record</p>
+                <div className="mt-3 space-y-3">
+                  {(employee.configuration_review_resolutions || []).map((resolution) => (
+                    <div key={resolution.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm">
+                      <p className="font-semibold text-neutral-900">{resolution.item_message}</p>
+                      <p className="mt-1 leading-6 text-neutral-600">{resolution.resolution_note}</p>
+                      <p className="mt-2 text-xs text-neutral-500">Reviewed {formatGuamDateTime(resolution.reviewed_at)} by {resolution.reviewed_by_name}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
       <Card>
         <CardHeader><CardTitle>Payroll setup</CardTitle><p className="mt-2 text-sm text-neutral-500">A readable summary of the values used when this employee enters a pay run.</p></CardHeader>

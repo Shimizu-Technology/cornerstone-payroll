@@ -37,7 +37,7 @@ RSpec.describe Employee, type: :model do
       expect(employee.errors[:address_line1]).to include("can't be blank")
     end
 
-    it "clears source-field review items when the missing values are supplied" do
+    it "keeps source-field review items open until a reviewer documents the resolution" do
       employee = create(
         :employee,
         hire_date: nil,
@@ -59,11 +59,11 @@ RSpec.describe Employee, type: :model do
 
       employee.update!(hire_date: Date.new(2024, 1, 15))
 
-      expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "legacy_w4_allowances" ])
+      expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "verify_hire_date", "legacy_w4_allowances" ])
       expect(employee.configuration_review_status).to eq("needs_review")
     end
 
-    it "marks setup complete when the only source-field review item is resolved" do
+    it "does not treat entering a value as the same thing as reviewing its source" do
       employee = create(
         :employee,
         hire_date: nil,
@@ -80,8 +80,8 @@ RSpec.describe Employee, type: :model do
 
       employee.update!(hire_date: Date.new(2024, 1, 15))
 
-      expect(employee.reload.configuration_review_items).to be_empty
-      expect(employee.configuration_review_status).to eq("complete")
+      expect(employee.reload.configuration_review_items.pluck("code")).to eq([ "verify_hire_date" ])
+      expect(employee.configuration_review_status).to eq("needs_review")
     end
 
     it "preserves a reviewer's completed status when an unrelated edit resolves nothing" do

@@ -242,6 +242,18 @@ export interface Employee {
   configuration_source?: 'quickbooks_history' | null;
   configuration_review_status?: 'complete' | 'needs_review';
   configuration_review_items?: Array<{ code: string; message: string; fields: string[] }>;
+  configuration_review_resolutions?: Array<{
+    id: number;
+    item_code: string;
+    item_message: string;
+    item_fields: string[];
+    resolution_note: string;
+    reviewed_by_name: string;
+    reviewed_by_email: string;
+    reviewed_by_role: string;
+    reviewed_at: string;
+    created_at: string;
+  }>;
   // Contractor-specific fields
   business_name?: string;
   contractor_ein?: string;
