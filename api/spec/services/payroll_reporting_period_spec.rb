@@ -19,6 +19,17 @@ RSpec.describe PayrollReportingPeriod do
     expect(period.filename_token).to eq("2026-02-03_to_2026-03-07")
   end
 
+  it "builds an explicit all-history period without treating it as a custom range" do
+    period = described_class.all_time
+
+    expect(period.range).to eq(Date.new(1900, 1, 1)..Date.new(9999, 12, 31))
+    expect(period.all_time?).to be(true)
+    expect(period.custom?).to be(false)
+    expect(period.label).to eq("All pay history")
+    expect(period.filename_token).to eq("all_pay_history")
+    expect(period.payload).to include(all_time: true, custom: false, year: nil)
+  end
+
   it "rejects partial and invalid ranges" do
     expect { described_class.from_params({ start_date: "2026-01-01" }) }.to raise_error(ArgumentError, /both required/)
     expect { described_class.from_params({ start_date: "not-a-date", end_date: "2026-01-02" }) }.to raise_error(ArgumentError, /YYYY-MM-DD/)

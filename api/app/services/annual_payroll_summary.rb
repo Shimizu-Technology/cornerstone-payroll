@@ -49,12 +49,13 @@ class AnnualPayrollSummary
     {
       year: year,
       payroll_count: native_items.map(&:pay_period_id).uniq.length + regular_historical_period_count(imported_paychecks),
-      paycheck_count: native_items.length + imported_paychecks.length,
+      paycheck_count: native_items.length + regular_historical_paycheck_count(imported_paychecks),
       employee_count: (native_items.map(&:employee_id) + imported_paychecks.map(&:employee_id)).compact.uniq.length,
       cornerstone_payroll_count: native_items.map(&:pay_period_id).uniq.length,
       cornerstone_paycheck_count: native_items.length,
       quickbooks_payroll_count: regular_historical_period_count(imported_paychecks),
-      quickbooks_paycheck_count: imported_paychecks.length,
+      quickbooks_paycheck_count: regular_historical_paycheck_count(imported_paychecks),
+      quickbooks_record_count: imported_paychecks.length,
       opening_summary_count: imported_paychecks.count { |paycheck| paycheck.historical_pay_period.period_type == "opening_summary" },
       adjustment_count: adjustments.length,
       excluded_unlinked_paycheck_count: unlinked.length,
@@ -181,6 +182,10 @@ class AnnualPayrollSummary
     end.uniq.length
   end
 
+  def regular_historical_paycheck_count(paychecks)
+    paychecks.count { |paycheck| paycheck.historical_pay_period.period_type == "regular" }
+  end
+
   def overall_totals(rows)
     totals = {
       year_count: rows.length,
@@ -191,6 +196,7 @@ class AnnualPayrollSummary
       cornerstone_paycheck_count: rows.sum { |row| row[:cornerstone_paycheck_count] },
       quickbooks_payroll_count: rows.sum { |row| row[:quickbooks_payroll_count] },
       quickbooks_paycheck_count: rows.sum { |row| row[:quickbooks_paycheck_count] },
+      quickbooks_record_count: rows.sum { |row| row[:quickbooks_record_count] },
       opening_summary_count: rows.sum { |row| row[:opening_summary_count] },
       adjustment_count: rows.sum { |row| row[:adjustment_count] },
       excluded_unlinked_paycheck_count: rows.sum { |row| row[:excluded_unlinked_paycheck_count] },

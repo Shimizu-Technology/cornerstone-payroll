@@ -9,11 +9,13 @@ interface PayrollSourceNoticeProps {
 
 export function PayrollSourceNotice({ summary, mentionFieldScope = false }: PayrollSourceNoticeProps): ReactElement | null {
   const adjustments = summary?.adjustments || { count: 0, gross_pay_delta: 0, net_pay_delta: 0 };
-  if (!summary || (summary.quickbooks.paycheck_count === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0 && adjustments.count === 0)) return null;
+  if (!summary || (summary.quickbooks.record_count === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0 && adjustments.count === 0)) return null;
 
   const quickbooks = summary.quickbooks;
-  const importedLabel = `${quickbooks.paycheck_count} linked QuickBooks ${quickbooks.paycheck_count === 1 ? 'record' : 'records'}`;
-  const cornerstoneLabel = `${summary.cornerstone.paycheck_count} Cornerstone ${summary.cornerstone.paycheck_count === 1 ? 'record' : 'records'}`;
+  const includedLabels = [
+    summary.cornerstone.paycheck_count > 0 ? `${summary.cornerstone.paycheck_count} Cornerstone ${summary.cornerstone.paycheck_count === 1 ? 'paycheck' : 'paychecks'}` : null,
+    quickbooks.paycheck_count > 0 ? `${quickbooks.paycheck_count} linked QuickBooks ${quickbooks.paycheck_count === 1 ? 'paycheck' : 'paychecks'}` : null,
+  ].filter(Boolean);
 
   return (
     <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950 sm:px-5">
@@ -22,7 +24,7 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
         <div>
           <p className="font-semibold">Combined payroll history</p>
           <p className="mt-1 leading-6 text-amber-800">
-            This view combines {cornerstoneLabel} with {importedLabel}. {summary.source_statement}
+            This view includes {includedLabels.join(' and ') || 'locked QuickBooks balance history'}. {summary.source_statement}
           </p>
           {quickbooks.opening_summary_count > 0 && (
             <p className="mt-1 leading-6 text-amber-800">

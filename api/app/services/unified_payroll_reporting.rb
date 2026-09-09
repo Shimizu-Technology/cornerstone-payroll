@@ -170,7 +170,8 @@ class UnifiedPayrollReporting
       },
       quickbooks: {
         payroll_count: regular_period_count(historical_paychecks),
-        paycheck_count: historical_paychecks.length,
+        paycheck_count: regular_paycheck_count(historical_paychecks),
+        record_count: historical_paychecks.length,
         opening_summary_count: opening_summary_count(historical_paychecks),
         excluded_unlinked_paycheck_count: excluded_unlinked_paychecks.length,
         excluded_unlinked_gross_pay: sum(excluded_unlinked_paychecks, :gross_pay),
@@ -239,6 +240,10 @@ class UnifiedPayrollReporting
 
   def opening_summary_count(paychecks)
     paychecks.count { |paycheck| paycheck.historical_pay_period.period_type == "opening_summary" }
+  end
+
+  def regular_paycheck_count(paychecks)
+    paychecks.count { |paycheck| paycheck.historical_pay_period.period_type == "regular" }
   end
 
   def bridge_summary

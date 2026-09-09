@@ -7,7 +7,7 @@ RSpec.describe AnnualPayrollSummary do
   let(:employee) { create(:employee, company: company) }
   let(:user) { create(:user, company: company, role: "admin") }
 
-  def historical_paycheck(status:, suffix:, year:, employee:, gross_pay:, net_pay:)
+  def historical_paycheck(status:, suffix:, year:, employee:, gross_pay:, net_pay:, period_type: "regular")
     batch = create(
       :historical_import_batch,
       company: company,
@@ -25,7 +25,7 @@ RSpec.describe AnnualPayrollSummary do
       start_date: pay_date - 13.days,
       end_date: pay_date - 5.days,
       pay_date: pay_date,
-      period_type: "regular",
+      period_type: period_type,
       paycheck_count: 1,
       totals: { "gross_pay" => gross_pay.to_s, "net_pay" => net_pay.to_s }
     )
@@ -47,8 +47,8 @@ RSpec.describe AnnualPayrollSummary do
       external_key: "paycheck-#{suffix}",
       source_employee_name: employee&.full_name || "Unlinked Worker",
       source_row_number: 1,
-      source_status: "paid",
-      reconciliation_status: employee ? "matched" : "unmatched",
+      source_status: period_type == "opening_summary" ? "historical_summary" : "paid",
+      reconciliation_status: employee ? (period_type == "opening_summary" ? "opening_summary" : "matched") : "unmatched",
       period_start: period.start_date,
       period_end: period.end_date,
       pay_date: pay_date,
@@ -67,6 +67,34 @@ RSpec.describe AnnualPayrollSummary do
       total_payroll_cost: gross_pay + 53
     )
     [ batch, period, paycheck ]
+  end
+
+  it "separates imported paycheck counts from opening-summary records" do
+    historical_paycheck(
+      status: "locked", suffix: "regular-count", year: 2025, employee: employee, gross_pay: 500, net_pay: 350
+    )
+    historical_paycheck(
+      status: "locked", suffix: "opening-count", year: 2025, employee: employee, gross_pay: 200, net_pay: 120,
+      period_type: "opening_summary"
+    )
+
+    report = described_class.new(company: company).call
+    year = report.fetch(:years).sole
+
+    expect(year).to include(
+      payroll_count: 1,
+      paycheck_count: 1,
+      quickbooks_payroll_count: 1,
+      quickbooks_paycheck_count: 1,
+      quickbooks_record_count: 2,
+      opening_summary_count: 1
+    )
+    expect(report.fetch(:totals)).to include(
+      paycheck_count: 1,
+      quickbooks_paycheck_count: 1,
+      quickbooks_record_count: 2,
+      opening_summary_count: 1
+    )
   end
 
   it "breaks locked QuickBooks and committed Cornerstone payroll totals out by year" do

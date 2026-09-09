@@ -37,10 +37,11 @@ class PayrollRegisterPdfGenerator
     pp = report[:pay_period] || {}
     start_d = pp[:start_date].to_s.gsub(/[^0-9\-]/, "")
     end_d   = pp[:end_date].to_s.gsub(/[^0-9\-]/, "")
+    prefix = report.dig(:source, :system) == "quickbooks_online" ? "quickbooks_payroll_register" : "payroll_register"
     if start_d.present? && end_d.present?
-      "payroll_register_#{start_d}_to_#{end_d}.pdf"
+      "#{prefix}_#{start_d}_to_#{end_d}.pdf"
     else
-      "payroll_register_unknown_period.pdf"
+      "#{prefix}_unknown_period.pdf"
     end
   end
 
@@ -88,6 +89,7 @@ class PayrollRegisterPdfGenerator
   def render_pay_period_block(pdf)
     pp     = report[:pay_period] || {}
     meta   = report[:meta] || {}
+    source = report[:source] || {}
 
     pdf.font_size(11) { pdf.text "Pay Period Information", style: :bold }
     pdf.move_down 4
@@ -98,7 +100,9 @@ class PayrollRegisterPdfGenerator
       [ "End Date",      pp[:end_date].to_s ],
       [ "Pay Date",      pp[:pay_date].to_s ],
       [ "Status",        pp[:status].to_s.capitalize ],
+      [ "Source",        source[:label].to_s ],
       [ "Description",   meta[:report_description].to_s ],
+      [ "Source Handling", source[:statement].to_s ],
       [ "Generated At",  meta[:generated_at].to_s ]
     ].reject { |_, value| value.blank? }
 
