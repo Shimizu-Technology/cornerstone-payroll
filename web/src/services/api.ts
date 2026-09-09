@@ -385,6 +385,7 @@ export const employeesApi = {
     status?: string;
     department_id?: number;
     employment_type?: string;
+    configuration_review_status?: 'complete' | 'needs_review';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
@@ -418,6 +419,10 @@ export const employeesApi = {
       `/admin/employees/${id}/transition_tax_classification`,
       { transition },
     ),
+  resolveConfigurationReviewItem: (
+    id: number,
+    input: { code: string; resolution_note: string; acknowledgement: string },
+  ) => api.post<{ data: Employee }>(`/admin/employees/${id}/resolve_configuration_review_item`, input),
 };
 
 // Employee Bulk Import
@@ -4489,6 +4494,23 @@ export interface PayrollGoLiveReview {
   ready_for_signoff: boolean;
   blockers: string[];
   readiness: Record<string, boolean | number>;
+  company_setup: {
+    status: 'missing_required' | 'needs_review' | 'stale' | 'current';
+    current: boolean;
+    missing_required_fields: string[];
+    sections: Array<{
+      key: string;
+      label: string;
+      description: string;
+      fields: Record<string, boolean>;
+      missing_required_fields: string[];
+      complete: boolean;
+    }>;
+    reviewed_at?: string | null;
+    reviewed_by_name?: string | null;
+    review_notes?: string | null;
+    acknowledgement: string;
+  };
   parallel_runs: PayrollGoLiveParallelRun[];
   technical_signed_at?: string | null;
   technical_signed_by_name?: string | null;
@@ -4518,6 +4540,7 @@ export interface PayrollGoLivePayload {
     can_preview_setup: boolean;
     can_apply_setup: boolean;
     can_record_parallel: boolean;
+    can_review_company_setup: boolean;
     can_sign_technical: boolean;
     can_sign_operations: boolean;
   };
@@ -4533,6 +4556,8 @@ export const payrollGoLiveApi = {
     api.post<PayrollGoLivePayload>('/admin/payroll_go_live/apply_setup', { acknowledgement }, { companyId }),
   recordParallel: (input: { pay_period_id: number; source_totals: Record<string, string | number>; notes: string }, companyId: number): Promise<PayrollGoLivePayload> =>
     api.post<PayrollGoLivePayload>('/admin/payroll_go_live/record_parallel_run', input, { companyId }),
+  reviewCompanySetup: (input: { acknowledgement: string; notes: string }, companyId: number): Promise<PayrollGoLivePayload> =>
+    api.post<PayrollGoLivePayload>('/admin/payroll_go_live/review_company_setup', input, { companyId }),
   updateReview: (input: { attestations: Record<string, boolean>; review_notes: string }, companyId: number): Promise<PayrollGoLivePayload> =>
     api.patch<PayrollGoLivePayload>('/admin/payroll_go_live/update_review', input, { companyId }),
   signTechnical: (acknowledgement: string, companyId: number): Promise<PayrollGoLivePayload> =>

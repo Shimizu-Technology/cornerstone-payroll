@@ -62,6 +62,7 @@ class Company < ApplicationRecord
   has_many :historical_tax_wage_reports, dependent: :restrict_with_error
   has_many :historical_ytd_bridges, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
+  has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
   has_one :payroll_go_live_review, dependent: :restrict_with_error
   has_many :source_payroll_go_live_reviews,
            class_name: "PayrollGoLiveReview",

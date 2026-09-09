@@ -1055,7 +1055,7 @@ export function EmployeeForm() {
               <AlertCircle className="mt-0 h-5 w-5 shrink-0 text-warning-700" />
               <div>
                 <p className="font-semibold">QuickBooks setup needs review</p>
-                <p className="mt-2 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Entering the missing hire date or address clears that source-field item when you save.</p>
+                <p className="mt-2 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Correct the fields here, then return to the employee workspace to document what was verified and mark each item reviewed.</p>
                 <ul className="mt-4 space-y-2 text-sm leading-6">
                   {(loadedEmployee.configuration_review_items || []).map((item) => (
                     <li key={item.code}>• {item.message}</li>

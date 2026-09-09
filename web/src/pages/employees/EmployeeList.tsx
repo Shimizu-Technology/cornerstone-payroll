@@ -103,6 +103,7 @@ export function EmployeeList() {
   const status = searchParams.get('status') ?? 'active';
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
+  const configurationReviewStatus = searchParams.get('configuration_review_status') || '';
   const sortBy = (searchParams.get('sort_by') as 'name' | 'department' | 'rate' | 'status' | null) ?? 'name';
   const sortDirection = (searchParams.get('sort_direction') as 'asc' | 'desc' | null) ?? 'asc';
   const page = parseInt(searchParams.get('page') || '1', 10);
@@ -140,6 +141,7 @@ export function EmployeeList() {
             status: status === 'all' ? undefined : (status || undefined),
             department_id: departmentId ? parseInt(departmentId, 10) : undefined,
             employment_type: employmentType || undefined,
+            configuration_review_status: configurationReviewStatus === 'needs_review' ? 'needs_review' : undefined,
             page,
             per_page: 500,
             group_by: 'employment_type',
@@ -159,7 +161,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
+  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -280,7 +282,7 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [companyEmployees]);
 
-  const hasActiveFilters = !!(search || departmentId || employmentType || status !== 'active');
+  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || status !== 'active');
 
   return (
     <div>
@@ -352,6 +354,18 @@ export function EmployeeList() {
                 </option>
               ))}
             </Select>
+
+            {!isClient && (
+              <Select
+                value={configurationReviewStatus}
+                onChange={(e) => updateFilter('configuration_review_status', e.target.value)}
+                className="w-full sm:w-44"
+                aria-label="Setup review status"
+              >
+                <option value="">All setup reviews</option>
+                <option value="needs_review">Needs setup review</option>
+              </Select>
+            )}
           </div>
         </div>
 

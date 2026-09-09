@@ -1,0 +1,94 @@
+# frozen_string_literal: true
+
+class EmployeeConfigurationReviewService
+  ACKNOWLEDGEMENT = "MARK SETUP ITEM REVIEWED"
+  SOURCE_REQUIRED_CODES = %w[
+    verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
+  ].freeze
+
+  def initialize(employee:, actor:)
+    @employee = employee
+    @actor = actor
+  end
+
+  def resolve!(code:, resolution_note:, acknowledgement:)
+    authorize!
+    raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
+
+    note = resolution_note.to_s.squish
+    raise ArgumentError, "Document what was verified or corrected" if note.blank?
+    raise ArgumentError, "Resolution note is too long" if note.length > 1_000
+
+    resolution = nil
+    Employee.transaction do
+      employee.lock!
+      item = current_items.find { |value| value.fetch("code") == code.to_s }
+      existing = employee.employee_configuration_review_resolutions.find_by(item_code: code.to_s)
+      return existing if item.nil? && existing
+      raise ArgumentError, "This setup review item is no longer open" unless item
+
+      ensure_required_source_fields!(item)
+      resolution = employee.employee_configuration_review_resolutions.create!(
+        company: employee.company,
+        item_code: item.fetch("code"),
+        item_message: item.fetch("message"),
+        item_fields: Array(item.fetch("fields")),
+        resolution_note: note,
+        reviewed_by: actor,
+        reviewed_by_name: actor.name,
+        reviewed_by_email: actor.email,
+        reviewed_by_role: actor.role,
+        reviewed_at: Time.current
+      )
+      remaining = current_items.reject { |value| value.fetch("code") == code.to_s }
+      employee.update!(
+        configuration_review_items: remaining,
+        configuration_review_status: remaining.empty? ? "complete" : "needs_review"
+      )
+      audit!(resolution)
+    end
+    resolution
+  end
+
+  private
+
+  attr_reader :employee, :actor
+
+  def current_items
+    Array(employee.configuration_review_items).select do |item|
+      item.is_a?(Hash) && item["code"].present? && item["message"].present? && item["fields"].is_a?(Array)
+    end
+  end
+
+  def ensure_required_source_fields!(item)
+    return unless SOURCE_REQUIRED_CODES.include?(item.fetch("code"))
+
+    missing = Array(item.fetch("fields")).reject { |field| employee.public_send(field).present? }
+    return if missing.empty?
+
+    raise ArgumentError, "Enter the required employee values first: #{missing.map { |field| field.humanize }.join(', ')}"
+  end
+
+  def authorize!
+    allowed = employee.configuration_source == "quickbooks_history" && actor&.payroll_access_allowed? &&
+      actor.can_access_company?(employee.company_id) && StaffRolePolicy.allowed?(actor, :payroll_operations)
+    raise ArgumentError, "Cornerstone payroll access is required" unless allowed
+  end
+
+  def audit!(resolution)
+    AuditLog.record!(
+      user: actor,
+      organization_id: employee.company.organization_id,
+      company_id: employee.company_id,
+      action: "employees#resolve_configuration_review",
+      record_type: "employees",
+      record_id: employee.id,
+      subject_name: employee.full_name,
+      metadata: {
+        item_code: resolution.item_code,
+        resolution_id: resolution.id,
+        remaining_item_count: employee.configuration_review_items.size
+      }
+    )
+  end
+end

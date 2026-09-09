@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -472,6 +472,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
     t.index ["requested_by_id"], name: "index_employee_change_requests_on_requested_by_id"
     t.index ["reviewed_by_id"], name: "index_employee_change_requests_on_reviewed_by_id"
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
+  end
+
+  create_table "employee_configuration_review_resolutions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.string "item_code", null: false
+    t.jsonb "item_fields", default: [], null: false
+    t.text "item_message", null: false
+    t.text "resolution_note", null: false
+    t.datetime "reviewed_at", null: false
+    t.bigint "reviewed_by_id"
+    t.string "reviewed_by_email", null: false
+    t.string "reviewed_by_name", null: false
+    t.string "reviewed_by_role", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "reviewed_at"], name: "idx_employee_configuration_review_resolutions_company_time"
+    t.index ["company_id"], name: "index_employee_configuration_review_resolutions_on_company_id"
+    t.index ["employee_id", "item_code"], name: "idx_employee_configuration_review_resolutions_unique", unique: true
+    t.index ["employee_id"], name: "index_employee_configuration_review_resolutions_on_employee_id"
+    t.index ["reviewed_by_id"], name: "idx_employee_config_reviews_reviewer"
+    t.check_constraint "jsonb_typeof(item_fields) = 'array'::text", name: "employee_configuration_review_resolutions_fields_array"
   end
 
   create_table "employee_deductions", force: :cascade do |t|
@@ -1793,6 +1815,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
     t.datetime "approved_at"
     t.jsonb "attestations", default: {}, null: false
     t.bigint "company_id", null: false
+    t.string "company_setup_digest"
+    t.text "company_setup_review_notes"
+    t.datetime "company_setup_reviewed_at"
+    t.bigint "company_setup_reviewed_by_id"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
     t.date "effective_on", null: false
@@ -1813,6 +1839,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
     t.jsonb "validation_errors", default: [], null: false
     t.jsonb "warnings", default: [], null: false
     t.index ["company_id"], name: "index_payroll_go_live_reviews_on_company_id", unique: true
+    t.index ["company_setup_reviewed_by_id"], name: "idx_go_live_reviews_company_setup_reviewer"
     t.index ["created_by_id"], name: "index_payroll_go_live_reviews_on_created_by_id"
     t.index ["historical_import_batch_id"], name: "index_payroll_go_live_reviews_on_historical_import_batch_id", unique: true
     t.index ["operations_signed_by_id"], name: "index_payroll_go_live_reviews_on_operations_signed_by_id"
@@ -2806,6 +2833,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
   add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
+  add_foreign_key "employee_configuration_review_resolutions", "companies", on_delete: :restrict
+  add_foreign_key "employee_configuration_review_resolutions", "employees", on_delete: :restrict
+  add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
   add_foreign_key "employee_loans", "companies"
@@ -2966,6 +2996,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
   add_foreign_key "payroll_go_live_reviews", "companies", column: "source_company_id", on_delete: :restrict
   add_foreign_key "payroll_go_live_reviews", "companies", on_delete: :restrict
   add_foreign_key "payroll_go_live_reviews", "historical_import_batches", on_delete: :restrict
+  add_foreign_key "payroll_go_live_reviews", "users", column: "company_setup_reviewed_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "operations_signed_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "setup_applied_by_id", on_delete: :nullify
