@@ -444,7 +444,8 @@ export function EmployeeList() {
                               key={employee.id}
                               employee={employee}
                               departments={companyDepartments}
-                              onEdit={() => openEmployee(employee.id)}
+                              actionLabel={isClient ? 'Edit employee' : 'Open employee'}
+                              onOpen={() => openEmployee(employee.id)}
                             />
                           ))}
                         </div>
@@ -495,7 +496,8 @@ export function EmployeeList() {
                                 employee={employee}
                                 departments={companyDepartments}
                                 rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
-                                onEdit={() => openEmployee(employee.id)}
+                                actionLabel={isClient ? 'Edit' : 'Open'}
+                                onOpen={() => openEmployee(employee.id)}
                               />
                             ))}
                             </TableBody>
@@ -552,11 +554,13 @@ export function EmployeeList() {
 function EmployeeMobileCard({
   employee,
   departments,
-  onEdit,
+  actionLabel,
+  onOpen,
 }: {
   employee: Employee;
   departments: (Department & { employee_count: number })[];
-  onEdit: () => void;
+  actionLabel: string;
+  onOpen: () => void;
 }) {
   const statusConfig = employeeStatusConfig[employee.status];
   const deptName = departments.find(d => d.id === employee.department_id)?.name;
@@ -588,7 +592,9 @@ function EmployeeMobileCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate font-semibold text-neutral-950">{employee.first_name} {employee.last_name}</p>
+              <button type="button" onClick={onOpen} className="truncate text-left font-semibold text-primary-800 hover:text-primary-950 hover:underline">
+                {employee.first_name} {employee.last_name}
+              </button>
               {employee.email && <p className="truncate text-sm text-neutral-500">{employee.email}</p>}
             </div>
             <div className="flex flex-col items-end gap-2">
@@ -614,7 +620,7 @@ function EmployeeMobileCard({
             </div>
           )}
           <MobileCardActions>
-            <Button variant="outline" size="sm" onClick={onEdit}>Edit employee</Button>
+            <Button variant="outline" size="sm" onClick={onOpen}>{actionLabel}</Button>
           </MobileCardActions>
         </div>
       </div>
@@ -626,12 +632,14 @@ function EmployeeTableRow({
   employee,
   departments,
   rowTone,
-  onEdit,
+  actionLabel,
+  onOpen,
 }: {
   employee: Employee;
   departments: (Department & { employee_count: number })[];
   rowTone: string;
-  onEdit: () => void;
+  actionLabel: string;
+  onOpen: () => void;
 }) {
   const statusConfig = employeeStatusConfig[employee.status];
   const deptName = departments.find(d => d.id === employee.department_id)?.name;
@@ -651,9 +659,9 @@ function EmployeeTableRow({
             </span>
           </div>
           <div>
-            <p className="font-medium text-gray-900">
+            <button type="button" onClick={onOpen} className="text-left font-medium text-primary-800 hover:text-primary-950 hover:underline">
               {employee.first_name} {employee.last_name}
-            </p>
+            </button>
             {employee.email && (
               <p className="text-sm text-gray-500">{employee.email}</p>
             )}
@@ -716,9 +724,9 @@ function EmployeeTableRow({
         <Button 
           variant="ghost" 
           size="sm"
-          onClick={onEdit}
+          onClick={onOpen}
         >
-          Edit
+          {actionLabel}
         </Button>
       </TableCell>
     </TableRow>

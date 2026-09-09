@@ -71,7 +71,8 @@ class PayrollRegisterCsvExporter
     company_slug = report.dig(:meta, :company_name).to_s.parameterize.presence
     start_d = pp[:start_date].to_s.gsub(/[^0-9\-]/, "")
     end_d   = pp[:end_date].to_s.gsub(/[^0-9\-]/, "")
-    prefix = [ "payroll_register", company_slug ].compact.join("_")
+    source_prefix = report.dig(:source, :system) == "quickbooks_online" ? "quickbooks_payroll_register" : "payroll_register"
+    prefix = [ source_prefix, company_slug ].compact.join("_")
     if start_d.present? && end_d.present?
       "#{prefix}_#{start_d}_to_#{end_d}.csv"
     else
@@ -148,7 +149,7 @@ class PayrollRegisterCsvExporter
       sanitize_csv_field(emp[:employee_name]),
       sanitize_csv_field(emp[:department_name]),
       sanitize_csv_field(emp[:employment_type]),
-      format_currency(emp[:pay_rate]),
+      emp[:pay_rate].nil? ? "" : format_currency(emp[:pay_rate]),
       emp[:hours_worked].to_f,
       emp[:overtime_hours].to_f,
       emp[:holiday_hours].to_f,

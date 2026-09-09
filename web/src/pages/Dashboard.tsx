@@ -9,7 +9,7 @@ import { formatCurrency, payPeriodStatusConfig } from '@/lib/utils';
 import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
 import { useCompany } from '@/contexts/CompanyContext';
-import { newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
+import { importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 interface StatCardProps {
   title: string;
@@ -100,6 +100,12 @@ export function Dashboard(): ReactElement {
   const payRunHref = (payRunId: number, tab: 'overview' | 'work' = 'overview'): string => (
     activeCompanyId ? payRunPath(activeCompanyId, payRunId, tab) : `/pay-periods/${payRunId}`
   );
+  const recentPayrollHref = (payroll: DashboardResponse['stats']['recent_payrolls'][number]): string => (
+    payroll.record_type === 'imported' && activeCompanyId
+      ? importedPayRunPath(activeCompanyId, payroll.id)
+      : payRunHref(payroll.id)
+  );
+  const importedYtdCount = stats?.ytd_totals?.imported_payroll_count ?? 0;
 
   return (
     <div>
@@ -180,7 +186,9 @@ export function Dashboard(): ReactElement {
           <StatCard
             title="YTD Payroll"
             value={stats?.ytd_totals ? formatCurrency(stats.ytd_totals.net_pay) : '$0.00'}
-            subtitle={stats?.ytd_totals ? `${stats.ytd_totals.payroll_count} pay periods` : undefined}
+            subtitle={stats?.ytd_totals
+              ? `${stats.ytd_totals.payroll_count} pay periods${importedYtdCount > 0 ? ` · ${importedYtdCount} imported` : ''}`
+              : undefined}
             loading={loading}
             icon={<Banknote className="h-[18px] w-[18px]" />}
           />
@@ -285,8 +293,8 @@ export function Dashboard(): ReactElement {
               <div className="space-y-3">
                 {stats.recent_payrolls.map((payroll) => (
                   <Link
-                    key={payroll.id}
-                    to={payRunHref(payroll.id)}
+                    key={payroll.key ?? payroll.id}
+                    to={recentPayrollHref(payroll)}
                     aria-label={`Open payroll ${payroll.period_description}`}
                     className="-mx-2 flex cursor-pointer flex-col gap-2 rounded-xl border border-transparent px-3 py-3 transition-all hover:border-primary-200 hover:bg-primary-50/60 sm:flex-row sm:items-center sm:justify-between"
                   >
@@ -295,6 +303,9 @@ export function Dashboard(): ReactElement {
                       <p className="text-sm text-neutral-500">
                         {new Date(payroll.pay_date).toLocaleDateString()} • {payroll.employee_count} employees
                       </p>
+                      {payroll.record_type === 'imported' && (
+                        <Badge variant="warning" className="mt-2">QuickBooks import · locked</Badge>
+                      )}
                     </div>
                     <p className="font-semibold text-success-600">{formatCurrency(payroll.total_net)}</p>
                   </Link>
@@ -341,6 +352,11 @@ export function Dashboard(): ReactElement {
               <CardTitle>{stats.ytd_totals.year} Year-to-Date Summary</CardTitle>
             </CardHeader>
             <CardContent>
+              {importedYtdCount > 0 && (
+                <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                  These totals include {importedYtdCount} locked QuickBooks {importedYtdCount === 1 ? 'pay period' : 'pay periods'} alongside payroll run in Cornerstone.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 <div>
                   <p className="text-sm text-neutral-500">Gross Pay</p>

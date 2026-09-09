@@ -1582,13 +1582,23 @@ export interface DashboardResponse {
       retirement: number;
       net_pay: number;
       payroll_count: number;
+      imported_payroll_count: number;
+      imported_opening_summary_count: number;
     };
     recent_payrolls: {
+      key?: string;
+      record_type?: 'native' | 'imported';
       id: number;
       period_description: string;
       pay_date: string;
       employee_count: number;
       total_net: number;
+      source?: {
+        system: string;
+        label: string;
+        detail?: string;
+        locked: boolean;
+      };
     }[];
   };
 }
@@ -1602,8 +1612,19 @@ export interface PayrollRegisterReport {
       generated_at?: string;
       report_description?: string;
     };
+    source?: {
+      system: 'cornerstone' | 'quickbooks_online';
+      label: string;
+      locked: boolean;
+      statement: string;
+      import_batch_id?: number;
+      locked_at?: string | null;
+      locked_by_name?: string | null;
+    };
     pay_period: {
+      key?: string;
       id: number;
+      record_type?: 'native' | 'imported';
       start_date: string;
       end_date: string;
       pay_date: string;
@@ -1674,6 +1695,7 @@ export interface PayrollReportPeriod {
   end_date: string;
   year: number | null;
   custom: boolean;
+  all_time?: boolean;
   label: string;
   quarter?: number | null;
 }
@@ -1741,6 +1763,7 @@ export interface PayrollSourceSummary {
   quickbooks: {
     payroll_count: number;
     paycheck_count: number;
+    record_count: number;
     opening_summary_count: number;
     excluded_unlinked_paycheck_count: number;
     excluded_unlinked_gross_pay: number;
@@ -1841,6 +1864,7 @@ export interface PayrollReportPeriodParams {
   year?: number;
   start_date?: string;
   end_date?: string;
+  all_time?: boolean;
 }
 
 export interface TaxSummaryReport {
@@ -1934,6 +1958,7 @@ export interface AnnualPayrollSummaryRow {
   cornerstone_paycheck_count: number;
   quickbooks_payroll_count: number;
   quickbooks_paycheck_count: number;
+  quickbooks_record_count: number;
   opening_summary_count: number;
   adjustment_count: number;
   excluded_unlinked_paycheck_count: number;
@@ -2250,15 +2275,15 @@ export interface QuarterlyOfficialFormFields {
 export const reportsApi = {
   dashboard: () =>
     api.get<DashboardResponse>('/admin/reports/dashboard'),
-  payrollRegister: (payPeriodId: number) =>
-    api.get<PayrollRegisterReport>('/admin/reports/payroll_register', { pay_period_id: payPeriodId }),
+  payrollRegister: (payRunKey: string | number) =>
+    api.get<PayrollRegisterReport>('/admin/reports/payroll_register', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
   // CPR-70: Payroll Register exports
-  payrollRegisterCsv: (payPeriodId: number) =>
-    api.getBlobWithParams('/admin/reports/payroll_register_csv', { pay_period_id: payPeriodId }),
-  payrollRegisterPdf: (payPeriodId: number) =>
-    api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
-  payrollRegisterXlsx: (payPeriodId: number) =>
-    api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
+  payrollRegisterCsv: (payRunKey: string | number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_csv', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
+  payrollRegisterPdf: (payRunKey: string | number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
+  payrollRegisterXlsx: (payRunKey: string | number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
   employeePayHistory: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
     api.get<{ report: EmployeePayHistoryReport }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
   employeePayHistoryXlsx: (employeeId: number, period: PayrollReportPeriodParams = {}) =>

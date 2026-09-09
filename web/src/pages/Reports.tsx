@@ -13,16 +13,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
+import { reportsApi, payrollHistoryApi, employeesApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { comparePayPeriodsByPeriod } from '@/lib/utils';
+import { useCompany } from '@/contexts/CompanyContext';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
-  PayPeriod,
   Employee,
   W2GuReport,
   W2GuEmployeeRow,
@@ -31,6 +30,7 @@ import type {
   W2GuMarkReadyResponse,
   PayrollFilingGateGroup,
 } from '@/types';
+import type { PayrollHistoryRecord } from '@/services/api';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -109,9 +109,10 @@ function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalid
 // ─── Payroll Register Panel ───────────────────────────────────────────────────
 
 function PayrollRegisterPanel() {
-  const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
+  const { activeCompanyId } = useCompany();
+  const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(true);
-  const [selectedPeriodId, setSelectedPeriodId] = useState<number | null>(null);
+  const [selectedPayRunKey, setSelectedPayRunKey] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -120,23 +121,29 @@ function PayrollRegisterPanel() {
   const [report, setReport] = useState<PayrollRegisterReport['report'] | null>(null);
 
   useEffect(() => {
-    payPeriodsApi.list({ status: 'committed' })
+    if (!activeCompanyId) {
+      setPayPeriods([]);
+      setSelectedPayRunKey('');
+      setLoadingPeriods(false);
+      return;
+    }
+    setLoadingPeriods(true);
+    payrollHistoryApi.list({ page: 1, per_page: 100, sort: 'pay_date', direction: 'desc' }, activeCompanyId)
       .then((res) => {
-        const periods = res.pay_periods ?? [];
-        const sorted = [...periods].sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
-        setPayPeriods(sorted);
-        if (sorted.length > 0) setSelectedPeriodId(sorted[0].id);
+        const periods = res.data.filter((period) => period.record_type === 'imported' || period.status === 'committed');
+        setPayPeriods(periods);
+        setSelectedPayRunKey(periods[0]?.key || '');
       })
       .catch(() => setError('Failed to load pay periods'))
       .finally(() => setLoadingPeriods(false));
-  }, []);
+  }, [activeCompanyId]);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
   const downloadFormats: ReportDownloadFormat[] = [
     {
       key: 'xlsx',
       label: 'Excel register (.xlsx)',
-      description: 'CEO-facing register with split tips and review details.',
+      description: 'Workbook with register details, components, and source information.',
       kind: 'spreadsheet',
       loading: exportingXlsx,
       onSelect: downloadXlsx,
@@ -160,12 +167,12 @@ function PayrollRegisterPanel() {
   ];
 
   async function loadReport() {
-    if (!selectedPeriodId) return;
+    if (!selectedPayRunKey) return;
     setLoading(true);
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.payrollRegister(selectedPeriodId);
+      const res = await reportsApi.payrollRegister(selectedPayRunKey);
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -176,12 +183,12 @@ function PayrollRegisterPanel() {
 
 
   async function downloadCsv() {
-    if (!selectedPeriodId) return;
+    if (!selectedPayRunKey) return;
     setExportingCsv(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.payrollRegisterCsv(selectedPeriodId);
-      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.csv`);
+      const { blob, filename } = await reportsApi.payrollRegisterCsv(selectedPayRunKey);
+      triggerDownload(blob, filename || `payroll_register_${selectedPayRunKey.replace(':', '-')}.csv`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -190,12 +197,12 @@ function PayrollRegisterPanel() {
   }
 
   async function downloadPdf() {
-    if (!selectedPeriodId) return;
+    if (!selectedPayRunKey) return;
     setExportingPdf(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.payrollRegisterPdf(selectedPeriodId);
-      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.pdf`);
+      const { blob, filename } = await reportsApi.payrollRegisterPdf(selectedPayRunKey);
+      triggerDownload(blob, filename || `payroll_register_${selectedPayRunKey.replace(':', '-')}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -204,12 +211,12 @@ function PayrollRegisterPanel() {
   }
 
   async function downloadXlsx() {
-    if (!selectedPeriodId) return;
+    if (!selectedPayRunKey) return;
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.payrollRegisterXlsx(selectedPeriodId);
-      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.xlsx`);
+      const { blob, filename } = await reportsApi.payrollRegisterXlsx(selectedPayRunKey);
+      triggerDownload(blob, filename || `payroll_register_${selectedPayRunKey.replace(':', '-')}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -223,7 +230,7 @@ function PayrollRegisterPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Payroll Register</CardTitle>
           <CardDescription>
-            Complete payroll details for a selected pay period — all employees, hours, taxes, and net pay.
+            Complete payroll details for a selected pay period. Committed Cornerstone payroll and locked QuickBooks imports use the same report.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -237,29 +244,29 @@ function PayrollRegisterPanel() {
               ) : (
                 <select
                   id="pr-period"
-                  value={selectedPeriodId ?? ''}
+                  value={selectedPayRunKey}
                   onChange={(e) => {
-                    setSelectedPeriodId(Number(e.target.value));
+                    setSelectedPayRunKey(e.target.value);
                     setReport(null);
                     setError(null);
                   }}
                   disabled={busy}
                   className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                 >
-                  {payPeriods.length === 0 && <option value="">No committed pay periods</option>}
+                  {payPeriods.length === 0 && <option value="">No completed pay periods</option>}
                   {payPeriods.map((pp) => (
-                    <option key={pp.id} value={pp.id}>
-                      {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
+                    <option key={pp.key} value={pp.key}>
+                      {pp.source.label} · {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
                     </option>
                   ))}
                 </select>
               )}
             </div>
-            <Button onClick={loadReport} disabled={busy || !selectedPeriodId}>
+            <Button onClick={loadReport} disabled={busy || !selectedPayRunKey}>
               {loading ? 'Loading…' : 'View Report'}
             </Button>
             <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
-              <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPeriodId} />
+              <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPayRunKey} />
             </div>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -1234,7 +1241,9 @@ function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
-  const [periodMode, setPeriodMode] = useState<'year' | 'custom'>('year');
+  const [periodMode, setPeriodMode] = useState<'year' | 'quarter' | 'month' | 'custom'>('year');
+  const [quarter, setQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState('');
@@ -1249,9 +1258,32 @@ function YtdSummaryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
 
+  function calendarRange(mode: 'quarter' | 'month'): { start_date: string; end_date: string } {
+    const startMonth = mode === 'quarter' ? ((quarter - 1) * 3) + 1 : month;
+    const endMonth = mode === 'quarter' ? startMonth + 2 : month;
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const endDay = new Date(year, endMonth, 0).getDate();
+    return {
+      start_date: `${year}-${pad(startMonth)}-01`,
+      end_date: `${year}-${pad(endMonth)}-${pad(endDay)}`,
+    };
+  }
+
+  function selectedPeriodParams(): PayrollReportPeriodParams {
+    if (periodMode === 'custom') return { start_date: startDate, end_date: endDate };
+    if (periodMode === 'quarter' || periodMode === 'month') return calendarRange(periodMode);
+    return { year };
+  }
+
+  function periodFilenameToken(): string {
+    if (periodMode === 'year') return String(year);
+    const range = selectedPeriodParams();
+    return `${range.start_date}_to_${range.end_date}`;
+  }
+
   function reportParams(overrides: Partial<YtdSummaryParams> = {}): YtdSummaryParams {
     return {
-      ...(periodMode === 'custom' ? { start_date: startDate, end_date: endDate } : { year }),
+      ...selectedPeriodParams(),
       sort_by: sortBy,
       sort_direction: sortDirection,
       ...(search.trim() ? { search: search.trim() } : {}),
@@ -1305,7 +1337,7 @@ function YtdSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.ytdSummaryXlsx(reportParams());
-      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.xlsx`);
+      triggerDownload(blob, filename || `payroll_summary_${periodFilenameToken()}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1318,7 +1350,7 @@ function YtdSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.ytdSummaryPdf(reportParams());
-      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.pdf`);
+      triggerDownload(blob, filename || `payroll_summary_${periodFilenameToken()}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1331,7 +1363,7 @@ function YtdSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.ytdSummaryCsv(reportParams());
-      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.csv`);
+      triggerDownload(blob, filename || `payroll_summary_${periodFilenameToken()}.csv`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1356,8 +1388,10 @@ function YtdSummaryPanel() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
-            <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'year' | 'custom'); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+            <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as typeof periodMode); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
               <option value="year">Calendar year</option>
+              <option value="quarter">Quarter</option>
+              <option value="month">Month</option>
               <option value="custom">Custom pay dates</option>
             </select>
             {periodMode === 'custom' ? <>
@@ -1379,6 +1413,24 @@ function YtdSummaryPanel() {
                 ))}
               </select>
             </div>
+            {periodMode === 'quarter' && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="ytd-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+                <select id="ytd-quarter" value={quarter} onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+                  {[1, 2, 3, 4].map((value) => <option key={value} value={value}>Q{value}</option>)}
+                </select>
+              </div>
+            )}
+            {periodMode === 'month' && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="ytd-month" className="text-sm font-medium text-gray-700">Month</label>
+                <select id="ytd-month" value={month} onChange={(e) => { setMonth(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
+                    <option key={value} value={value}>{new Date(2000, value - 1, 1).toLocaleString('en-US', { month: 'long' })}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             </>}
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-search" className="text-sm font-medium text-gray-700">Search</label>
