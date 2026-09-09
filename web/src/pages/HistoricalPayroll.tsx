@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -81,6 +82,11 @@ function fileSize(bytes: number): string {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function humanizeToken(value: string): string {
+  const words = value.replaceAll('_', ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function mergeNullableUpdate<T extends object, U extends Partial<T>>(
@@ -183,6 +189,7 @@ type HistoricalAction =
   | 'lock'
   | 'verify'
   | 'source_download'
+  | 'evidence_download'
   | 'worker_review'
   | 'bootstrap_preview'
   | 'bootstrap_apply'
@@ -789,6 +796,29 @@ export function HistoricalPayroll(): ReactElement {
     }
   };
 
+  const downloadEvidenceManifest = async (): Promise<void> => {
+    const batchId = selectedBatchIdRef.current;
+    if (!batchId) return;
+    setAction('evidence_download');
+    setError(null);
+    try {
+      const download = await historicalImportsApi.downloadEvidenceManifest(batchId);
+      const url = URL.createObjectURL(download.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = download.filename || `quickbooks_evidence_manifest_batch_${batchId}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice({ tone: 'success', message: 'The non-PII QuickBooks evidence manifest was downloaded.' });
+    } catch (err) {
+      handleError(err, 'The QuickBooks evidence manifest could not be downloaded.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   const changeBatchPage = async (nextPage: number): Promise<void> => {
     if (nextPage < 1 || nextPage > batchMeta.total_pages || nextPage === batchPageRef.current) return;
 
@@ -1142,6 +1172,7 @@ export function HistoricalPayroll(): ReactElement {
   const sourcesReady = Boolean(selectedBatch?.source_retention_summary.ready);
   const readyToApply = reconciliationPassed && workersReviewed && sourcesReady;
   const summary = selectedBatch?.preview_summary;
+  const evidenceManifest = selectedBatch?.evidence_manifest;
   const clientBootstrap = selectedBatch?.client_bootstrap;
   const clientBootstrapApplied = clientBootstrap?.status === 'applied';
   const clientBootstrapMutable = selectedBatch?.status === 'previewed' || selectedBatch?.status === 'applied';
@@ -1173,8 +1204,8 @@ export function HistoricalPayroll(): ReactElement {
   return (
     <div className="min-h-full bg-neutral-50/70">
       <Header
-        title="Data Migration"
-        description="Import, reconcile, and lock source payroll before it appears alongside native payroll runs."
+        title="Payroll Migration"
+        description="Prepare, review, prove, and lock source payroll before it appears alongside native payroll runs."
         actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading || batchListLoading}><RefreshCw className={`mr-2 h-4 w-4 ${batchListLoading ? 'animate-spin' : ''}`} />Refresh</Button>}
       />
 
@@ -1204,6 +1235,24 @@ export function HistoricalPayroll(): ReactElement {
               : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
             <span>{notice.message}</span>
           </div>
+        )}
+
+        {selectedBatch && (
+          <nav aria-label="Migration workspace" className="rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm">
+            <div className="grid gap-1 sm:grid-cols-4">
+              {[
+                { href: '#migration-setup', eyebrow: '1 · Setup', label: 'Source and readiness' },
+                { href: '#migration-review', eyebrow: '2 · Review', label: workersReviewed ? 'Workers resolved' : `${selectedBatch.worker_review_summary.needs_review} workers left` },
+                { href: '#migration-evidence', eyebrow: '3 · Evidence', label: sourcesReady ? 'Sources verified' : 'Verification needed' },
+                { href: '#migration-history', eyebrow: '4 · History', label: selectedBatch.status === 'locked' ? 'Available in payroll' : 'Preview imported values' },
+              ].map((item) => (
+                <a key={item.href} href={item.href} className="rounded-xl px-4 py-3 transition hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+                  <span className="block text-[11px] font-bold uppercase tracking-[0.12em] text-primary-700">{item.eyebrow}</span>
+                  <span className="mt-1 block text-sm font-semibold text-neutral-900">{item.label}</span>
+                </a>
+              ))}
+            </div>
+          </nav>
         )}
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.75fr)]">
@@ -1250,7 +1299,7 @@ export function HistoricalPayroll(): ReactElement {
           </Card>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+        <section id="migration-setup" className="grid scroll-mt-40 gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
           <Card>
             <CardHeader><CardTitle>Stage a payroll export</CardTitle><CardDescription>Choose the source that produced the files. Each adapter defines its required reports, validation rules, and safe migration capabilities.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
@@ -1600,7 +1649,7 @@ export function HistoricalPayroll(): ReactElement {
         )}
 
         {detail && (
-          <Card>
+          <Card id="migration-review" className="scroll-mt-40">
             <CardHeader>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-2xl"><CardTitle>Worker review</CardTitle><CardDescription>Link a source name to an existing employee when they are the same person. Choose archive-only for former or source-only workers who should not attach to a live profile.</CardDescription></div>
@@ -1659,7 +1708,7 @@ export function HistoricalPayroll(): ReactElement {
         )}
 
         {archive && archive.applied_batch_count > 0 && (
-          <Card>
+          <Card id="migration-history" className="scroll-mt-40">
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.7),rgba(255,255,255,0.96)_55%,rgba(239,246,255,0.7))]">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="max-w-3xl">
@@ -1757,7 +1806,7 @@ export function HistoricalPayroll(): ReactElement {
         )}
 
         {detail && (
-          <Card>
+          <Card id={archive && archive.applied_batch_count > 0 ? undefined : 'migration-history'} className="scroll-mt-40">
             <CardHeader>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div><CardTitle>Paycheck ledger</CardTitle><CardDescription>Final imported values, searchable by employee or check number. Open a row to inspect its itemized source lines.</CardDescription></div>
@@ -1798,41 +1847,79 @@ export function HistoricalPayroll(): ReactElement {
         )}
 
         {selectedBatch && (
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div><CardTitle>Source inventory</CardTitle><CardDescription>{selectedBatch.source_file_manifest.length} original files retained in private storage. The screen returns fingerprints and status—not file contents or private storage keys.</CardDescription></div>
-                {canMutate && <Button size="sm" variant="outline" onClick={() => void verifySourceFiles()} disabled={action !== null}><ShieldCheck className="mr-2 h-4 w-4" />{action === 'verify' ? 'Verifying…' : 'Verify all files'}</Button>}
+          <Card id="migration-evidence" className="scroll-mt-40 overflow-hidden">
+            <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(239,246,255,0.82),rgba(255,255,255,0.98)_60%,rgba(240,253,250,0.7))]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><FileArchive className="h-4 w-4" />Auditable source trail</div>
+                  <CardTitle className="mt-2">Evidence inventory</CardTitle>
+                  <CardDescription className="mt-2">See what each QuickBooks report proves, its date coverage, required headers, and retained-file fingerprint. Original files stay private and every download is audited.</CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void downloadEvidenceManifest()} disabled={action !== null}>
+                    {action === 'evidence_download' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                    Download evidence manifest
+                  </Button>
+                  {canMutate && <Button size="sm" variant="outline" onClick={() => void verifySourceFiles()} disabled={action !== null}><ShieldCheck className="mr-2 h-4 w-4" />{action === 'verify' ? 'Verifying…' : 'Verify all files'}</Button>}
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {selectedBatch.source_file_manifest.length === 0 && (
-                <div className="flex items-start gap-4 rounded-xl border border-dashed border-warning-300 bg-warning-50 p-4 sm:col-span-2 xl:col-span-3">
-                  <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
-                  <div>
-                    <p className="text-sm font-semibold text-warning-900">No source inventory is attached</p>
-                    <p className="mt-2 text-sm leading-6 text-warning-800">Upload the same QuickBooks bundle again to retain and verify its original files before applying this preview.</p>
+            <CardContent className="space-y-6 p-4 sm:p-6">
+              {evidenceManifest ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Required reports</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.required_present_count}/{evidenceManifest.summary.required_report_count}</p><p className="mt-1 text-xs text-neutral-500">report types present</p></div>
+                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.source_retention_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Retained sources</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.verified_file_count}/{evidenceManifest.summary.file_count}</p><p className="mt-1 text-xs text-neutral-500">fingerprints verified</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Detailed pay dates</p><p className="mt-1 text-sm font-bold text-neutral-950">{shortDate(evidenceManifest.summary.first_detailed_pay_date)} – {shortDate(evidenceManifest.summary.last_detailed_pay_date)}</p><p className="mt-1 text-xs text-neutral-500">authoritative paycheck coverage</p></div>
+                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.ytd_evidence_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Tax & wage evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.tax_wage_report_count}</p><p className="mt-1 text-xs text-neutral-500">{evidenceManifest.summary.tax_wage_years.join(', ') || 'No years validated'}</p></div>
                   </div>
-                </div>
-              )}
-              {selectedBatch.source_file_manifest.map((file, index) => {
-                const retained = selectedBatch.source_files?.find((source) => source.position === (file.position ?? index));
-                const verified = retained?.verification_status === 'verified';
-                return (
-                  <div key={`${file.filename}-${file.sha256}`} className="flex min-w-0 items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-                    <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="truncate text-sm font-medium text-neutral-900" title={file.filename}>{file.filename}</p>
-                        <Badge variant={verified ? 'success' : retained ? 'danger' : 'warning'}>{verified ? 'Verified' : retained ? 'Failed' : 'Missing'}</Badge>
-                      </div>
-                      <p className="mt-1 text-xs text-neutral-500">{file.report_type.replaceAll('_', ' ')} · {(file.byte_size / 1024).toFixed(0)} KB</p>
-                      <p className="mt-1 truncate font-mono text-[10px] text-neutral-400" title={file.sha256}>SHA-256 {file.sha256}</p>
-                      {canMutate && retained && <Button size="sm" variant="ghost" className="mt-2" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className={`rounded-2xl border p-5 ${evidenceManifest.summary.paycheck_reconciliation_ready ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}`}>
+                      <div className="flex items-center gap-2"><ClipboardCheck className="h-5 w-5 text-primary-700" /><h3 className="font-semibold text-neutral-950">Paycheck reconciliation</h3></div>
+                      <p className="mt-2 text-sm leading-6 text-neutral-700">{evidenceManifest.taxonomy.paycheck_reconciliation}</p>
+                      <Badge className="mt-3" variant={evidenceManifest.summary.paycheck_reconciliation_ready ? 'success' : 'warning'}>{evidenceManifest.summary.paycheck_reconciliation_ready ? 'Reconciled' : 'Needs attention'}</Badge>
+                    </div>
+                    <div className={`rounded-2xl border p-5 ${evidenceManifest.summary.ytd_evidence_ready ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}`}>
+                      <div className="flex items-center gap-2"><FileCheck2 className="h-5 w-5 text-primary-700" /><h3 className="font-semibold text-neutral-950">Quarterly, annual, and YTD evidence</h3></div>
+                      <p className="mt-2 text-sm leading-6 text-neutral-700">{evidenceManifest.taxonomy.tax_wage_ytd}</p>
+                      <Badge className="mt-3" variant={evidenceManifest.summary.ytd_evidence_ready ? 'success' : 'warning'}>{evidenceManifest.summary.ytd_evidence_ready ? 'Reconciled' : 'Needs attention'}</Badge>
                     </div>
                   </div>
-                );
-              })}
+
+                  <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                    <Table>
+                      <TableHeader><TableRow><TableHead>Source report</TableHead><TableHead>What it proves</TableHead><TableHead>Header check</TableHead><TableHead>Coverage</TableHead><TableHead>Integrity</TableHead><TableHead><span className="sr-only">Download</span></TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {evidenceManifest.rows.map((row) => {
+                          const retained = selectedBatch.source_files?.find((source) => source.position === row.position - 1);
+                          const verified = row.retention_status === 'verified';
+                          return (
+                            <TableRow key={`${row.position}-${row.sha256}`}>
+                              <TableCell className="min-w-[230px]"><p className="font-semibold text-neutral-950">{row.report_label}</p><p className="mt-1 max-w-[260px] truncate text-xs text-neutral-500" title={row.filename}>Source {row.position} · {row.filename}</p>{row.required && <Badge variant="info" className="mt-2">Required</Badge>}</TableCell>
+                              <TableCell className="min-w-[260px]"><p className="text-sm font-medium text-neutral-900">{row.evidence_role}</p><p className="mt-1 text-xs leading-5 text-neutral-500">{row.description}</p></TableCell>
+                              <TableCell className="min-w-[210px]"><Badge variant={row.header_validation === 'validated' ? 'success' : row.header_validation === 'failed' ? 'danger' : 'default'}>{humanizeToken(row.header_validation)}</Badge>{row.required_headers.length > 0 && <p className="mt-2 text-xs leading-5 text-neutral-500">{row.required_headers.join(' · ')}</p>}</TableCell>
+                              <TableCell className="whitespace-nowrap text-sm text-neutral-700">{row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}{row.row_count != null && <p className="mt-1 text-xs text-neutral-500">{row.row_count.toLocaleString()} rows</p>}</TableCell>
+                              <TableCell className="min-w-[180px]"><Badge variant={verified ? 'success' : row.retention_status === 'missing' ? 'warning' : 'danger'}>{humanizeToken(row.retention_status)}</Badge><p className="mt-2 max-w-[180px] truncate font-mono text-[10px] text-neutral-400" title={row.sha256}>SHA-256 {row.sha256}</p><p className="mt-1 text-xs text-neutral-500">{fileSize(row.byte_size)}</p></TableCell>
+                              <TableCell>{canMutate && retained && <Button size="sm" variant="ghost" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-xl border border-primary-200 bg-primary-50/70 p-4 text-sm leading-6 text-primary-950 lg:flex-row lg:items-center lg:justify-between">
+                    <p className="max-w-3xl"><span className="font-semibold">Safe to share for review:</span> {evidenceManifest.taxonomy.privacy}</p>
+                    {selectedBatch.status === 'locked' && activeCompanyId && <div className="flex shrink-0 gap-2"><Link className="font-semibold text-primary-800 underline decoration-primary-300 underline-offset-4" to={`/companies/${activeCompanyId}/pay-runs`}>View pay periods</Link><Link className="font-semibold text-primary-800 underline decoration-primary-300 underline-offset-4" to="/reports">View reports</Link></div>}
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-start gap-4 rounded-xl border border-dashed border-warning-300 bg-warning-50 p-4">
+                  <FileArchive className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" />
+                  <div><p className="text-sm font-semibold text-warning-900">No evidence inventory is attached</p><p className="mt-2 text-sm leading-6 text-warning-800">Upload the same source bundle again to retain, classify, and verify its original files before applying this preview.</p></div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
