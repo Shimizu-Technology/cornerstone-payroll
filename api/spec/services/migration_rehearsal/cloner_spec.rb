@@ -32,7 +32,10 @@ RSpec.describe MigrationRehearsal::Cloner do
       ]
     )
   end
-  let(:source_bytes) { "synthetic QuickBooks source" }
+  # Real XLS/XLSX/PDF source files are arbitrary binary data. Keep this fixture
+  # invalid as UTF-8 so integrity verification cannot accidentally use text
+  # predicates that attempt to decode the bytes.
+  let(:source_bytes) { "synthetic QuickBooks source\xFF".b }
   let(:source_key) { "historical-payroll/company-#{source_company.id}/rehearsal-spec/source-00.xlsx" }
   let(:storage) { R2StorageService.new }
   let(:batch) do
@@ -150,6 +153,8 @@ RSpec.describe MigrationRehearsal::Cloner do
   end
 
   it "copies setup and the immutable archive, re-verifies source bytes, and leaves the source unchanged" do
+    expect(source_bytes.dup.force_encoding(Encoding::UTF_8)).not_to be_valid_encoding
+
     HistoricalTaxWageReport.create!(
       company: source_company,
       historical_import_batch: batch,

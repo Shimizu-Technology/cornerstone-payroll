@@ -318,7 +318,7 @@ module MigrationRehearsal
     end
 
     def validate_source_bytes!(source_file, bytes)
-      valid = bytes.present? && bytes.bytesize == source_file.byte_size &&
+      valid = bytes && !bytes.empty? && bytes.bytesize == source_file.byte_size &&
         ActiveSupport::SecurityUtils.secure_compare(Digest::SHA256.hexdigest(bytes), source_file.sha256)
       raise "Retained source file #{source_file.position + 1} failed integrity verification" unless valid
     end
