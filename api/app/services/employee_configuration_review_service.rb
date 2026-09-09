@@ -1,9 +1,17 @@
 # frozen_string_literal: true
 
 class EmployeeConfigurationReviewService
+  class Error < StandardError; end
+  class NotAuthorized < Error; end
+  class InvalidResolution < Error; end
+
   ACKNOWLEDGEMENT = "MARK SETUP ITEM REVIEWED"
   SOURCE_REQUIRED_CODES = %w[
     verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
+  ].freeze
+  REVIEWABLE_EMPLOYEE_FIELDS = %w[
+    hire_date address_line1 city state zip allowances w4_form_version
+    employment_type salary_type pay_rate
   ].freeze
 
   def initialize(employee:, actor:)
@@ -13,19 +21,20 @@ class EmployeeConfigurationReviewService
 
   def resolve!(code:, resolution_note:, acknowledgement:)
     authorize!
-    raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
+    raise InvalidResolution, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
 
     note = resolution_note.to_s.squish
-    raise ArgumentError, "Document what was verified or corrected" if note.blank?
-    raise ArgumentError, "Resolution note is too long" if note.length > 1_000
+    raise InvalidResolution, "Document what was verified or corrected" if note.blank?
+    raise InvalidResolution, "Resolution note is too long" if note.length > 1_000
 
     resolution = nil
     Employee.transaction do
       employee.lock!
+      ensure_review_items_are_well_formed!
       item = current_items.find { |value| value.fetch("code") == code.to_s }
       existing = employee.employee_configuration_review_resolutions.find_by(item_code: code.to_s)
       return existing if item.nil? && existing
-      raise ArgumentError, "This setup review item is no longer open" unless item
+      raise InvalidResolution, "This setup review item is no longer open" unless item
 
       ensure_required_source_fields!(item)
       resolution = employee.employee_configuration_review_resolutions.create!(
@@ -60,19 +69,31 @@ class EmployeeConfigurationReviewService
     end
   end
 
+  def ensure_review_items_are_well_formed!
+    return if current_items.size == Array(employee.configuration_review_items).size
+
+    raise InvalidResolution, "Employee setup review data is malformed; repair it before resolving items"
+  end
+
   def ensure_required_source_fields!(item)
     return unless SOURCE_REQUIRED_CODES.include?(item.fetch("code"))
 
-    missing = Array(item.fetch("fields")).reject { |field| employee.public_send(field).present? }
+    fields = Array(item.fetch("fields"))
+    unsupported = fields - REVIEWABLE_EMPLOYEE_FIELDS
+    if unsupported.any?
+      raise InvalidResolution, "This setup review item contains unsupported employee fields"
+    end
+
+    missing = fields.reject { |field| employee.read_attribute(field).present? }
     return if missing.empty?
 
-    raise ArgumentError, "Enter the required employee values first: #{missing.map { |field| field.humanize }.join(', ')}"
+    raise InvalidResolution, "Enter the required employee values first: #{missing.map { |field| field.humanize }.join(', ')}"
   end
 
   def authorize!
     allowed = employee.configuration_source == "quickbooks_history" && actor&.payroll_access_allowed? &&
       actor.can_access_company?(employee.company_id) && StaffRolePolicy.allowed?(actor, :payroll_operations)
-    raise ArgumentError, "Cornerstone payroll access is required" unless allowed
+    raise NotAuthorized, "Cornerstone payroll access is required" unless allowed
   end
 
   def audit!(resolution)
