@@ -131,6 +131,31 @@ RSpec.describe EmployeeConfigurationReviewService do
     expect(employee.configuration_review_status).to eq("needs_review")
   end
 
+  it "rejects mixed retained review items with invalid value types" do
+    valid_item = employee.configuration_review_items.first
+    malformed_items = [
+      { "code" => 17, "message" => "Numeric code", "fields" => [] },
+      { "code" => "numeric_message", "message" => 17, "fields" => [] },
+      { "code" => "numeric_field", "message" => "Numeric field", "fields" => [ 17 ] }
+    ]
+    employee.update_columns(
+      configuration_review_items: [ valid_item, *malformed_items ],
+      configuration_review_status: "needs_review"
+    )
+
+    expect do
+      described_class.new(employee:, actor:).resolve!(
+        code: valid_item.fetch("code"),
+        resolution_note: "Reviewed source record.",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::InvalidResolution, /malformed/)
+
+    expect(EmployeeConfigurationReviewResolution.count).to eq(0)
+    expect(employee.reload.configuration_review_items).to eq([ valid_item, *malformed_items ])
+    expect(employee.configuration_review_status).to eq("needs_review")
+  end
+
   it "never invokes an unapproved employee method from retained item fields" do
     employee.update_columns(
       configuration_review_items: [
