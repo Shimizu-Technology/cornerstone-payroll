@@ -146,6 +146,18 @@ RSpec.describe QuickbooksHistory::BundleParser do
     expect(unknown).to include("taxable_wages" => "3000.0", "tax_amount" => "12.0")
   end
 
+  it "warns when QuickBooks reports FUTA for a Guam employer" do
+    rows = annual_tax_wage_rows
+    rows << [ "FUTA Employer", 3_000, 0, 3_000, 18 ]
+    annual = build_quickbooks_xls("Tax_and_Wage_Summary_with_futa.xls", rows)
+
+    result = described_class.new(
+      files: quickbooks_history_uploads + quickbooks_tax_wage_uploads.drop(1) + [ annual ]
+    ).call
+
+    expect(result.warnings.join(" ")).to match(/non-zero FUTA employer tax.*does not apply to Guam employers/)
+  end
+
   it "classifies a full calendar year as annual even when its filename contains a quarter token" do
     annual = build_quickbooks_xls(
       "Tax and Wage Summary Q4 annual.xls",

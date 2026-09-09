@@ -676,4 +676,131 @@ RSpec.describe Form941GuAggregator do
       expect(Rails.logger).to have_received(:warn).with(include("Large fractions-of-cents adjustment=0.25"))
     end
   end
+
+  describe "historical transition-year aggregation" do
+    let(:historical_company) { create(:company, name: "Historical Guam Co", ein: "91-7654321") }
+    let(:historical_department) { create(:department, company: historical_company) }
+    let(:historical_employee) { create(:employee, company: historical_company, department: historical_department) }
+
+    it "includes dated imported records but excludes a same-quarter opening summary" do
+      create_historical_filing_source(
+        company: historical_company,
+        employee: historical_employee,
+        pay_date: Date.new(2025, 6, 18),
+        gross_pay: 1_000,
+        federal_income_tax: 100,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        employer_social_security_tax: 62,
+        employer_medicare_tax: 14.50,
+        reported_tips: 100,
+        social_security_taxable_wages: 900,
+        social_security_taxable_tips: 100,
+        medicare_taxable_wages: 1_000
+      )
+      create_historical_filing_source(
+        company: historical_company,
+        employee: historical_employee,
+        pay_date: Date.new(2025, 6, 20),
+        gross_pay: 2_000,
+        federal_income_tax: 200,
+        social_security_tax: 124,
+        medicare_tax: 29,
+        employer_social_security_tax: 124,
+        employer_medicare_tax: 29,
+        period_type: "opening_summary",
+        period_start: Date.new(2025, 1, 1),
+        period_end: Date.new(2025, 6, 16)
+      )
+
+      expect(described_class.new(historical_company, 2025, 2, include_historical: false).generate[:tax_detail][:gross_wages]).to eq(0.0)
+
+      report = described_class.new(historical_company, 2025, 2).generate
+
+      expect(report[:lines]).to include(
+        line1_employee_count: 1,
+        line5a_ss_wages: 900.0,
+        line5a_ss_combined_tax: 111.6,
+        line5b_ss_tips: 100.0,
+        line5b_ss_tips_combined_tax: 12.4,
+        line5c_medicare_wages: 1_000.0,
+        line5c_medicare_combined_tax: 29.0,
+        line5e_total_ss_medicare: 153.0
+      )
+      expect(report[:tax_detail]).to include(
+        gross_wages: 1_000.0,
+        guam_withholding_for_w1: 100.0,
+        ss_employee: 62.0,
+        ss_employer: 62.0,
+        medicare_employee: 14.5,
+        medicare_employer: 14.5
+      )
+      expect(report.dig(:meta, :source_summary, :quickbooks)).to include(
+        included: true,
+        dated_record_count: 1,
+        pay_period_count: 1,
+        opening_summary_count_excluded: 1
+      )
+      expect(report[:meta][:caveats]).to include(a_string_matching(/opening summaries.*excluded/i))
+    end
+
+    it "adds imported and committed payroll exactly once in a mixed quarter" do
+      create_historical_filing_source(
+        company: historical_company,
+        employee: historical_employee,
+        pay_date: Date.new(2025, 4, 18),
+        gross_pay: 1_000,
+        federal_income_tax: 100,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        employer_social_security_tax: 62,
+        employer_medicare_tax: 14.50,
+        reported_tips: 100,
+        social_security_taxable_wages: 900,
+        social_security_taxable_tips: 100,
+        medicare_taxable_wages: 1_000
+      )
+      live_period = create(
+        :pay_period,
+        :committed,
+        company: historical_company,
+        start_date: Date.new(2025, 5, 1),
+        end_date: Date.new(2025, 5, 14),
+        pay_date: Date.new(2025, 5, 18)
+      )
+      create(
+        :payroll_item,
+        company: historical_company,
+        employee: historical_employee,
+        pay_period: live_period,
+        gross_pay: 500,
+        withholding_tax: 50,
+        social_security_tax: 31,
+        employer_social_security_tax: 31,
+        medicare_tax: 7.25,
+        employer_medicare_tax: 7.25,
+        social_security_taxable_wages: 500,
+        social_security_taxable_tips: 0,
+        medicare_taxable_wages: 500,
+        additional_medicare_taxable_wages: 0
+      )
+
+      report = described_class.new(historical_company, 2025, 2, include_historical: true).generate
+
+      expect(report[:lines]).to include(
+        line5a_ss_wages: 1_400.0,
+        line5a_ss_combined_tax: 173.6,
+        line5b_ss_tips: 100.0,
+        line5b_ss_tips_combined_tax: 12.4,
+        line5c_medicare_wages: 1_500.0,
+        line5c_medicare_combined_tax: 43.5,
+        line5e_total_ss_medicare: 229.5
+      )
+      expect(report[:tax_detail]).to include(gross_wages: 1_500.0, guam_withholding_for_w1: 150.0)
+      expect(report.dig(:meta, :source_summary)).to include(mode: "locked_quickbooks_plus_committed_cornerstone")
+      expect(report.dig(:meta, :source_summary, :cornerstone)).to include(payroll_item_count: 1, pay_period_count: 1)
+      expect(report.dig(:meta, :source_summary, :quickbooks)).to include(dated_record_count: 1, pay_period_count: 1)
+      expect(report.dig(:meta, :pay_periods_included)).to eq(2)
+    end
+  end
 end

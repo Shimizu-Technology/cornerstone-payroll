@@ -11,7 +11,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, employeesApi, payrollItemsApi, setAuthToken, setAuthTokenProvider } from './api';
+import { apiClient, employeesApi, payrollItemsApi, reportsApi, setAuthToken, setAuthTokenProvider } from './api';
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
@@ -90,5 +90,39 @@ describe('ApiClient company identity', (): void => {
     expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('X-Company-Id')).toBe('12');
     expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get('X-Company-Id')).toBe('7');
     expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get('X-Company-Id')).toBe('7');
+  });
+
+  it('records filing responsibility through the company-scoped review endpoint', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [], filing_gate: {}, permissions: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    apiClient.setActiveCompanyId(7);
+    await reportsApi.updatePayrollFilingResponsibility({
+      tax_year: 2026,
+      quarter: 2,
+      filing_types: ['form_941'],
+      responsible_party: 'cornerstone',
+      imported_payroll_inclusion: 'included',
+      notes: 'Reviewed against locked QuickBooks payroll.',
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options?.method).toBe('PUT');
+    expect(new Headers(options?.headers).get('X-Company-Id')).toBe('7');
+    expect(JSON.parse(String(options?.body))).toEqual({
+      responsibility: {
+        tax_year: 2026,
+        quarter: 2,
+        filing_types: ['form_941'],
+        responsible_party: 'cornerstone',
+        imported_payroll_inclusion: 'included',
+        notes: 'Reviewed against locked QuickBooks payroll.',
+      },
+    });
   });
 });

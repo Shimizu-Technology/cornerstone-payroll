@@ -99,7 +99,7 @@ module QuickbooksHistory
         company_name: company_name,
         parse_errors: tax_wage_parse_errors
       )
-      warnings = build_warnings(detail.fetch(:paychecks), history, inventory)
+      warnings = build_warnings(detail.fetch(:paychecks), history, inventory, tax_wage_reports: tax_wage_reports)
       if tax_wage_reconciliation["not_available"]
         warnings << "Tax and Wage Summary evidence is not available. Historical YTD activation and v5 cutover verification remain blocked until those reports are imported."
       end
@@ -966,7 +966,7 @@ module QuickbooksHistory
       CanonicalJson.normalize(value)
     end
 
-    def build_warnings(paychecks, history, inventory)
+    def build_warnings(paychecks, history, inventory, tax_wage_reports:)
       opening_rows = paychecks.select { |row| row.fetch(:period_type) == "opening_summary" }
       opening_count = opening_rows.size
       missing_check_numbers = history.count { |row| row[:check_number].blank? }
@@ -980,6 +980,15 @@ module QuickbooksHistory
       unreadable = inventory.select { |entry| entry[:report_type] == "unreadable_spreadsheet" }
       if unreadable.any?
         warnings << "Supplemental spreadsheet(s) could not be parsed: #{unreadable.map { |entry| entry.fetch(:filename) }.join(', ')}. They remain fingerprinted as source evidence."
+      end
+      # IRS Publication 15 section 14 excludes Guam employers from FUTA.
+      # Keep imported evidence intact, but require review instead of silently
+      # treating a QuickBooks FUTA line as a Guam liability.
+      reports_with_futa = tax_wage_reports.select do |report|
+        money(report.dig(:tax_lines, "futa_employer", "tax_amount")).nonzero?
+      end
+      if reports_with_futa.any?
+        warnings << "QuickBooks reports non-zero FUTA employer tax. FUTA generally does not apply to Guam employers; obtain payroll-review approval before activating this history."
       end
       warnings
     end

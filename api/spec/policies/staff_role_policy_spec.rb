@@ -10,6 +10,7 @@ RSpec.describe StaffRolePolicy do
     expected_roles = {
       staff_workspace: %w[super_admin org_admin admin manager accountant],
       payroll_operations: %w[super_admin org_admin admin manager accountant],
+      manage_filing_review: %w[super_admin org_admin admin manager accountant],
       manage_client_configuration: %w[super_admin org_admin admin manager],
       manage_organization: %w[super_admin org_admin admin],
       manage_platform: %w[super_admin]
@@ -80,6 +81,14 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/historical_imports",
         action_name: "download_cutover_evidence"
       )).to eq(:payroll_operations)
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/payroll_filing_responsibilities",
+        action_name: "index"
+      )).to eq(:payroll_operations)
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/payroll_filing_responsibilities",
+        action_name: "upsert"
+      )).to eq(:manage_filing_review)
       %w[create update destroy apply apply_to_all_companies clear_active].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",

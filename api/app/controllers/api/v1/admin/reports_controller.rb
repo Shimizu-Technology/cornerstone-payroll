@@ -275,6 +275,12 @@ module Api
 
           company = Company.find(current_company_id)
           report  = Form941GuAggregator.new(company, year, quarter).generate
+          report[:filing_gate] = PayrollFilingResponsibilityGate.new(
+            company: company,
+            tax_year: year,
+            quarter: quarter,
+            filing_type: "form_941"
+          ).payload
 
           render json: { report: report }
         rescue ArgumentError => e
@@ -335,7 +341,13 @@ module Api
             quarter: quarter,
             user: current_user
           )
-          render json: { report: QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate }, status: :created
+          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
+            company: company,
+            tax_year: year,
+            quarter: quarter
+          )
+          render json: { report: report }, status: :created
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
@@ -417,6 +429,15 @@ module Api
           task = QuarterlyComplianceTask.joins(:quarterly_compliance_packet)
             .where(quarterly_compliance_packets: { company_id: current_company_id })
             .find(params[:id])
+          if params.dig(:task, :status).to_s == "ready_to_file"
+            filing_gate = PayrollFilingResponsibilityGate.for_task(task)
+            unless filing_gate.dig(:capabilities, :can_mark_filing_ready)
+              return render json: {
+                error: "Resolve payroll filing responsibility before marking this filing ready",
+                filing_gate: filing_gate
+              }, status: :unprocessable_entity
+            end
+          end
           task.update!(quarterly_compliance_task_params)
           render json: { task: task.workflow_payload }
         rescue ActiveRecord::RecordNotFound
@@ -430,7 +451,8 @@ module Api
           return error_response if error_response
 
           render json: {
-            data: quarterly_compliance_official_form_defaults(report_data, params[:form_type])
+            data: quarterly_compliance_official_form_defaults(report_data, params[:form_type]),
+            filing_gate: report_data[:filing_gate]
           }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -619,7 +641,8 @@ module Api
 
           render json: {
             preflight: preflight,
-            filing: filing_readiness_payload(filing)
+            filing: filing_readiness_payload(filing),
+            filing_gate: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
@@ -641,8 +664,12 @@ module Api
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
-          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
-          render json: { filing: filing ? filing_readiness_payload(filing) : nil }
+          company = Company.find(current_company_id)
+          filing = W2FilingReadiness.find_by(company_id: company.id, year: year)
+          render json: {
+            filing: filing ? filing_readiness_payload(filing) : nil,
+            filing_gate: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
+          }
         end
 
         # POST /api/v1/admin/reports/w2_gu_mark_ready
@@ -667,11 +694,20 @@ module Api
             return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
           end
 
-          if filing.status == "filing_ready"
-            return render json: { filing: filing_readiness_payload(filing) }
+          company = Company.find(current_company_id)
+          filing_gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
+          unless filing_gate.dig(:capabilities, :all_filing_ready_exports_allowed)
+            return render json: {
+              error: "Resolve payroll filing responsibility before marking W-2GU filing ready",
+              filing: filing_readiness_payload(filing),
+              filing_gate: filing_gate
+            }, status: :unprocessable_entity
           end
 
-          company = Company.find(current_company_id)
+          if filing.status == "filing_ready"
+            return render json: { filing: filing_readiness_payload(filing), filing_gate: filing_gate }
+          end
+
           fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
           apply_preflight_to_filing!(
             filing,
@@ -696,7 +732,8 @@ module Api
 
           render json: {
             filing: filing_readiness_payload(filing),
-            revalidation: revalidation_payload(fresh_preflight)
+            revalidation: revalidation_payload(fresh_preflight),
+            filing_gate: filing_gate
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
@@ -1402,7 +1439,13 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          [ QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate, nil ]
+          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
+            company: company,
+            tax_year: year,
+            quarter: quarter
+          )
+          [ report, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
         rescue ArgumentError => e
@@ -1458,6 +1501,16 @@ module Api
           return error_response if error_response
 
           config = quarterly_compliance_official_form_config(params[:form_type])
+          if disposition == "attachment"
+            filing_type = PayrollFilingResponsibilityGate::OFFICIAL_FORM_FILING_TYPES.fetch(params[:form_type].to_s)
+            filing_gate = report_data.dig(:filing_gate, :filings, filing_type)
+            unless filing_gate.dig(:capabilities, :can_export_filing_ready)
+              return render json: {
+                error: "Resolve payroll filing responsibility before downloading an official filing output",
+                filing_gate: filing_gate
+              }, status: :unprocessable_entity
+            end
+          end
           fields = quarterly_compliance_official_form_fields(params[:form_type])
           send_data config.fetch(:generator).new(report: report_data, fields: fields).generate,
             filename: "#{config.fetch(:filename_prefix)}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
@@ -1608,6 +1661,7 @@ module Api
 
           company     = Company.find(current_company_id)
           report_data = W2GuAggregator.new(company, year).generate
+          report_data[:filing_gate] = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
           [ report_data, nil ]
         end
 

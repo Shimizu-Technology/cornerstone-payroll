@@ -46,16 +46,18 @@ class Form941GuAggregator
     2026 => 184_500.00
   }.freeze
 
-  attr_reader :company, :year, :quarter
+  attr_reader :company, :year, :quarter, :include_historical
 
   # @param company [Company]
   # @param year    [Integer]
   # @param quarter [Integer] 1–4
-  def initialize(company, year, quarter)
+  def initialize(company, year, quarter, include_historical: nil)
     @company = company
     @year    = year.to_i
     @quarter = quarter.to_i
     raise ArgumentError, "quarter must be 1–4" unless (1..4).cover?(@quarter)
+
+    @include_historical = include_historical.nil? ? locked_historical_imports? : include_historical
   end
 
   # Returns the full federal Form 941 structured report hash.
@@ -63,9 +65,10 @@ class Form941GuAggregator
     # Validate the filing-year rule set even when the quarter has no payroll.
     # An empty report for an unknown year must not look filing-ready.
     ss_wage_base
+    historical_source.validate!(range: Date.new(year, 1, 1)..quarter_end_date) if include_historical
 
     items = qualifying_payroll_items
-    records = items.to_a
+    records = items.to_a + historical_quarter_records
 
     # --- Payroll detail retained for Guam W-1/SWICA tie-out context ---
     total_gross          = sum(records, :gross_pay)
@@ -140,6 +143,7 @@ class Form941GuAggregator
         quarter_end:    quarter_end_date.iso8601,
         generated_at:   Time.current.iso8601,
         pay_periods_included: pay_period_count,
+        source_summary: source_summary(items),
         caveats: [
           "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
           "Line 7 fractions-of-cents uses (monthly Schedule B total - line 6); positive means monthly liability exceeds line 6, negative means it is lower.",
@@ -153,7 +157,8 @@ class Form941GuAggregator
           "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
           "If prior-quarter payroll was committed before tips were embedded in gross_pay, verify transition-year Additional Medicare carry-forward manually.",
-          "Only 'committed' pay periods with pay_date in the quarter are included."
+          "Only 'committed' pay periods with pay_date in the quarter are included.",
+          *historical_caveats
         ]
       },
       filing_readiness: {
@@ -237,7 +242,11 @@ class Form941GuAggregator
   end
 
   def pay_period_count
-    committed_pay_periods.count
+    committed_pay_periods.count + historical_quarter_records
+      .select { |record| record.record_type == "source_snapshot" }
+      .map(&:historical_pay_period_id)
+      .uniq
+      .length
   end
 
   def qualifying_payroll_items
@@ -287,7 +296,7 @@ class Form941GuAggregator
   # tips and Additional Medicare.
   def monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
-    month_map = records.group_by { |item| item.pay_period.pay_date.beginning_of_month.to_date }
+    month_map = records.group_by { |item| record_pay_date(item).beginning_of_month.to_date }
 
     months.map do |month_start|
       month_end = month_start.end_of_month
@@ -327,9 +336,17 @@ class Form941GuAggregator
          .each do |employee_id, employee_items|
       running_taxable_wages = prior_ss_taxable_wages[employee_id].to_f
 
-      employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        month_key = item.pay_period.pay_date.beginning_of_month.to_date
-        if item.social_security_taxable_wages.present? && item.social_security_taxable_tips.present?
+      employee_items.sort_by { |item| [ record_pay_date(item), record_key(item) ] }.each do |item|
+        month_key = record_pay_date(item).beginning_of_month.to_date
+        if historical_record?(item)
+          taxable_wages = capped_historical_amount(item.social_security_taxable_wages.to_d, running_taxable_wages)
+          running_taxable_wages += taxable_wages
+          taxable_tips = capped_historical_amount(item.social_security_taxable_tips.to_d, running_taxable_wages)
+          allocations[month_key][:wages] += taxable_wages
+          allocations[month_key][:tips] += taxable_tips
+          running_taxable_wages += taxable_tips
+          next
+        elsif item.social_security_taxable_wages.present? && item.social_security_taxable_tips.present?
           taxable_wages = item.social_security_taxable_wages.to_d
           taxable_tips = item.social_security_taxable_tips.to_d
           allocations[month_key][:wages] += taxable_wages
@@ -368,8 +385,8 @@ class Form941GuAggregator
          .each do |employee_id, employee_items|
       running_wages = prior_medicare_wages[employee_id].to_f
 
-      employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        month_key = item.pay_period.pay_date.beginning_of_month.to_date
+      employee_items.sort_by { |item| [ record_pay_date(item), record_key(item) ] }.each do |item|
+        month_key = record_pay_date(item).beginning_of_month.to_date
         if item.additional_medicare_taxable_wages.present?
           allocations[month_key] += item.additional_medicare_taxable_wages.to_d
           running_wages += (item.medicare_taxable_wages || item.gross_pay).to_d
@@ -410,7 +427,13 @@ class Form941GuAggregator
       ), 2)
     SQL
 
-    prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h
+    merge_prior_wages(
+      prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h,
+      prior_historical_records.group_by(&:employee_id).transform_values do |records|
+        records.sum(0.to_d) { |record| record.social_security_taxable_wages.to_d + record.social_security_taxable_tips.to_d }
+      end,
+      cap: ss_wage_base
+    )
   end
 
   def prior_medicare_wages_by_employee
@@ -418,7 +441,12 @@ class Form941GuAggregator
     # For transition-year data committed before tips were embedded in gross_pay,
     # operators should verify year-to-date Medicare wages manually.
     aggregate = Arel.sql("ROUND(SUM(COALESCE(medicare_taxable_wages, gross_pay)), 2)")
-    prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h
+    merge_prior_wages(
+      prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h,
+      prior_historical_records.group_by(&:employee_id).transform_values do |records|
+        records.sum(0.to_d, &:medicare_taxable_wages)
+      end
+    )
   end
 
   def prior_payroll_items
@@ -436,7 +464,7 @@ class Form941GuAggregator
   def line1_employee_count
     reference_date = Date.new(year, quarter * 3, 12)
 
-    PayrollItem.joins(:pay_period)
+    native_ids = PayrollItem.joins(:pay_period)
                .where(company_id: company.id)
                .not_voided
                .where(pay_periods: {
@@ -448,11 +476,98 @@ class Form941GuAggregator
                })
                .where.not(employment_type: "contractor")
                .distinct
-               .count(:employee_id)
+               .pluck(:employee_id)
+    historical_ids = historical_quarter_records.filter_map do |record|
+      next unless record.record_type == "source_snapshot"
+      next unless record.period_start <= reference_date && record.period_end >= reference_date
+
+      record.employee_id
+    end
+    (native_ids + historical_ids).uniq.length
+  end
+
+  def historical_source
+    @historical_source ||= HistoricalPayrollFilingSource.new(company)
+  end
+
+  def locked_historical_imports?
+    company.historical_import_batches
+      .joins(:historical_paychecks)
+      .where(status: "locked", historical_paychecks: { pay_date: Date.new(year, 1, 1)..quarter_end_date })
+      .exists?
+  end
+
+  def historical_quarter_records
+    @historical_quarter_records ||= include_historical ? historical_source.records(range: quarter_start_date..quarter_end_date) : []
+  end
+
+  def prior_historical_records
+    return [] unless include_historical
+
+    @prior_historical_records ||= historical_source.records(
+      range: Date.new(year, 1, 1)...quarter_start_date,
+      include_opening_summaries: true
+    )
+  end
+
+  def historical_record?(record)
+    record.respond_to?(:historical_source?) && record.historical_source?
+  end
+
+  def record_pay_date(record)
+    historical_record?(record) ? record.pay_date : record.pay_period.pay_date
+  end
+
+  def record_key(record)
+    historical_record?(record) ? record.key : "cornerstone:#{record.id}"
+  end
+
+  def capped_historical_amount(amount, running_taxable_wages)
+    return amount if amount.negative?
+
+    [ amount, [ ss_wage_base.to_d - running_taxable_wages.to_d, 0.to_d ].max ].min
+  end
+
+  def merge_prior_wages(native, historical, cap: nil)
+    native.merge(historical) { |_employee_id, native_amount, historical_amount| native_amount.to_d + historical_amount.to_d }
+          .transform_values do |amount|
+      rounded = amount.to_d.round(2)
+      cap ? [ rounded, cap.to_d ].min.to_f : rounded.to_f
+    end
+  end
+
+  def source_summary(items)
+    metadata = include_historical ? historical_source.metadata(year: year, range: quarter_start_date..quarter_end_date) : {}
+    {
+      mode: include_historical ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      cornerstone: {
+        payroll_item_count: items.count,
+        pay_period_count: committed_pay_periods.count
+      },
+      quickbooks: {
+        included: include_historical,
+        dated_record_count: metadata.fetch(:dated_record_count, 0),
+        pay_period_count: metadata.fetch(:pay_period_count, 0),
+        opening_summary_count_excluded: metadata.fetch(:opening_summary_count_excluded, 0)
+      }
+    }
+  end
+
+  def historical_caveats
+    return [] unless include_historical
+
+    caveats = [
+      "QuickBooks values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
+      "Historical YTD bridge balances are used only for source eligibility and annual carry-forward; they are not added to quarterly lines, avoiding duplicate wages and taxes."
+    ]
+    if historical_source.opening_summary_count(range: quarter_start_date..quarter_end_date).positive?
+      caveats << "QuickBooks opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
+    end
+    caveats
   end
 
   def ss_wage_base
-    AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
+    AnnualTaxConfig.historical_ss_wage_base(year)&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
       raise ArgumentError, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
     end
   end
