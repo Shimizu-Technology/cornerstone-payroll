@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -105,7 +105,7 @@ export function EmployeeWorkspace(): ReactElement {
     try {
       const [employeeResult, historyResult] = await Promise.allSettled([
         employeesApi.get(employeeId),
-        reportsApi.employeePayHistory(employeeId, { limit: 24 }),
+        reportsApi.employeePayHistory(employeeId, { all_time: true }),
       ]);
       if (!isCurrentRequest()) return;
       if (employeeResult.status === 'rejected') throw employeeResult.reason;
@@ -275,8 +275,8 @@ function EmployeeOverview({
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={BadgeDollarSign} label="Current pay rate" value={formatCurrency(Number(employee.pay_rate) || 0)} detail={employee.employment_type === 'hourly' ? 'per hour' : employee.salary_type === 'per_period' ? 'per pay period' : employee.employment_type === 'contractor' ? 'contract rate' : 'annual salary'} />
         <Metric icon={Banknote} label="Recent gross" value={latestPay ? formatCurrency(latestPay.gross_pay) : 'No payroll yet'} detail={latestPay ? `Paid ${formatDate(latestPay.pay_date)}` : 'No committed payroll records'} />
-        <Metric icon={ReceiptText} label="Period gross" value={formatCurrency(numericValue(summary, 'gross_pay'))} detail={`${numericValue(summary, 'payroll_count')} payroll record${numericValue(summary, 'payroll_count') === 1 ? '' : 's'}`} />
-        <Metric icon={CalendarDays} label="Period net" value={formatCurrency(numericValue(summary, 'net_pay'))} detail={`${employee.pay_frequency.replace('_', '-')} schedule`} />
+        <Metric icon={ReceiptText} label="Recorded gross" value={formatCurrency(numericValue(summary, 'gross_pay'))} detail={`${numericValue(summary, 'payroll_count')} payroll record${numericValue(summary, 'payroll_count') === 1 ? '' : 's'}`} />
+        <Metric icon={CalendarDays} label="Recorded net" value={formatCurrency(numericValue(summary, 'net_pay'))} detail="Across imported and Cornerstone payroll" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
@@ -407,19 +407,50 @@ interface PayHistoryProps {
 }
 
 function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
+  const [yearFilter, setYearFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'cornerstone' | 'quickbooks'>('all');
+  const years = useMemo(() => Array.from(new Set((report?.history || []).map((item) => item.pay_date.slice(0, 4)))).sort().reverse(), [report]);
+  const visibleHistory = useMemo(() => (report?.history || []).filter((item) => {
+    if (yearFilter !== 'all' && !item.pay_date.startsWith(yearFilter)) return false;
+    if (sourceFilter === 'cornerstone' && item.record_type !== 'native') return false;
+    if (sourceFilter === 'quickbooks' && item.record_type === 'native') return false;
+    return true;
+  }), [report, sourceFilter, yearFilter]);
+
   return (
     <Card>
-      <CardHeader><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Committed Cornerstone payroll and linked QuickBooks history appear together. Imported records are locked and cannot be edited or recalculated here.</p></CardHeader>
+      <CardHeader className="gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Every linked QuickBooks record and committed Cornerstone paycheck appears here. Imported records are locked and cannot be edited or recalculated.</p></div>
+        {report && report.history.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs font-semibold text-neutral-600">Year
+              <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+                <option value="all">All years</option>
+                {years.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-neutral-600">Source
+              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+                <option value="all">All sources</option>
+                <option value="cornerstone">Cornerstone</option>
+                <option value="quickbooks">QuickBooks / adjustments</option>
+              </select>
+            </label>
+          </div>
+        )}
+      </CardHeader>
       <CardContent className="p-0">
         {!report ? (
           <p className="px-6 py-10 text-center text-sm text-amber-800">Pay history could not be loaded. Use Try again above without leaving this employee.</p>
         ) : report.history.length === 0 ? (
           <p className="px-6 py-10 text-center text-sm text-neutral-500">No committed payroll records are available for this employee.</p>
+        ) : visibleHistory.length === 0 ? (
+          <p className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records match these filters.</p>
         ) : (
           <Table>
             <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Check</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
             <TableBody striped>
-              {report.history.map((item) => (
+              {visibleHistory.map((item) => (
                 <TableRow key={item.key}>
                   <TableCell className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
