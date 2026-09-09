@@ -50,6 +50,9 @@ export function CompanySwitcher() {
         <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
           {activeCompany?.name || 'Loading...'}
         </p>
+        {activeCompany?.payroll_environment === 'migration_rehearsal' && (
+          <p className="mt-0.5 text-xs font-semibold text-amber-700">Migration rehearsal</p>
+        )}
       </div>
     );
   }
@@ -71,6 +74,9 @@ export function CompanySwitcher() {
           <p className="truncate text-sm font-semibold text-neutral-900">
             {activeCompany?.name || 'Select Company'}
           </p>
+          {activeCompany?.payroll_environment === 'migration_rehearsal' && (
+            <p className="text-xs font-semibold text-amber-700">Migration rehearsal</p>
+          )}
           <p className="text-xs text-neutral-500">
             {activeCompany?.active_employees || 0} employees
           </p>
@@ -98,6 +104,9 @@ export function CompanySwitcher() {
                 <p className={`truncate text-sm ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
                   {company.name}
                 </p>
+                {company.payroll_environment === 'migration_rehearsal' && (
+                  <p className="text-xs font-semibold text-amber-700">Migration rehearsal · {company.migration_rehearsal_status}</p>
+                )}
                 <p className="text-xs text-neutral-500">
                   {company.active_employees} active employees &middot; {company.pay_frequency}
                 </p>

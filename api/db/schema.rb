@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_09_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_09_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -255,10 +255,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_120000) do
     t.string "ein"
     t.string "email"
     t.boolean "historical_payroll_enabled", default: false, null: false
+    t.datetime "migration_rehearsal_completed_at"
+    t.datetime "migration_rehearsal_created_at"
+    t.bigint "migration_rehearsal_created_by_id"
+    t.text "migration_rehearsal_error"
+    t.string "migration_rehearsal_status"
+    t.bigint "migration_source_batch_id"
+    t.bigint "migration_source_company_id"
     t.string "name", null: false
     t.integer "next_check_number", default: 1001, null: false
     t.bigint "organization_id", null: false
     t.string "pay_frequency", default: "biweekly"
+    t.string "payroll_environment", default: "live", null: false
     t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
     t.boolean "simple_payroll_register_enabled", default: false, null: false
@@ -266,9 +274,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_120000) do
     t.datetime "updated_at", null: false
     t.string "zip"
     t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
-    t.index ["ein"], name: "index_companies_on_ein", unique: true
+    t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
+    t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"
+    t.index ["migration_source_batch_id"], name: "index_companies_on_migration_source_batch_id"
+    t.index ["migration_source_company_id", "active"], name: "idx_companies_active_migration_rehearsals", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true))"
+    t.index ["migration_source_company_id"], name: "index_companies_on_migration_source_company_id"
     t.index ["name"], name: "index_companies_on_name"
     t.index ["organization_id"], name: "index_companies_on_organization_id"
+    t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
+    t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_source_batch_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL", name: "companies_migration_rehearsal_shape_check"
+    t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -2768,8 +2783,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_120000) do
   add_foreign_key "client_portal_threads", "companies"
   add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
+  add_foreign_key "companies", "companies", column: "migration_source_company_id"
+  add_foreign_key "companies", "historical_import_batches", column: "migration_source_batch_id"
   add_foreign_key "companies", "organizations"
   add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
+  add_foreign_key "companies", "users", column: "migration_rehearsal_created_by_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_pay_schedules", "companies"

@@ -16,6 +16,7 @@ module Api
         ).freeze
 
         skip_before_action :enforce_company_access!, only: [ :index ]
+        skip_before_action :enforce_migration_rehearsal_safety!
 
         # GET /api/v1/admin/companies
         # Organization admins see their firm's companies; non-admin staff see assigned clients.
@@ -78,6 +79,39 @@ module Api
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
           render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/companies/:id/migration_rehearsal_preview
+        def migration_rehearsal_preview
+          source = accessible_company!
+          batch = selected_locked_batch(source)
+          render json: { migration_rehearsal: MigrationRehearsal::Preview.new(source_company: source, batch: batch).call }
+        end
+
+        # POST /api/v1/admin/companies/:id/migration_rehearsal
+        def create_migration_rehearsal
+          source = accessible_company!
+          company = MigrationRehearsal::Create.new(
+            source_company: source,
+            actor: current_user,
+            name: params[:name],
+            acknowledgement: params[:acknowledgement],
+            batch: selected_locked_batch(source)
+          ).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/companies/:id/retry_migration_rehearsal
+        def retry_migration_rehearsal
+          company = accessible_company!
+          company = MigrationRehearsal::Retry.new(company: company, actor: current_user).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/companies/:id
@@ -158,7 +192,14 @@ module Api
             active_employees: active_employee_counts&.fetch(company.id, 0) || company.employees.active.count,
             total_employees: total_employee_counts&.fetch(company.id, 0) || company.employees.count,
             pay_frequency: company.pay_frequency,
-            historical_payroll_enabled: company.historical_payroll_enabled
+            historical_payroll_enabled: company.historical_payroll_enabled,
+            payroll_environment: company.payroll_environment,
+            migration_rehearsal_status: company.migration_rehearsal_status,
+            migration_source_company_id: company.migration_source_company_id,
+            migration_source_company_name: company.migration_source_company&.name,
+            migration_source_batch_id: company.migration_source_batch_id,
+            migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
+            migration_rehearsal_error: company.migration_rehearsal_error
           }
 
           if detailed
@@ -204,6 +245,19 @@ module Api
           scope = Employee.where(company_id: company_ids)
           scope = scope.active if active_only
           scope.group(:company_id).count
+        end
+
+        def accessible_company!
+          company = Company.find(params[:id])
+          raise ActiveRecord::RecordNotFound unless current_user&.can_access_company?(company.id)
+
+          company
+        end
+
+        def selected_locked_batch(company)
+          return company.historical_import_batches.where(status: "locked").recent_first.first if params[:historical_import_batch_id].blank?
+
+          company.historical_import_batches.where(status: "locked").find(params[:historical_import_batch_id])
         end
       end
     end

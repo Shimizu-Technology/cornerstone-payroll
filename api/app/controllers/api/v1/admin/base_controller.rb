@@ -8,6 +8,7 @@ module Api
 
         before_action :require_staff_access!
         before_action :enforce_company_access!
+        before_action :enforce_migration_rehearsal_safety!
         before_action :enforce_high_impact_role_policy!
 
         private
@@ -27,6 +28,21 @@ module Api
           return unless capability
 
           require_capability!(capability)
+        end
+
+        def enforce_migration_rehearsal_safety!
+          return unless current_company&.migration_rehearsal?
+
+          unless current_company.migration_rehearsal_status == "ready"
+            return render json: {
+              error: "This migration rehearsal is still being prepared. Try again after its verified copy is ready."
+            }, status: :conflict
+          end
+          return unless MigrationRehearsalSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
+
+          render json: {
+            error: "This action is unavailable in a migration rehearsal. Rehearsals cannot issue checks, move money, commit payroll, or produce filing-ready records."
+          }, status: :forbidden
         end
 
         def require_capability!(capability, error: nil)
