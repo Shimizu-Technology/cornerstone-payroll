@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useOutlet } from 'react-router';
-import { Menu, PanelLeftOpen, X } from 'lucide-react';
+import { FlaskConical, Menu, PanelLeftOpen, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -165,6 +165,20 @@ export function Layout() {
         </div>
 
         <main className="relative flex-1 overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
+          {activeCompany?.payroll_environment === 'migration_rehearsal' && (
+            <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 sm:px-6">
+              <div className="mx-auto flex max-w-screen-2xl items-start gap-2.5 text-sm">
+                <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <div>
+                  <span className="font-semibold">Migration rehearsal — no live payroll.</span>{' '}
+                  Changes stay in this test client. Payroll cannot be committed, and checks, payments, and filing-ready actions are blocked.
+                  {activeCompany.migration_source_company_name && (
+                    <span className="text-amber-800"> Source: {activeCompany.migration_source_company_name}.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <div
             className={`min-h-full transition-opacity duration-200 ease-out ${
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'

@@ -5,9 +5,20 @@ require "set"
 class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
   PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email].freeze
+  PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze
+  MIGRATION_REHEARSAL_STATUSES = %w[pending ready failed].freeze
 
   belongs_to :organization
   belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
+  belongs_to :migration_source_company, class_name: "Company", optional: true
+  belongs_to :migration_source_batch, class_name: "HistoricalImportBatch", optional: true
+  belongs_to :migration_rehearsal_created_by, class_name: "User", optional: true
+
+  has_many :migration_rehearsals,
+           class_name: "Company",
+           foreign_key: :migration_source_company_id,
+           inverse_of: :migration_source_company,
+           dependent: :restrict_with_error
 
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy
@@ -66,8 +77,13 @@ class Company < ApplicationRecord
   before_validation :normalize_blanks
 
   validates :name, presence: true
-  validates :ein, uniqueness: true, allow_blank: true
+  validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :migration_rehearsal?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
+  validates :payroll_environment, inclusion: { in: PAYROLL_ENVIRONMENTS }
+  validates :migration_rehearsal_status, inclusion: { in: MIGRATION_REHEARSAL_STATUSES }, allow_nil: true
+  validates :migration_source_company, presence: true, if: :migration_rehearsal?
+  validates :migration_rehearsal_status, presence: true, if: :migration_rehearsal?
+  validate :migration_rehearsal_source_is_valid
   validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
@@ -75,6 +91,16 @@ class Company < ApplicationRecord
   validate :payroll_intake_source_types_are_supported
 
   scope :active, -> { where(active: true) }
+  scope :live_payroll, -> { where(payroll_environment: "live") }
+  scope :migration_rehearsal, -> { where(payroll_environment: "migration_rehearsal") }
+
+  def migration_rehearsal?
+    payroll_environment == "migration_rehearsal"
+  end
+
+  def live_payroll?
+    payroll_environment == "live"
+  end
 
   # ---------------------------------------------------------------------------
   # Check number sequencing — thread-safe via row-level lock
@@ -200,6 +226,21 @@ class Company < ApplicationRecord
     return if unsupported.empty?
 
     errors.add(:payroll_intake_source_types, "contains unsupported source type(s): #{unsupported.join(', ')}")
+  end
+
+  def migration_rehearsal_source_is_valid
+    if live_payroll? && (migration_source_company_id.present? || migration_source_batch_id.present? || migration_rehearsal_status.present?)
+      errors.add(:base, "Live clients cannot reference a migration rehearsal source")
+      return
+    end
+    return unless migration_rehearsal? && migration_source_company
+
+    errors.add(:migration_source_company, "must be a live client") unless migration_source_company.live_payroll?
+    errors.add(:migration_source_company, "must belong to the same organization") if migration_source_company.organization_id != organization_id
+    errors.add(:migration_source_company, "cannot reference itself") if migration_source_company_id == id
+    if migration_source_batch.blank? || migration_source_batch.company_id != migration_source_company_id || !migration_source_batch.locked?
+      errors.add(:migration_source_batch, "must be a locked import from the source client")
+    end
   end
 
   def issued_check_numbers_in_range(start_number, end_number)

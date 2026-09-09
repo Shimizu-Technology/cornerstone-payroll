@@ -37,7 +37,14 @@ module Api
           active_employees: active_employee_counts.fetch(company.id, 0),
           total_employees: total_employee_counts.fetch(company.id, 0),
           pay_frequency: company.pay_frequency,
-          historical_payroll_enabled: company.historical_payroll_enabled
+          historical_payroll_enabled: company.historical_payroll_enabled,
+          payroll_environment: company.payroll_environment,
+          migration_rehearsal_status: company.migration_rehearsal_status,
+          migration_source_company_id: company.migration_source_company_id,
+          migration_source_company_name: company.migration_source_company&.name,
+          migration_source_batch_id: company.migration_source_batch_id,
+          migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
+          migration_rehearsal_error: company.migration_rehearsal_error
         }
       end
 

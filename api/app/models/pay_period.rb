@@ -101,6 +101,7 @@ class PayPeriod < ApplicationRecord
   validate :purpose_fields_change_only_in_draft
   validate :parallel_run_marker_cannot_be_cleared
   validate :parallel_run_cannot_be_committed
+  validate :migration_rehearsal_cannot_be_committed
   validate :starts_after_historical_ytd_boundary,
            if: lambda {
              validation_context == :payroll_calculation ||
@@ -116,6 +117,7 @@ class PayPeriod < ApplicationRecord
            }
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
+  before_validation :force_migration_rehearsal_to_parallel
 
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
@@ -161,6 +163,10 @@ class PayPeriod < ApplicationRecord
 
   def committed?
     status == "committed"
+  end
+
+  def migration_rehearsal?
+    company&.migration_rehearsal? || false
   end
 
   def can_edit?
@@ -304,6 +310,16 @@ class PayPeriod < ApplicationRecord
 
   private
 
+  def force_migration_rehearsal_to_parallel
+    self.parallel_run = true if migration_rehearsal?
+  end
+
+  def migration_rehearsal_cannot_be_committed
+    return unless migration_rehearsal? && status == "committed"
+
+    errors.add(:status, "cannot be committed in a migration rehearsal")
+  end
+
   def parallel_run_marker_cannot_be_cleared
     if will_save_change_to_parallel_run? && parallel_run_in_database
       errors.add(:parallel_run, "cannot be cleared after this payroll is used for comparison")
@@ -351,6 +367,7 @@ class PayPeriod < ApplicationRecord
 
   def starts_after_historical_ytd_boundary
     return if company_id.blank?
+    return if migration_rehearsal? && validation_context != :payroll_calculation && draft?
 
     batches = HistoricalImportBatch.where(
       company_id: company_id,
@@ -363,6 +380,10 @@ class PayPeriod < ApplicationRecord
 
     bridges = batches.filter_map(&:latest_applied_historical_ytd_bridge)
     unbridged_batch = batches.any? { |batch| batch.latest_applied_historical_ytd_bridge.nil? }
+    if migration_rehearsal? && validation_context == :payroll_calculation && unbridged_batch
+      errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
+      return
+    end
     if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
       errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return

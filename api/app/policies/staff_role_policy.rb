@@ -45,6 +45,9 @@ class StaffRolePolicy
 
   ACTION_CAPABILITIES = {
     "api/v1/admin/companies#create" => :manage_organization,
+    "api/v1/admin/companies#migration_rehearsal_preview" => :manage_organization,
+    "api/v1/admin/companies#create_migration_rehearsal" => :manage_organization,
+    "api/v1/admin/companies#retry_migration_rehearsal" => :manage_organization,
     "api/v1/admin/time_tracking_sources#create" => :manage_organization,
     "api/v1/admin/time_tracking_sources#update" => :manage_organization,
     "api/v1/admin/time_tracking_sources#destroy" => :manage_organization,

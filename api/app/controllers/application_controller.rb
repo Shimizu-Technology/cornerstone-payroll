@@ -100,6 +100,14 @@ class ApplicationController < ActionController::API
     @current_company_id ||= resolve_company_id
   end
 
+  def forbid_migration_rehearsal_official_action!
+    return unless current_company&.migration_rehearsal?
+
+    render json: {
+      error: "This action is unavailable in a migration rehearsal. Rehearsals cannot issue checks, move money, commit payroll, or produce filing-ready records."
+    }, status: :forbidden
+  end
+
   def current_user_id
     current_user&.id
   end

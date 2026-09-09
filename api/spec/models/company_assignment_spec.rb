@@ -37,4 +37,27 @@ RSpec.describe CompanyAssignment, type: :model do
       expect(assignment.errors[:company]).to include("must belong to the user's organization")
     end
   end
+
+  describe "migration rehearsal access" do
+    it "allows payroll staff to be assigned to a rehearsal" do
+      organization = create(:organization)
+      staff_company = create(:company, organization: organization)
+      rehearsal = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
+      accountant = create(:user, company: staff_company, organization: organization, role: "accountant")
+
+      expect(described_class.new(user: accountant, company: rehearsal)).to be_valid
+    end
+
+    it "rejects client portal access to a rehearsal" do
+      organization = create(:organization)
+      client_company = create(:company, organization: organization)
+      rehearsal = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
+      client = create(:user, company: client_company, organization: organization, role: "client")
+
+      assignment = described_class.new(user: client, company: rehearsal)
+
+      expect(assignment).not_to be_valid
+      expect(assignment.errors[:company]).to include("migration rehearsals are available only to payroll staff")
+    end
+  end
 end
