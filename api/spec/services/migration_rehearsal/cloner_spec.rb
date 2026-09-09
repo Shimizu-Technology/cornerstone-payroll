@@ -270,4 +270,49 @@ RSpec.describe MigrationRehearsal::Cloner do
 
     expect(target.reload).to have_attributes(migration_rehearsal_status: "pending", migration_rehearsal_error: nil)
   end
+
+  it "records a safe retryable failure after rolling back an incomplete copy" do
+    target = Company.create!(
+      organization: organization,
+      name: "Example Payroll Migration Test",
+      payroll_environment: "migration_rehearsal",
+      migration_source_company: source_company,
+      migration_source_batch: batch,
+      migration_rehearsal_status: "pending"
+    )
+    failed_storage = instance_double(R2StorageService)
+    allow(failed_storage).to receive(:list).and_return([])
+    allow(failed_storage).to receive(:download_with_limit).and_return("tampered source")
+
+    expect {
+      described_class.new(company: target, source_batch: batch, actor: actor, storage: failed_storage).call
+    }.to raise_error(RuntimeError, /integrity verification/)
+
+    expect(target.reload).to have_attributes(
+      migration_rehearsal_status: "failed",
+      migration_rehearsal_error: "The rehearsal copy did not finish. No source data changed. Retry the verified copy."
+    )
+    expect(target.employees).to be_empty
+    expect(target.historical_import_batches).to be_empty
+  end
+
+  it "does not clean completed files when a duplicate job arrives late" do
+    target = Company.create!(
+      organization: organization,
+      name: "Example Payroll Migration Test",
+      payroll_environment: "migration_rehearsal",
+      migration_source_company: source_company,
+      migration_source_batch: batch,
+      migration_rehearsal_status: "ready"
+    )
+    untouched_storage = instance_double(R2StorageService)
+    expect(untouched_storage).not_to receive(:list)
+    expect(untouched_storage).not_to receive(:delete)
+
+    expect {
+      described_class.new(company: target, source_batch: batch, actor: actor, storage: untouched_storage).call
+    }.to raise_error(ArgumentError, /already been prepared/)
+
+    expect(target.reload.migration_rehearsal_status).to eq("ready")
+  end
 end

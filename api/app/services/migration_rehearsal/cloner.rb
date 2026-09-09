@@ -41,11 +41,7 @@ module MigrationRehearsal
       company
     rescue StandardError => e
       cleanup_uploads!
-      company.update_columns(
-        migration_rehearsal_status: "failed",
-        migration_rehearsal_error: "The rehearsal copy did not finish. No source data changed. Retry the verified copy.",
-        updated_at: Time.current
-      ) if company.persisted? && company.migration_rehearsal_status != "ready"
+      mark_failed!
       Rails.logger.error("Migration rehearsal clone failed for company #{company.id}: #{e.class}: #{e.message}")
       raise
     end
@@ -334,6 +330,21 @@ module MigrationRehearsal
       uploaded_keys.each { |key| storage.delete(key) }
     rescue StandardError => e
       Rails.logger.error("Migration rehearsal storage cleanup failed for company #{company.id}: #{e.class}: #{e.message}")
+    end
+
+    def mark_failed!
+      return unless company.persisted?
+
+      company.reload
+      return if company.migration_rehearsal_status == "ready"
+
+      company.update_columns(
+        migration_rehearsal_status: "failed",
+        migration_rehearsal_error: "The rehearsal copy did not finish. No source data changed. Retry the verified copy.",
+        updated_at: Time.current
+      )
+    rescue StandardError => e
+      Rails.logger.error("Migration rehearsal failure status could not be saved for company #{company.id}: #{e.class}: #{e.message}")
     end
 
     def audit_ready!(target_batch)
