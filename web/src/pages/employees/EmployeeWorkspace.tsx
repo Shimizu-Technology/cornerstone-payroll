@@ -389,8 +389,8 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
               <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
                 <p className="font-semibold text-neutral-950">{item.message}</p>
                 {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
-                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                  <label className="block space-y-1.5">
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <label className="block space-y-2">
                     <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
                     <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
                   </label>
@@ -400,14 +400,14 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
             ))}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-neutral-600">Need to correct a date, address, W-4, rate, or recurring payroll item first?</p>
-              <Link className="inline-flex min-h-10 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
+              <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
             </div>
             {(employee.configuration_review_resolutions || []).length > 0 && (
               <div className="border-t border-neutral-200 pt-4">
                 <p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Completed review record</p>
                 <div className="mt-3 space-y-3">
                   {(employee.configuration_review_resolutions || []).map((resolution) => (
-                    <div key={resolution.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm">
+                    <div key={resolution.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm">
                       <p className="font-semibold text-neutral-900">{resolution.item_message}</p>
                       <p className="mt-1 leading-6 text-neutral-600">{resolution.resolution_note}</p>
                       <p className="mt-2 text-xs text-neutral-500">Reviewed {formatGuamDateTime(resolution.reviewed_at)} by {resolution.reviewed_by_name}</p>

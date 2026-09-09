@@ -663,25 +663,25 @@ test('makes successor company setup an attributed go-live gate', async ({ page }
     acknowledgements: { apply_setup: 'COPY REVIEWED LIVE SETUP', technical: 'TECHNICAL GO-LIVE CHECKS COMPLETE', operations: 'OPERATIONS GO-LIVE CHECKS COMPLETE' },
   };
   let submittedReview: Record<string, string> | undefined;
-  await page.route('**/api/v1/admin/payroll_go_live**', async (route) => {
-    if (route.request().method() === 'POST') {
-      submittedReview = await route.request().postDataJSON();
-      await fulfillJson(route, {
-        ...basePayload,
-        data: {
-          ...basePayload.data!,
-          company_setup: {
-            ...basePayload.data!.company_setup,
-            status: 'current',
-            current: true,
-            reviewed_at: '2026-09-09T04:00:00Z',
-            reviewed_by_name: 'Test User',
-            review_notes: submittedReview?.notes || '',
-          },
+  await page.route('**/api/v1/admin/payroll_go_live/review_company_setup', async (route) => {
+    submittedReview = await route.request().postDataJSON();
+    await fulfillJson(route, {
+      ...basePayload,
+      data: {
+        ...basePayload.data!,
+        company_setup: {
+          ...basePayload.data!.company_setup,
+          status: 'current',
+          current: true,
+          reviewed_at: '2026-09-09T04:00:00Z',
+          reviewed_by_name: 'Test User',
+          review_notes: submittedReview?.notes || '',
         },
-      });
-      return;
-    }
+      },
+    });
+  });
+  await page.route('**/api/v1/admin/payroll_go_live/update_review', (route) => fulfillJson(route, basePayload));
+  await page.route('**/api/v1/admin/payroll_go_live', async (route) => {
     await fulfillJson(route, basePayload);
   });
 
@@ -690,6 +690,8 @@ test('makes successor company setup an attributed go-live gate', async ({ page }
   await expect(page.getByText('Company setup review', { exact: true })).toBeVisible();
   await expect(page.getByText('The EIN is intentionally never copied')).toBeVisible();
   await page.getByLabel('Company setup review note').fill('Matched the EIN and filing address to the signed employer record.');
+  await page.getByRole('button', { name: 'Save readiness record' }).click();
+  await expect(page.getByLabel('Company setup review note')).toHaveValue('Matched the EIN and filing address to the signed employer record.');
   await page.getByLabel('Type COMPANY SETUP REVIEWED').fill('COMPANY SETUP REVIEWED');
   await page.getByRole('button', { name: 'Mark company setup reviewed' }).click();
 

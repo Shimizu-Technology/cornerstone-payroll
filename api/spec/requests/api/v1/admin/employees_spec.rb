@@ -261,6 +261,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     it "does not accept a resolution without a documented review" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
       post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
         code: "time_off_setup_not_imported",
         resolution_note: "",
@@ -268,6 +270,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Document what was verified or corrected")
       expect(employee.reload.configuration_review_status).to eq("needs_review")
     end
   end

@@ -31,6 +31,8 @@ class PayrollGoLiveReview < ApplicationRecord
   validates :effective_on, presence: true
   validates :review_notes, length: { maximum: 2_000 }, allow_blank: true
   validates :company_setup_review_notes, length: { maximum: 2_000 }, allow_blank: true
+  validates :company_setup_reviewed_by_name, :company_setup_reviewed_by_email,
+            :company_setup_reviewed_by_role, presence: true, if: :company_setup_digest?
   validate :companies_share_organization
   validate :batch_matches_destination
   validate :different_companies
