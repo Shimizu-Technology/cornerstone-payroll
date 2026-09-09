@@ -104,7 +104,7 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          period = payroll_reporting_period
+          period = employee_pay_history_period
           items = employee_pay_history_items(employee, period)
 
           render json: {
@@ -1272,15 +1272,32 @@ module Api
 
         # Shared data builder for payroll register (JSON + CSV + PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
-        # pay_period_id param is required.
+        # pay_run_key accepts native:<id> or imported:<id>. pay_period_id remains
+        # supported for older native-payroll clients.
         def build_payroll_register_data
-          pay_period_id = params[:pay_period_id]
+          raw_key = params[:pay_run_key].presence
+          raw_key ||= "native:#{params[:pay_period_id]}" if params[:pay_period_id].present?
 
-          if pay_period_id.blank?
+          if raw_key.blank?
             return [ nil, render(json: { error: "pay_period_id is required" }, status: :unprocessable_entity) ]
           end
 
-          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: pay_period_id)
+          match = raw_key.to_s.match(/\A(native|imported):(\d+)\z/)
+          unless match
+            return [ nil, render(json: { error: "pay_run_key must use native:<id> or imported:<id>" }, status: :unprocessable_entity) ]
+          end
+
+          source_type = match[1]
+          record_id = match[2].to_i
+          if source_type == "imported"
+            report = ImportedPayrollRegister.new(
+              company_id: current_company_id,
+              historical_pay_period_id: record_id
+            ).call
+            return [ report, nil ]
+          end
+
+          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: record_id)
 
           unless pay_period && pay_period.company_id == current_company_id
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
@@ -1298,6 +1315,12 @@ module Api
             type: "payroll_register",
             simple_payroll_register_enabled: company.simple_payroll_register_enabled?,
             meta: report_meta(company, :payroll_register),
+            source: {
+              system: "cornerstone",
+              label: "Cornerstone",
+              locked: pay_period.committed?,
+              statement: "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
+            },
             pay_period: {
               id: pay_period.id,
               start_date: pay_period.start_date,
@@ -1356,6 +1379,8 @@ module Api
           end
 
           [ report_data, nil ]
+        rescue ActiveRecord::RecordNotFound
+          [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
         end
 
         # Shared data builder for tax summary (JSON + CSV + PDF).
@@ -1688,6 +1713,12 @@ module Api
           PayrollReportingPeriod.from_params(params)
         end
 
+        def employee_pay_history_period
+          return PayrollReportingPeriod.all_time if ActiveModel::Type::Boolean.new.cast(params[:all_time])
+
+          payroll_reporting_period
+        end
+
         def reportable_pay_periods(period)
           PayPeriod.reportable_committed
                    .where(company_id: current_company_id, pay_date: period.range)
@@ -1831,55 +1862,55 @@ module Api
         end
 
         def ytd_company_totals(year = Date.current.year)
-          reportable_period_ids = PayPeriod.reportable_committed
-                                           .where(company_id: current_company_id)
-                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
-                                           .select(:id)
+          period = PayrollReportingPeriod.new(
+            start_date: Date.new(year, 1, 1),
+            end_date: Date.new(year, 12, 31),
+            year: year
+          )
+          items = reportable_payroll_items(period).to_a
+          unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
+          historical_paychecks = unified.historical_paychecks
+          historical_adjustments = unified.historical_adjustments
 
-          items = PayrollItem.joins(:pay_period)
-                            .includes(:payroll_item_field_entries)
-                            .where(company_id: current_company_id)
-                            .not_voided
-                            .where(pay_periods: {
-                              id: reportable_period_ids
-                            })
-
-          ytd_items = items.to_a
-
-          {
-            year: year,
-            gross_pay: items.sum(:gross_pay),
-            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
-            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
-            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
-            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
-            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
-            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
-            withholding_tax: items.sum(:withholding_tax),
-            social_security_tax: items.sum(:social_security_tax),
-            medicare_tax: items.sum(:medicare_tax),
-            retirement: items.sum(:retirement_payment),
-            total_deductions: items.sum(:total_deductions),
-            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
-            net_pay: items.sum(:net_pay),
-            payroll_count: items.select("DISTINCT pay_period_id").count
-          }
+          payroll_period_company_totals(
+            items,
+            period,
+            historical_paychecks,
+            historical_adjustments,
+            unified: unified
+          )
         end
 
         def recent_payroll_summary
-          PayPeriod.reportable_committed
-                   .where(company_id: current_company_id)
-                   .order(pay_date: :desc)
-                   .limit(5)
-                   .map do |pp|
-            {
-              id: pp.id,
-              period_description: pp.period_description,
-              pay_date: pp.pay_date,
-              employee_count: pp.payroll_items.not_voided.count,
-              total_net: pp.payroll_items.not_voided.sum(:net_pay)
-            }
+          rows = %w[cornerstone quickbooks].flat_map do |source|
+            PayrollHistoryQuery.new(
+              company_id: current_company_id,
+              params: {
+                page: 1,
+                per_page: 5,
+                source: source,
+                status: source == "cornerstone" ? "committed" : "locked",
+                sort: "pay_date",
+                direction: "desc"
+              }
+            ).call.data
           end
+
+          rows.sort_by { |row| [ row.fetch(:pay_date).to_date, row.fetch(:key) ] }
+              .reverse
+              .first(5)
+              .map do |row|
+            row.slice(:key, :record_type, :id, :pay_date, :employee_count, :total_net, :source).merge(
+              period_description: payroll_history_period_description(row)
+            )
+          end
+        end
+
+        def payroll_history_period_description(row)
+          start_date = row.fetch(:start_date).to_date
+          end_date = row.fetch(:end_date).to_date
+
+          "#{start_date.strftime('%b %-d, %Y')} - #{end_date.strftime('%b %-d, %Y')}"
         end
 
         def payroll_item_detail(item, fallback_tip_components: nil)
@@ -2105,7 +2136,8 @@ module Api
         end
 
         def employee_pay_history_limit
-          return nil if params[:start_date].present? || params[:end_date].present? || params[:year].present?
+          return nil if params[:start_date].present? || params[:end_date].present? || params[:year].present? ||
+            ActiveModel::Type::Boolean.new.cast(params[:all_time])
 
           limit = Integer(params[:limit].presence || 12, exception: false)
           raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
@@ -2407,7 +2439,7 @@ module Api
             return [ nil, nil, nil ]
           end
 
-          period = payroll_reporting_period
+          period = employee_pay_history_period
           items = employee_pay_history_items(employee, period)
           [ employee, period, employee_pay_history_report(employee, items, period: period) ]
         end
@@ -2424,6 +2456,7 @@ module Api
         def report_info_sheet(report, title:, description: nil)
           meta = report_value(report, :meta) || {}
           pp = report_value(report, :pay_period) || {}
+          source = report_value(report, :source) || {}
           rows = [
             [ "Field", "Value" ],
             [ "Report", title ],
@@ -2431,6 +2464,8 @@ module Api
             [ "Description", description || report_value(meta, :report_description) ],
             [ "Pay Period", [ report_value(pp, :start_date), report_value(pp, :end_date) ].compact.join(" to ") ],
             [ "Pay Date", report_value(pp, :pay_date) ],
+            [ "Source", report_value(source, :label) ],
+            [ "Source handling", report_value(source, :statement) ],
             [ "Generated At", report_value(meta, :generated_at) ]
           ].reject { |_, value| value.blank? }
 

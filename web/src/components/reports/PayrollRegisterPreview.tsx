@@ -669,6 +669,12 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
 
   return (
     <div className="space-y-5">
+      {report.source?.system === 'quickbooks_online' && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950">
+          <p className="font-bold">Locked QuickBooks payroll</p>
+          <p className="mt-2 text-amber-900">{report.source.statement}</p>
+        </div>
+      )}
       {register}
       <PayrollComponentsDisclosure report={report} />
     </div>

@@ -8,6 +8,16 @@
 class PayrollReportingPeriod
   attr_reader :start_date, :end_date, :year
 
+  def self.all_time
+    new(
+      start_date: Date.new(1900, 1, 1),
+      end_date: Date.new(9999, 12, 31),
+      label: "All pay history",
+      filename_token: "all_pay_history",
+      all_time: true
+    )
+  end
+
   def self.from_params(params, default_year: Date.current.year)
     start_value = params[:start_date].presence
     end_value = params[:end_date].presence
@@ -34,12 +44,15 @@ class PayrollReportingPeriod
   end
   private_class_method :parse_iso_date!
 
-  def initialize(start_date:, end_date:, year: nil)
+  def initialize(start_date:, end_date:, year: nil, label: nil, filename_token: nil, all_time: false)
     raise ArgumentError, "start_date must be on or before end_date" if start_date > end_date
 
     @start_date = start_date
     @end_date = end_date
     @year = year || (start_date.year if start_date == Date.new(start_date.year, 1, 1) && end_date == Date.new(start_date.year, 12, 31))
+    @label = label
+    @filename_token = filename_token
+    @all_time = all_time
   end
 
   def range
@@ -47,15 +60,19 @@ class PayrollReportingPeriod
   end
 
   def custom?
-    year.nil?
+    year.nil? && !all_time?
+  end
+
+  def all_time?
+    @all_time
   end
 
   def label
-    custom? ? "#{start_date.strftime('%b %-d, %Y')} – #{end_date.strftime('%b %-d, %Y')}" : year.to_s
+    @label || (custom? ? "#{start_date.strftime('%b %-d, %Y')} – #{end_date.strftime('%b %-d, %Y')}" : year.to_s)
   end
 
   def filename_token
-    custom? ? "#{start_date}_to_#{end_date}" : year.to_s
+    @filename_token || (custom? ? "#{start_date}_to_#{end_date}" : year.to_s)
   end
 
   def payload
@@ -65,6 +82,7 @@ class PayrollReportingPeriod
       end_date: end_date,
       year: year,
       custom: custom?,
+      all_time: all_time?,
       label: label
     }
   end

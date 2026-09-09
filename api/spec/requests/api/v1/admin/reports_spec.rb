@@ -90,6 +90,55 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     [ batch, period, paycheck ]
   end
 
+  describe "GET /api/v1/admin/reports/dashboard" do
+    let!(:native_period) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 9, 1),
+        end_date: Date.new(2026, 9, 14),
+        pay_date: Date.new(2026, 9, 18))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period: native_period,
+        employee: employee,
+        company: company,
+        gross_pay: 1000,
+        withholding_tax: 70,
+        social_security_tax: 62,
+        medicare_tax: 14.50,
+        total_deductions: 200,
+        net_pay: 800)
+      _batch, @dashboard_imported_period, _paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "dashboard",
+        pay_date: Date.new(2026, 8, 21)
+      )
+    end
+
+    it "combines committed Cornerstone and locked QuickBooks payroll in YTD and recent payrolls" do
+      travel_to Date.new(2026, 9, 20) do
+        get "/api/v1/admin/reports/dashboard"
+      end
+
+      expect(response).to have_http_status(:ok)
+      ytd = response.parsed_body.dig("stats", "ytd_totals")
+      expect(ytd).to include(
+        "gross_pay" => 1500.0,
+        "net_pay" => 1100.0,
+        "payroll_count" => 2,
+        "imported_payroll_count" => 1,
+        "imported_opening_summary_count" => 0
+      )
+
+      recent = response.parsed_body.dig("stats", "recent_payrolls")
+      expect(recent.pluck("record_type")).to eq(%w[native imported])
+      expect(recent.pluck("key")).to eq([ "native:#{native_period.id}", "imported:#{@dashboard_imported_period.id}" ])
+      expect(recent.second.dig("source", "locked")).to be(true)
+    end
+  end
+
   describe "GET /api/v1/admin/reports/transmittal_preview" do
     let!(:pay_period) do
       create(:pay_period, :committed,
@@ -1642,7 +1691,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("source_summary", "cornerstone")).to include("payroll_count" => 1, "paycheck_count" => 1)
       expect(report.dig("source_summary", "quickbooks")).to include(
         "payroll_count" => 1,
-        "paycheck_count" => 2,
+        "paycheck_count" => 1,
+        "record_count" => 2,
         "opening_summary_count" => 1,
         "excluded_unlinked_paycheck_count" => 1,
         "excluded_unlinked_gross_pay" => 250.0,
@@ -1709,6 +1759,28 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("source_summary", "cornerstone", "paycheck_count")).to eq(0)
       expect(report.dig("source_summary", "quickbooks", "paycheck_count")).to eq(1)
       expect(report.dig("source_summary", "quickbooks", "excluded_unlinked_paycheck_count")).to eq(0)
+    end
+
+    it "returns older linked payroll when the employee workspace requests all history" do
+      _batch, _historical_period, historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "older-workspace-history",
+        pay_date: Date.new(2025, 12, 19)
+      )
+
+      travel_to Time.zone.local(2026, 9, 9) do
+        get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, all_time: true }
+      end
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.fetch("history").map { |row| row.fetch("key") }).to include("imported:#{historical_paycheck.id}")
+      expect(report.fetch("period")).to include(
+        "all_time" => true,
+        "custom" => false,
+        "year" => nil,
+        "label" => "All pay history"
+      )
     end
   end
 
@@ -1962,6 +2034,127 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(response.body).to include(employee.full_name)
       expect(response.body).to include("2000.00")
+    end
+
+    it "renders a locked imported payroll register from the typed pay-run key" do
+      _batch, historical_period, historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "typed-register",
+        pay_date: Date.new(2025, 2, 14)
+      )
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_run_key: "imported:#{historical_period.id}" }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.fetch("pay_period")).to include(
+        "key" => "imported:#{historical_period.id}",
+        "record_type" => "imported",
+        "status" => "locked"
+      )
+      expect(report.fetch("source")).to include(
+        "system" => "quickbooks_online",
+        "locked" => true
+      )
+      expect(report.dig("source", "statement")).to include("cannot be edited or recalculated")
+      expect(report.dig("summary", "total_gross").to_f).to eq(500.0)
+      expect(report.dig("summary", "total_net").to_f).to eq(300.0)
+      expect(report.fetch("employees").sole).to include(
+        "historical_paycheck_id" => historical_paycheck.id,
+        "gross_pay" => 500.0,
+        "withholding_tax" => 90.0,
+        "social_security_tax" => 50.0,
+        "medicare_tax" => 10.0,
+        "total_deductions" => 200.0,
+        "net_pay" => 300.0
+      )
+    end
+
+    it "exports the imported register without substituting current employee payroll values" do
+      _batch, historical_period, _historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "typed-register-csv",
+        pay_date: Date.new(2025, 2, 28)
+      )
+
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_run_key: "imported:#{historical_period.id}" }
+
+      expect(response).to have_http_status(:ok), response.body
+      employee_row = CSV.parse(response.body, headers: true).find { |row| row["Employee Name"] == employee.full_name }
+      expect(employee_row).not_to be_nil
+      expect(employee_row["Pay Rate"]).to eq("")
+      expect(employee_row["Gross Pay"]).to eq("500.00")
+      expect(employee_row["Total Deductions"]).to eq("200.00")
+      expect(employee_row["Net Pay"]).to eq("300.00")
+    end
+
+    it "identifies locked QuickBooks provenance in imported PDF and Excel exports" do
+      _batch, historical_period, _historical_paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "typed-register-formats",
+        pay_date: Date.new(2025, 3, 14)
+      )
+      pay_run_key = "imported:#{historical_period.id}"
+
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_run_key: pay_run_key }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.headers.fetch("Content-Disposition")).to include("quickbooks_payroll_register")
+      pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(pdf_text).to include("QuickBooks import")
+      expect(pdf_text).to include("cannot be edited or recalculated")
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_run_key: pay_run_key }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.headers.fetch("Content-Disposition")).to include("quickbooks_payroll_register")
+      file = Tempfile.new([ "quickbooks_payroll_register", ".xlsx" ])
+      file.binmode
+      file.write(response.body)
+      file.close
+      workbook = Roo::Excelx.new(file.path)
+      info_rows = (1..workbook.sheet("Report Info").last_row).map { |row_number| workbook.sheet("Report Info").row(row_number) }
+      expect(info_rows).to include([ "Source", "QuickBooks import" ])
+      expect(info_rows.find { |row| row.first == "Source handling" }&.second).to include("cannot be edited or recalculated")
+    ensure
+      file&.unlink
+    end
+
+    it "does not expose an imported payroll period from another company" do
+      other_company = create(:company)
+      other_user = create(:user, company: other_company, role: "admin")
+      batch = HistoricalImportBatch.create!(
+        company: other_company,
+        source_label: "Other company QuickBooks",
+        bundle_digest: "other-company-register-#{other_company.id}",
+        importer_version: "quickbooks-online-payroll-v5",
+        status: "locked",
+        locked_at: Time.current,
+        locked_by: other_user
+      )
+      other_period = HistoricalPayPeriod.create!(
+        historical_import_batch: batch,
+        company: other_company,
+        external_key: "other-company-period",
+        source_label: "Other company payroll",
+        start_date: Date.new(2025, 3, 1),
+        end_date: Date.new(2025, 3, 9),
+        pay_date: Date.new(2025, 3, 14),
+        period_type: "regular",
+        paycheck_count: 0,
+        totals: {}
+      )
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_run_key: "imported:#{other_period.id}" }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "rejects malformed typed pay-run keys" do
+      get "/api/v1/admin/reports/payroll_register", params: { pay_run_key: "quickbooks:123" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("native:<id> or imported:<id>")
     end
 
     it "includes TOTALS summary row" do
