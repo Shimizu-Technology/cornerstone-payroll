@@ -164,7 +164,7 @@ test('payroll summary explains combined sources and any excluded unlinked record
   await page.getByRole('button', { name: 'View Report' }).click();
 
   await expect(page.getByText('Combined payroll history')).toBeVisible();
-  await expect(page.getByText(/1 linked QuickBooks record/)).toBeVisible();
+  await expect(page.getByText(/1 linked QuickBooks paycheck/)).toBeVisible();
   await expect(page.getByText(/1 QuickBooks record was excluded/)).toBeVisible();
   await expect(page.getByText(/Payroll field reconciliation below covers Cornerstone records only/)).toBeVisible();
 });
