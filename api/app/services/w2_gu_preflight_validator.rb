@@ -26,8 +26,8 @@ class W2GuPreflightValidator
       company_id: company.id,
       company_name: company.name,
       run_at: Time.current.iso8601,
-      blocking_count: findings.count { |f| f.severity == 'blocking' },
-      warning_count: findings.count { |f| f.severity == 'warning' },
+      blocking_count: findings.count { |f| f.severity == "blocking" },
+      warning_count: findings.count { |f| f.severity == "warning" },
       findings: findings.map { |f| serialize(f) }
     }
   end
@@ -38,16 +38,16 @@ class W2GuPreflightValidator
     out = []
 
     out << Finding.new(
-      severity: 'blocking',
-      code: 'EMPLOYER_EIN_MISSING',
-      message: 'Employer EIN is missing.'
+      severity: "blocking",
+      code: "EMPLOYER_EIN_MISSING",
+      message: "Employer EIN is missing."
     ) if company.ein.blank?
 
     if company.address_line1.blank? || company.city.blank? || company.state.blank? || company.zip.blank?
       out << Finding.new(
-        severity: 'blocking',
-        code: 'EMPLOYER_ADDRESS_INCOMPLETE',
-        message: 'Employer address is incomplete (address/city/state/zip required).'
+        severity: "blocking",
+        code: "EMPLOYER_ADDRESS_INCOMPLETE",
+        message: "Employer address is incomplete (address/city/state/zip required)."
       )
     end
 
@@ -59,8 +59,8 @@ class W2GuPreflightValidator
 
     if employee_ids.empty?
       out << Finding.new(
-        severity: 'blocking',
-        code: 'NO_COMMITTED_PAYROLL',
+        severity: "blocking",
+        code: "NO_COMMITTED_PAYROLL",
         message: "No committed Cornerstone or locked imported payroll found for #{year}. Cannot validate W-2 readiness."
       )
       return out
@@ -69,8 +69,8 @@ class W2GuPreflightValidator
     Employee.where(id: employee_ids).find_each do |employee|
       unless employee.valid_filing_ssn?
         out << Finding.new(
-          severity: 'blocking',
-          code: 'EMPLOYEE_SSN_MISSING',
+          severity: "blocking",
+          code: "EMPLOYEE_SSN_MISSING",
           message: "Employee #{employee.full_name} is missing SSN.",
           employee_id: employee.id
         )
@@ -78,8 +78,8 @@ class W2GuPreflightValidator
 
       if employee.address_line1.blank? || employee.city.blank? || employee.state.blank? || employee.zip.blank?
         out << Finding.new(
-          severity: 'blocking',
-          code: 'EMPLOYEE_ADDRESS_INCOMPLETE',
+          severity: "blocking",
+          code: "EMPLOYEE_ADDRESS_INCOMPLETE",
           message: "Employee #{employee.full_name} has incomplete address.",
           employee_id: employee.id
         )
@@ -110,8 +110,8 @@ class W2GuPreflightValidator
     [ (native_ids + historical_ids).uniq, [] ]
   rescue ArgumentError => e
     finding = Finding.new(
-      severity: 'blocking',
-      code: 'HISTORICAL_PAYROLL_NOT_READY',
+      severity: "blocking",
+      code: "HISTORICAL_PAYROLL_NOT_READY",
       message: "Locked imported payroll is not ready for W-2GU filing review: #{e.message}"
     )
     [ native_ids || [], [ finding ] ]
