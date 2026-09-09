@@ -10,7 +10,7 @@ module Api
 
         before_action :require_historical_payroll_enabled!
         before_action :set_batch, only: %i[
-          show apply lock verify_source_files download_source_file archive_unlinked_workers update_worker
+          show apply lock verify_source_files download_evidence_manifest download_source_file archive_unlinked_workers update_worker
           verify_cutover update_cutover_review approve_cutover download_cutover_evidence
           preview_client_bootstrap apply_client_bootstrap
           preview_ytd_bridge apply_ytd_bridge
@@ -162,6 +162,24 @@ module Api
             error: "That source file is unavailable or failed integrity verification",
             details: {}
           }, status: :unprocessable_entity
+        end
+
+        def download_evidence_manifest
+          manifest = QuickbooksHistory::EvidenceCoverageManifest.new(batch: @batch)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: @batch.company.organization_id,
+            company_id: @batch.company_id,
+            action: "historical_imports#download_evidence_manifest",
+            record_type: "historical_import_batches",
+            record_id: @batch.id,
+            subject_name: @batch.source_label,
+            metadata: { bundle_digest: @batch.bundle_digest, manifest_version: QuickbooksHistory::EvidenceCoverageManifest::VERSION }
+          )
+          send_data manifest.to_csv,
+                    filename: manifest.filename,
+                    type: "text/csv; charset=utf-8",
+                    disposition: "attachment"
         end
 
         def archive_unlinked_workers
@@ -466,7 +484,10 @@ module Api
             created_at: batch.created_at
           }
           payload[:tax_wage_reconciliation] = batch.tax_wage_reconciliation if include_tax_wage_reconciliation
-          payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) } if include_source_files
+          if include_source_files
+            payload[:source_files] = source_files.map { |source_file| source_file_json(source_file) }
+            payload[:evidence_manifest] = QuickbooksHistory::EvidenceCoverageManifest.new(batch: batch).call
+          end
           payload
         end
 

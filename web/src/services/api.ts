@@ -4024,6 +4024,55 @@ export interface HistoricalCutoverReview {
   updated_at: string;
 }
 
+export interface HistoricalEvidenceManifest {
+  version: number;
+  batch_id: number;
+  source_system: string;
+  source_label: string;
+  bundle_digest: string;
+  batch_status: HistoricalImportBatch['status'];
+  generated_at: string;
+  summary: {
+    file_count: number;
+    verified_file_count: number;
+    required_report_count: number;
+    required_present_count: number;
+    required_headers_validated_count: number;
+    tax_wage_report_count: number;
+    tax_wage_years: number[];
+    first_detailed_pay_date?: string | null;
+    last_detailed_pay_date?: string | null;
+    source_retention_ready: boolean;
+    paycheck_reconciliation_ready: boolean;
+    ytd_evidence_ready: boolean;
+  };
+  taxonomy: {
+    paycheck_reconciliation: string;
+    tax_wage_ytd: string;
+    privacy: string;
+  };
+  rows: Array<{
+    position: number;
+    filename: string;
+    report_type: string;
+    report_label: string;
+    evidence_layer: string;
+    evidence_role: string;
+    description: string;
+    required: boolean;
+    required_headers: string[];
+    header_validation: 'validated' | 'classified' | 'failed' | 'not_applicable';
+    row_count?: number | null;
+    coverage_start?: string | null;
+    coverage_end?: string | null;
+    coverage_scope?: string | null;
+    retention_status: string;
+    verified_at?: string | null;
+    byte_size: number;
+    sha256: string;
+  }>;
+}
+
 export interface HistoricalImportBatch {
   id: number;
   company_id: number;
@@ -4050,6 +4099,7 @@ export interface HistoricalImportBatch {
     last_verified_at?: string | null;
   };
   source_files?: HistoricalImportSourceFile[];
+  evidence_manifest?: HistoricalEvidenceManifest;
   preview_summary: {
     file_count: number;
     worker_count: number;
@@ -4606,6 +4656,8 @@ export const historicalImportsApi = {
     api.post<{ data: HistoricalImportBatch; meta: { all_verified: boolean } }>(`/admin/historical_imports/${id}/verify_source_files`),
   downloadSourceFile: (batchId: number, sourceFileId: number): Promise<Blob> =>
     api.getBlob(`/admin/historical_imports/${batchId}/source_files/${sourceFileId}/download`),
+  downloadEvidenceManifest: (batchId: number): Promise<BlobDownload> =>
+    api.getBlobWithParams(`/admin/historical_imports/${batchId}/download_evidence_manifest`),
   mapWorker: (batchId: number, workerId: number, employeeId: number): Promise<{ data: HistoricalWorker }> =>
     api.patch<{ data: HistoricalWorker }>(`/admin/historical_imports/${batchId}/workers/${workerId}`, { employee_id: employeeId }),
   keepWorkerArchiveOnly: (batchId: number, workerId: number): Promise<{ data: HistoricalWorker }> =>
