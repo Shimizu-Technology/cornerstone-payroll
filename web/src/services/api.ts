@@ -1970,6 +1970,7 @@ export interface AnnualPayrollSummaryReport {
 export interface Form941GuReport {
   meta: {
     report_type: string;
+    company_id: number;
     company_name: string;
     ein: string;
     year: number;
@@ -2062,7 +2063,12 @@ export interface QuarterlyCompliancePacketReport {
     quarter_start: string;
     quarter_end: string;
     period_basis: string;
+    generated_at: string;
     pay_periods_included: number;
+    source_summary: {
+      cornerstone: { pay_period_count: number; payroll_item_count: number };
+      quickbooks: { pay_period_count: number; record_count: number; opening_summary_count_excluded: number };
+    };
     document_status: 'draft_not_filed';
   };
   due_dates: {
@@ -2076,6 +2082,7 @@ export interface QuarterlyCompliancePacketReport {
     federal_track: string;
     form_941_guam_lines_2_3: string;
     schedule_b: string;
+    imported_payroll: string;
   };
   workflow?: {
     id: number;
@@ -2087,9 +2094,13 @@ export interface QuarterlyCompliancePacketReport {
     tasks: QuarterlyComplianceTask[];
   } | null;
   pay_periods: {
-    id: number;
-    start_date: string;
-    end_date: string;
+    id: number | string;
+    source: 'cornerstone' | 'quickbooks';
+    read_only: boolean;
+    payment_status?: 'paid_before_cornerstone';
+    record_type?: string;
+    start_date: string | null;
+    end_date: string | null;
     pay_date: string;
     employee_count: number;
     gross_pay: number;
@@ -2105,11 +2116,15 @@ export interface QuarterlyCompliancePacketReport {
   form_500: {
     policy: string;
     total_guam_withholding: number;
+    historical_payroll_excluded: boolean;
+    excluded_historical_withholding: number;
+    historical_exclusion_note: string;
     deposits: {
       pay_period_id: number;
       pay_date: string;
       quarter_ending: string;
       amount: number | null;
+      expected_amount: number;
       status: string;
       payment_date: string | null;
       confirmation_number: string | null;
