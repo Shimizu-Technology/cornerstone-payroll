@@ -16,13 +16,15 @@ module Api
         ).freeze
 
         skip_before_action :enforce_company_access!, only: [ :index ]
-        skip_before_action :enforce_migration_rehearsal_safety!
+        skip_before_action :enforce_migration_rehearsal_safety!, only: %i[
+          index migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+        ]
 
         # GET /api/v1/admin/companies
         # Organization admins see their firm's companies; non-admin staff see assigned clients.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
-          companies = Company.where(id: accessible_ids).order(:name)
+          companies = Company.where(id: accessible_ids).includes(:migration_source_company).order(:name)
           companies = companies.where(active: true) if params[:active] == "true"
 
           company_ids = companies.pluck(:id)

@@ -241,9 +241,10 @@ module MigrationRehearsal
     end
 
     def copy_adjustments!(paycheck_map, bridge_map)
-      source_adjustments = HistoricalPaycheckAdjustment.where(historical_paycheck_id: paycheck_map.keys).order(:id)
+      source_paycheck_ids = source_batch.historical_paychecks.select(:id)
+      source_adjustment_scope = HistoricalPaycheckAdjustment.where(historical_paycheck_id: source_paycheck_ids)
       adjustment_map = {}
-      source_adjustments.each do |adjustment|
+      source_adjustment_scope.order(:id).each do |adjustment|
         adjustment_map[adjustment.id] = copy_record!(
           adjustment,
           company: company,
@@ -251,7 +252,9 @@ module MigrationRehearsal
           reverses_adjustment: adjustment.reverses_adjustment_id && adjustment_map.fetch(adjustment.reverses_adjustment_id)
         )
       end
-      HistoricalPaycheckAdjustmentEvent.where(historical_paycheck_adjustment_id: adjustment_map.keys).order(:id).each do |event|
+      HistoricalPaycheckAdjustmentEvent.where(
+        historical_paycheck_adjustment_id: source_adjustment_scope.select(:id)
+      ).order(:id).each do |event|
         copy_record!(
           event,
           company: company,

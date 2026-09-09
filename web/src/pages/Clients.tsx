@@ -103,6 +103,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
 
 export function Clients() {
   const navigate = useNavigate();
+  const rehearsalNameId = useId();
   const { refreshCompanies, switchCompany } = useCompany();
   const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
@@ -125,16 +126,16 @@ export function Clients() {
   const [rehearsalError, setRehearsalError] = useState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       setError(null);
       const data = await companiesApi.list();
       setCompanies(data.companies);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load clients');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, []);
 
@@ -142,7 +143,7 @@ export function Clients() {
 
   useEffect(() => {
     if (!companies.some(company => company.migration_rehearsal_status === 'pending')) return;
-    const timer = window.setTimeout(() => { void load(); }, 3000);
+    const timer = window.setTimeout(() => { void load(true); }, 3000);
     return () => window.clearTimeout(timer);
   }, [companies, load]);
 
@@ -318,7 +319,7 @@ export function Clients() {
         )}
 
         {rehearsalSourceId && (
-          <Card className="border-amber-200 p-5 sm:p-6">
+          <Card className="border-amber-200 p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
@@ -337,9 +338,9 @@ export function Clients() {
             </div>
 
             {loadingRehearsal ? (
-              <p className="mt-5 text-sm text-neutral-500">Checking the source archive…</p>
+              <p className="mt-6 text-sm text-neutral-500">Checking the source archive…</p>
             ) : rehearsalPreview && (
-              <div className="mt-5 space-y-4">
+              <div className="mt-6 space-y-4">
                 <div className="grid gap-3 sm:grid-cols-4">
                   <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.employees ?? 0}</p></div>
                   <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Imported pay periods</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.imported_pay_periods ?? 0}</p></div>
@@ -349,13 +350,13 @@ export function Clients() {
 
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
                   <p className="font-semibold text-neutral-900">Copy boundaries</p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5">{rehearsalPreview.warnings.map(item => <li key={item}>{item}</li>)}</ul>
+                  <ul className="mt-2 list-disc space-y-1 pl-6">{rehearsalPreview.warnings.map(item => <li key={item}>{item}</li>)}</ul>
                 </div>
 
                 {rehearsalPreview.blockers.length > 0 && (
                   <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                     <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Not ready to copy</div>
-                    <ul className="mt-2 list-disc space-y-1 pl-5">{rehearsalPreview.blockers.map(item => <li key={item}>{item}</li>)}</ul>
+                    <ul className="mt-2 list-disc space-y-1 pl-6">{rehearsalPreview.blockers.map(item => <li key={item}>{item}</li>)}</ul>
                   </div>
                 )}
 
@@ -366,8 +367,8 @@ export function Clients() {
                       <p className="mt-1 leading-6">The original remains untouched. Practice runs are always parallel-only and cannot be committed. Check, payment, and official filing actions are blocked.</p>
                     </div>
                     <div className="max-w-xl">
-                      <label className="mb-1 block text-sm font-medium text-neutral-700">Rehearsal name</label>
-                      <Input value={rehearsalName} onChange={event => setRehearsalName(event.target.value)} />
+                      <label htmlFor={rehearsalNameId} className="mb-1 block text-sm font-medium text-neutral-700">Rehearsal name</label>
+                      <Input id={rehearsalNameId} value={rehearsalName} onChange={event => setRehearsalName(event.target.value)} />
                     </div>
                     <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
                       <input type="checkbox" checked={rehearsalConfirmed} onChange={event => setRehearsalConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
@@ -379,7 +380,7 @@ export function Clients() {
             )}
 
             {rehearsalError && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rehearsalError}</div>}
-            <div className="mt-5 flex justify-end gap-3 border-t border-neutral-200 pt-4">
+            <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
               <Button variant="outline" onClick={handleCloseRehearsal}>Cancel</Button>
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
                 <FlaskConical className="mr-2 h-4 w-4" />{creatingRehearsal ? 'Creating verified copy…' : 'Create migration test'}
@@ -621,7 +622,7 @@ export function Clients() {
                             <p className="mt-0.5 text-xs font-semibold text-amber-700">Migration rehearsal · {c.migration_rehearsal_status}</p>
                           )}
                         </div>
-                        <Badge variant={c.migration_rehearsal_status === 'failed' ? 'danger' : c.active !== false ? 'success' : 'default'}>
+                        <Badge variant={c.migration_rehearsal_status === 'pending' ? 'info' : c.migration_rehearsal_status === 'failed' ? 'danger' : c.active !== false ? 'success' : 'default'}>
                           {c.migration_rehearsal_status === 'pending'
                             ? 'Preparing'
                             : c.migration_rehearsal_status === 'failed'

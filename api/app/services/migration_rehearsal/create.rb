@@ -9,7 +9,7 @@ module MigrationRehearsal
       check_offset_x check_offset_y check_layout_config next_check_number active_printer_profile_id
     ].freeze
 
-    def initialize(source_company:, actor:, name: nil, acknowledgement:, batch: nil)
+    def initialize(source_company:, actor:, acknowledgement:, name: nil, batch: nil)
       @source_company = source_company
       @actor = actor
       @name = name.to_s.strip.presence || "#{source_company.name} Migration Test"
