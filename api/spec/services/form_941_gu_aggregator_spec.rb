@@ -103,7 +103,8 @@ RSpec.describe Form941GuAggregator do
         expect(report[:meta][:caveats]).not_to be_empty
         expect(report[:meta][:caveats]).to include(
           "Lines 8–9 (adjustments) require manual entry before filing.",
-          "Lines 11–14 (credits/deposits/balance) require manual review against federal deposit records."
+          "Lines 11–14 (credits/deposits/balance) require manual review against federal deposit records.",
+          "Guam wage withholding is tracked through Form 500/W-1 and shown separately in the tax detail."
         )
         expect(report[:meta][:caveats].join(" ")).not_to match(/PLACEHOLDER|tax_detail\.|gross_pay|pay_date/)
       end
