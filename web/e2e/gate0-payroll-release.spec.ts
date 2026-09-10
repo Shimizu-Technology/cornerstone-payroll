@@ -1900,6 +1900,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
       const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Avery Example', exact: true });
       if (!await loan.isVisible()) await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
+      const regularHours = page.getByRole('row').filter({ has: loan }).getByRole('textbox').first();
+      await regularHours.fill('80');
+      await regularHours.press('Tab');
       await loan.fill('75');
       await loan.press('Tab');
       const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
