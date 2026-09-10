@@ -533,7 +533,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
     t.index ["company_id"], name: "index_employee_loans_on_company_id"
     t.index ["created_by_id"], name: "index_employee_loans_on_created_by_id"
     t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
-    t.index ["employee_id", "deduction_type_id"], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
+    t.index [ "employee_id", "deduction_type_id" ], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
     t.check_constraint "balance_source::text = ANY (ARRAY['new_loan'::character varying::text, 'quickbooks'::character varying::text, 'statement'::character varying::text, 'employee_confirmation'::character varying::text, 'other_verified'::character varying::text])", name: "employee_loans_balance_source_check"
@@ -554,7 +554,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
     t.index ["employee_id", "active"], name: "idx_employee_payroll_fields_employee_active"
     t.index ["employee_id", "payroll_field_definition_id"], name: "idx_employee_payroll_fields_unique", unique: true
     t.index ["employee_id"], name: "index_employee_payroll_fields_on_employee_id"
-    t.index ["employee_loan_id"], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
+    t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index ["employee_loan_id"], name: "index_employee_payroll_fields_on_employee_loan_id"
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
@@ -1552,7 +1552,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
     t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
     t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
     t.index ["recorded_by_id"], name: "index_loan_transactions_on_recorded_by_id"
-    t.index ["reverses_transaction_id"], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
+    t.index [ "reverses_transaction_id" ], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
     t.check_constraint "source::text = ANY (ARRAY['opening_balance'::character varying::text, 'payroll'::character varying::text, 'manual'::character varying::text])", name: "loan_transactions_source_check"
   end
@@ -1969,7 +1969,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
     t.string "reporting_group"
     t.datetime "updated_at", null: false
     t.index ["deduction_type_id"], name: "index_payroll_item_deductions_on_deduction_type_id"
-    t.index ["employee_loan_id"], name: "index_payroll_item_deductions_on_employee_loan_id"
+    t.index [ "employee_loan_id" ], name: "index_payroll_item_deductions_on_employee_loan_id"
     t.index ["payroll_item_id", "deduction_type_id"], name: "idx_pi_deductions_on_pi_and_dt", unique: true
     t.index ["payroll_item_id"], name: "index_payroll_item_deductions_on_payroll_item_id"
     t.index ["reporting_group"], name: "idx_payroll_item_deductions_reporting_group"
