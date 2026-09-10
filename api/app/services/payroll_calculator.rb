@@ -42,7 +42,7 @@ class PayrollCalculator
   end
 
   def apply_loan_payments!
-    process_loan_payments
+    ApplicationRecord.transaction { process_loan_payments }
   end
 
   protected
@@ -191,6 +191,7 @@ class PayrollCalculator
 
   def sync_percentage_payroll_field_entries_after_final_gross
     payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee, assignments: payroll_field_assignments_for_calculation)
+    apply_tracked_loan_field_limits! unless historical_calculation?
   end
 
   def payroll_field_assignments_for_calculation
@@ -235,10 +236,14 @@ class PayrollCalculator
       next if skip_employee_deduction?(dt)
 
       amount = ed.calculate_amount(payroll_item.gross_pay)
+      loan = historical_calculation? ? nil : loan_for_deduction_type(dt.id)
+      amount = loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: loan.payment_amount || amount) if loan
       next if amount.zero?
 
       payroll_item.payroll_item_deductions.build(
         deduction_type: dt,
+        employee_loan: loan,
+        loan_schedule_snapshot: loan ? loan_schedule_snapshot(loan, default: true) : {},
         amount: amount,
         category: dt.category,
         label: dt.name,
@@ -281,16 +286,18 @@ class PayrollCalculator
 
   # Process loan balance tracking for any loan-type deductions
   def process_loan_payments
+    recorded_loan_ids = Set.new
     payroll_item.payroll_item_deductions.select { |pid| pid.deduction_type&.loan? }.each do |pid|
-      loan = find_active_loan_for_deduction(pid)
+      loan = pid.employee_loan || find_active_loan_for_deduction(pid)
       next unless loan
-      next if payment_already_recorded?(loan)
+      raise ArgumentError, "A loan appears more than once on this paycheck; correct its repayment schedules and recalculate" unless recorded_loan_ids.add?(loan.id)
 
       loan.record_payment!(
         amount: pid.amount,
         pay_period: pay_period,
         payroll_item: payroll_item,
-        date: pay_period.pay_date
+        date: pay_period.pay_date,
+        schedule_snapshot: pid.loan_schedule_snapshot
       )
     end
   end
@@ -336,7 +343,9 @@ class PayrollCalculator
         amount: entry.amount,
         category: category,
         label: entry.label,
-        reporting_group: entry.reporting_group
+        reporting_group: entry.reporting_group,
+        employee_loan_id: historical_calculation? ? nil : entry.metadata&.fetch("employee_loan_id", nil),
+        loan_schedule_snapshot: historical_calculation? ? {} : (entry.metadata || {}).fetch("loan_schedule_snapshot", {})
       )
     end
   end
@@ -561,14 +570,34 @@ class PayrollCalculator
     employee_value(:retirement_rate).to_f.positive?
   end
 
-  def find_active_loan_for_deduction(payroll_item_deduction)
-    loan = if employee.association(:employee_loans).loaded?
-      employee.employee_loans.find do |candidate|
-        candidate.active? && candidate.deduction_type_id == payroll_item_deduction.deduction_type_id
-      end
-    else
-      employee.employee_loans.active.find_by(deduction_type_id: payroll_item_deduction.deduction_type_id)
+  def loan_schedule_snapshot(loan, default:)
+    { "default" => default, "payment_amount" => loan.payment_amount.to_s, "first_deduction_date" => loan.first_deduction_date.to_s }
+  end
+
+  def loan_for_deduction_type(type_id)
+    loans = employee.employee_loans.where(deduction_type_id: type_id).order(:id).to_a
+    raise ArgumentError, "Multiple loan balances use this deduction; link a separate schedule for each loan" if loans.size > 1
+
+    loans.first
+  end
+
+  def apply_tracked_loan_field_limits!
+    employee.employee_payroll_fields.includes(:employee_loan).each do |assignment|
+      loan = assignment.employee_loan
+      next unless loan
+
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.payroll_field_definition_id == assignment.payroll_field_definition_id && candidate.active? }
+      next unless entry
+
+      requested = entry.source == "employee_default" ? (loan.payment_amount || entry.amount) : (entry.metadata || {}).fetch("loan_requested_amount", entry.amount)
+      eligible = assignment.active? && (assignment.start_date.blank? || assignment.start_date <= pay_period.pay_date) && (assignment.end_date.blank? || assignment.end_date >= pay_period.pay_date)
+      entry.amount = eligible ? loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: requested) : 0.to_d
+      entry.metadata = (entry.metadata || {}).merge("employee_loan_id" => loan.id, "loan_requested_amount" => requested.to_s, "loan_schedule_snapshot" => loan_schedule_snapshot(loan, default: entry.source == "employee_default"))
     end
+  end
+
+  def find_active_loan_for_deduction(payroll_item_deduction)
+    loan = loan_for_deduction_type(payroll_item_deduction.deduction_type_id)
     return loan if loan
 
     field_entry = payroll_item.payroll_item_field_entries.find do |entry|
@@ -590,15 +619,7 @@ class PayrollCalculator
         .find_by(payroll_field_definition_id: field_entry.payroll_field_definition_id)
     end
     linked_loan = assignment&.employee_loan
-    linked_loan if linked_loan&.active?
-  end
-
-  def payment_already_recorded?(loan)
-    if loan.association(:loan_transactions).loaded?
-      loan.loan_transactions.any? { |transaction| transaction.transaction_type == "payment" && transaction.payroll_item_id == payroll_item.id }
-    else
-      loan.loan_transactions.payments.exists?(payroll_item_id: payroll_item.id)
-    end
+    linked_loan
   end
 
   def roth_retirement_deduction?(deduction_type)

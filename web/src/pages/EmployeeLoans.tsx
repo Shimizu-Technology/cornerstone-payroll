@@ -37,10 +37,11 @@ export default function EmployeeLoans() {
     opening_balance: '',
     payment_amount: '',
     start_date: '',
+    first_deduction_date: '',
     balance_as_of: guamToday(),
     balance_source: 'quickbooks' as EmployeeLoan['balance_source'],
     principal_amount_known: false,
-    schedule_key: '',
+    schedule_key: 'new',
     notes: '',
   });
   const [formError, setFormError] = useState<string | null>(null);
@@ -92,10 +93,11 @@ export default function EmployeeLoans() {
     opening_balance: '',
     payment_amount: '',
     start_date: '',
+    first_deduction_date: '',
     balance_as_of: guamToday(),
     balance_source: 'quickbooks',
     principal_amount_known: false,
-    schedule_key: '',
+    schedule_key: 'new',
     notes: '',
   });
 
@@ -108,6 +110,7 @@ export default function EmployeeLoans() {
       opening_balance: '',
       payment_amount: gap.amount_type === 'fixed' && gap.amount ? String(gap.amount) : '',
       start_date: '',
+    first_deduction_date: '',
       balance_as_of: guamToday(),
       balance_source: 'quickbooks',
       principal_amount_known: false,
@@ -159,6 +162,10 @@ export default function EmployeeLoans() {
       setFormError('Enter the original amount for the new loan.');
       return;
     }
+    if (formData.schedule_key && (!Number.isFinite(Number(formData.payment_amount)) || Number(formData.payment_amount) <= 0 || !formData.first_deduction_date)) {
+      setFormError('Enter the payment per payday and first deduction payday.');
+      return;
+    }
     const [scheduleKind, scheduleId] = formData.schedule_key.split(':');
     setCreatingLoan(true);
     try {
@@ -170,11 +177,13 @@ export default function EmployeeLoans() {
         opening_balance: formData.opening_balance ? parseFloat(formData.opening_balance) : undefined,
         payment_amount: formData.payment_amount ? parseFloat(formData.payment_amount) : undefined,
         start_date: formData.start_date || undefined,
+        first_deduction_date: formData.first_deduction_date || undefined,
         balance_as_of: isExistingBalance ? formData.balance_as_of : undefined,
         balance_source: isExistingBalance ? formData.balance_source : 'new_loan',
         principal_amount_known: isExistingBalance ? formData.principal_amount_known : true,
-        schedule_kind: scheduleKind ? scheduleKind as LoanSchedule['kind'] : undefined,
+        schedule_kind: scheduleKind ? scheduleKind as LoanSchedule['kind'] | 'new' : undefined,
         schedule_id: scheduleId ? parseInt(scheduleId, 10) : undefined,
+        schedule_fingerprint: loanSchedules.find(schedule => schedule.employee_id === Number(formData.employee_id) && `${schedule.kind}:${schedule.id}` === formData.schedule_key)?.source_fingerprint,
         notes: formData.notes || undefined,
       });
       setShowForm(false);
@@ -382,7 +391,7 @@ export default function EmployeeLoans() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Employee <span className="text-danger-600">*</span>
-                <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.employee_id} onChange={e => setFormData(p => ({ ...p, employee_id: e.target.value, schedule_key: '' }))}>
+                <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.employee_id} onChange={e => setFormData(p => ({ ...p, employee_id: e.target.value, schedule_key: 'new' }))}>
                   <option value="">Select an employee</option>
                   {employees.filter(e => e.status === 'active').map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.last_name}, {emp.first_name}</option>
@@ -396,12 +405,14 @@ export default function EmployeeLoans() {
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Payroll deduction schedule
                 <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.schedule_key} onChange={e => setFormData(p => ({ ...p, schedule_key: e.target.value }))} disabled={!formData.employee_id}>
-                  <option value="">No automatic deduction schedule</option>
+                  <option value="new">Create a payroll repayment schedule</option>
+                  <option value="">Track balance only — no payroll deductions</option>
                   {selectedEmployeeSchedules.map((schedule) => (
                     <option key={`${schedule.kind}:${schedule.id}`} value={`${schedule.kind}:${schedule.id}`}>{schedule.label}</option>
                   ))}
                 </select>
               </label>
+              {formData.schedule_key.startsWith('recurring_adjustment:') && <p className="text-sm text-neutral-600 md:col-span-2">This replaces the selected recurring loan deduction with balance repayment. The old recurring default will be stopped when you save, so it is not deducted twice.</p>}
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Payment per payroll
                 <Input placeholder="$0.00" type="text" inputMode="decimal" value={formData.payment_amount} onChange={e => setFormData(p => ({ ...p, payment_amount: e.target.value }))} />
@@ -437,7 +448,8 @@ export default function EmployeeLoans() {
                   <label className="space-y-1.5 text-sm font-semibold text-neutral-800">Loan start date<Input type="date" value={formData.start_date} onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))} /></label>
                 </>
               )}
-              <label className="space-y-1.5 text-sm font-semibold text-neutral-800 md:col-span-2">Notes or verification reference<Input placeholder="Optional source detail" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} /></label>
+              {formData.schedule_key && <label className="space-y-1.5 text-sm font-semibold text-neutral-800">First deduction payday<Input type="date" value={formData.first_deduction_date} onChange={e => setFormData(p => ({ ...p, first_deduction_date: e.target.value }))} /><span className="block text-xs font-normal text-neutral-600">Deduct each payday from this date, cap the last payment at the remaining balance, then stop.</span></label>}
+              <label className="space-y-1.5 text-sm font-semibold text-neutral-800 md:col-span-2">Notes or verification reference (does not change deductions)<Input placeholder="Optional source detail" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} /></label>
             </div>
             <p className="mt-3 text-xs leading-5 text-neutral-500">A linked payroll deduction reduces this ledger only when payroll is committed. Imported paid checks stay unchanged.</p>
             <div className="mt-3 grid grid-cols-1 gap-2 sm:flex">
@@ -490,7 +502,7 @@ export default function EmployeeLoans() {
                     <div className="mt-2 grid grid-cols-1 gap-1 text-sm text-gray-500 sm:flex sm:flex-wrap sm:gap-x-6 sm:gap-y-1">
                       <span>{loan.principal_amount_known ? `Original: ${fmt(loan.original_amount)}` : `Opening balance: ${fmt(loan.opening_balance)}`}</span>
                       <span className="font-semibold text-gray-900">Balance: {fmt(loan.current_balance)}</span>
-                      {loan.payment_amount && <span>Per Period: {fmt(loan.payment_amount)}</span>}
+                      {loan.scheduled ? <span>{loan.schedule_active ? `${fmt(loan.payment_amount || 0)} each payday${loan.effective_first_deduction_date ? ` from ${formatDate(loan.effective_first_deduction_date)}` : ''}${loan.last_deduction_date ? ` through ${formatDate(loan.last_deduction_date)}, or until paid` : ', until paid'}` : 'Payroll deductions stopped'}</span> : <span>Balance tracking only</span>}
                       <span>Verified as of: {formatDate(loan.balance_as_of)}</span>
                     </div>
                   </div>
@@ -522,6 +534,26 @@ export default function EmployeeLoans() {
                       </div>
                     </div>
 
+                    {expandedLoan.scheduled && expandedLoan.status !== 'paid_off' && (
+                      <form className="mb-4 flex flex-wrap items-end gap-3" onSubmit={async (event) => {
+                        event.preventDefault();
+                        const values = new FormData(event.currentTarget);
+                        setLoanActionId(loan.id);
+                        setLoanActionError(null);
+                        try {
+                          const result = await employeeLoansApi.update(loan.id, { payment_amount: Number(values.get('scheduled_payment')), first_deduction_date: String(values.get('first_payday')) });
+                          setExpandedLoan(result.loan);
+                          await loadLoans();
+                        } catch (error) {
+                          setLoanActionError(error instanceof Error ? error.message : 'Could not update repayment schedule');
+                        } finally { setLoanActionId(null); }
+                      }}>
+                        <label className="text-sm font-medium">Payment each payday<Input name="scheduled_payment" type="number" min="0.01" step="0.01" required defaultValue={expandedLoan.payment_amount} /></label>
+                        <label className="text-sm font-medium">First deduction payday<Input name="first_payday" type="date" required defaultValue={expandedLoan.first_deduction_date || ''} /></label>
+                        <Button type="submit" disabled={loanActionId === loan.id}>Save repayment schedule</Button>
+                        <p className="w-full text-xs text-neutral-600">Changes apply when editable payroll is recalculated. The final deduction is capped at the balance; paid-off and suspended loans do not deduct.</p>
+                      </form>
+                    )}
                     {/* Lifecycle Actions */}
                     <div className="mb-4 grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-white p-3 sm:flex sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
                       <div className="sm:mr-auto">

@@ -109,7 +109,7 @@ class PayrollFieldInputBuilder
     return unless payroll_item&.loan_deduction.to_f.positive?
     return unless field.category == "loan" && field.tax_treatment == "post_tax_deduction"
 
-    "Already supplied by this payroll import's loan deduction"
+    "Supplied by this payroll's direct loan deduction"
   end
 
   def decimal(value)

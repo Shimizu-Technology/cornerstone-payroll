@@ -19,7 +19,9 @@ class PayrollFieldInputApplier
       raise ArgumentError, "Payroll field is not available in the payroll worksheet" unless field.active? && field.show_in_payroll_grid?
       raise ArgumentError, "Payroll field belongs to another client" unless field.company_id == company_id
       if direct_loan_field_should_be_skipped?(payroll_item, field)
-        raise ArgumentError, "#{field.name} is already supplied by this payroll import's loan deduction"
+        next if input.fetch(:mode) == "default"
+
+        raise ArgumentError, "Clear the direct loan deduction before overriding #{field.name}; only one loan deduction source can apply"
       end
 
       entry = payroll_item.payroll_item_field_entries.detect do |candidate|
@@ -33,14 +35,14 @@ class PayrollFieldInputApplier
         # establishes the selected source before calculate! runs.
         amount = assignment.effective_amount_for(payroll_item.gross_pay.to_d)
         if entry
-          entry.assign_attributes(attributes.merge(amount: amount, source: "employee_default", metadata: (entry.metadata || {}).except("uncapped_amount")))
+          entry.assign_attributes(attributes.merge(amount: amount, source: "employee_default", metadata: (entry.metadata || {}).except("uncapped_amount", "loan_requested_amount")))
         else
           payroll_item.payroll_item_field_entries.build(attributes.merge(amount: amount, source: "employee_default"))
         end
       else
         amount = decimal_amount!(input[:amount], field.name)
         if entry
-          entry.assign_attributes(attributes.merge(amount: amount, source: "manual", metadata: (entry.metadata || {}).except("uncapped_amount")))
+          entry.assign_attributes(attributes.merge(amount: amount, source: "manual", metadata: (entry.metadata || {}).except("uncapped_amount", "loan_requested_amount")))
         else
           payroll_item.payroll_item_field_entries.build(attributes.merge(amount: amount, source: "manual"))
         end

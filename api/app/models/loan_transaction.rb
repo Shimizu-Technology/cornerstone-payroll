@@ -5,6 +5,8 @@ class LoanTransaction < ApplicationRecord
   SOURCES = %w[opening_balance payroll manual].freeze
 
   belongs_to :employee_loan
+  belongs_to :reverses_transaction, class_name: "LoanTransaction", optional: true
+  has_one :reversal, class_name: "LoanTransaction", foreign_key: :reverses_transaction_id
   belongs_to :pay_period, optional: true
   belongs_to :payroll_item, optional: true
   belongs_to :recorded_by, class_name: "User", optional: true
