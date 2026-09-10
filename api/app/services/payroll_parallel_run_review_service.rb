@@ -87,8 +87,7 @@ class PayrollParallelRunReviewService
   def cornerstone_totals
     items = pay_period.payroll_items.not_voided.to_a
     tax_total = items.sum do |item|
-      item.withholding_tax.to_d + item.additional_withholding.to_d + item.social_security_tax.to_d +
-        item.medicare_tax.to_d + item.additional_medicare_tax.to_d
+      PayrollTaxSummary.new(item).total
     end.round(2)
     total_deductions = items.sum { |item| item.total_deductions.to_d }.round(2)
     {

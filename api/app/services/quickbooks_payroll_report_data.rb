@@ -7,7 +7,7 @@ require "ostruct"
 # flexible payroll fields/deductions into 401(k) buckets when an explicit
 # reporting_group is present or the source is already retirement/401(k)-specific.
 class QuickbooksPayrollReportData
-  Line = Struct.new(:label, :amount, :hours, keyword_init: true)
+  Line = Struct.new(:label, :amount, :hours, :source, keyword_init: true)
   DeductionContributionEntry = Struct.new(
     :item,
     :employee_name,
@@ -67,72 +67,39 @@ class QuickbooksPayrollReportData
   end
 
   def earnings_lines_for(item)
-    grouped = item.payroll_item_earnings.group_by { |earning| earning.label.presence || earning.category.to_s.titleize }
+    flexible = flexible_addition_lines(item, "taxable_addition")
+    remaining = item.payroll_item_earnings.reject { |earning| earning.category == "non_taxable" }
+    remove_mirrored_earnings!(remaining, flexible, category: "other")
+    grouped = remaining.group_by { |earning| earning.label.presence || earning.category.to_s.titleize }
     lines = [ Line.new(label: "Gross", amount: item.gross_pay.to_f, hours: item.total_hours.to_f) ]
-
     grouped.each do |label, earnings|
       amount = earnings.sum { |earning| earning.amount.to_f }
       hours = earnings.sum { |earning| earning.hours.to_f }
       next if amount.zero? && hours.zero?
 
-      lines << Line.new(label: label, amount: amount, hours: hours.positive? ? hours : nil)
+      lines << Line.new(label: label, amount: amount, hours: hours.positive? ? hours : nil,
+        source: earnings.all? { |earning| earning.category == "bonus" } ? "one_time" : "saved_earning")
     end
-
-    existing_categories = item.payroll_item_earnings.map { |earning| earning.category.to_s }
-    existing_labels = item.payroll_item_earnings.map { |earning| earning.label.to_s.strip.downcase }
-
-    if item.bonus.to_f.positive? && !existing_categories.include?("bonus")
-      lines << Line.new(label: "Bonus", amount: item.bonus.to_f)
+    categories = remaining.map(&:category)
+    if item.bonus.to_f.positive? && !categories.include?("bonus")
+      lines << Line.new(label: "Bonus", amount: item.bonus.to_f, source: "one_time")
     end
-
-    if item.reported_tips.to_f.positive? && !existing_categories.include?("tips")
+    if item.reported_tips.to_f.positive? && !categories.include?("tips")
       lines << Line.new(label: "Paycheck Tips", amount: item.reported_tips.to_f)
     end
-
-    Array(item.custom_earnings).each do |entry|
-      amount = entry["amount"].to_f
-      label = entry["label"].presence || "Other Earnings"
-      next unless amount.positive?
-      next if existing_labels.include?(label.to_s.strip.downcase)
-
-      lines << Line.new(label: label, amount: amount)
-    end
-
-    payroll_field_entries_for(item, "taxable_addition").each do |entry|
-      next unless entry.amount.to_f.positive?
-
-      lines << Line.new(label: entry.label, amount: entry.amount.to_f)
-    end
-
-    payroll_adjustments_for(item, "taxable_addition").each do |adjustment|
-      lines << Line.new(label: adjustment.fetch("label"), amount: adjustment.fetch("amount").to_f)
-    end
-
-    lines
+    lines + flexible
   end
 
   def other_pay_lines_for(item)
-    lines = []
-
-    item.payroll_item_earnings.select { |earning| earning.category.to_s == "non_taxable" }.each do |earning|
-      lines << Line.new(label: earning.label.presence || "Other Pay", amount: earning.amount.to_f, hours: earning.hours)
+    flexible = flexible_addition_lines(item, "non_taxable_addition")
+    if item.non_taxable_pay.to_f.positive?
+      flexible << Line.new(label: "Non-Taxable Pay", amount: item.non_taxable_pay.to_f, source: "manual")
     end
-
-    payroll_field_entries_for(item, "non_taxable_addition").each do |entry|
-      next unless entry.amount.to_f.positive?
-
-      lines << Line.new(label: entry.label, amount: entry.amount.to_f)
-    end
-
-    payroll_adjustments_for(item, "non_taxable_addition").each do |adjustment|
-      lines << Line.new(label: adjustment.fetch("label"), amount: adjustment.fetch("amount").to_f)
-    end
-
-    if item.non_taxable_pay.to_f.positive? && lines.none? { |line| line.amount.to_f == item.non_taxable_pay.to_f }
-      lines << Line.new(label: "Non-taxable Pay", amount: item.non_taxable_pay.to_f)
-    end
-
-    lines
+    remaining = item.payroll_item_earnings.select { |earning| earning.category == "non_taxable" }
+    remove_mirrored_earnings!(remaining, flexible, category: "non_taxable")
+    remaining.map do |earning|
+      Line.new(label: earning.label.presence || "Other Pay", amount: earning.amount.to_f, hours: earning.hours)
+    end + flexible
   end
 
   def pre_tax_retirement_deduction_lines_for(item)
@@ -219,7 +186,8 @@ class QuickbooksPayrollReportData
   end
 
   def deduction_contribution_entries_for_item(item)
-    deduction_contribution_entries.select { |entry| entry.item == item }
+    @deduction_entries_by_item ||= {}
+    @deduction_entries_by_item[item] ||= build_deduction_contribution_entries(item)
   end
 
   def aggregate_deduction_contribution_rows
@@ -286,6 +254,39 @@ class QuickbooksPayrollReportData
   end
 
   private
+
+  # Calculators retain both source snapshots and materialized earning rows.
+  # Consume one exact mirror per source row; equal amounts on distinct sources
+  # must remain separate, and non-taxable rows must never appear in gross.
+  def remove_mirrored_earnings!(earnings, lines, category:)
+    lines.each do |line|
+      index = earnings.index do |earning|
+        earning.category == category && earning.label.to_s.strip.casecmp?(line.label.to_s.strip) &&
+          earning.amount.to_d.round(2) == line.amount.to_d.round(2)
+      end
+      earnings.delete_at(index) if index
+    end
+  end
+
+  def flexible_addition_lines(item, treatment)
+    lines = []
+    if treatment == "taxable_addition"
+      Array(item.custom_earnings).each do |entry|
+        next unless entry["amount"].to_f.positive?
+
+        lines << Line.new(label: entry["label"].presence || "Other Earning", amount: entry["amount"].to_f, source: "manual")
+      end
+    end
+    payroll_field_entries_for(item, treatment).each do |entry|
+      next unless entry.amount.to_f.positive?
+
+      lines << Line.new(label: entry.label, amount: entry.amount.to_f, source: entry.source)
+    end
+    payroll_adjustments_for(item, treatment).each do |adjustment|
+      lines << Line.new(label: adjustment.fetch("label"), amount: adjustment.fetch("amount").to_f, source: payroll_adjustment_source(item))
+    end
+    lines
+  end
 
   def build_deduction_contribution_entries(item)
     entries = []
