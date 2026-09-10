@@ -305,7 +305,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   };
 
   const handleMarkDelivered = async (item: CheckItem): Promise<void> => {
-    if (!window.confirm(`Confirm that check #${item.check_number} was delivered to ${item.employee_name}? This marks the linked AIRE hours as paid.`)) return;
+    const linkedNotice = item.aire_linked ? ' This marks the linked AIRE hours as paid.' : '';
+    if (!window.confirm(`Confirm that check #${item.check_number} was delivered to ${item.employee_name}?${linkedNotice}`)) return;
     setActionLoading({ id: item.id, action: 'markDelivered' });
     try {
       const result = await checksApi.markDelivered(item.id);
@@ -469,7 +470,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       )}
 
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-        Printing means the check was prepared. Mark it delivered only after the employee has received it; linked AIRE hours are not marked paid until then.
+        Printing means the check was prepared. Mark it delivered only after the employee has received it.
+        {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
       </div>
 
       {checkNumberChanges.length > 0 && (

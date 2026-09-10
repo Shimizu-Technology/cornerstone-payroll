@@ -6,6 +6,16 @@ RSpec.describe W2GuAggregator do
   let(:employee) { create(:employee, company: company, department: department, ssn_encrypted: "123-45-6789") }
 
   describe "#generate" do
+    it "keeps filing caveats readable while retaining structured compliance issues" do
+      report = described_class.new(company, 2026).generate
+      expect(report[:meta][:caveats]).to include(
+        "Employees missing an SSN are flagged in the compliance issues.",
+        "If payroll items were committed before tips were included in gross pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually."
+      )
+      expect(report[:meta][:caveats].join(" ")).not_to match(/compliance_issues|gross_pay/)
+      expect(report[:compliance_issues]).to eq([])
+    end
+
     it "uses historical payroll-item classification after the worker becomes a contractor" do
       historical_employee = create(:employee, :contractor,
         company: company,

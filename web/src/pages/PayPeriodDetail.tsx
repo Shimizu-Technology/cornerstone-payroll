@@ -40,6 +40,7 @@ import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
+import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecordsDialog';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
@@ -296,6 +297,7 @@ export function PayPeriodDetail({
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
+  const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
@@ -436,6 +438,8 @@ export function PayPeriodDetail({
     // momentarily render against the previous period's checks while the
     // new panel loads.
     setPayPeriod(null);
+    setTimeTrackingImportOpen(false);
+    setAireRecordsOpen(false);
     setPayrollItems([]);
     setNonEmployeeChecks([]);
     setSupplementals([]);
@@ -962,11 +966,14 @@ export function PayPeriodDetail({
   const canEditPayPeriod = !isCommitted && !isVoided;
   const canImportMosa = isDraft && canEditPayPeriod;
   const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
-  const canImportTimeTracking = (isDraft && canEditPayPeriod) || (isCommitted && !isVoided);
+  const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
+  const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
+  const canLinkAireRecord = isCommitted && !isVoided && activeTimeTrackingSources.includes('aire_services');
+  const linkedAireRecords = payPeriod.time_tracking?.linked_aire_records || [];
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
-  const hasLinkedAireRecord = reportablePayrollItems.some((item) => Boolean(item.time_tracking_provenance));
+  const hasLinkedAireRecord = linkedAireRecords.length > 0;
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
   const totalGross = reportablePayrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
@@ -1294,11 +1301,14 @@ export function PayPeriodDetail({
 
   const workflowActions = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+      {hasLinkedAireRecord && (
+        <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View AIRE Record</Button>
+      )}
       {isCommitted && !isVoided && (
         <>
-          {canImportTimeTracking && (
+          {canLinkAireRecord && !hasLinkedAireRecord && (
             <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
-              {hasLinkedAireRecord ? 'View AIRE Record' : 'Link AIRE Record'}
+              Link AIRE Record
             </Button>
           )}
           <Button variant="outline" onClick={openPayDateCorrection}>
@@ -3143,11 +3153,18 @@ export function PayPeriodDetail({
       />
 
       <TimeTrackingImportModal
+        key={`${payPeriod.company_id}-${payPeriod.id}`}
         open={timeTrackingImportOpen}
         onClose={() => setTimeTrackingImportOpen(false)}
         payPeriod={payPeriod}
         employees={employees}
         onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+      />
+
+      <AirePayrollRecordsDialog
+        open={aireRecordsOpen}
+        onClose={() => setAireRecordsOpen(false)}
+        records={linkedAireRecords}
       />
 
       {/* Per-employee Corrective Paycheck Modal — only relevant on

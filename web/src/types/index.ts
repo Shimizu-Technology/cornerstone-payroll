@@ -502,6 +502,29 @@ export interface PayDateCorrection {
   corrected_by_name?: string | null;
 }
 
+export interface AirePayrollRecord {
+  id: number;
+  source_name: string;
+  source_active: boolean;
+  external_batch_id: string;
+  external_batch_checksum: string;
+  contract_version: string;
+  source_cutoff_at: string;
+  applied_at?: string | null;
+  reconciled_at?: string | null;
+  reconciliation_note?: string | null;
+  reconciliation_exceptions?: Array<{
+    employee_name: string;
+    aire_regular_hours: string;
+    cornerstone_regular_hours: string;
+    aire_overtime_hours: string;
+    cornerstone_overtime_hours: string;
+    total_difference_hours: string;
+  }>;
+  source_processing_status?: string | null;
+  source_processing_synced_at?: string | null;
+}
+
 export interface PayPeriod {
   id: number;
   company_id?: number;
@@ -531,6 +554,10 @@ export interface PayPeriod {
   notes?: string;
   period_description?: string;
   payroll_intake_source_types?: string[];
+  time_tracking?: {
+    active_source_types: string[];
+    linked_aire_records: AirePayrollRecord[];
+  };
   created_by_id?: number;
   approved_by_id?: number;
   calculated_at?: string | null;
@@ -1101,6 +1128,7 @@ export interface CheckItem {
   pay_period_id: number;
   employee_id: number;
   employee_name: string;
+  aire_linked?: boolean;
   department_id?: number | null;
   department_name?: string | null;
   check_number: string | null;
