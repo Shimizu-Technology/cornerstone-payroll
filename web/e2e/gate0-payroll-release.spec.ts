@@ -1829,6 +1829,103 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(String((await responseJson(retryApply)).error)).toMatch(/non-editable pay period/i);
   });
 
+  test('enters and clears a one-time bonus beside hours without creating a recurring addition', async ({ browser }) => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email,
+      'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      const periodPath = `admin/pay_periods/${fixture.bonus_sync_pay_period_id}`;
+      const baseline = await accountantApi.post(`${periodPath}/run_payroll`);
+      expect(baseline.ok()).toBeTruthy();
+      const baselineBody = await baseline.json();
+      const initial = baselineBody.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      const grossWithoutBonus = Number(initial.gross_pay) - Number(initial.bonus || 0);
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const bonus = page.getByRole('textbox', { name: 'Bonus this payroll for Avery Example', exact: true });
+      await expect(bonus).toBeVisible();
+      await bonus.fill('321.09');
+      await bonus.press('Tab');
+      await page.route('**/run_payroll', async (route) => {
+        await route.fulfill({ json: {
+          ...baselineBody,
+          results: { success: [], errors: [{ employee_id: fixture.employee_id, error: 'Review this employee setup before retrying.' }] },
+        } });
+      }, { times: 1 });
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
+      await expect(bonus).toHaveValue('321.09');
+      const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const result = await (await save).json();
+      expect(result.results.errors).toEqual([]);
+      const updated = result.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      expect(Number(updated.bonus)).toBe(321.09);
+      expect(Number(updated.gross_pay)).toBeCloseTo(grossWithoutBonus + 321.09, 2);
+      await expect(bonus).toHaveValue('321.09');
+      await page.reload();
+      await expect(bonus).toHaveValue('321.09');
+      await bonus.fill('0');
+      await bonus.press('Tab');
+      const clear = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const cleared = await (await clear).json();
+      expect(cleared.results.errors).toEqual([]);
+      const finalItem = cleared.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      expect(Number(finalItem.bonus)).toBe(0);
+      expect(Number(finalItem.gross_pay)).toBeCloseTo(grossWithoutBonus, 2);
+      await page.screenshot({ path: 'test-results/feedback-bonus-worksheet.png', fullPage: true });
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('accepts a first direct loan entry with an untouched default and restores the default after clearing', async ({ browser }) => {
+    const fieldResponse = await adminApi.post('admin/payroll_fields', { data: { payroll_field: {
+      name: `Feedback loan ${randomUUID()}`, kind: 'deduction', tax_treatment: 'post_tax_deduction', category: 'loan',
+      amount_type: 'fixed', default_amount: 50, show_in_payroll_grid: true, active: true,
+    } } });
+    expect(fieldResponse.ok()).toBeTruthy();
+    const { payroll_field: field } = await fieldResponse.json();
+    const assignment = await adminApi.post(`admin/employees/${fixture.employee_id}/payroll_fields`, { data: {
+      employee_payroll_field: { payroll_field_definition_id: field.id, amount: 50, active: true },
+    } });
+    expect(assignment.ok()).toBeTruthy();
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Avery Example', exact: true });
+      if (!await loan.isVisible()) await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
+      await loan.fill('75');
+      await loan.press('Tab');
+      const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const body = await (await saved).json();
+      expect(body.results.errors).toEqual([]);
+      const item = body.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
+      expect(Number(item.loan_deduction)).toBe(75);
+      expect(Number(item.loan_payment)).toBe(75);
+      await page.reload();
+      await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
+      await expect(loan).toHaveValue('75.00');
+      await loan.fill('0');
+      await loan.press('Tab');
+      const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const final = await (await cleared).json();
+      expect(final.results.errors).toEqual([]);
+      const finalItem = final.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
+      expect(Number(finalItem.loan_deduction)).toBe(0);
+      expect(Number(finalItem.loan_payment)).toBe(50);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('records a historical correction beside the locked source and exposes its immutable review workflow', async ({ browser }): Promise<void> => {
     const sourceBefore = await adminApi.get(`admin/imported_pay_periods/${fixture.historical_pay_period_id}`);
     expect(sourceBefore.ok()).toBeTruthy();
@@ -1901,101 +1998,6 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       { data: { event_type: 'filing_reviewed_no_amendment', note: 'Reviewed in Gate 0' } },
     );
     expect(eventResponse.ok()).toBeTruthy();
-  });
-  test('enters and clears a one-time bonus beside hours without creating a recurring addition', async ({ browser }) => {
-    const context = await browser.newContext({ extraHTTPHeaders: {
-      'X-E2E-User-Email': fixture.accountant_email,
-      'X-Company-Id': String(fixture.company_id),
-    } });
-    try {
-      const page = await context.newPage();
-      const periodPath = `admin/pay_periods/${fixture.bonus_sync_pay_period_id}`;
-      const baseline = await accountantApi.post(`${periodPath}/run_payroll`);
-      expect(baseline.ok()).toBeTruthy();
-      const baselineBody = await baseline.json();
-      const initial = baselineBody.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
-      const grossWithoutBonus = Number(initial.gross_pay) - Number(initial.bonus || 0);
-      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
-      const bonus = page.getByRole('textbox', { name: 'Bonus this payroll for Bonus Alpha', exact: true });
-      await expect(bonus).toBeVisible();
-      await bonus.fill('321.09');
-      await bonus.press('Tab');
-      await page.route('**/run_payroll', async (route) => {
-        await route.fulfill({ json: {
-          ...baselineBody,
-          results: { success: [], errors: [{ employee_id: fixture.bonus_alpha_employee_id, error: 'Review this employee setup before retrying.' }] },
-        } });
-      }, { times: 1 });
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-      await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
-      await expect(bonus).toHaveValue('321.09');
-      const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-      const result = await (await save).json();
-      expect(result.results.errors).toEqual([]);
-      const updated = result.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
-      expect(Number(updated.bonus)).toBe(321.09);
-      expect(Number(updated.gross_pay)).toBeCloseTo(grossWithoutBonus + 321.09, 2);
-      await expect(bonus).toHaveValue('321.09');
-      await page.reload();
-      await expect(bonus).toHaveValue('321.09');
-      await bonus.fill('0');
-      await bonus.press('Tab');
-      const clear = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-      const cleared = await (await clear).json();
-      expect(cleared.results.errors).toEqual([]);
-      const finalItem = cleared.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
-      expect(Number(finalItem.bonus)).toBe(0);
-      expect(Number(finalItem.gross_pay)).toBeCloseTo(grossWithoutBonus, 2);
-      await page.screenshot({ path: 'test-results/feedback-bonus-worksheet.png', fullPage: true });
-    } finally {
-      await context.close();
-    }
-  });
-
-  test('accepts a first direct loan entry with an untouched default and restores the default after clearing', async ({ browser }) => {
-    const fieldResponse = await adminApi.post('admin/payroll_fields', { data: { payroll_field: {
-      name: `Feedback loan ${randomUUID()}`, kind: 'deduction', tax_treatment: 'post_tax_deduction', category: 'loan',
-      amount_type: 'fixed', default_amount: 50, show_in_payroll_grid: true, active: true,
-    } } });
-    expect(fieldResponse.ok()).toBeTruthy();
-    const { payroll_field: field } = await fieldResponse.json();
-    const assignment = await adminApi.post(`admin/employees/${fixture.bonus_alpha_employee_id}/payroll_fields`, { data: {
-      employee_payroll_field: { payroll_field_definition_id: field.id, amount: 50, active: true },
-    } });
-    expect(assignment.ok()).toBeTruthy();
-    const context = await browser.newContext({ extraHTTPHeaders: {
-      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
-    } });
-    try {
-      const page = await context.newPage();
-      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
-      const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Bonus Alpha', exact: true });
-      if (!await loan.isVisible()) await page.getByRole('button', { name: /Tips & Deductions/ }).click();
-      await loan.fill('75');
-      await loan.press('Tab');
-      const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-      const body = await (await saved).json();
-      expect(body.results.errors).toEqual([]);
-      const item = body.pay_period.payroll_items.find((row: { id: number }) => row.id === fixture.bonus_alpha_payroll_item_id);
-      expect(Number(item.loan_deduction)).toBe(75);
-      expect(Number(item.loan_payment)).toBe(75);
-      await page.reload();
-      await expect(loan).toHaveValue('75.00');
-      await loan.fill('0');
-      await loan.press('Tab');
-      const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-      const final = await (await cleared).json();
-      expect(final.results.errors).toEqual([]);
-      const finalItem = final.pay_period.payroll_items.find((row: { id: number }) => row.id === fixture.bonus_alpha_payroll_item_id);
-      expect(Number(finalItem.loan_deduction)).toBe(0);
-      expect(Number(finalItem.loan_payment)).toBe(50);
-    } finally {
-      await context.close();
-    }
   });
 
 });
