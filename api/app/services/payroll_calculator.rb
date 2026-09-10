@@ -439,6 +439,8 @@ class PayrollCalculator
         "election_source" => w4_election_for_calculation&.source,
         "form_version" => employee_value(:w4_form_version),
         "effective_on" => employee_value(:w4_effective_on)&.to_date&.iso8601,
+        "signed_on" => employee_value(:w4_signed_on)&.to_date&.iso8601,
+        "source_reference" => employee_value(:w4_source_reference),
         "filing_status_entered" => employee_value(:filing_status),
         "filing_status_normalized" => FilingStatusConfig.normalize(employee_value(:filing_status)),
         "step2_multiple_jobs" => employee_value(:w4_step2_multiple_jobs),

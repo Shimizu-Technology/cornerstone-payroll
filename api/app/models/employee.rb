@@ -97,6 +97,7 @@ class Employee < ApplicationRecord
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
 
+  before_validation :normalize_w4_source_reference
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
@@ -107,6 +108,7 @@ class Employee < ApplicationRecord
   encrypts :bank_routing_number_encrypted
   encrypts :bank_account_number_encrypted
 
+  validates :w4_source_reference, length: { maximum: 255 }, allow_nil: true
   validates :first_name, presence: true
   validates :last_name, presence: true
   validates :pay_rate,
@@ -117,6 +119,7 @@ class Employee < ApplicationRecord
   validates :status, inclusion: { in: %w[active inactive terminated] }
   validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
   validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
+  validate :plausible_hire_date, if: :will_save_change_to_hire_date?
   validate :configuration_review_items_are_valid
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
@@ -449,6 +452,19 @@ class Employee < ApplicationRecord
   SOURCE_FIELD_CONFIGURATION_REVIEW_CODES = %w[
     verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
   ].freeze
+
+  def normalize_w4_source_reference
+    self.w4_source_reference = w4_source_reference.to_s.strip.presence
+  end
+
+  def plausible_hire_date
+    if hire_date.blank?
+      errors.add(:hire_date, "must be a valid date") if hire_date_before_type_cast.present?
+      return
+    end
+
+    errors.add(:hire_date, "must have a year between 1900 and next year") unless hire_date.year.between?(1900, Date.current.year + 1)
+  end
 
   def configuration_review_items_are_valid
     unless configuration_review_items.is_a?(Array)

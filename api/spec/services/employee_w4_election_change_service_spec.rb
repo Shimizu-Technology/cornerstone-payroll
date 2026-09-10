@@ -39,6 +39,22 @@ RSpec.describe EmployeeW4ElectionChangeService do
     expect(employee.reload.filing_status).to eq("married")
   end
 
+  it "keeps signed-document dates separate from application effective and recorded dates" do
+    election = described_class.new(
+      employee: employee,
+      attributes: election_attributes(
+        w4_form_version: 2025, w4_signed_on: "2025-10-20", w4_source_reference: "Signed W4.pdf",
+        w4_dependent_credit: 2000, w4_effective_on: "2026-09-07"
+      ), actor: actor, source: "quickbooks_history", reason: "Verified signed form"
+    ).call!
+
+    expect(election.w4_signed_on).to eq(Date.new(2025, 10, 20))
+    expect(election.effective_on).to eq(Date.new(2026, 9, 7))
+    expect(election.created_at.to_date).to eq(Date.current)
+    expect(employee.reload.w4_signed_on).to eq(election.w4_signed_on)
+    expect(election.profile_attributes).to include(w4_source_reference: "Signed W4.pdf", w4_form_version: 2025)
+  end
+
   it "requires an effective date and explanation for a changed election" do
     described_class.new(
       employee: employee,
@@ -93,6 +109,16 @@ RSpec.describe EmployeeW4ElectionChangeService do
         source: "staff",
         reason: ""
       ).call!
+    }.not_to change(EmployeeW4Election, :count)
+  end
+
+  it "does not append an election for a blank source reference submitted with an unrelated edit" do
+    described_class.new(employee: employee, attributes: election_attributes,
+      actor: actor, source: "employee_creation", reason: "Initial W-4 election").call!
+
+    expect {
+      described_class.new(employee: employee, attributes: election_attributes(w4_source_reference: "  "),
+        actor: actor, source: "staff", reason: "").call!
     }.not_to change(EmployeeW4Election, :count)
   end
 
