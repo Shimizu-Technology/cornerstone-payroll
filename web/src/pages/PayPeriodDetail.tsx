@@ -2269,6 +2269,7 @@ export function PayPeriodDetail({
                               fixedDecimalsOnBlur={2}
                             />
                           </div>
+                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">One-time deduction. For balance repayment, use the linked loan field.</p>
                         </TableCell>
                         )}
                         {showPayrollFields && worksheetPayrollFields.map((field) => {
