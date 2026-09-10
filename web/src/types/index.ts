@@ -765,6 +765,8 @@ export interface PayrollItem {
   service_charge_wages?: number | null;
   qualified_overtime_compensation?: number | null;
   bonus?: number;
+  bonus_source?: 'manual' | 'mosa_revel' | null;
+  imported_bonus?: number | null;
   salary_override?: number | null;
   non_taxable_pay?: number;
   // Calculated pay
