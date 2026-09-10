@@ -75,11 +75,33 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     expect(target.reload).to have_attributes(hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
     expect(company.deduction_types.find_by!(name: "Employee loan")).to have_attributes(default_amount: 50.to_d)
     expect(target.employee_deductions.joins(:deduction_type).find_by!(deduction_types: { name: "Employee loan" })).to have_attributes(amount: 50.to_d)
+    expect(target.employee_deductions.joins(:deduction_type).find_by!(deduction_types: { name: "Employee loan" })).not_to be_active
+    expect(target.reload.configuration_review_items).to include(include("code" => "loan_balance_not_transferred"))
     expect(company.employee_loans).to be_empty
     expect(company.pay_periods).to be_empty
     expect(company.historical_import_batches).to contain_exactly(batch)
     expect(company.reload.email).to eq("old@example.com")
     expect(company.company_pay_schedules.find_by!(effective_on: effective_on)).to be_confirmed
+  end
+
+  it "copies a linked loan field inactive without losing an existing successor ledger" do
+    source = create(:employee, company: source_company)
+    target = create(:employee, company: company)
+    source_field = create(:payroll_field_definition, company: source_company, category: "loan", kind: "deduction", tax_treatment: "post_tax_deduction")
+    target_field = create(:payroll_field_definition, company: company, category: "loan", kind: "deduction", tax_treatment: "post_tax_deduction")
+    loan = EmployeeLoan.create!(company: source_company, employee: source, name: "Tracked loan", original_amount: 500, current_balance: 450, status: "active")
+    source.employee_payroll_fields.create!(payroll_field_definition: source_field, employee_loan: loan, amount: 50, active: true)
+    described_class.copy_payroll_fields!(source, target, { source_field => target_field })
+    copied = target.employee_payroll_fields.find_by!(payroll_field_definition: target_field)
+    expect(copied).not_to be_active
+    expect(copied.employee_loan_id).to be_nil
+    expect(target.reload.configuration_review_items).to include(include("code" => "loan_balance_not_transferred"))
+
+    target_loan = EmployeeLoan.create!(company: company, employee: target, name: "Verified successor loan", original_amount: 125, current_balance: 125, status: "active")
+    copied.update!(employee_loan: target_loan, amount: 25, active: true)
+    described_class.copy_payroll_fields!(source, target, { source_field => target_field })
+    expect(copied.reload).to have_attributes(employee_loan_id: target_loan.id, amount: 25.to_d, active: true)
+    expect(target_loan.reload.current_balance).to eq(125)
   end
 
   it "blocks a transfer when an active employee cannot be matched" do
