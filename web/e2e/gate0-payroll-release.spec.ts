@@ -2006,4 +2006,57 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(eventResponse.ok()).toBeTruthy();
   });
 
+  test('creates and edits a verified loan repayment schedule through the real UI', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const loanName = `Verified UI loan ${randomUUID()}`;
+    let loanId: number | undefined;
+    try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(10_000);
+      await page.goto('/employee-loans');
+      await page.getByRole('button', { name: 'Set up loan', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Employee *', exact: true }).selectOption(String(fixture.employee_id));
+      await page.getByLabel('Loan name *', { exact: true }).fill(loanName);
+      await page.getByRole('combobox', { name: 'Payroll deduction schedule', exact: true }).selectOption('new');
+      await page.getByLabel('Payment per payroll', { exact: true }).fill('250');
+      await page.getByLabel('Confirmed opening balance *', { exact: true }).fill('650');
+      await page.getByLabel('Balance verified as of *', { exact: true }).fill('2026-09-01');
+      await page.getByRole('combobox', { name: 'Verification source', exact: true }).selectOption('statement');
+      await page.getByLabel('First deduction payday', { exact: false }).fill('2026-09-10');
+      const createdResponse = page.waitForResponse(response => response.url().endsWith('/admin/employee_loans') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Create Loan', exact: true }).click();
+      const created = await createdResponse;
+      expect(created.status()).toBe(201);
+      const createdLoan = (await created.json()).loan;
+      loanId = createdLoan.id;
+      expect(Number(createdLoan.current_balance)).toBe(650);
+      expect(Number(createdLoan.payment_amount)).toBe(250);
+      expect(createdLoan.first_deduction_date).toBe('2026-09-10');
+      expect(createdLoan.scheduled).toBe(true);
+      await page.getByRole('button', { name: new RegExp(loanName) }).click();
+      await page.getByLabel('Payment each payday', { exact: true }).fill('200');
+      await page.getByLabel('First deduction payday', { exact: true }).fill('2026-09-24');
+      const updatedResponse = page.waitForResponse(response => response.url().endsWith(`/admin/employee_loans/${loanId}`) && response.request().method() === 'PATCH');
+      await page.getByRole('button', { name: 'Save repayment schedule', exact: true }).click();
+      expect((await updatedResponse).ok()).toBeTruthy();
+      await page.reload();
+      await page.getByRole('button', { name: new RegExp(loanName) }).click();
+      await expect(page.getByLabel('Payment each payday', { exact: true })).toHaveValue('200.0');
+      await expect(page.getByLabel('First deduction payday', { exact: true })).toHaveValue('2026-09-24');
+      const saved = await adminApi.get(`admin/employee_loans/${loanId}`);
+      const savedLoan = (await saved.json()).loan;
+      expect(Number(savedLoan.payment_amount)).toBe(200);
+      expect(savedLoan.first_deduction_date).toBe('2026-09-24');
+      const schedules = await adminApi.get('admin/employee_loans');
+      const schedule = (await schedules.json()).loan_schedules.find((row: { employee_id: number; deduction_type_id?: number }) => row.employee_id === fixture.employee_id && row.deduction_type_id === savedLoan.deduction_type_id);
+      expect(Number(schedule.amount)).toBe(200);
+      expect(schedule.tracked).toBe(true);
+    } finally {
+      if (loanId) await adminApi.delete(`admin/employee_loans/${loanId}`);
+      await context.close();
+    }
+  });
+
 });
