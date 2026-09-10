@@ -6,6 +6,7 @@ class PayrollItemDeduction < ApplicationRecord
 
   belongs_to :payroll_item
   belongs_to :deduction_type
+  belongs_to :employee_loan, optional: true
 
   validates :amount, presence: true, numericality: true
   validates :category, presence: true, inclusion: { in: CATEGORIES }

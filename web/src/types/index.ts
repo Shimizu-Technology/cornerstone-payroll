@@ -1483,6 +1483,11 @@ export interface EmployeeLoan {
   principal_amount_known: boolean;
   created_by_name?: string | null;
   payment_amount?: number;
+  first_deduction_date?: string;
+  scheduled?: boolean;
+  schedule_active?: boolean;
+  effective_first_deduction_date?: string;
+  last_deduction_date?: string;
   start_date?: string;
   paid_off_date?: string;
   status: LoanStatus;
@@ -1508,7 +1513,8 @@ export interface LoanTransaction {
 }
 
 export interface LoanSchedule {
-  kind: 'employee_deduction' | 'payroll_field';
+  kind: 'employee_deduction' | 'payroll_field' | 'recurring_adjustment';
+  source_fingerprint?: string;
   id: number;
   employee_id: number;
   employee_name: string;

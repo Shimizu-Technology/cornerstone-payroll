@@ -3166,14 +3166,14 @@ export const employeeLoansApi = {
     api.get<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`),
   create: (data: {
     employee_id: number; name: string; original_amount?: number;
-    opening_balance?: number; payment_amount?: number; start_date?: string;
+    opening_balance?: number; payment_amount?: number; start_date?: string; first_deduction_date?: string;
     balance_as_of?: string; balance_source?: EmployeeLoan['balance_source'];
     principal_amount_known?: boolean; balance_setup_mode?: 'new_loan' | 'existing_balance';
-    schedule_kind?: LoanSchedule['kind']; schedule_id?: number;
+    schedule_kind?: LoanSchedule['kind'] | 'new'; schedule_id?: number; schedule_fingerprint?: string;
     deduction_type_id?: number; notes?: string;
   }) =>
     api.post<{ loan: EmployeeLoan }>('/admin/employee_loans', { employee_loan: data }),
-  update: (id: number, data: Partial<{ name: string; payment_amount: number; notes: string; deduction_type_id: number }>) =>
+  update: (id: number, data: Partial<{ name: string; payment_amount: number; first_deduction_date: string; notes: string; deduction_type_id: number }>) =>
     api.patch<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`, { employee_loan: data }),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/employee_loans/${id}`),

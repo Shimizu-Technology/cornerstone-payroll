@@ -226,6 +226,7 @@ RSpec.describe PayrollCalculator do
         employee: employee,
         company: company,
         name: "Verified balance",
+        balance_as_of: pay_period.pay_date,
         original_amount: 500,
         current_balance: 500,
         payment_amount: 50,

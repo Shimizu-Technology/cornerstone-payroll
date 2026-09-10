@@ -10,6 +10,7 @@ class EmployeePayrollField < ApplicationRecord
   validates :percentage, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :field_belongs_to_employee_company
   validate :date_range_is_valid
+  validate :loan_matches_assignment
 
   scope :active, -> { where(active: true) }
   scope :effective_on, ->(date) {
@@ -35,6 +36,24 @@ class EmployeePayrollField < ApplicationRecord
 
     if payroll_field_definition.company_id != employee.company_id
       errors.add(:payroll_field_definition, "must belong to the employee's company")
+    end
+  end
+
+  def loan_matches_assignment
+    if persisted? && employee_loan_id_in_database.present?
+      errors.add(:employee_loan, "cannot be detached or replaced; suspend this repayment schedule instead") if will_save_change_to_employee_loan_id?
+      errors.add(:payroll_field_definition, "cannot be replaced on a linked repayment schedule") if will_save_change_to_payroll_field_definition_id?
+    end
+    return unless employee_loan
+
+    if employee_loan.employee_id != employee_id || employee_loan.company_id != employee&.company_id
+      errors.add(:employee_loan, "must belong to this employee and client")
+    end
+    unless category == "loan" && tax_treatment == "post_tax_deduction" && amount_type == "fixed"
+      errors.add(:employee_loan, "requires a fixed post-tax loan deduction")
+    end
+    if employee_loan.deduction_type_id.present? || employee_loan.employee_payroll_fields.where.not(id: id).exists?
+      errors.add(:employee_loan, "already has a repayment schedule")
     end
   end
 
