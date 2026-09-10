@@ -18,7 +18,7 @@ module Api
           status = assignment.previously_new_record? ? :created : :ok
           render json: { employee_payroll_field: assignment_json(assignment) }, status: status
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         def update
@@ -28,7 +28,7 @@ module Api
             render json: { errors: @assignment.errors.full_messages }, status: :unprocessable_entity
           end
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         def bulk_update
@@ -39,7 +39,7 @@ module Api
             .map { |attrs| attrs[:payroll_field_definition_id] }
 
           if active_definition_ids.uniq.length != active_definition_ids.length
-            return render json: { errors: ["Payroll field assignments cannot contain duplicate active fields"] }, status: :unprocessable_entity
+            return render json: { errors: [ "Payroll field assignments cannot contain duplicate active fields" ] }, status: :unprocessable_entity
           end
 
           assignments = []
@@ -61,14 +61,14 @@ module Api
 
           render json: { employee_payroll_fields: assignments.map { |assignment| assignment_json(assignment) } }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound, ActionController::ParameterMissing => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         def destroy
           @assignment.update!(active: false)
           render json: { employee_payroll_field: assignment_json(@assignment) }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         private
@@ -116,7 +116,9 @@ module Api
 
           if permitted[:employee_loan_id].present?
             loan = EmployeeLoan.find_by(id: permitted[:employee_loan_id], company_id: current_company_id, employee_id: @employee.id)
-            permitted[:employee_loan_id] = loan&.id
+            raise ActiveRecord::RecordNotFound, "Loan not found for this employee" unless loan
+
+            permitted[:employee_loan_id] = loan.id
           end
 
           permitted

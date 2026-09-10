@@ -221,9 +221,9 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
         }
       }
 
-      expect(response).to have_http_status(:created)
-      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
-      expect(assignment.employee_loan_id).to be_nil
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_payroll_fields.where(payroll_field_definition: field)).not_to exist
+      expect(response.parsed_body.fetch("errors")).to include("Loan not found for this employee")
     end
 
     it "does not assign another employee's loan from the same company" do
@@ -254,9 +254,9 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
         }
       }
 
-      expect(response).to have_http_status(:created)
-      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
-      expect(assignment.employee_loan_id).to be_nil
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_payroll_fields.where(payroll_field_definition: field)).not_to exist
+      expect(response.parsed_body.fetch("errors")).to include("Loan not found for this employee")
     end
 
     it "returns a validation response when assignment creation hits a uniqueness race" do
@@ -300,6 +300,40 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "rejects an invalid replacement loan without detaching the saved balance ledger" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Tracked loan", kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      loan = EmployeeLoan.create!(company: company, employee: employee, name: "Existing balance", original_amount: 500, current_balance: 500)
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, employee_loan: loan, amount: 50)
+
+      patch "/api/v1/admin/employees/#{employee.id}/payroll_fields/#{assignment.id}", params: {
+        employee_payroll_field: { employee_loan_id: -1, amount: 100 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(assignment.reload.employee_loan_id).to eq(loan.id)
+      expect(assignment.amount).to eq(50)
+      expect(loan.reload.current_balance).to eq(500)
+    end
+
+    it "rejects the entire bulk update when a supplied loan cannot be linked" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Tracked loan", kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      loan = EmployeeLoan.create!(company: company, employee: employee, name: "Existing balance", original_amount: 500, current_balance: 500)
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, employee_loan: loan, amount: 50)
+      rent = PayrollFieldDefinition.create!(company: company, name: "Rent", kind: "deduction", tax_treatment: "post_tax_deduction", category: "rent")
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/bulk_update", params: {
+        employee_payroll_fields: [
+          { payroll_field_definition_id: rent.id, amount: 25 },
+          { id: assignment.id, payroll_field_definition_id: field.id, employee_loan_id: -1, amount: 100 }
+        ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_payroll_fields.count).to eq(1)
+      expect(assignment.reload.employee_loan_id).to eq(loan.id)
+      expect(assignment.amount).to eq(50)
     end
 
     it "bulk-updates employee payroll field assignments atomically" do
