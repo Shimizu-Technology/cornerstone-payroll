@@ -768,7 +768,12 @@ export function PayPeriodDetail({
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
       setSalaryOverrideMap((previous) => ({ ...previous, ...salary_overrides }));
-      setAdditionalEmployeeIds(new Set());
+      const failedEmployeeIds = new Set(response.results.errors.map((failure) => String(failure.employee_id)));
+      const failedBonuses = Object.fromEntries(Object.entries(bonusEdits).filter(([employeeId]) => failedEmployeeIds.has(employeeId)));
+      setBonusEdits(failedBonuses);
+      setBonusMap((previous) => ({ ...previous, ...failedBonuses }));
+      setHoursMap((previous) => ({ ...previous, ...Object.fromEntries(Object.entries(hoursMap).filter(([employeeId]) => failedEmployeeIds.has(employeeId))) }));
+      setAdditionalEmployeeIds(new Set([...additionalEmployeeIds].filter((employeeId) => failedEmployeeIds.has(String(employeeId)))));
       await payPeriodsApi.payrollFieldInputs(payPeriod.id)
         .then((updatedPayrollFieldResponse) => {
           syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
@@ -2190,6 +2195,7 @@ export function PayPeriodDetail({
                             value={bonusMap[String(emp.id)] ?? 0}
                             onValueChange={(value) => {
                               const amount = value ?? 0;
+                              if (amount === (bonusMap[String(emp.id)] ?? 0)) return;
                               setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount }));
                               setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount }));
                             }}
