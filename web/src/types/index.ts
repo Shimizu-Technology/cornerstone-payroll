@@ -229,6 +229,8 @@ export interface Employee {
   w4_step4a_other_income: number;
   w4_step4b_deductions: number;
   w4_form_version: number;
+  w4_signed_on?: string | null;
+  w4_source_reference?: string | null;
   w4_effective_on?: string | null;
   current_w4_election?: EmployeeW4Election | null;
   upcoming_w4_election?: EmployeeW4Election | null;
@@ -288,6 +290,8 @@ export interface EmployeeW4Election {
   w4_step4a_other_income: number;
   w4_step4b_deductions: number;
   w4_form_version: number;
+  w4_signed_on?: string | null;
+  w4_source_reference?: string | null;
   source: EmployeeW4ElectionSource;
   reason: string;
   created_by_name?: string | null;
@@ -435,6 +439,8 @@ export interface EmployeeFormData {
   w4_step4a_other_income: number;
   w4_step4b_deductions: number;
   w4_form_version: number;
+  w4_signed_on?: string | null;
+  w4_source_reference?: string | null;
   w4_effective_on?: string | null;
   w4_change_reason?: string;
   retirement_rate: number;

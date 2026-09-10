@@ -81,11 +81,13 @@ module QuickbooksHistory
         filing_status: tax.fetch(:filing_status),
         allowances: tax.fetch(:allowances),
         w4_dependent_credit: tax.fetch(:dependent_credit),
-        w4_form_version: Employee::MIN_SUPPORTED_W4_FORM_VERSION,
-        w4_step2_multiple_jobs: false,
-        w4_step4a_other_income: 0,
-        w4_step4b_deductions: 0,
-        additional_withholding: 0,
+        w4_form_version: tax.fetch(:form_version),
+        w4_signed_on: tax[:signed_on],
+        w4_source_reference: "QuickBooks retained worker #{worker.id} / Tax info",
+        w4_step2_multiple_jobs: tax.fetch(:multiple_jobs),
+        w4_step4a_other_income: tax.fetch(:other_income),
+        w4_step4b_deductions: tax.fetch(:deductions),
+        additional_withholding: tax.fetch(:additional_withholding),
         retirement_rate: pay.fetch(:retirement_rate),
         roth_retirement_rate: pay.fetch(:roth_retirement_rate),
         employer_retirement_match_rate: pay.fetch(:employer_retirement_match_rate),
@@ -160,12 +162,41 @@ module QuickbooksHistory
         )
       end
 
-      dependent_credit = decimal(text.match(/Claim dependents amount:\s*\$([\d,]+(?:\.\d+)?)/i)&.captures&.first)
+      # Missing source fields are not evidence of zero/unchecked elections. Keep
+      # the compatible numeric defaults but explicitly hold them for review.
+      amount_patterns = {
+        dependent_credit: /(?:Claim dependents amount|Step 3(?: dependents)?):\s*\$?([\d,]+(?:\.\d+)?)/i,
+        other_income: /(?:Other income(?: amount)?|Step 4\(a\)(?: other income)?):\s*\$?([\d,]+(?:\.\d+)?)/i,
+        deductions: /(?:Deductions(?: amount)?|Step 4\(b\)(?: deductions)?):\s*\$?([\d,]+(?:\.\d+)?)/i,
+        additional_withholding: /(?:Extra withholding(?: amount)?|Additional withholding(?: amount)?|Step 4\(c\)(?: extra withholding)?):\s*\$?([\d,]+(?:\.\d+)?)/i
+      }
+      matches = amount_patterns.transform_values { |pattern| text.match(pattern)&.captures&.first }
+      multiple_jobs = text.match(/(?:Multiple jobs(?: or spouse works)?|Step 2(?: checkbox)?):\s*(Yes|No|True|False|Checked|Unchecked)\b/i)&.captures&.first
+      form_version = text.match(/(?:W-?4 (?:form )?(?:year|version|revision)|Form revision(?: year)?):\s*(\d{4})\b/i)&.captures&.first
+      signed_on_text = text.match(/(?:W-?4 signed(?: date)?|Signed date):\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})/i)&.captures&.first
+      signed_on = signed_on_text.present? ? parse_optional_date(signed_on_text, "W-4 signed date") : nil
+      missing = matches.select { |_, value| value.nil? }.keys.map do |key|
+        { dependent_credit: "w4_dependent_credit", other_income: "w4_step4a_other_income",
+          deductions: "w4_step4b_deductions", additional_withholding: "additional_withholding" }.fetch(key)
+      end
+      missing << "w4_step2_multiple_jobs" if multiple_jobs.nil?
+      missing << "w4_form_version" if form_version.nil?
+      missing << "w4_signed_on" if signed_on.nil?
+      if missing.any?
+        review(
+          code: "w4_source_inputs_unverified",
+          message: "The retained QuickBooks tax setup does not establish all W-4 inputs or document dates. Verify the listed fields against the signed form; zero/unchecked defaults and the import date are not source evidence.",
+          fields: missing
+        )
+      end
       {
         ssn: ssn,
         filing_status: filing_status,
         allowances: allowances,
-        dependent_credit: dependent_credit
+        **matches.transform_values { |value| decimal(value) },
+        multiple_jobs: multiple_jobs.present? && multiple_jobs.match?(/\A(?:yes|true|checked)\z/i),
+        form_version: form_version ? form_version.to_i : Employee::MIN_SUPPORTED_W4_FORM_VERSION,
+        signed_on: signed_on
       }
     end
 
@@ -416,7 +447,7 @@ module QuickbooksHistory
     def parse_optional_date(value, label)
       return nil if value.to_s.blank? || value.to_s == "-"
 
-      Date.strptime(value.to_s, "%m/%d/%Y")
+      value.to_s.match?(/\A\d{4}-\d{2}-\d{2}\z/) ? Date.iso8601(value.to_s) : Date.strptime(value.to_s, "%m/%d/%Y")
     rescue Date::Error
       errors << "QuickBooks #{label} is invalid"
       nil

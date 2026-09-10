@@ -28,6 +28,8 @@ RSpec.describe PayrollCalculator do
       first = EmployeeW4Election.create!(
         **base_attributes,
         effective_on: Date.new(2024, 1, 1),
+        w4_signed_on: Date.new(2023, 12, 20),
+        w4_source_reference: "Signed source W4.pdf",
         filing_status: "single"
       )
       EmployeeW4Election.create!(
@@ -42,6 +44,9 @@ RSpec.describe PayrollCalculator do
       calculator.send(:capture_calculation_context!)
       expect(payroll_item.calculation_context_snapshot.dig("employee", "filing_status")).to eq("single")
       expect(calculator.send(:employee_w4_snapshot).dig("w4", "election_id")).to eq(first.id)
+      expect(calculator.send(:employee_w4_snapshot).dig("w4", "signed_on")).to eq("2023-12-20")
+      expect(calculator.send(:employee_w4_snapshot).dig("w4", "source_reference")).to eq("Signed source W4.pdf")
+      expect(payroll_item.calculation_context_snapshot.dig("employee", "w4_signed_on")).to eq("2023-12-20")
     end
   end
 

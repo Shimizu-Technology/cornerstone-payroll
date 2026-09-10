@@ -13,6 +13,7 @@ import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocuments
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
+import { canonicalSsn, importedProfileAllowsBlank, validateHireDate } from '@/lib/employee-profile';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -42,6 +43,8 @@ const initialFormData: EmployeeFormData = {
   w4_step4b_deductions: 0,
   w4_form_version: 2020,
   w4_effective_on: '',
+  w4_signed_on: null,
+  w4_source_reference: '',
   retirement_rate: 0,
   roth_retirement_rate: 0,
   employer_retirement_match_rate: 0,
@@ -80,11 +83,14 @@ interface PayrollAdjustmentFormRow {
 interface EmployeePayrollFieldFormRow {
   temp_id: string;
   id?: number;
+  employee_loan_id?: number | null;
   payroll_field_definition_id: number | '';
   amount: number;
   percentage: number;
   active: boolean;
   notes: string;
+  start_date: string;
+  end_date: string;
   dirty?: boolean;
 }
 
@@ -275,6 +281,8 @@ export function EmployeeForm() {
     || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4b_deductions)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0)
     || toNumberOrZero(loadedEmployee.w4_form_version) !== toNumberOrZero(form.w4_form_version)
     || (loadedEmployee.w4_effective_on || '') !== (form.w4_effective_on || '')
+    || (loadedEmployee.w4_signed_on || '') !== (form.w4_signed_on || '')
+    || (loadedEmployee.w4_source_reference || '') !== (form.w4_source_reference || '')
   ));
 
   const fetchEmployee = useCallback(async () => {
@@ -295,7 +303,7 @@ export function EmployeeForm() {
       const employee = response.data;
       setLoadedEmployee(employee);
       
-      const loadedSsn = isClient ? '' : (employee.ssn || '');
+      const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
@@ -318,6 +326,8 @@ export function EmployeeForm() {
         w4_step4b_deductions: toNumberOrZero(employee.w4_step4b_deductions),
         w4_form_version: toNumberOrZero(employee.w4_form_version) || 2020,
         w4_effective_on: employee.w4_effective_on || '',
+        w4_signed_on: employee.w4_signed_on || null,
+        w4_source_reference: employee.w4_source_reference || '',
         retirement_rate: toNumberOrZero(employee.retirement_rate),
         roth_retirement_rate: toNumberOrZero(employee.roth_retirement_rate),
         employer_retirement_match_rate: toNumberOrZero(employee.employer_retirement_match_rate),
@@ -412,11 +422,14 @@ export function EmployeeForm() {
       setEmployeePayrollFields(response.employee_payroll_fields.map((assignment: EmployeePayrollField) => ({
         temp_id: crypto.randomUUID(),
         id: assignment.id,
+        employee_loan_id: assignment.employee_loan_id,
         payroll_field_definition_id: assignment.payroll_field_definition_id,
         amount: toNumberOrZero(assignment.amount),
         percentage: toNumberOrZero(assignment.percentage),
         active: assignment.active !== false,
         notes: assignment.notes || '',
+        start_date: assignment.start_date || '',
+        end_date: assignment.end_date || '',
         dirty: false,
       })));
     } catch (err) {
@@ -602,6 +615,8 @@ export function EmployeeForm() {
         ...defaultAssignmentValuesForField(availableField),
         active: true,
         notes: '',
+        start_date: '',
+        end_date: '',
         dirty: true,
       },
     ]);
@@ -703,10 +718,12 @@ export function EmployeeForm() {
     });
   };
 
+  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field);
+
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
     const usesSsn = form.employment_type !== 'contractor' || form.contractor_type !== 'business';
-    const ssnChanged = (form.ssn || '') !== initialSsn;
+    const ssnChanged = canonicalSsn(form.ssn) !== canonicalSsn(initialSsn);
     const storedSsnCanRemain = isClient && isEditing && Boolean(storedSsnLastFour) && !form.ssn?.trim();
 
     if (!form.first_name.trim()) {
@@ -740,24 +757,29 @@ export function EmployeeForm() {
     if (usesSsn && (!isEditing || ssnChanged)) {
       if (!form.ssn_confirmation?.trim()) {
         newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
-      } else if (form.ssn_confirmation !== form.ssn) {
+      } else if (canonicalSsn(form.ssn_confirmation) !== canonicalSsn(form.ssn)) {
         newErrors.ssn_confirmation = ['Social Security Numbers do not match'];
       }
     }
-    if (!form.hire_date) {
+    if (!allowsUnverifiedBlank('hire_date') && !form.hire_date) {
       newErrors.hire_date = ['Hire date is required'];
     }
-    if (!form.address_line1?.trim()) {
+    if (!allowsUnverifiedBlank('address_line1') && !form.address_line1?.trim()) {
       newErrors.address_line1 = ['Address line 1 is required'];
     }
-    if (!form.city?.trim()) {
+    if (!allowsUnverifiedBlank('city') && !form.city?.trim()) {
       newErrors.city = ['City is required'];
     }
-    if (!form.state?.trim()) {
+    if (!allowsUnverifiedBlank('state') && !form.state?.trim()) {
       newErrors.state = ['State is required'];
     }
-    if (!form.zip?.trim()) {
+    if (!allowsUnverifiedBlank('zip') && !form.zip?.trim()) {
       newErrors.zip = ['ZIP code is required'];
+    }
+    const hireDateError = !isEditing || form.hire_date !== (loadedEmployee?.hire_date || '') ? validateHireDate(form.hire_date) : null;
+    if (hireDateError) newErrors.hire_date = [hireDateError];
+    if (employeePayrollFields.some((row) => row.start_date && row.end_date && row.end_date < row.start_date)) {
+      newErrors.employee_payroll_fields = ['Last payday must be on or after first payday'];
     }
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
       if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
@@ -858,6 +880,7 @@ export function EmployeeForm() {
           : undefined,
         default_payroll_adjustments: normalizeDefaultPayrollAdjustments(),
         w4_change_reason: w4HasChanged ? w4ChangeReason.trim() : undefined,
+        w4_source_reference: form.w4_source_reference?.trim() || null,
       };
 
       let savedEmployeeId: number;
@@ -869,7 +892,7 @@ export function EmployeeForm() {
         if (!updateData.ssn) {
           delete updateData.ssn;
         }
-        if (updateData.ssn === initialSsn) {
+        if (canonicalSsn(updateData.ssn) === canonicalSsn(initialSsn)) {
           delete updateData.ssn;
           delete updateData.ssn_confirmation;
         }
@@ -909,6 +932,8 @@ export function EmployeeForm() {
               percentage: field?.amount_type === 'percentage' ? Number(row.percentage) || 0 : null,
               active: row.active !== false,
               notes: row.notes.trim(),
+              start_date: row.start_date || null,
+              end_date: row.end_date || null,
             };
           });
 
@@ -987,7 +1012,7 @@ export function EmployeeForm() {
   const isW2Employee = form.employment_type !== 'contractor';
   const taxIdUsesSsn = isW2Employee || form.contractor_type !== 'business';
   const ssnConfirmationRequired = taxIdUsesSsn
-    && (!isEditing || (form.ssn || '') !== initialSsn);
+    && (!isEditing || canonicalSsn(form.ssn) !== canonicalSsn(initialSsn));
   const ssnDigits = (form.ssn || '').replace(/\D/g, '');
   const ssnConfirmationDigits = (form.ssn_confirmation || '').replace(/\D/g, '');
   const ssnComparisonReady = ssnDigits.length === 9 && ssnConfirmationDigits.length === 9;
@@ -1187,6 +1212,7 @@ export function EmployeeForm() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Employment Information</CardTitle>
+            {loadedEmployee?.configuration_review_status === 'needs_review' && <p className="mt-1 text-sm text-gray-600">Save verified details as you receive them. Missing imported details remain in Setup Review until confirmed.</p>}
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1196,7 +1222,7 @@ export function EmployeeForm() {
                 </label>
                 <Input
                   name="hire_date"
-                  required
+                  required={!allowsUnverifiedBlank('hire_date')}
                   type="date"
                   value={form.hire_date}
                   onChange={(e) => handleChange('hire_date', e.target.value)}
@@ -1569,6 +1595,7 @@ export function EmployeeForm() {
                               <label className="mb-1 block text-xs font-medium text-gray-600">Employee amount</label>
                               <NumericInput
                                 value={row.amount}
+                                disabled={Boolean(row.employee_loan_id)}
                                 onValueChange={(value) => updateEmployeePayrollField(row.temp_id, { amount: value ?? 0 })}
                                 min={0}
                                 fixedDecimalsOnBlur={2}
@@ -1576,7 +1603,7 @@ export function EmployeeForm() {
                             </div>
                           )}
                           <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Notes</label>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Notes (reference only)</label>
                             <Input
                               value={row.notes}
                               onChange={(event) => updateEmployeePayrollField(row.temp_id, { notes: event.target.value })}
@@ -1587,6 +1614,20 @@ export function EmployeeForm() {
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <label className="text-xs font-medium text-gray-600">First payday (optional)
+                            <Input type="date" value={row.start_date} onChange={(event) => updateEmployeePayrollField(row.temp_id, { start_date: event.target.value })} />
+                          </label>
+                          <label className="text-xs font-medium text-gray-600">Last payday (optional)
+                            <Input type="date" min={row.start_date || undefined} value={row.end_date} onChange={(event) => updateEmployeePayrollField(row.temp_id, { end_date: event.target.value })} />
+                          </label>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-600">
+                          {row.active ? `Applies every payday ${row.start_date ? `from ${row.start_date}` : 'from the first eligible payroll'} ${row.end_date ? `through ${row.end_date}, inclusive` : 'until stopped'}.` : 'Inactive: does not apply to payroll.'}
+                          {row.employee_loan_id && ' Linked loan: its payment amount and remaining balance control the deduction. Edit repayment amounts in Loans.'}
+                          {row.dirty && ' Save employee to apply these settings.'} Notes do not change the amount or schedule.
+                          {selectedField?.category === 'loan' && ' Use the employee’s Loans section to repay a verified balance and stop automatically at payoff.'}
+                        </p>
                         {selectedField && (
                           <p className="mt-2 text-xs text-blue-800">
                             {selectedField.kind.replace(/_/g, ' ')} · {selectedField.tax_treatment.replace(/_/g, ' ')} · {selectedField.category.replace(/_/g, ' ')}
@@ -1780,7 +1821,7 @@ export function EmployeeForm() {
                         </div>
                         <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
                         <div className="mt-3">
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
                           <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
                         </div>
                       </div>
@@ -1846,7 +1887,7 @@ export function EmployeeForm() {
                         </div>
                         <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
                         <div className="mt-3">
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
                           <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
                         </div>
                       </div>
@@ -2013,6 +2054,16 @@ export function EmployeeForm() {
                 </div>
               </div>
 
+              <div className="mb-4 grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 (optional)
+                  <Input type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
+                </label>
+                <label className="text-sm font-medium text-gray-700">Source document / reference (optional)
+                  <Input maxLength={255} value={form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
+                </label>
+                <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. The effective date controls which paychecks use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
+              </div>
+
               {/* Step 2: Multiple Jobs */}
               <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 2: Multiple Jobs or Spouse Works</h4>
@@ -2135,6 +2186,7 @@ export function EmployeeForm() {
                           <span className="font-semibold text-neutral-900">Effective {new Date(`${election.effective_on}T00:00:00`).toLocaleDateString()}</span>
                           <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">{election.source.replace('_', ' ')}</span>
                         </div>
+                        <p className="mt-1 text-neutral-600">Signed: {election.w4_signed_on || 'not recorded'} · Source: {election.w4_source_reference || 'not recorded'}</p>
                         <p className="mt-1 text-neutral-600">{filingStatusLabels[election.filing_status] || election.filing_status} · Form {election.w4_form_version} · {formatCurrency(Number(election.additional_withholding) || 0)} extra per pay period</p>
                         <p className="mt-2 text-xs leading-5 text-neutral-500">{election.reason}{election.created_by_name ? ` · Recorded by ${election.created_by_name}` : ''}</p>
                       </div>
@@ -2230,7 +2282,7 @@ export function EmployeeForm() {
                 </label>
                 <Input
                   name="address_line1"
-                  required
+                  required={!allowsUnverifiedBlank('address_line1')}
                   value={form.address_line1 || ''}
                   onChange={(e) => handleChange('address_line1', e.target.value)}
                   placeholder="Street address"
@@ -2254,7 +2306,7 @@ export function EmployeeForm() {
                   </label>
                   <Input
                     name="city"
-                    required
+                    required={!allowsUnverifiedBlank('city')}
                     value={form.city || ''}
                     onChange={(e) => handleChange('city', e.target.value)}
                     error={getFieldError('city')}
@@ -2266,7 +2318,7 @@ export function EmployeeForm() {
                   </label>
                   <Input
                     name="state"
-                    required
+                    required={!allowsUnverifiedBlank('state')}
                     value={form.state || ''}
                     onChange={(e) => handleChange('state', e.target.value)}
                     maxLength={2}
@@ -2280,7 +2332,7 @@ export function EmployeeForm() {
                   </label>
                   <Input
                     name="zip"
-                    required
+                    required={!allowsUnverifiedBlank('zip')}
                     value={form.zip || ''}
                     onChange={(e) => handleChange('zip', e.target.value)}
                     placeholder="96910"
