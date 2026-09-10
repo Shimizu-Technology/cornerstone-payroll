@@ -53,6 +53,7 @@ module Api
           attrs[:employment_type] = employee.employment_type
 
           @payroll_item = @pay_period.payroll_items.build(attrs)
+          PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
           @payroll_item.employee = employee
           @payroll_item.employment_type ||= employee.employment_type
           sync_pay_rate_from_employee(@payroll_item, employee)
@@ -83,6 +84,8 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
+
+          PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
 
           if @payroll_item.update(attrs)
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
@@ -296,6 +299,8 @@ module Api
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             total_hours: item.total_hours,
             bonus: item.bonus,
+            bonus_source: item.bonus_source,
+            imported_bonus: item.imported_bonus,
             reported_tips: item.reported_tips,
             tips_paid_out: item.tips_paid_out,
             cash_tips_reported: item.cash_tips_reported,
@@ -340,6 +345,7 @@ module Api
           }
 
           if detailed
+            json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             # Include full YTD breakdown
             json[:ytd] = {
               gross: item.ytd_gross,

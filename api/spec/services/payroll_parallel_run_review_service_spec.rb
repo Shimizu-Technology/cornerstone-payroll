@@ -44,6 +44,18 @@ RSpec.describe PayrollParallelRunReviewService do
     end.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Parallel comparison payroll cannot be committed/)
   end
 
+  it "counts saved Medicare once and classifies extra withholding as tax" do
+    pay_period.payroll_items.first.update!(medicare_tax: 19, additional_medicare_tax: 4.50, additional_withholding: 25)
+    record = described_class.new(
+      review:, pay_period:, actor:, notes: "Compared tax components against source",
+      source_totals: { employee_count: 1, gross_pay: 1_000, net_pay: 750, taxes: 206, deductions: 44 }
+    ).call!
+
+    expect(record).to be_pass
+    expect(record.cornerstone_taxes).to eq(206.to_d)
+    expect(record.cornerstone_deductions).to eq(44.to_d)
+  end
+
   it "records a failure when the source does not reconcile" do
     record = described_class.new(
       review:, pay_period:, actor:, notes: "Employee count differs",
