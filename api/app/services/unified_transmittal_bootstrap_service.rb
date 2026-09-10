@@ -52,7 +52,6 @@ class UnifiedTransmittalBootstrapService
 
   def normalized_legacy_notes(legacy)
     notes = Array(legacy&.notes).map(&:to_s).map(&:strip).reject(&:blank?)
-    notes << "Started from the saved pay-period transmittal." if legacy.present?
     notes.uniq
   end
 

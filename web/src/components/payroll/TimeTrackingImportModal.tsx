@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
 import type { TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
@@ -82,6 +83,7 @@ function withReconciliationErrors(
 }
 
 export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select');
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
@@ -198,7 +200,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     return () => {
       cancelled = true;
     };
-  }, [open, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
+  }, [open, payPeriod.id, payPeriod.company_id, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.id === sourceId) || null,
@@ -439,9 +441,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                   <div className="flex items-start gap-2">
                     <Link2 className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <p>{isHistoricalReconciliation ? 'No active AIRE time tracking source is configured for this client.' : 'No active time tracking source is configured for this client.'} Add one in Time Tracking Source settings, then return to this pay period.</p>
+                    <p>{isHistoricalReconciliation ? 'No active AIRE time tracking source is configured for this client.' : 'No active time tracking source is configured for this client.'} {isAdmin ? 'Enable one in Time Tracking Source settings, then return to this pay period.' : 'Ask an administrator to configure the client’s time tracking integration.'}</p>
                   </div>
-                  <Button
+                  {isAdmin && <Button
                     type="button"
                     variant="outline"
                     size="sm"
@@ -452,7 +454,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                     }}
                   >
                     Configure time tracking
-                  </Button>
+                  </Button>}
                 </div>
               ) : (
                 <>

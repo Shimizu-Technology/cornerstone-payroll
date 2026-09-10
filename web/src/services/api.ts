@@ -1673,7 +1673,6 @@ export interface PayrollRegisterReport {
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
     contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
     simple_register?: {
-      note: string;
       columns: Array<{
         key: string;
         label: string;

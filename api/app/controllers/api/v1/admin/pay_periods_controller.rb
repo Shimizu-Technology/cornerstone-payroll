@@ -1028,6 +1028,10 @@ module Api
             updated_at: pay_period.updated_at
           }
 
+          # Mutation responses replace the browser's current period too. Retain
+          # source capabilities/history there without adding queries to the list.
+          json[:time_tracking] = PayPeriodTimeTrackingSummary.call(pay_period) unless action_name == "index"
+
           if include_items
             confirmed_workweek = PayPeriodConfirmedWorkweekAdoptionService.candidate_for(pay_period)
             json[:confirmed_workweek_adoption] = {
