@@ -123,7 +123,7 @@ class PayrollGoLiveSetupPlan
     values = [
       "Paid payroll, checks, tax filings, YTD rows, loan transactions, and audit history are never copied.",
       "The source EIN is not moved during setup transfer. Complete the legal-employer handoff only after go-live approval.",
-      "Loan deduction schedules are copied without balances; each opening balance must be independently verified."
+      "Balance-tracked loan deductions are copied inactive until the successor balance and repayment schedule are verified. Existing successor loan schedules are retained."
     ]
     values << "The source client has no EIN recorded" if source_company.ein.blank?
     values
