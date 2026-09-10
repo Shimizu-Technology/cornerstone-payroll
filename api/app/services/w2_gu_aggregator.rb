@@ -42,14 +42,14 @@ class W2GuAggregator
         source_summary: source_summary,
         caveats: [
           "This report is a preparation summary and should be reviewed before filing.",
-          "Employees missing SSN are flagged in compliance_issues.",
+          "Employees missing an SSN are flagged in the compliance issues.",
           "Box labels map to W-2GU concepts but final filing format/export is separate.",
           "Box 1 = Gross wages minus pre-tax 401(k) deferrals (Code D). Box 5 = Gross wages (not reduced by 401k).",
           "Box 12 codes: D = 401(k) elective deferrals, AA = Roth 401(k) contributions.",
           "For 2026+, Box 12 code TP reports cash tips and code TT reports qualified overtime compensation; Box 14b reports Treasury tipped occupation codes.",
           "Box 13 Retirement plan checkbox is set if the employee has a retirement contribution rate > 0.",
           "Committed taxable wage bases are used when present. Legacy rows without stored bases use a clearly flagged compatibility fallback.",
-          "If payroll items were committed before tips were embedded in gross_pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually.",
+          "If payroll items were committed before tips were included in gross pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually.",
           *historical_caveats
         ]
       },

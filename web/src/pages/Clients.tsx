@@ -293,6 +293,11 @@ export function Clients() {
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
+  const openClientIntegrations = (companyId: number) => {
+    switchCompany(companyId);
+    navigate('/time-tracking-sources');
+  };
+
   return (
     <>
       <Header
@@ -537,7 +542,7 @@ export function Clients() {
                   <SettingToggle
                     checked={form.simple_payroll_register_enabled === true}
                     label="Simple payroll register Excel format"
-                    description="Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
+                    description="Adds a compact payroll register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
                     onToggle={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
                   />
 
@@ -652,6 +657,11 @@ export function Clients() {
                             <Pencil className="mr-1 h-4 w-4" />
                             {loadingEditId === c.id ? 'Loading...' : 'Edit'}
                           </Button>
+                          {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                            <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
+                              Time tracking
+                            </Button>
+                          )}
                           {canManageClients && c.payroll_environment === 'live' && (
                             <Button size="sm" variant="outline" onClick={() => handleOpenRehearsal(c)}>
                               <FlaskConical className="mr-1 h-4 w-4" />Migration test
@@ -756,6 +766,11 @@ export function Clients() {
                                 <><Pencil className="w-3 h-3 mr-1" /> Edit</>
                               )}
                             </Button>
+                            {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                              <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
+                                Time tracking
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       )}

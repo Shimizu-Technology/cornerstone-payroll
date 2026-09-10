@@ -39,6 +39,7 @@ RSpec.describe UnifiedTransmittalBootstrapService do
 
     expect(transmittal).to be_pay_period_source
     expect(transmittal.pay_period).to eq(pay_period)
+    expect(transmittal.notes).to eq([])
     expect(transmittal.items.pluck(:source_key)).to include(
       a_string_starting_with("payroll_item:"),
       a_string_starting_with("non_employee_check:"),
@@ -55,6 +56,19 @@ RSpec.describe UnifiedTransmittalBootstrapService do
     employer_medicare = transmittal.items.find_by!(source_key: "tax_obligation:employer_medicare")
     expect(employee_medicare.amount).to eq(26.40)
     expect(employer_medicare.amount).to eq(17.40)
+  end
+
+  it "preserves legacy notes without adding migration instructions to the printed packet" do
+    saved_notes = [ "Client will confirm pickup on Friday", "EFTPS payment to be done by client" ]
+    Transmittal.create!(pay_period: pay_period, company: company, notes: saved_notes)
+
+    expect(service.call.notes).to eq(saved_notes)
+  end
+
+  it "keeps an intentionally empty legacy notes list empty" do
+    Transmittal.create!(pay_period: pay_period, company: company, notes: [])
+
+    expect(service.call.notes).to eq([])
   end
 
   it "is idempotent and preserves operator edits while appending new source rows" do

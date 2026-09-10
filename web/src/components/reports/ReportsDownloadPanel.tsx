@@ -47,11 +47,6 @@ const DEFAULT_REPORT_LIST = [
   'Employee Installment Loan Report',
 ];
 
-const DEFAULT_NOTES = [
-  'EFTPS payment to be done by client',
-  '401K upload to be submitted by client',
-];
-
 function fmt(val: number) {
   return `$${val.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 }
@@ -429,7 +424,7 @@ function TransmittalEditorModal({
         if (saved) {
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
           setTransmittalDate(saved.transmittal_date || localDateString());
-          setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
+          setNotes([...(saved.notes || [])]);
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
           setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
@@ -452,15 +447,14 @@ function TransmittalEditorModal({
           data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
           setNeCheckNumbers(neNums);
           setCustomEntries([]);
-          const autoNotes: string[] = [];
+          const obligationNotes: string[] = [];
           if (data.tax_totals.total_fica > 0) {
-            autoNotes.push(`FICA Obligation (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)}`);
+            obligationNotes.push(`FICA Obligation (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)}`);
           }
           if (data.tax_totals.fit > 0) {
-            autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+            obligationNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
           }
-          autoNotes.push(...DEFAULT_NOTES);
-          setNotes(autoNotes);
+          setNotes(obligationNotes);
         }
         setInitialized(true);
       }).catch(() => {
@@ -468,7 +462,7 @@ function TransmittalEditorModal({
 
         setPreparerName('Cornerstone Tax Services');
         setReportList([...DEFAULT_REPORT_LIST]);
-        setNotes([...DEFAULT_NOTES]);
+        setNotes([]);
         setInitialized(true);
       }).finally(() => {
         if (!cancelled) setLoadingPreview(false);
@@ -1450,7 +1444,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                   key: 'spreadsheet',
                   label: report.key === 'payrollRegister' ? 'Excel register (.xlsx)' : 'Excel spreadsheet (.xlsx)',
                   description: report.key === 'payrollRegister'
-                    ? 'The CEO-facing register with split tips and review details.'
+                    ? 'Editable payroll workbook with employee detail.'
                     : 'Editable workbook with report detail.',
                   kind: 'spreadsheet' as const,
                   loading: spreadsheetLoading,
@@ -1611,7 +1605,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
           {
             key: 'spreadsheet',
             label: 'Excel register (.xlsx)',
-            description: 'CEO-facing register with split tips and review details.',
+            description: 'Editable payroll workbook with employee detail.',
             kind: 'spreadsheet',
             loading: isReportLoading('payrollRegister', 'spreadsheet'),
             onSelect: () => handleSpreadsheetDownload('payrollRegister'),
