@@ -25,7 +25,9 @@ module TimeTracking
 
     def apply_locked!(acknowledgement_ids)
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless @pay_period.can_edit?
-      raise ArgumentError, "Time tracking source is inactive" unless @import.time_tracking_source.reload.active?
+      # Hold the source row through the enclosing payroll transaction so a
+      # concurrent settings update cannot disable it midway through application.
+      raise ArgumentError, "Time tracking source is inactive" unless @source.lock!.active?
       results = nil
 
       @import.with_lock(requires_new: true) do

@@ -42,4 +42,6 @@ The browser tests use synthetic API responses. The backend request/service specs
 
 New regression files: `web/e2e/public-report-download-menu.spec.ts`, `web/e2e/public-report-export-page.spec.ts`, `web/e2e/public-time-tracking-settings.spec.ts`, and `api/spec/requests/api/v1/admin/time_tracking_client_settings_spec.rb`.
 
+PR review follow-up: both import paths now lock the source row within the existing payroll transaction, serializing deactivation with payroll writes. Two PostgreSQL concurrency tests verify that a pending deactivation blocks each operation until it commits and then rejects the stale preview. Saved AIRE timestamps use the shared Guam formatter. Additional tests cover report caveats, saved transmittal notes (including empty notes), calculated notes for new transmittals, and failed previews. All **2,409 backend examples** pass locally, the frontend gate passes, and all **8** additional browser scenarios pass. Brakeman reports no warnings.
+
 The owned test database was removed, browsers closed, and development server stopped. Shared PostgreSQL and all baseline resources were left running.

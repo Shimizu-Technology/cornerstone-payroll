@@ -1,9 +1,10 @@
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { AirePayrollRecord } from '@/types';
+import { formatGuamDateTime } from '@/lib/utils';
 
 function timestamp(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : 'Not recorded';
+  return formatGuamDateTime(value);
 }
 
 export function AirePayrollRecordsDialog({ open, onClose, records }: {
@@ -30,7 +31,7 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
               </dl>
               {record.reconciliation_note && <p className="mt-4 whitespace-pre-wrap text-sm text-neutral-700">{record.reconciliation_note}</p>}
               {!!record.reconciliation_exceptions?.length && (
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                   <h4 className="font-semibold">Recorded rounding differences</h4>
                   <ul className="mt-2 space-y-2">
                     {record.reconciliation_exceptions.map((exception, index) => (
@@ -51,7 +52,7 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
             </section>
           ))}
         </div>
-        <div className="mt-5 flex justify-end"><Button variant="outline" onClick={onClose}>Close</Button></div>
+        <div className="mt-4 flex justify-end"><Button variant="outline" onClick={onClose}>Close</Button></div>
       </DialogContent>
     </Dialog>
   );
