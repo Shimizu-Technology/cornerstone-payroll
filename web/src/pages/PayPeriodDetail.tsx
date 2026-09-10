@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
@@ -992,7 +993,7 @@ export function PayPeriodDetail({
   const totalAddlWH = reportablePayrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
   const totalSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
   const totalMedicare = reportablePayrollItems.reduce(
-    (s, i) => s + toNumber(i.medicare_tax),
+    (s, i) => s + payrollTaxSummary(i).totalMedicare,
     0,
   );
   const totalDeductions = reportablePayrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
@@ -1223,7 +1224,7 @@ export function PayPeriodDetail({
     totals.withholding += toNumber(item.withholding_tax);
     totals.additionalWithholding += toNumber(item.additional_withholding);
     totals.socialSecurity += toNumber(item.social_security_tax);
-    totals.employeeMedicare += toNumber(item.medicare_tax);
+    totals.employeeMedicare += payrollTaxSummary(item).totalMedicare;
     totals.employerMedicare += toNumber(item.employer_medicare_tax);
     totals.deductions += toNumber(item.total_deductions);
     totals.net += toNumber(item.net_pay);
@@ -2253,6 +2254,7 @@ export function PayPeriodDetail({
                           <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
+                              aria-label={`Loan deduction this payroll for ${emp.first_name} ${emp.last_name}`}
                               value={loansMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateLoan(emp.id, value ?? 0)}
                               placeholder="0"
@@ -2797,7 +2799,7 @@ export function PayPeriodDetail({
                           </TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>
-                            {formatCurrency(toNumber(item.medicare_tax))}
+                            {formatCurrency(payrollTaxSummary(item).totalMedicare)}
                           </TableCell>
                           <TableCell className={`text-right text-amber-700 ${rowTone}`}>{formatCurrency(toNumber(item.employer_medicare_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>

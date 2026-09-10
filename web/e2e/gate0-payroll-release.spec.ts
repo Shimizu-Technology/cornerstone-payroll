@@ -1945,4 +1945,48 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }
   });
 
+  test('accepts a first direct loan entry with an untouched default and restores the default after clearing', async ({ browser }) => {
+    const fieldResponse = await adminApi.post('admin/payroll_fields', { data: { payroll_field: {
+      name: `Feedback loan ${randomUUID()}`, kind: 'deduction', tax_treatment: 'post_tax_deduction', category: 'loan',
+      amount_type: 'fixed', default_amount: 50, show_in_payroll_grid: true, active: true,
+    } } });
+    expect(fieldResponse.ok()).toBeTruthy();
+    const { payroll_field: field } = await fieldResponse.json();
+    const assignment = await adminApi.post(`admin/employees/${fixture.bonus_alpha_employee_id}/payroll_fields`, { data: {
+      employee_payroll_field: { payroll_field_definition_id: field.id, amount: 50, active: true },
+    } });
+    expect(assignment.ok()).toBeTruthy();
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Bonus Alpha', exact: true });
+      if (!await loan.isVisible()) await page.getByRole('button', { name: /Tips & Deductions/ }).click();
+      await loan.fill('75');
+      await loan.press('Tab');
+      const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+      const body = await (await saved).json();
+      expect(body.results.errors).toEqual([]);
+      const item = body.pay_period.payroll_items.find((row: { id: number }) => row.id === fixture.bonus_alpha_payroll_item_id);
+      expect(Number(item.loan_deduction)).toBe(75);
+      expect(Number(item.loan_payment)).toBe(75);
+      await page.reload();
+      await expect(loan).toHaveValue('75.00');
+      await loan.fill('0');
+      await loan.press('Tab');
+      const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+      const final = await (await cleared).json();
+      expect(final.results.errors).toEqual([]);
+      const finalItem = final.pay_period.payroll_items.find((row: { id: number }) => row.id === fixture.bonus_alpha_payroll_item_id);
+      expect(Number(finalItem.loan_deduction)).toBe(0);
+      expect(Number(finalItem.loan_payment)).toBe(50);
+    } finally {
+      await context.close();
+    }
+  });
+
 });
