@@ -4,8 +4,12 @@
 # separately so a reimport cannot silently replace an operator's correction.
 class PayrollBonusInput
   def self.manual!(item, value)
-    item.bonus = amount(value)
-    item.bonus_source = "manual"
+    next_amount = amount(value)
+    # Older clients submit every form value, even on unrelated edits.
+    # An unchanged imported value remains source-controlled.
+    changed = item.bonus.to_d != next_amount
+    item.bonus = next_amount
+    item.bonus_source = "manual" if changed || item.bonus_source.nil?
   end
 
   def self.import!(item, value)

@@ -1920,6 +1920,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await expect(bonus).toBeVisible();
       await bonus.fill('321.09');
       await bonus.press('Tab');
+      await page.route('**/run_payroll', async (route) => {
+        await route.fulfill({ json: {
+          ...baselineBody,
+          results: { success: [], errors: [{ employee_id: fixture.bonus_alpha_employee_id, error: 'Review this employee setup before retrying.' }] },
+        } });
+      }, { times: 1 });
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+      await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
+      await expect(bonus).toHaveValue('321.09');
       const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
       await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
       const result = await (await save).json();

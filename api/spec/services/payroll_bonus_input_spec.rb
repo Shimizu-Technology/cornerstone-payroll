@@ -24,6 +24,15 @@ RSpec.describe PayrollBonusInput do
     expect(item.bonus_source).to eq("mosa_revel")
   end
 
+  it "keeps source control when older clients resubmit an unchanged imported amount" do
+    item = build(:payroll_item)
+    described_class.import!(item, 150)
+    described_class.manual!(item, 150)
+    expect(item.bonus_source).to eq("mosa_revel")
+    described_class.import!(item, 275)
+    expect(item.bonus).to eq(275)
+  end
+
   it "protects a legacy entered bonus without source metadata" do
     item = build(:payroll_item, bonus: 75)
     described_class.import!(item, 125)
