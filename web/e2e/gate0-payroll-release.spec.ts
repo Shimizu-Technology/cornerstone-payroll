@@ -1902,4 +1902,47 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     );
     expect(eventResponse.ok()).toBeTruthy();
   });
+  test('enters and clears a one-time bonus beside hours without creating a recurring addition', async ({ browser }) => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email,
+      'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      const periodPath = `admin/pay_periods/${fixture.bonus_sync_pay_period_id}`;
+      const baseline = await accountantApi.post(`${periodPath}/run_payroll`);
+      expect(baseline.ok()).toBeTruthy();
+      const baselineBody = await baseline.json();
+      const initial = baselineBody.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
+      const grossWithoutBonus = Number(initial.gross_pay) - Number(initial.bonus || 0);
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const bonus = page.getByRole('textbox', { name: 'Bonus this payroll for Bonus Alpha', exact: true });
+      await expect(bonus).toBeVisible();
+      await bonus.fill('321.09');
+      await bonus.press('Tab');
+      const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+      const result = await (await save).json();
+      expect(result.results.errors).toEqual([]);
+      const updated = result.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
+      expect(Number(updated.bonus)).toBe(321.09);
+      expect(Number(updated.gross_pay)).toBeCloseTo(grossWithoutBonus + 321.09, 2);
+      await expect(bonus).toHaveValue('321.09');
+      await page.reload();
+      await expect(bonus).toHaveValue('321.09');
+      await bonus.fill('0');
+      await bonus.press('Tab');
+      const clear = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+      const cleared = await (await clear).json();
+      expect(cleared.results.errors).toEqual([]);
+      const finalItem = cleared.pay_period.payroll_items.find((item: { id: number }) => item.id === fixture.bonus_alpha_payroll_item_id);
+      expect(Number(finalItem.bonus)).toBe(0);
+      expect(Number(finalItem.gross_pay)).toBeCloseTo(grossWithoutBonus, 2);
+      await page.screenshot({ path: 'test-results/feedback-bonus-worksheet.png', fullPage: true });
+    } finally {
+      await context.close();
+    }
+  });
+
 });
