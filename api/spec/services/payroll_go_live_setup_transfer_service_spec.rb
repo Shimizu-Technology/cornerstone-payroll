@@ -91,7 +91,7 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     target_field = create(:payroll_field_definition, company: company, category: "loan", kind: "deduction", tax_treatment: "post_tax_deduction")
     loan = EmployeeLoan.create!(company: source_company, employee: source, name: "Tracked loan", original_amount: 500, current_balance: 450, status: "active")
     source.employee_payroll_fields.create!(payroll_field_definition: source_field, employee_loan: loan, amount: 50, active: true)
-    described_class.copy_payroll_fields!(source, target, { source_field => target_field })
+    described_class.send(:copy_payroll_fields!, source, target, { source_field => target_field })
     copied = target.employee_payroll_fields.find_by!(payroll_field_definition: target_field)
     expect(copied).not_to be_active
     expect(copied.employee_loan_id).to be_nil
@@ -99,7 +99,7 @@ RSpec.describe PayrollGoLiveSetupTransferService do
 
     target_loan = EmployeeLoan.create!(company: company, employee: target, name: "Verified successor loan", original_amount: 125, current_balance: 125, status: "active")
     copied.update!(employee_loan: target_loan, amount: 25, active: true)
-    described_class.copy_payroll_fields!(source, target, { source_field => target_field })
+    described_class.send(:copy_payroll_fields!, source, target, { source_field => target_field })
     expect(copied.reload).to have_attributes(employee_loan_id: target_loan.id, amount: 25.to_d, active: true)
     expect(target_loan.reload.current_balance).to eq(125)
   end
