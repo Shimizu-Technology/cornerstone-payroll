@@ -1906,24 +1906,27 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await loan.fill('75');
       await loan.press('Tab');
       const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
       const body = await (await saved).json();
       expect(body.results.errors).toEqual([]);
       const item = body.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
       expect(Number(item.loan_deduction)).toBe(75);
       expect(Number(item.loan_payment)).toBe(75);
       await page.reload();
-      await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
       await expect(loan).toHaveValue('75.00');
       await loan.fill('0');
       await loan.press('Tab');
       const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
       const final = await (await cleared).json();
       expect(final.results.errors).toEqual([]);
       const finalItem = final.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
       expect(Number(finalItem.loan_deduction)).toBe(0);
-      expect(Number(finalItem.loan_payment)).toBe(50);
+      const restoredDefault = finalItem.payroll_field_entries.find((entry: { payroll_field_definition_id: number }) => entry.payroll_field_definition_id === field.id);
+      expect(restoredDefault).toMatchObject({ active: true, source: 'employee_default' });
+      expect(Number(restoredDefault.amount)).toBe(50);
+      expect(Number(finalItem.total_deductions)).toBeCloseTo(Number(item.total_deductions) - 25, 2);
+      expect(Number(finalItem.net_pay)).toBeCloseTo(Number(item.net_pay) + 25, 2);
     } finally {
       await context.close();
     }
