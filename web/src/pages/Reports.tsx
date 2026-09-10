@@ -3816,19 +3816,6 @@ export function Reports() {
             </div>
           )}
         </section>
-
-        <Card className="border-dashed">
-          <CardHeader>
-            <CardTitle>Planned reports</CardTitle>
-            <CardDescription>Additional exports queued for future releases.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3 rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
-              <span className="h-2 w-2 rounded-full bg-neutral-300" />
-              General Ledger Export
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

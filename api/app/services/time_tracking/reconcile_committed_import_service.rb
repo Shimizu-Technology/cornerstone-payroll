@@ -39,6 +39,7 @@ module TimeTracking
     attr_reader :import, :mappings, :actor, :note, :pay_period, :company, :source
 
     def reconcile_locked!(ids)
+      raise ArgumentError, "Time tracking source is inactive" unless source.reload.active?
       unless pay_period.committed? && !pay_period.voided?
         raise ArgumentError, "Historical reconciliation requires a committed, active pay period"
       end

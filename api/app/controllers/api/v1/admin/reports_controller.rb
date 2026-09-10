@@ -2552,7 +2552,6 @@ module Api
           "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
         ].freeze
 
-        CEO_PAYROLL_REGISTER_NOTE = "Note: this simple payroll register format applies to SCR and AIRE. MHI has more complex payroll components and should be reviewed separately.".freeze
         CEO_PAYROLL_REGISTER_HINTS = [
           "", "", "", "Hourly rate", "", "",
           "For hourly employees only: Rate × Regular Hours + Rate × OT Hours × 1.5",
@@ -2656,9 +2655,6 @@ module Api
           information_rows = simple_register[:pay_period_information].map { |row| [ nil, row[:label], row[:value] ] }
 
           rows = []
-          note_row_index = rows.length
-          rows << [ simple_register[:note] ]
-          rows << []
           information_header_index = rows.length
           rows << [ "Pay Period Information" ]
           information_start_index = rows.length
@@ -2675,7 +2671,6 @@ module Api
           rows << total_row
 
           row_style_rules = [
-            { rows: note_row_index, style: :note },
             { rows: information_header_index, style: :section_header },
             { rows: information_start_index..information_end_index, styles: [ nil, :info_label, :info_value ] },
             { rows: hint_row_index, styles: ceo_hint_styles },
@@ -2691,14 +2686,12 @@ module Api
             styles: ceo_register_style_definitions,
             row_style_rules: row_style_rules,
             row_heights: {
-              note_row_index => 24,
               information_header_index => 24,
               hint_row_index => 72,
               header_row_index => 42,
               total_row_index => 24
             },
             merged_cells: [
-              "A#{note_row_index + 1}:W#{note_row_index + 1}",
               "A#{information_header_index + 1}:W#{information_header_index + 1}"
             ],
             show_grid_lines: false,
@@ -2710,10 +2703,9 @@ module Api
           ceo_rows = ceo_payroll_register_rows(Array(report[:employees]))
           total_row = ceo_payroll_register_total_row(ceo_rows)
           review_rows = payroll_register_review_rows(report, ceo_rows)
-          review_rows << [ "OK", nil, "No simple-register exceptions detected", nil ] if review_rows.empty?
+          review_rows << [ "OK", nil, "No register exceptions detected", nil ] if review_rows.empty?
 
           {
-            note: CEO_PAYROLL_REGISTER_NOTE,
             columns: CEO_PAYROLL_REGISTER_KEYS.each_index.map do |index|
               {
                 key: CEO_PAYROLL_REGISTER_KEYS[index],
@@ -2767,7 +2759,6 @@ module Api
           money_format = "$#,##0.00;[Red]-$#,##0.00"
 
           {
-            note: base_font.merge(i: true, fg_color: "44546A", alignment: { vertical: :center, wrap_text: true }),
             section_header: base_font.merge(
               sz: 12,
               b: true,
@@ -3053,7 +3044,7 @@ module Api
         def payroll_register_review_rows(report, ceo_rows)
           rows = []
           Array(report[:contractors]).each do |contractor|
-            rows << [ "Info", contractor[:employee_name], "Contractor omitted from simple register", "Contractors remain available on the Contractors/detail sheets." ]
+            rows << [ "Info", contractor[:employee_name], "Contractor shown separately from employee register", "Contractors remain available on the Contractors/detail sheets." ]
           end
 
           Array(report[:employees]).each_with_index do |emp, index|
@@ -3067,7 +3058,7 @@ module Api
             displayed_deductions = simple_register_deductions_total(emp)
             deduction_diff = money(emp[:total_deductions].to_f - displayed_deductions)
             if deduction_diff.abs > 0.01
-              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the simple columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, recurring/manual adjustments, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
+              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the displayed columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, recurring/manual adjustments, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
             end
 
             tip_components_total = Array(emp[:tip_components]).sum { |component| component[:amount].to_f }
@@ -3079,7 +3070,7 @@ module Api
               rows << [ "Review", emp[:employee_name], "Tips paid out exceed reported taxable tips", "Tips out: #{format('$%.2f', emp[:tips_paid_out].to_f)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}. Confirm paid-out tips are included in taxable gross before filing." ]
             end
 
-            rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "Simple register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
+            rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "The employee register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Roth retirement present", "Retirement column includes Roth and traditional employee retirement." ] if emp[:roth_retirement_payment].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Payroll fields present", "Review Payroll Fields Detail for itemized field treatment." ] if Array(emp[:payroll_field_entries]).any? { |entry| entry[:amount].to_f.positive? }
             rows << [ "Review", emp[:employee_name], "Recurring or manual adjustments present", "Review Payroll Adjustments Detail for the itemized amount, treatment, and saved source." ] if Array(emp[:payroll_adjustments]).any? { |entry| entry[:amount].to_f.positive? }

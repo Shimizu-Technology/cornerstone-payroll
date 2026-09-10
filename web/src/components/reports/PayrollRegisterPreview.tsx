@@ -253,9 +253,6 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
         </div>
 
         <div className="space-y-4 p-5">
-          <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm italic leading-6 text-blue-900">
-            {simple.note}
-          </p>
           <div>
             <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-neutral-500">Pay period information</h3>
             <dl className="mt-3 grid gap-x-8 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -346,7 +343,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
           <div className="border-b border-neutral-200 px-5 py-4">
             <h3 className="font-bold text-neutral-950">1099 contractor detail</h3>
             <p className="mt-0.5 text-sm text-neutral-500">
-              Informational contractor payments are shown separately and are not included in the simplified W-2 totals.
+              Informational contractor payments are shown separately and are not included in the employee register totals.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -380,7 +377,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="font-bold text-neutral-950">Register review</h3>
-            <p className="mt-0.5 text-sm text-neutral-500">Exceptions and informational items that do not fit the simplified columns.</p>
+            <p className="mt-0.5 text-sm text-neutral-500">Exceptions and informational items that do not fit the displayed columns.</p>
           </div>
         </div>
         <div className="mt-4 space-y-2.5">

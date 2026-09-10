@@ -98,10 +98,14 @@ RSpec.describe Form941GuAggregator do
         expect(report[:meta][:ein]).to eq("91-1234567")
       end
 
-      it "includes caveats about placeholders" do
+      it "explains required manual entries without placeholder terminology" do
         expect(report[:meta][:caveats]).to be_an(Array)
         expect(report[:meta][:caveats]).not_to be_empty
-        expect(report[:meta][:caveats].any? { |c| c.include?("PLACEHOLDER") }).to be true
+        expect(report[:meta][:caveats]).to include(
+          "Lines 8–9 (adjustments) require manual entry before filing.",
+          "Lines 11–14 (credits/deposits/balance) require manual review against federal deposit records."
+        )
+        expect(report[:meta][:caveats].join(" ")).not_to match(/PLACEHOLDER|tax_detail\.|gross_pay|pay_date/)
       end
     end
 
@@ -243,11 +247,11 @@ RSpec.describe Form941GuAggregator do
     end
 
     it "documents that tax_detail SS totals include tips" do
-      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips") }).to be(true)
+      expect(report[:meta][:caveats].any? { |c| c.include?("The combined Social Security amount in the tax detail includes tax on both SS wages and SS-taxable tips") }).to be(true)
     end
 
     it "documents that tax detail SS totals can drift from form lines by rounding" do
-      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined is based on stored SS taxes") }).to be(true)
+      expect(report[:meta][:caveats].any? { |c| c.include?("The combined Social Security amount in the tax detail is based on recorded SS taxes") }).to be(true)
     end
 
     it "documents the Additional Medicare transition-year caveat" do

@@ -2272,6 +2272,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       workbook = workbook_from_response
       expect(workbook.sheets.first).to eq("Payroll Register")
+      register = workbook.sheet("Payroll Register")
+      expect(register.row(1).first).to eq("Pay Period Information")
+      expect((1..register.last_row).flat_map { |row_number| register.row(row_number) }.compact.join(" "))
+        .not_to match(/simple payroll register format|SCR|AIRE|MHI/)
       expect(workbook.sheets).to include("Employees", "Earnings Detail", "Deductions Detail", "Register Review", "Report Info")
     end
 
@@ -2401,6 +2405,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
       simple_register = report.fetch("simple_register")
+      expect(simple_register).not_to have_key("note")
       columns = simple_register.fetch("columns")
       hourly_row = simple_register.fetch("rows").find { |row| row.fetch("employee") == hourly_employee.full_name }
       salary_row = simple_register.fetch("rows").find { |row| row.fetch("employee") == salary_employee.full_name }
@@ -2415,7 +2420,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(information.fetch("Processed By").fetch("value")).to include("Payroll Processor")
       expect(information.fetch("Approved By").fetch("value")).to include("Payroll Reviewer")
       expect(simple_register.fetch("review")).to contain_exactly(
-        include("severity" => "OK", "issue" => "No simple-register exceptions detected")
+        include("severity" => "OK", "issue" => "No register exceptions detected")
       )
     end
 

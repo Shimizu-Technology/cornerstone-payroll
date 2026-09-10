@@ -22,7 +22,7 @@ const blankForm: FormState = {
   source_type: 'aire_services',
   base_url: '',
   shared_secret: '',
-  active: true,
+  active: false,
 };
 
 const sourceTypeOptions: Array<{ value: TimeTrackingSource['source_type']; label: string; hint: string }> = [
@@ -59,6 +59,11 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
 }
 
 export function TimeTrackingSources() {
+  const { activeCompanyId } = useCompany();
+  return <ClientTimeTrackingSources key={activeCompanyId} />;
+}
+
+function ClientTimeTrackingSources() {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [form, setForm] = useState<FormState>(() => normalizeForm());
@@ -151,7 +156,7 @@ export function TimeTrackingSources() {
       const basePayload = {
         name: form.name.trim(),
         base_url: form.base_url.trim().replace(/\/+$/, ''),
-        active: editing ? form.active : true,
+        active: form.active,
       };
 
       if (editing && form.id) {
@@ -227,7 +232,7 @@ export function TimeTrackingSources() {
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <p className="font-medium">Active client: {activeCompany?.name || 'Loading client...'}</p>
-              <p className="mt-1">Payroll uses one active time tracking source per client. The import modal will use this client’s active source automatically.</p>
+              <p className="mt-1">Enable a source only for clients that use it. An enabled AIRE source shows AIRE import and linking actions on that client’s payroll. With no enabled source, new import and linking actions are hidden. Previously linked records remain available for review.</p>
             </div>
           </div>
         </div>
@@ -311,10 +316,21 @@ export function TimeTrackingSources() {
                 <span className="mt-1 block text-xs text-gray-500">Must match the source app’s payroll export secret.</span>
               </label>
 
-              <div className="flex items-end justify-end">
-                <Button onClick={saveSource} disabled={saving || !activeCompanyId}>
+              <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm lg:col-span-2">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={form.active}
+                  onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))}
+                  disabled={saving || loading}
+                  className="mt-1 h-4 w-4"
+                />
+                <span><span className="font-semibold text-neutral-900">Enable time tracking integration for this client</span><span className="mt-1 block text-neutral-600">Save the source to apply this setting. Disabling stops new imports and links; it keeps saved records and payment tracking for payroll already linked.</span></span>
+              </label>
+              <div className="flex justify-end lg:col-span-2">
+                <Button onClick={saveSource} disabled={saving || loading || !activeCompanyId}>
                   <Save className="mr-2 h-4 w-4" />
-                  {saving ? 'Saving...' : editing ? 'Save source' : 'Create active source'}
+                  {saving ? 'Saving...' : editing ? 'Save source' : 'Create source'}
                 </Button>
               </div>
             </div>
