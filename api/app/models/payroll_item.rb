@@ -464,6 +464,21 @@ class PayrollItem < ApplicationRecord
     employment_type == "contractor"
   end
 
+  def variable_salary_missing?(use_calculation_snapshot: false)
+    return false if correction_entry? || !pay_period.includes_base_salary?
+
+    snapshot = use_calculation_snapshot ? calculation_context_snapshot.to_h.fetch("employee", {}).to_h : {}
+    variable_salary = if snapshot.key?("employment_type") && snapshot.key?("salary_type")
+      snapshot["employment_type"] == "salary" && snapshot["salary_type"] == "variable"
+    else
+      employee.variable_salary?
+    end
+    return false unless variable_salary
+
+    amount = salary_override.to_d
+    !amount.finite? || !amount.positive?
+  end
+
   # Calculate and store all values
   def calculate!
     ApplicationRecord.transaction do
@@ -476,6 +491,10 @@ class PayrollItem < ApplicationRecord
         raise ActiveRecord::RecordInvalid, calculation_period
       end
       self.pay_period = calculation_period
+
+      if variable_salary_missing?
+        raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
+      end
 
       calculator = PayrollCalculator.for(employee, self)
       calculator.calculate

@@ -90,7 +90,7 @@ module PayrollIntake
                 next
               end
 
-              if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
+              if payroll_item.variable_salary_missing?
                 results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Enter this employee's variable salary amount before applying payroll intake." }
                 next
               end

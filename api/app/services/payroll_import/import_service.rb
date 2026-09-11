@@ -120,6 +120,18 @@ module PayrollImport
       employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
+      # Fail before writing any source rows. A recurring bonus cannot stand in
+      # for the period pay of a variable-salary employee on a regular run.
+      missing_salary_names = employees_by_id.values.filter_map do |employee|
+        next if excluded_employee_ids.include?(employee.id)
+
+        item = pay_period.payroll_items.find_by(employee_id: employee.id) || PayrollItem.new(pay_period: pay_period, employee: employee)
+        employee.full_name if item.variable_salary_missing?
+      end
+      if missing_salary_names.any?
+        raise ArgumentError, "Enter Pay this period in the payroll worksheet for #{missing_salary_names.join(', ')}, then preview the import again. Nothing has been imported."
+      end
+
       ActiveRecord::Base.transaction(requires_new: true) do
         matched.each do |row|
           employee_id = row[:employee_id]
@@ -270,6 +282,10 @@ module PayrollImport
         employee_id: employee.id,
         employee_name: employee.full_name,
         employment_type: employee.employment_type,
+        period_pay_required: employee.variable_salary? && pay_period.includes_base_salary?,
+        current_period_pay: existing_item&.salary_override&.to_s("F"),
+        period_pay_missing: (existing_item || PayrollItem.new(pay_period: pay_period, employee: employee)).variable_salary_missing?,
+        overwrite_required: existing_item.present? && existing_item.import_source != "mosa_revel",
         pay_rate: employee.pay_rate.to_f,
         confidence: match[:confidence],
         matched_name: match[:matched_name],

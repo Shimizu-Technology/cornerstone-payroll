@@ -313,7 +313,7 @@ RSpec.describe HourlyPayrollCalculator do
       expect(payroll_item.withholding_tax).to be < no_retirement_item.withholding_tax
     end
 
-    it "does not double-count retirement sub-category employee deductions when percentage retirement is configured" do
+    it "requires review when a fixed retirement deduction overlaps a configured percentage" do
       deduction_type = DeductionType.create!(
         company: company,
         name: "401(k) Pre-Tax",
@@ -330,17 +330,7 @@ RSpec.describe HourlyPayrollCalculator do
       )
 
       calculator = described_class.new(employee, payroll_item)
-      calculator.calculate
-
-      expect(payroll_item.retirement_payment).to eq(64.00)
-      expect(payroll_item.payroll_item_deductions.map(&:label)).not_to include("401(k) Pre-Tax")
-      expect(payroll_item.total_deductions).to eq(
-        payroll_item.withholding_tax.to_f +
-        payroll_item.social_security_tax.to_f +
-        payroll_item.medicare_tax.to_f +
-        payroll_item.retirement_payment.to_f +
-        payroll_item.roth_retirement_payment.to_f
-      )
+      expect { calculator.calculate }.to raise_error(ArgumentError, /Retirement setup needs review/)
     end
 
     it "keeps a fixed traditional 401(k) deduction when only roth_retirement_rate is configured" do

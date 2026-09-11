@@ -25,6 +25,9 @@ RSpec.describe PayrollImport::ImportService do
         ]
       )
 
+      create(:payroll_item, pay_period: pay_period, employee: employee,
+        employment_type: "salary", pay_rate: employee.pay_rate, salary_override: 1000, import_source: "mosa_revel")
+
       allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
 
       result = service.apply!(

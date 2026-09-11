@@ -21,6 +21,7 @@ class PayPeriodLifecycleService
         raise InvalidTransitionError, "Can only approve a calculated pay period"
       end
 
+      validate_variable_period_pay!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -62,6 +63,7 @@ class PayPeriodLifecycleService
         raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
       end
 
+      validate_variable_period_pay!
       pay_period.update!(
         status: "committed",
         committed_at: Time.current,
@@ -102,6 +104,16 @@ class PayPeriodLifecycleService
       pay_period.lock!
       yield
     end
+  end
+
+  def validate_variable_period_pay!
+    missing = pay_period.payroll_items.not_voided.includes(:employee).select do |item|
+      item.variable_salary_missing?(use_calculation_snapshot: true)
+    end
+    return if missing.empty?
+
+    names = missing.map(&:employee_full_name).join(", ")
+    raise InvalidTransitionError, "Enter Pay this period and recalculate payroll for #{names} before approval or commit. Recurring bonuses do not replace period pay."
   end
 
   def record_aire_processing_acknowledgements
