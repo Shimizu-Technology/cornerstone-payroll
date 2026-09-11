@@ -1084,7 +1084,7 @@ export const payPeriodsApi = {
   },
   applyImport: (
     id: number,
-    data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean },
+    data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean; force_overwrite?: boolean },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
 
@@ -1465,6 +1465,10 @@ export interface DeleteDraftCorrectionRunResponse {
 
 // Import types
 export interface ImportPreviewRow {
+  period_pay_required?: boolean;
+  current_period_pay?: number | null;
+  period_pay_missing?: boolean;
+  overwrite_required?: boolean;
   bonus?: number | null;
   current_bonus?: number;
   effective_bonus?: number;

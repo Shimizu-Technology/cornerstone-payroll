@@ -47,7 +47,7 @@ class W2GuAggregator
           "Box 1 = Gross wages minus pre-tax 401(k) deferrals (Code D). Box 5 = Gross wages (not reduced by 401k).",
           "Box 12 codes: D = 401(k) elective deferrals, AA = Roth 401(k) contributions.",
           "For 2026+, Box 12 code TP reports cash tips and code TT reports qualified overtime compensation; Box 14b reports Treasury tipped occupation codes.",
-          "Box 13 Retirement plan checkbox is set if the employee has a retirement contribution rate > 0.",
+          "Box 13 Retirement plan checkbox is set when recorded employee 401(k) contributions or an employee retirement contribution rate are present.",
           "Committed taxable wage bases are used when present. Legacy rows without stored bases use a clearly flagged compatibility fallback.",
           "If payroll items were committed before tips were included in gross pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually.",
           *historical_caveats
@@ -84,9 +84,8 @@ class W2GuAggregator
     Date.new(year, 1, 1)..Date.new(year, 12, 31)
   end
 
-  # Pre-aggregate payroll sums by employee to avoid N+1 SUM queries.
-  def aggregated_items
-    @aggregated_items ||= PayrollItem
+  def live_items
+    PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id)
       .not_voided
@@ -96,7 +95,11 @@ class W2GuAggregator
           .where(company_id: company.id, pay_date: year_range)
           .select(:id)
       })
-      .group(:employee_id)
+  end
+
+  # Pre-aggregate payroll sums by employee to avoid N+1 SUM queries.
+  def aggregated_items
+    @aggregated_items ||= live_items.group(:employee_id)
       .select(
         :employee_id,
         "SUM(gross_pay) AS gross_pay",
@@ -105,8 +108,6 @@ class W2GuAggregator
         "SUM(COALESCE(additional_withholding, 0)) AS additional_withholding",
         "SUM(social_security_tax) AS ss_tax",
         "SUM(medicare_tax) AS medicare_tax",
-        "SUM(COALESCE(retirement_payment, 0)) AS retirement_total",
-        "SUM(COALESCE(roth_retirement_payment, 0)) AS roth_retirement_total",
         "SUM(COALESCE(non_taxable_pay, 0)) AS non_taxable_total",
         "SUM(COALESCE(social_security_taxable_wages, GREATEST(gross_pay - reported_tips, 0))) AS ss_wages_base",
         "SUM(COALESCE(social_security_taxable_tips, reported_tips)) AS ss_tips_base",
@@ -119,6 +120,10 @@ class W2GuAggregator
         "COUNT(*) FILTER (WHERE overtime_hours <> 0 AND qualified_overtime_compensation IS NULL) AS missing_qualified_overtime_count"
       )
       .index_by(&:employee_id)
+  end
+
+  def aggregated_retirement
+    @aggregated_retirement ||= PayrollRetirementTotals.for_scope_by_employee(live_items)
   end
 
   def employees
@@ -137,8 +142,9 @@ class W2GuAggregator
     withholding_tax = sums&.withholding_tax.to_f + sums&.additional_withholding.to_f + historical_sum(historical, :federal_income_tax)
     ss_tax = sums&.ss_tax.to_f + historical_sum(historical, :social_security_tax)
     medicare_tax = sums&.medicare_tax.to_f + historical_sum(historical, :medicare_tax)
-    retirement_total = sums&.retirement_total.to_f + historical_sum(historical, :retirement)
-    roth_retirement_total = sums&.roth_retirement_total.to_f + historical_sum(historical, :roth_retirement)
+    retirement = aggregated_retirement.fetch(employee.id, {})
+    retirement_total = retirement[:retirement].to_f + historical_sum(historical, :retirement)
+    roth_retirement_total = retirement[:roth_retirement].to_f + historical_sum(historical, :roth_retirement)
     non_taxable_total = sums&.non_taxable_total.to_f + historical_sum(historical, :non_taxable_pay)
     ss_wages_base = sums&.ss_wages_base.to_f + historical_sum(historical, :social_security_taxable_wages)
     ss_tips_base = sums&.ss_tips_base.to_f + historical_sum(historical, :social_security_taxable_tips)

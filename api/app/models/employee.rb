@@ -370,6 +370,7 @@ class Employee < ApplicationRecord
     live_totals = columns.keys.each_with_object({}) do |key, totals|
       totals[key] = row[key.to_s].to_f
     end
+    live_totals.merge!(PayrollRetirementTotals.for_scope(scope))
     merge_historical_ytd(live_totals, tax_year)
   end
 

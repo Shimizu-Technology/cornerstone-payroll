@@ -688,7 +688,7 @@ export function PayPeriodDetail({
         if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
           const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
           salary_overrides[String(employee.id)] = amount;
-          if (amount <= 0) {
+          if (amount <= 0 && payPeriod.includes_base_salary !== false) {
             missingVariableSalaryEmployees.push(`${employee.first_name} ${employee.last_name}`);
           }
         }
@@ -2117,6 +2117,7 @@ export function PayPeriodDetail({
                               <span className="text-xs text-gray-500">Pay this period: $</span>
                               <NumericInput
                                 value={salaryOverride || null}
+                                aria-label={`Pay this period for ${emp.first_name} ${emp.last_name}`}
                                 onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)}
                                 placeholder="0.00"
                                 className="w-28 text-center border border-indigo-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-indigo-50/50"
