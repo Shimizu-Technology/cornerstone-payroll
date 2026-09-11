@@ -32,6 +32,8 @@ class ClientEmployeeUpdateService
     w4_step4a_other_income
     w4_step4b_deductions
     w4_form_version
+    w4_signed_on
+    w4_source_reference
     w4_effective_on
     retirement_rate
     roth_retirement_rate

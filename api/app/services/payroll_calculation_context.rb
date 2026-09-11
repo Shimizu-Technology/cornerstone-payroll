@@ -15,6 +15,8 @@ class PayrollCalculationContext
     allowances
     w4_form_version
     w4_effective_on
+    w4_signed_on
+    w4_source_reference
     w4_step2_multiple_jobs
     w4_dependent_credit
     w4_step4a_other_income

@@ -10,6 +10,8 @@ class EmployeeW4Election < ApplicationRecord
     w4_step4a_other_income
     w4_step4b_deductions
     w4_form_version
+    w4_signed_on
+    w4_source_reference
     w4_effective_on
   ].freeze
   SNAPSHOT_ATTRIBUTES = PROFILE_ATTRIBUTES - [ :w4_effective_on ]
@@ -24,6 +26,7 @@ class EmployeeW4Election < ApplicationRecord
   validates :allowances, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :additional_withholding, :w4_dependent_credit, :w4_step4a_other_income, :w4_step4b_deductions,
     numericality: { greater_than_or_equal_to: 0 }
+  validates :w4_source_reference, length: { maximum: 255 }, allow_nil: true
   validates :w4_form_version,
     numericality: { only_integer: true, greater_than_or_equal_to: 1987, less_than_or_equal_to: ->(_) { Date.current.year + 1 } }
   validates :source, inclusion: { in: SOURCES }

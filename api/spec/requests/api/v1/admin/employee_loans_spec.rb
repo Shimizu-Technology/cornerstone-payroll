@@ -127,6 +127,72 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       }
     end
 
+    it "creates an automatic schedule whose payment and first payday are explicit" do
+      post "/api/v1/admin/employee_loans", params: {
+        employee_loan: valid_params[:employee_loan].merge(schedule_kind: "new", first_deduction_date: "2026-09-10")
+      }, as: :json
+      expect(response).to have_http_status(:created)
+      loan = EmployeeLoan.last
+      schedule = employee.employee_deductions.find_by!(deduction_type: loan.deduction_type)
+      expect(schedule.amount).to eq(25)
+      expect(loan.first_deduction_date).to eq(Date.new(2026, 9, 10))
+      patch "/api/v1/admin/employee_loans/#{loan.id}", params: { employee_loan: { payment_amount: 40, first_deduction_date: "2026-09-24" } }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(schedule.reload.amount).to eq(40)
+      expect(loan.reload.first_deduction_date).to eq(Date.new(2026, 9, 24))
+    end
+
+    it "rejects an automatic schedule without a first deduction payday atomically" do
+      expect {
+        post "/api/v1/admin/employee_loans", params: { employee_loan: valid_params[:employee_loan].merge(schedule_kind: "new") }, as: :json
+      }.not_to change(EmployeeLoan, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "converts a verified recurring loan default atomically instead of duplicating it" do
+      employee.update!(default_payroll_adjustments: [ { label: "Loan - Installment", amount: 250, treatment: "post_tax_deduction", active: true, notes: "Until paid" } ])
+      get "/api/v1/admin/employee_loans"
+      gap = response.parsed_body.fetch("setup_gaps").find { |row| row["kind"] == "recurring_adjustment" }
+      expect(gap).to be_present
+      post "/api/v1/admin/employee_loans", params: { employee_loan: {
+        employee_id: employee.id, name: "Verified installment", balance_setup_mode: "existing_balance",
+        opening_balance: 650, balance_as_of: "2026-09-01", balance_source: "statement",
+        payment_amount: 250, first_deduction_date: "2026-09-10", schedule_kind: gap["kind"],
+        schedule_id: gap["id"], schedule_fingerprint: gap["source_fingerprint"]
+      } }, as: :json
+      expect(response).to have_http_status(:created)
+      expect(employee.reload.active_payroll_adjustments).to be_empty
+      expect(employee.employee_deductions.active.sum(:amount)).to eq(250)
+      expect(AuditLog.last.action).to eq("employee_loans#replace_recurring_deduction")
+    end
+
+    it "blocks conversion when a saved manual paycheck would keep the old deduction" do
+      adjustment = { "label" => "Loan", "amount" => 250, "treatment" => "post_tax_deduction", "active" => true }
+      employee.update!(default_payroll_adjustments: [ adjustment ])
+      period = create(:pay_period, company: company)
+      create(:payroll_item, employee: employee, company: company, pay_period: period, payroll_adjustments: [ adjustment.merge("amount" => 200) ], custom_columns_data: { "payroll_adjustments_overridden" => true })
+      get "/api/v1/admin/employee_loans"
+      gap = response.parsed_body.fetch("setup_gaps").find { |row| row["kind"] == "recurring_adjustment" }
+      post "/api/v1/admin/employee_loans", params: { employee_loan: valid_params[:employee_loan].merge(
+        schedule_kind: gap["kind"], schedule_id: gap["id"], schedule_fingerprint: gap["source_fingerprint"], first_deduction_date: "2026-09-10"
+      ) }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Remove that old deduction")
+      expect(EmployeeLoan.count).to eq(0)
+      expect(employee.reload.active_payroll_adjustments.size).to eq(1)
+    end
+
+    it "rejects a stale recurring source without changing setup or creating a balance" do
+      employee.update!(default_payroll_adjustments: [ { label: "Loan", amount: 250, treatment: "post_tax_deduction", active: true } ])
+      expect {
+        post "/api/v1/admin/employee_loans", params: { employee_loan: valid_params[:employee_loan].merge(
+          schedule_kind: "recurring_adjustment", schedule_id: 1, schedule_fingerprint: "stale", first_deduction_date: "2026-09-10"
+        ) }, as: :json
+      }.not_to change(EmployeeLoan, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.reload.active_payroll_adjustments.size).to eq(1)
+    end
+
     it "creates the loan and initial transaction atomically" do
       expect {
         post "/api/v1/admin/employee_loans", params: valid_params, as: :json

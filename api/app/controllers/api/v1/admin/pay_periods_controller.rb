@@ -352,6 +352,11 @@ module Api
                 payroll_item.salary_override = override_val > 0 ? override_val : nil
               end
 
+              # An omitted bonus preserves this paycheck; explicit zero clears it.
+              if params[:bonuses]&.key?(employee_id.to_s)
+                PayrollBonusInput.manual!(payroll_item, params[:bonuses][employee_id.to_s])
+              end
+
               # Apply tips from the Adjust Hours table
               if params[:tips] && params[:tips][employee_id.to_s]
                 tip_data = params[:tips][employee_id.to_s]
@@ -1077,6 +1082,8 @@ module Api
             timekeeping_source: item.timekeeping_source,
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
+            bonus_source: item.bonus_source,
+            imported_bonus: item.imported_bonus,
             reported_tips: item.reported_tips,
             tips_paid_out: item.tips_paid_out,
             cash_tips_reported: item.cash_tips_reported,
@@ -1179,7 +1186,7 @@ module Api
         end
 
         def submitted_payroll_employee_ids
-          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings custom_deductions payroll_adjustments].flat_map do |key|
+          keyed_ids = %i[salary_overrides bonuses tips tips_paid_out loan_deductions custom_earnings custom_deductions payroll_adjustments].flat_map do |key|
             params[key].respond_to?(:keys) ? params[key].keys : []
           end
 

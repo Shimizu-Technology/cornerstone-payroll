@@ -140,7 +140,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
-            {step === 'upload' && 'Upload Revel hours and the optional per-payroll tips and deductions workbook.'}
+            {step === 'upload' && 'Upload Revel hours and the optional per-payroll tips, deductions and bonus workbook.'}
             {step === 'preview' && (unresolvedCount > 0
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? '' : 's'} need attention before this import can be applied.`
               : `${included.length} employees are ready. Review the source matches and apply.`)}
@@ -209,6 +209,10 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         )}
 
         {/* Preview Step */}
+        {step === 'upload' && (
+          <p className="text-sm text-gray-500">Optional BONUSES sheet: row 4 headers, column C last name, D first name, F bonus amount. A blank amount preserves the current bonus; zero clears an imported bonus. You can also enter bonuses beside the hours after importing.</p>
+        )}
+
         {step === 'preview' && previewData && (
           <div className="space-y-3">
             {unresolvedCount > 0 && (
@@ -280,6 +284,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                     <TableHead className="text-right">Payroll rate</TableHead>
                     <TableHead className="text-right">Tips</TableHead>
                     <TableHead className="text-right">Loan Ded.</TableHead>
+                    <TableHead className="text-right">Bonus this payroll</TableHead>
                     <TableHead className="text-center">Match</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -344,6 +349,13 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                             <span className="text-gray-400">—</span>
                           )}
                         </TableCell>
+                        <TableCell className="text-right">
+                          <p>{formatCurrency(row.effective_bonus || 0)}</p>
+                          <p className="text-[11px] text-gray-500">
+                            {row.bonus == null ? 'No bonus supplied · current value kept' : `Workbook: ${formatCurrency(row.bonus)}`}
+                          </p>
+                          {row.bonus_keeps_manual && <p className="text-[11px] text-amber-700">Manual bonus retained</p>}
+                        </TableCell>
                         <TableCell className="text-center">
                           <Badge variant={row.confidence >= 1.0 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>
                             {Math.round(row.confidence * 100)}%
@@ -367,7 +379,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
               </p>
               <p>
-                Gross pay and taxes will be calculated from Cornerstone employee profiles, imported hours, and this period’s tips and deductions.
+                Gross pay and taxes will be calculated from employee profiles, imported hours, and this payroll’s tips, deductions and bonus. A manually entered bonus is retained during reimport.
               </p>
               <p>
                 Excel loan deductions are applied to this payroll run only. They do not create or update Employee Loans balances yet.

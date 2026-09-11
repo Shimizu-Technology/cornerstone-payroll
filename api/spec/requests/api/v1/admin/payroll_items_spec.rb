@@ -32,6 +32,16 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       json = JSON.parse(response.body)
       expect(json.dig("payroll_item", "id")).to eq(payroll_item.id)
       expect(json.dig("payroll_item", "employee_id")).to eq(employee.id)
+      expect(json.dig("payroll_item", "component_disclosure", "reconciliation", "net_pay")).to eq(payroll_item.net_pay.to_f)
+    end
+
+    it "records an explicit zero bonus as a manual input" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+        params: { payroll_item: { bonus: 0 } }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.bonus_source).to eq("manual")
+      expect(JSON.parse(response.body).dig("payroll_item", "bonus_source")).to eq("manual")
     end
 
     it "does not reveal a payroll item through another company's pay run" do

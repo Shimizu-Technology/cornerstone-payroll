@@ -285,7 +285,8 @@ export function PayrollItemEditModal({
         overtime_hours: parseFloat(String(fields.overtime_hours)) || 0,
         holiday_hours: parseFloat(String(fields.holiday_hours)) || 0,
         pto_hours: parseFloat(String(fields.pto_hours)) || 0,
-        bonus: parseFloat(String(fields.bonus)) || 0,
+        ...((parseFloat(String(fields.bonus)) || 0) !== (Number(item.bonus) || 0)
+          ? { bonus: parseFloat(String(fields.bonus)) || 0 } : {}),
         reported_tips: reportedTips,
         tips_paid_out: tipsPaidOut,
         service_charge_wages: parseFloat(String(fields.service_charge_wages)) || 0,

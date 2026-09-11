@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
@@ -221,8 +222,10 @@ function derivePayrollUiState(payrollItems: PayrollItem[]) {
   const tips: Record<string, { amount: number; pool: string }> = {};
   const tipsPaidOut: Record<string, number> = {};
   const loans: Record<string, number> = {};
+  const bonuses: Record<string, number> = {};
 
   payrollItems.forEach((item) => {
+    bonuses[String(item.employee_id)] = toNumber(item.bonus);
     if (item.salary_override && toNumber(item.salary_override) > 0) {
       salaryOverrides[String(item.employee_id)] = toNumber(item.salary_override);
     }
@@ -245,6 +248,7 @@ function derivePayrollUiState(payrollItems: PayrollItem[]) {
 
   return {
     salaryOverrides,
+    bonuses,
     tips,
     tipsPaidOut,
     loans,
@@ -288,6 +292,8 @@ export function PayPeriodDetail({
   // from the calculated total. Updated via the panel's onChecksLoaded prop.
   const [nonEmployeeChecks, setNonEmployeeChecks] = useState<NonEmployeeCheck[]>([]);
   const [hoursMap, setHoursMap] = useState<Record<string, HoursEntry>>({});
+  const [bonusMap, setBonusMap] = useState<Record<string, number>>({});
+  const [bonusEdits, setBonusEdits] = useState<Record<string, number>>({});
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -339,6 +345,8 @@ export function PayPeriodDetail({
   const syncDerivedPayrollState = useCallback((items: PayrollItem[]) => {
     const derivedState = derivePayrollUiState(items);
     setSalaryOverrideMap(derivedState.salaryOverrides);
+    setBonusMap(derivedState.bonuses);
+    setBonusEdits({});
     setTipsMap(derivedState.tips);
     tipsPaidOutMapRef.current = derivedState.tipsPaidOut;
     setTipsPaidOutMap(derivedState.tipsPaidOut);
@@ -715,9 +723,12 @@ export function PayPeriodDetail({
 
       const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
       payrollFieldAssignments.forEach((assignment) => {
-        if (!assignment.editable) return;
+        const field = worksheetPayrollFields.find((candidate) => candidate.id === assignment.payroll_field_definition_id);
+        const isLoanField = field?.category === 'loan' && field.tax_treatment === 'post_tax_deduction';
+        if (!assignment.editable && !isLoanField) return;
         const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
         const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
+        if (isLoanField && toNumber(loansMap[String(assignment.employee_id)]) > 0 && draft.mode === 'default') return;
         if (draft.mode === 'override' && draft.amount == null) {
           const fieldName = worksheetPayrollFields.find(
             (field) => field.id === assignment.payroll_field_definition_id,
@@ -744,6 +755,7 @@ export function PayPeriodDetail({
 
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
+        ...(Object.keys(bonusEdits).length > 0 ? { bonuses: bonusEdits } : {}),
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
         ...(Object.keys(tips).length > 0 ? { tips } : {}),
         ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out } : {}),
@@ -756,7 +768,12 @@ export function PayPeriodDetail({
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
       setSalaryOverrideMap((previous) => ({ ...previous, ...salary_overrides }));
-      setAdditionalEmployeeIds(new Set());
+      const failedEmployeeIds = new Set(response.results.errors.map((failure) => String(failure.employee_id)));
+      const failedBonuses = Object.fromEntries(Object.entries(bonusEdits).filter(([employeeId]) => failedEmployeeIds.has(employeeId)));
+      setBonusEdits(failedBonuses);
+      setBonusMap((previous) => ({ ...previous, ...failedBonuses }));
+      setHoursMap((previous) => ({ ...previous, ...Object.fromEntries(Object.entries(hoursMap).filter(([employeeId]) => failedEmployeeIds.has(employeeId))) }));
+      setAdditionalEmployeeIds(new Set([...additionalEmployeeIds].filter((employeeId) => failedEmployeeIds.has(String(employeeId)))));
       await payPeriodsApi.payrollFieldInputs(payPeriod.id)
         .then((updatedPayrollFieldResponse) => {
           syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
@@ -981,7 +998,7 @@ export function PayPeriodDetail({
   const totalAddlWH = reportablePayrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
   const totalSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
   const totalMedicare = reportablePayrollItems.reduce(
-    (s, i) => s + toNumber(i.medicare_tax) + toNumber(i.additional_medicare_tax),
+    (s, i) => s + payrollTaxSummary(i).totalMedicare,
     0,
   );
   const totalDeductions = reportablePayrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
@@ -1039,7 +1056,7 @@ export function PayPeriodDetail({
     ])
   );
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
-    worksheetPayrollFields.reduce((total, field) => {
+    payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;
 
       const key = `${employeeId}:${field.id}`;
@@ -1056,6 +1073,13 @@ export function PayPeriodDetail({
 
       return total + Math.max(0, toNumber(assignment.assigned_amount ?? assignment.default_amount));
     }, 0)
+  );
+
+  const recurringTaxableAdditions = (employee: Employee) => (
+    (employee.default_custom_earnings || []).reduce((total, earning) => total + toNumber(earning.amount), 0)
+    + (employee.default_payroll_adjustments || []).reduce((total, adjustment) => (
+      adjustment.active !== false && adjustment.treatment === 'taxable_addition' ? total + toNumber(adjustment.amount) : total
+    ), 0)
   );
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
@@ -1205,7 +1229,7 @@ export function PayPeriodDetail({
     totals.withholding += toNumber(item.withholding_tax);
     totals.additionalWithholding += toNumber(item.additional_withholding);
     totals.socialSecurity += toNumber(item.social_security_tax);
-    totals.employeeMedicare += toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax);
+    totals.employeeMedicare += payrollTaxSummary(item).totalMedicare;
     totals.employerMedicare += toNumber(item.employer_medicare_tax);
     totals.deductions += toNumber(item.total_deductions);
     totals.net += toNumber(item.net_pay);
@@ -1877,7 +1901,7 @@ export function PayPeriodDetail({
               <Table
                 stickyHeader
                 containerClassName="max-h-[32rem]"
-                style={{ minWidth: 1380 + (showTipsLoans ? 420 : 0) + (showPayrollFields ? worksheetPayrollFields.length * 180 : 0) }}
+                style={{ minWidth: 1560 + (showTipsLoans ? 420 : 0) + (showPayrollFields ? worksheetPayrollFields.length * 180 : 0) }}
               >
                 <TableHeader>
                   <TableRow>
@@ -1885,6 +1909,7 @@ export function PayPeriodDetail({
                     <TableHead className={`w-[300px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Regular Hours</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Overtime Hours</TableHead>
+                    <TableHead className={`w-[180px] min-w-[180px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Bonus this payroll</TableHead>
                     {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
@@ -1905,13 +1930,13 @@ export function PayPeriodDetail({
                         </span>
                       </TableHead>
                     ))}
-                    <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
+                    <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Pay preview</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(() => {
                     const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-                    const draftDividerCols = 5 + (showTipsLoans ? 3 : 0) + (showPayrollFields ? worksheetPayrollFields.length : 0);
+                    const draftDividerCols = 6 + (showTipsLoans ? 3 : 0) + (showPayrollFields ? worksheetPayrollFields.length : 0);
                     const filtered = isCalculated
                       ? employees.filter((emp) => payrollEmployeeIds.has(emp.id) || additionalEmployeeIds.has(emp.id))
                       : employees;
@@ -1978,7 +2003,7 @@ export function PayPeriodDetail({
                               ? 0
                               : Math.max(toNumber(tipsMap[String(employee.id)]?.amount), toNumber(tipsPaidOutMap[String(employee.id)]));
 
-                            const grossBeforeFields = baseGross + tipGross;
+                            const grossBeforeFields = baseGross + tipGross + toNumber(bonusMap[String(employee.id)]) + recurringTaxableAdditions(employee);
                             return grossBeforeFields + estimatedTaxablePayrollFieldAdditions(employee.id, grossBeforeFields);
                           };
 
@@ -2030,7 +2055,7 @@ export function PayPeriodDetail({
                       const reportedTipGross = emp.employment_type === 'contractor'
                         ? 0
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
-                      const grossBeforeFields = baseEstGross + reportedTipGross;
+                      const grossBeforeFields = baseEstGross + reportedTipGross + toNumber(bonusMap[String(emp.id)]) + recurringTaxableAdditions(emp);
                       const calculatedItem = payrollItemByEmployeeId.get(emp.id);
                       const estGross = isCalculated && calculatedItem
                         ? toNumber(calculatedItem.gross_pay)
@@ -2164,6 +2189,32 @@ export function PayPeriodDetail({
                           )}
                         </TableCell>
                         )}
+                        <TableCell className={`min-w-[180px] text-center align-top ${rowTone}`}>
+                          <NumericInput
+                            aria-label={`Bonus this payroll for ${emp.first_name} ${emp.last_name}`}
+                            value={bonusMap[String(emp.id)] ?? 0}
+                            onValueChange={(value) => {
+                              const amount = value ?? 0;
+                              if (amount === (bonusMap[String(emp.id)] ?? 0)) return;
+                              setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount }));
+                              setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount }));
+                            }}
+                            min={0}
+                            max={99999999.99}
+                            fixedDecimalsOnBlur={2}
+                            className="mx-auto w-28 text-center"
+                          />
+                          <p className="mt-1 text-[11px] text-gray-500">Applies to this payroll only</p>
+                          {calculatedItem?.imported_bonus != null && (
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              Workbook: {formatCurrency(toNumber(calculatedItem.imported_bonus))}
+                              {(calculatedItem.bonus_source === 'manual' || bonusEdits[String(emp.id)] != null) && ' · Manual amount retained'}
+                            </p>
+                          )}
+                          {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && (
+                            <p className="mt-1 max-w-[180px] text-[11px] text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>
+                          )}
+                        </TableCell>
                         {showTipsLoans && (
                         <TableCell className={`min-w-[190px] text-center align-top ${rowTone}`}>
                           <div className="flex min-w-[160px] items-center justify-center gap-2">
@@ -2209,6 +2260,7 @@ export function PayPeriodDetail({
                           <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
+                              aria-label={`Loan deduction this payroll for ${emp.first_name} ${emp.last_name}`}
                               value={loansMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateLoan(emp.id, value ?? 0)}
                               placeholder="0"
@@ -2217,6 +2269,7 @@ export function PayPeriodDetail({
                               fixedDecimalsOnBlur={2}
                             />
                           </div>
+                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">One-time deduction. For balance repayment, use the linked loan field.</p>
                         </TableCell>
                         )}
                         {showPayrollFields && worksheetPayrollFields.map((field) => {
@@ -2231,6 +2284,10 @@ export function PayPeriodDetail({
                             );
                           }
 
+                          const isLoanField = field.category === 'loan' && field.tax_treatment === 'post_tax_deduction';
+                          const suppliedByDirectLoan = isLoanField && toNumber(loansMap[String(emp.id)]) > 0;
+                          const editable = isLoanField ? !suppliedByDirectLoan || draft?.mode === 'override' : assignment.editable;
+                          const skippedReason = suppliedByDirectLoan ? 'Using the direct loan deduction for this payroll' : assignment.skipped_reason;
                           const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
                           const defaultLabel = field.amount_type === 'percentage'
                             ? `${percentage}% automatic`
@@ -2258,11 +2315,11 @@ export function PayPeriodDetail({
                                     }`}
                                     min={0}
                                     fixedDecimalsOnBlur={2}
-                                    disabled={!assignment.editable}
+                                    disabled={!editable}
                                     aria-invalid={draft?.mode === 'override' && draft.amount == null}
                                   />
                                 </div>
-                                {assignment.editable ? (
+                                {editable ? (
                                   draft?.mode === 'override' && draft.amount == null ? (
                                     <button
                                       type="button"
@@ -2285,8 +2342,8 @@ export function PayPeriodDetail({
                                     </span>
                                   )
                                 ) : (
-                                  <span className="max-w-[160px] text-center text-[10px] leading-tight text-amber-700" title={assignment.skipped_reason || undefined}>
-                                    {assignment.skipped_reason}
+                                  <span className="max-w-[160px] text-center text-[10px] leading-tight text-amber-700" title={skippedReason || undefined}>
+                                    {skippedReason}
                                   </span>
                                 )}
                               </div>
@@ -2295,6 +2352,9 @@ export function PayPeriodDetail({
                         })}
                         <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
+                          <p className="mt-1 text-[11px] font-normal text-gray-500">
+                            {isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
+                          </p>
                         </TableCell>
                       </TableRow>
                       </Fragment>
@@ -2746,7 +2806,7 @@ export function PayPeriodDetail({
                           </TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>
-                            {formatCurrency(toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax))}
+                            {formatCurrency(payrollTaxSummary(item).totalMedicare)}
                           </TableCell>
                           <TableCell className={`text-right text-amber-700 ${rowTone}`}>{formatCurrency(toNumber(item.employer_medicare_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>

@@ -60,6 +60,55 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     )
   end
 
+  it "retains explicit advanced W-4 inputs and signed-document provenance without choosing an effective date" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        tax_info: "SSN: 000-00-0001 Fed: Single Claim dependents amount: $2,000 " \
+          "Multiple jobs: Yes Other income: $1,200.50 Deductions: $300 Extra withholding: $25.75 " \
+          "W-4 form revision: 2025 W-4 signed date: 2025-10-20"
+      ), pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.errors).to be_empty
+    expect(parsed.employee_attributes).to include(
+      w4_dependent_credit: 2000.to_d, w4_step2_multiple_jobs: true,
+      w4_step4a_other_income: 1200.50.to_d, w4_step4b_deductions: 300.to_d,
+      additional_withholding: 25.75.to_d, w4_form_version: 2025,
+      w4_signed_on: Date.new(2025, 10, 20), w4_source_reference: "QuickBooks retained worker 41 / Tax info"
+    )
+    expect(parsed.employee_attributes).not_to have_key(:w4_effective_on)
+    expect(parsed.review_items.pluck("code")).not_to include("w4_source_inputs_unverified")
+  end
+
+  it "flags absent W-4 inputs instead of treating defaults as verified elections" do
+    parsed = described_class.new(
+      worker: worker(pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None"),
+      pay_frequency: "biweekly"
+    ).call
+
+    item = parsed.review_items.find { |review| review["code"] == "w4_source_inputs_unverified" }
+    expect(item.fetch("fields")).to contain_exactly(
+      "w4_dependent_credit", "w4_step2_multiple_jobs", "w4_step4a_other_income", "w4_step4b_deductions",
+      "additional_withholding", "w4_form_version", "w4_signed_on"
+    )
+    expect(parsed.employee_attributes[:w4_signed_on]).to be_nil
+  end
+
+  it "recognizes explicitly supplied zero amounts and an unchecked multiple-jobs box" do
+    parsed = described_class.new(
+      worker: worker(
+        pay_info: "Hourly rate: $11.25/hr Pay method: Check Deductions: None Contributions: None Time off: None",
+        tax_info: "SSN: 000-00-0001 Fed: Single Claim dependents amount: $0 " \
+          "Multiple jobs: No Other income: 0 Deductions: 0 Additional withholding: 0 W4 year: 2025 Signed date: 10/20/2025"
+      ), pay_frequency: "biweekly"
+    ).call
+
+    expect(parsed.employee_attributes[:w4_step2_multiple_jobs]).to be(false)
+    expect(parsed.employee_attributes[:w4_signed_on]).to eq(Date.new(2025, 10, 20))
+    expect(parsed.review_items.pluck("code")).not_to include("w4_source_inputs_unverified")
+  end
+
   it "distinguishes a malformed employee directory snapshot from a missing one" do
     [ [ "not", "an", "object" ], "", false ].each do |malformed_directory|
       malformed_worker = build(

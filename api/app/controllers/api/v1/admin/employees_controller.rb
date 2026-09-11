@@ -73,7 +73,7 @@ module Api
         # PATCH /api/v1/admin/employees/:id
         def update
           attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
-          require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present?
+          require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
 
           Employee.transaction do
             @employee.update!(attributes.merge(w4_attributes))
@@ -224,6 +224,8 @@ module Api
             :w4_step4a_other_income,
             :w4_step4b_deductions,
             :w4_form_version,
+            :w4_signed_on,
+            :w4_source_reference,
             :w4_effective_on,
             :w4_change_reason,
             :retirement_rate,
