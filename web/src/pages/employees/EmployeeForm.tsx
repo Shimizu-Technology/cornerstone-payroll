@@ -2085,11 +2085,11 @@ export function EmployeeForm() {
 
               {/* Step 3: Dependents */}
               <div className="mb-4">
-                <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 3: Claim Dependents</h4>
+                <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 3: Dependent and Other Credits</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Total Annual Dependent Credit ($)
+                      Total Annual Step 3 Credit ($)
                     </label>
                     <Input
                       type="text"
@@ -2099,7 +2099,7 @@ export function EmployeeForm() {
                       onBlur={() => commitW4CurrencyDraft('w4_dependent_credit')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
-                      $2,000 per qualifying child under 17 + $500 per other dependent
+                      Enter the total annual amount from Step 3 of the employee’s signed W-4, including any other credits.
                     </p>
                   </div>
                 </div>
