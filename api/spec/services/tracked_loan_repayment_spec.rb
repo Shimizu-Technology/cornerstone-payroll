@@ -194,4 +194,34 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(loan.reload.current_balance).to eq(75)
     expect(loan.loan_transactions).to be_empty
   end
+  [ :inactive, :expired ].each do |field_state|
+    context "when an #{field_state} field exists alongside an active legacy schedule" do
+      before do
+        assignment.update!(field_state == :inactive ? { active: false } : { end_date: period.pay_date - 1 })
+        deduction_type = DeductionType.create!(company: company, name: "Legacy fallback loan", category: "post_tax", sub_category: "loan")
+        loan.update!(deduction_type: deduction_type)
+        employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
+      end
+
+      it "rejects a direct deduction that would bypass the active legacy repayment" do
+        item.loan_deduction = 40
+        expect { calculate }.to raise_error(ArgumentError, /named loan repayment/)
+        expect(loan.reload.current_balance).to eq(75)
+        expect(loan.loan_transactions).to be_empty
+      end
+
+      it "calculates and commits the legacy deduction exactly once" do
+        calculate
+        expect(item.payroll_item_deductions.size).to eq(1)
+        expect(item.payroll_item_deductions.first.amount).to eq(75)
+        expect(item.payroll_item_deductions.first.employee_loan).to eq(loan)
+        period.update!(status: "approved")
+        PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+        PayrollCalculator.for(employee, item).apply_loan_payments!
+        expect(loan.reload.current_balance).to eq(0)
+        expect(loan.loan_transactions.payments.count).to eq(1)
+        expect(loan.loan_transactions.payments.sum(:amount)).to eq(75)
+      end
+    end
+  end
 end
