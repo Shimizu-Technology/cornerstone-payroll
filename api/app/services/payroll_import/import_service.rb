@@ -283,7 +283,7 @@ module PayrollImport
         employee_name: employee.full_name,
         employment_type: employee.employment_type,
         period_pay_required: employee.variable_salary? && pay_period.includes_base_salary?,
-        current_period_pay: existing_item&.salary_override&.to_f,
+        current_period_pay: existing_item&.salary_override&.to_s("F"),
         period_pay_missing: (existing_item || PayrollItem.new(pay_period: pay_period, employee: employee)).variable_salary_missing?,
         overwrite_required: existing_item.present? && existing_item.import_source != "mosa_revel",
         pay_rate: employee.pay_rate.to_f,

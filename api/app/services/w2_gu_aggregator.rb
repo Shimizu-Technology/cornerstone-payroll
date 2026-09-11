@@ -30,7 +30,7 @@ class W2GuAggregator
 
     rows = employees.map { |employee| employee_row(employee) }
 
-    {
+    report = {
       meta: {
         report_type: "w2_gu",
         company_id: company.id,
@@ -59,26 +59,38 @@ class W2GuAggregator
         address: company.full_address
       },
       totals: {
-        box1_wages_tips_other_comp: rows.sum { |r| r[:box1_wages_tips_other_comp].to_f }.round(2),
-        box2_federal_income_tax_withheld: rows.sum { |r| r[:box2_federal_income_tax_withheld].to_f }.round(2),
-        box3_social_security_wages: rows.sum { |r| r[:box3_social_security_wages].to_f }.round(2),
-        box4_social_security_tax_withheld: rows.sum { |r| r[:box4_social_security_tax_withheld].to_f }.round(2),
-        box5_medicare_wages_tips: rows.sum { |r| r[:box5_medicare_wages_tips].to_f }.round(2),
-        box6_medicare_tax_withheld: rows.sum { |r| r[:box6_medicare_tax_withheld].to_f }.round(2),
-        box7_social_security_tips: rows.sum { |r| r[:box7_social_security_tips].to_f }.round(2),
-        reported_tips_total: rows.sum { |r| r[:reported_tips_total].to_f }.round(2),
-        box12_code_d_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "D" }.sum { |e| e[:amount] } }.round(2),
-        box12_code_aa_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "AA" }.sum { |e| e[:amount] } }.round(2),
-        box12_code_tp_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "TP" }.sum { |e| e[:amount] } }.round(2),
-        box12_code_tt_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "TT" }.sum { |e| e[:amount] } }.round(2),
+        box1_wages_tips_other_comp: rows.sum(0.to_d) { |r| r[:box1_wages_tips_other_comp].to_d }.round(2),
+        box2_federal_income_tax_withheld: rows.sum(0.to_d) { |r| r[:box2_federal_income_tax_withheld].to_d }.round(2),
+        box3_social_security_wages: rows.sum(0.to_d) { |r| r[:box3_social_security_wages].to_d }.round(2),
+        box4_social_security_tax_withheld: rows.sum(0.to_d) { |r| r[:box4_social_security_tax_withheld].to_d }.round(2),
+        box5_medicare_wages_tips: rows.sum(0.to_d) { |r| r[:box5_medicare_wages_tips].to_d }.round(2),
+        box6_medicare_tax_withheld: rows.sum(0.to_d) { |r| r[:box6_medicare_tax_withheld].to_d }.round(2),
+        box7_social_security_tips: rows.sum(0.to_d) { |r| r[:box7_social_security_tips].to_d }.round(2),
+        reported_tips_total: rows.sum(0.to_d) { |r| r[:reported_tips_total].to_d }.round(2),
+        box12_code_d_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "D" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
+        box12_code_aa_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "AA" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
+        box12_code_tp_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "TP" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
+        box12_code_tt_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "TT" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
         retirement_plan_participants: rows.count { |r| r[:box13_retirement_plan] }
       },
       compliance_issues: compliance_issues(rows),
       employees: rows
     }
+    serialize_money(report)
   end
 
   private
+
+  # Keep decimal arithmetic through final rounding, then preserve the report
+  # API's existing JSON-number contract at the serialization boundary.
+  def serialize_money(value)
+    case value
+    when BigDecimal then value.to_f
+    when Hash then value.transform_values { |entry| serialize_money(entry) }
+    when Array then value.map { |entry| serialize_money(entry) }
+    else value
+    end
+  end
 
   def year_range
     Date.new(year, 1, 1)..Date.new(year, 12, 31)
@@ -137,20 +149,20 @@ class W2GuAggregator
     sums = aggregated_items[employee.id]
     historical = historical_balances_by_employee.fetch(employee.id, [])
 
-    gross_pay = sums&.gross_pay.to_f + historical_sum(historical, :gross_pay)
-    reported_tips = sums&.reported_tips.to_f + historical_sum(historical, :reported_tips)
-    withholding_tax = sums&.withholding_tax.to_f + sums&.additional_withholding.to_f + historical_sum(historical, :federal_income_tax)
-    ss_tax = sums&.ss_tax.to_f + historical_sum(historical, :social_security_tax)
-    medicare_tax = sums&.medicare_tax.to_f + historical_sum(historical, :medicare_tax)
+    gross_pay = sums&.gross_pay.to_d + historical_sum(historical, :gross_pay)
+    reported_tips = sums&.reported_tips.to_d + historical_sum(historical, :reported_tips)
+    withholding_tax = sums&.withholding_tax.to_d + sums&.additional_withholding.to_d + historical_sum(historical, :federal_income_tax)
+    ss_tax = sums&.ss_tax.to_d + historical_sum(historical, :social_security_tax)
+    medicare_tax = sums&.medicare_tax.to_d + historical_sum(historical, :medicare_tax)
     retirement = aggregated_retirement.fetch(employee.id, {})
-    retirement_total = retirement[:retirement].to_f + historical_sum(historical, :retirement)
-    roth_retirement_total = retirement[:roth_retirement].to_f + historical_sum(historical, :roth_retirement)
-    non_taxable_total = sums&.non_taxable_total.to_f + historical_sum(historical, :non_taxable_pay)
-    ss_wages_base = sums&.ss_wages_base.to_f + historical_sum(historical, :social_security_taxable_wages)
-    ss_tips_base = sums&.ss_tips_base.to_f + historical_sum(historical, :social_security_taxable_tips)
-    medicare_wages_base = sums&.medicare_wages_base.to_f + historical_sum(historical, :medicare_taxable_wages)
-    cash_tips_total = sums&.cash_tips_total.to_f
-    qualified_overtime_total = sums&.qualified_overtime_total.to_f
+    retirement_total = retirement[:retirement].to_d + historical_sum(historical, :retirement)
+    roth_retirement_total = retirement[:roth_retirement].to_d + historical_sum(historical, :roth_retirement)
+    non_taxable_total = sums&.non_taxable_total.to_d + historical_sum(historical, :non_taxable_pay)
+    ss_wages_base = sums&.ss_wages_base.to_d + historical_sum(historical, :social_security_taxable_wages)
+    ss_tips_base = sums&.ss_tips_base.to_d + historical_sum(historical, :social_security_taxable_tips)
+    medicare_wages_base = sums&.medicare_wages_base.to_d + historical_sum(historical, :medicare_taxable_wages)
+    cash_tips_total = sums&.cash_tips_total.to_d
+    qualified_overtime_total = sums&.qualified_overtime_total.to_d
 
     if reported_tips > gross_pay
       Rails.logger.warn(
@@ -164,7 +176,7 @@ class W2GuAggregator
     # W-2 convention: allocate SS wage base to Box 3 (wages) first,
     # then Box 7 (tips) gets any remaining SS wage-base room.
     box3 = [ ss_wages_base, ss_wage_base ].min.round(2)
-    remaining_ss_base = [ ss_wage_base - box3, 0.0 ].max
+    remaining_ss_base = [ ss_wage_base - box3, 0.to_d ].max
     box7 = [ ss_tips_base, remaining_ss_base ].min.round(2)
 
     # Box 5: Medicare wages (gross pay, not reduced by pre-tax retirement)
@@ -176,7 +188,7 @@ class W2GuAggregator
 
     # Box 13: Checkboxes
     has_retirement_plan = retirement_total.positive? || roth_retirement_total.positive? ||
-      employee.retirement_rate.to_f > 0 || employee.roth_retirement_rate.to_f > 0
+      employee.retirement_rate.to_d > 0 || employee.roth_retirement_rate.to_d > 0
 
     {
       employee_id: employee.id,
@@ -275,7 +287,7 @@ class W2GuAggregator
       issues << "#{negative_tt} employee(s) have negative annual qualified overtime; Box 12 TT is blocked pending correction review" if negative_tt.positive?
 
       missing_occupation_codes = rows.count do |row|
-        row[:reported_tips_total].to_f.positive? && row[:box14b_tipped_occupation_codes].blank?
+        row[:reported_tips_total].to_d.positive? && row[:box14b_tipped_occupation_codes].blank?
       end
       issues << "#{missing_occupation_codes} tipped employee(s) missing Treasury tipped occupation code" if missing_occupation_codes.positive?
 
@@ -289,7 +301,7 @@ class W2GuAggregator
   end
 
   def ss_wage_base
-    @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year)
+    @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_d || SS_WAGE_BASE_BY_YEAR.fetch(year).to_d
   rescue KeyError
     raise ArgumentError, "SS wage base not configured for #{year}"
   end
@@ -314,7 +326,7 @@ class W2GuAggregator
   end
 
   def historical_sum(balances, field)
-    balances.sum(0.to_d) { |balance| balance.public_send(field).to_d }.to_f
+    balances.sum(0.to_d) { |balance| balance.public_send(field).to_d }
   end
 
   def historical_overtime?(balances)

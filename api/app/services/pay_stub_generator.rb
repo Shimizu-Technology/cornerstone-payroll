@@ -537,12 +537,12 @@ class PayStubGenerator
   end
 
   def ytd_payroll_field_amount(entry)
-    ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.0)
+    ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.to_d)
   end
 
   def ytd_total_deductions
-    payroll_item.ytd_withholding_tax.to_f + payroll_item.ytd_social_security_tax.to_f + payroll_item.ytd_medicare_tax.to_f +
-      employee_ytd_additional_withholding + retirement_ytd_totals[:retirement].to_f + retirement_ytd_totals[:roth_retirement].to_f +
+    payroll_item.ytd_withholding_tax.to_d + payroll_item.ytd_social_security_tax.to_d + payroll_item.ytd_medicare_tax.to_d +
+      employee_ytd_additional_withholding + retirement_ytd_totals[:retirement].to_d + retirement_ytd_totals[:roth_retirement].to_d +
       visible_legacy_insurance_ytd + visible_legacy_loan_ytd + legacy_itemized_deductions_ytd_total + employee_ytd_tips_paid_out +
       employee_ytd_custom_deductions_total + ytd_payroll_field_deductions_total
   end
@@ -553,15 +553,15 @@ class PayStubGenerator
       .map do |label, deductions|
         {
           label: label,
-          amount: deductions.sum { |deduction| deduction.amount.to_f },
-          ytd: legacy_itemized_deductions_ytd_by_label.fetch(label, 0.0)
+          amount: deductions.sum(0.to_d) { |deduction| deduction.amount.to_d },
+          ytd: legacy_itemized_deductions_ytd_by_label.fetch(label, 0.to_d)
         }
       end
       .sort_by { |row| row[:label].to_s }
   end
 
   def legacy_itemized_deductions_ytd_total
-    legacy_itemized_deduction_rows.sum { |row| row[:ytd].to_f }
+    legacy_itemized_deduction_rows.sum(0.to_d) { |row| row[:ytd].to_d }
   end
 
   def legacy_itemized_deductions_for_stub
@@ -579,7 +579,7 @@ class PayStubGenerator
     @legacy_itemized_deductions_ytd_by_label ||= begin
       labels = legacy_itemized_deductions_for_stub.map(&:label).uniq
       if labels.empty?
-        Hash.new(0.0)
+        Hash.new(0.to_d)
       else
         pay_date = payroll_item.pay_period.pay_date || Date.current
         year_start = Date.new(pay_date.year, 1, 1)
@@ -596,7 +596,7 @@ class PayStubGenerator
             pay_period_id: payroll_item.pay_period.id)
           .reject { |deduction| PayrollRetirementTotals.retirement_deduction?(deduction) }
           .group_by(&:label)
-          .transform_values { |deductions| deductions.sum { |deduction| deduction.amount.to_f } }
+          .transform_values { |deductions| deductions.sum(0.to_d) { |deduction| deduction.amount.to_d } }
       end
     end
   end
@@ -606,15 +606,15 @@ class PayStubGenerator
   end
 
   def visible_legacy_insurance_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
+    return 0.to_d if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
 
-    employee_ytd_totals[:insurance].to_f
+    employee_ytd_totals[:insurance].to_d
   end
 
   def visible_legacy_loan_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
+    return 0.to_d if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
 
-    employee_ytd_totals[:loans].to_f
+    employee_ytd_totals[:loans].to_d
   end
 
   def retirement_totals
@@ -658,8 +658,8 @@ class PayStubGenerator
   end
 
   def ytd_payroll_field_deductions_total
-    ytd_source_items.sum do |item|
-      item.payroll_item_field_entries.sum do |entry|
+    ytd_source_items.sum(0.to_d) do |item|
+      item.payroll_item_field_entries.sum(0.to_d) do |entry|
         next 0.to_d unless entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
         next 0.to_d if PayrollRetirementTotals.retirement_field?(entry)
 
@@ -672,12 +672,12 @@ class PayStubGenerator
     @ytd_payroll_field_totals ||= begin
       keys = payroll_item.payroll_item_field_entries.select(&:active?)
         .map { |entry| [ entry.label, entry.tax_treatment, entry.category ] }.uniq
-      ytd_source_items.each_with_object(Hash.new(0.0)) do |item, totals|
+      ytd_source_items.each_with_object(Hash.new(0.to_d)) do |item, totals|
         item.payroll_item_field_entries.each do |entry|
           next unless entry.active?
 
           key = [ entry.label, entry.tax_treatment, entry.category ]
-          totals[key] += entry.amount.to_f if keys.include?(key)
+          totals[key] += entry.amount.to_d if keys.include?(key)
         end
       end
     end
@@ -695,11 +695,11 @@ class PayStubGenerator
   end
 
   def employee_ytd_additional_withholding
-    employee_ytd_totals[:additional_withholding].to_f
+    employee_ytd_totals[:additional_withholding].to_d
   end
 
   def employee_ytd_tips_paid_out
-    employee_ytd_totals[:tips_paid_out].to_f
+    employee_ytd_totals[:tips_paid_out].to_d
   end
 
   def employee_ytd_custom_deductions_by_label
@@ -710,12 +710,12 @@ class PayStubGenerator
       if labels.empty?
         {}
       else
-        custom_deduction_items.each_with_object(Hash.new(0.0)) do |item, totals|
+        custom_deduction_items.each_with_object(Hash.new(0.to_d)) do |item, totals|
           Array(item.custom_deductions).each do |deduction|
             label = deduction["label"].to_s.strip.downcase
             next unless labels.include?(label)
 
-            totals[label] += deduction["amount"].to_f
+            totals[label] += deduction["amount"].to_d
           end
         end
       end
@@ -723,8 +723,8 @@ class PayStubGenerator
   end
 
   def employee_ytd_custom_deductions_total
-    @employee_ytd_custom_deductions_total ||= custom_deduction_items.sum do |item|
-      item.custom_deductions_total.to_f + item.pre_tax_payroll_adjustments_total.to_f + item.post_tax_payroll_adjustments_total.to_f
+    @employee_ytd_custom_deductions_total ||= custom_deduction_items.sum(0.to_d) do |item|
+      item.custom_deductions_total.to_d + item.pre_tax_payroll_adjustments_total.to_d + item.post_tax_payroll_adjustments_total.to_d
     end
   end
 

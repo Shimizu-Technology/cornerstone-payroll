@@ -59,6 +59,14 @@ RSpec.describe "Pay stub retirement history" do
     expect(generator.send(:ytd_total_deductions)).to eq(190)
   end
 
+  it "keeps cents exact while combining retirement and other YTD deductions" do
+    add_field(item, label: "401(k)", amount: "0.10")
+    add_field(item, label: "Rent", amount: "0.20", retirement: false)
+    total = PayStubGenerator.new(item).send(:ytd_total_deductions)
+    expect(total).to be_a(BigDecimal)
+    expect(total.to_s("F")).to eq("0.3")
+  end
+
   it "excludes prior drafts, voided checks, later same-day runs, future payroll and other employees" do
     earlier = prior_item(date: pay_date, amount: 10)
     item

@@ -227,15 +227,15 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         {step === 'preview' && previewData && (
           <div className="space-y-3">
             {missingPeriodPay.length > 0 && (
-              <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
-                <p className="mt-1">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. You can also uncheck these employees to import the other rows first.</p>
-                <Button variant="outline" className="mt-3" onClick={handleClose}>Return to payroll worksheet</Button>
+                <p className="mt-2">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. You can also uncheck these employees to import the other rows first.</p>
+                <Button variant="outline" className="mt-4" onClick={handleClose}>Return to payroll worksheet</Button>
               </div>
             )}
             {overwriteRows.length > 0 && (
-              <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="mt-0.5" />
+              <label className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
+                <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="shrink-0 self-start" />
                 <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. Saved period pay and manually entered bonuses are retained.</span>
               </label>
             )}
@@ -340,7 +340,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <p>{row.period_pay_required ? (row.current_period_pay ? formatCurrency(row.current_period_pay) : 'Missing period pay') : formatCurrency(row.pay_rate)}</p>
+                          <p>{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</p>
                           <p className="text-[11px] text-gray-500">{row.period_pay_required ? 'Pay this period · retained' : 'from employee profile'}</p>
                         </TableCell>
                         <TableCell className="text-right">
