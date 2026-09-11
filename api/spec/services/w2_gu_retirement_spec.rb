@@ -50,6 +50,17 @@ RSpec.describe W2GuAggregator, "fixed and flexible retirement" do
     expect(source.fetch(:balance).reload.retirement).to eq(500.to_d)
   end
 
+  it "keeps decimal cents internally and preserves numeric amounts in the JSON report" do
+    item.update!(gross_pay: "10000.30", retirement_payment: "20.10")
+    aggregator = described_class.new(company, 2025, include_historical: false)
+    internal = aggregator.send(:employee_row, employee).fetch(:box1_wages_tips_other_comp)
+    expect(internal).to be_a(BigDecimal)
+    expect(internal.to_s("F")).to eq("9055.2")
+    json = JSON.parse(aggregator.generate.to_json)
+    expect(json.fetch("totals").fetch("box1_wages_tips_other_comp")).to eq(9055.2)
+    expect(json.fetch("employees").sole.fetch("box12").find { |entry| entry["code"] == "D" }.fetch("amount")).to eq(945.1)
+  end
+
   it "uses the same exclusions for retirement and wage totals" do
     item.update_columns(voided: true)
     expect(described_class.new(company, 2025, include_historical: false).generate.fetch(:totals)).to include(box12_code_d_total: 0, box12_code_aa_total: 0)

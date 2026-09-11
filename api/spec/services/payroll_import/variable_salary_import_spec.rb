@@ -35,7 +35,7 @@ RSpec.describe "Variable salary source consistency" do
     item.calculate!
     expect(item.gross_pay).to eq(9900.00)
     preview = service.preview(pdf_records: [ { employee_name: "Salary, Variable", regular_hours: 0 } ], excel_records: [])
-    expect(preview[:matched].first).to include(period_pay_missing: false, current_period_pay: 9000.00, overwrite_required: true)
+    expect(preview[:matched].first).to include(period_pay_missing: false, current_period_pay: "9000.0", overwrite_required: true)
     expect(service.apply!(matched: [ source_row ])[:errors].first[:error]).to include("force_overwrite")
     expect(service.apply!(matched: [ source_row ], force_overwrite: true)[:errors]).to be_empty
     expect(item.reload.salary_override).to eq(9000.00)

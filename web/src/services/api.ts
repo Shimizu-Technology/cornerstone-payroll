@@ -1466,7 +1466,7 @@ export interface DeleteDraftCorrectionRunResponse {
 // Import types
 export interface ImportPreviewRow {
   period_pay_required?: boolean;
-  current_period_pay?: number | null;
+  current_period_pay?: string | null;
   period_pay_missing?: boolean;
   overwrite_required?: boolean;
   bonus?: number | null;

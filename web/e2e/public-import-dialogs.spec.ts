@@ -269,7 +269,7 @@ test('MoSa import routes missing period pay to the worksheet and requires review
           confidence: 1, matched_name: 'Variable Salary', regular_hours: 0, overtime_hours: 0, total_hours: 0,
           pdf_employee_name: 'Variable Salary', total_tips: 0, tip_pool: null, loan_deduction: 0,
           period_pay_required: true, period_pay_missing: !periodPayEntered,
-          current_period_pay: periodPayEntered ? 9000.00 : null, overwrite_required: periodPayEntered }],
+          current_period_pay: periodPayEntered ? '9000.0' : '0.0', overwrite_required: periodPayEntered }],
         unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [],
         pdf_count: 1, excel_count: 0, matched_count: 1, can_apply: true, tips_paid_out_from_tips: false,
       },
@@ -283,6 +283,7 @@ test('MoSa import routes missing period pay to the worksheet and requires review
   };
   await preview();
   await expect(dialog.getByRole('alert')).toContainText('Period pay is required for Variable Salary');
+  await expect(dialog.getByText('Missing period pay', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Return to payroll worksheet' }).click();
   await expect(dialog).not.toBeVisible();

@@ -441,8 +441,8 @@ class PayrollCalculator
     payroll_item.ytd_withholding_tax = ytd[:withholding_tax].to_f + payroll_item.withholding_tax.to_f
     payroll_item.ytd_social_security_tax = ytd[:social_security_tax].to_f + payroll_item.social_security_tax.to_f
     payroll_item.ytd_medicare_tax = ytd[:medicare_tax].to_f + payroll_item.medicare_tax.to_f
-    payroll_item.ytd_retirement = ytd[:retirement].to_f + retirement_totals[:retirement]
-    payroll_item.ytd_roth_retirement = ytd[:roth_retirement].to_f + retirement_totals[:roth_retirement]
+    payroll_item.ytd_retirement = ytd[:retirement].to_d + retirement_totals[:retirement]
+    payroll_item.ytd_roth_retirement = ytd[:roth_retirement].to_d + retirement_totals[:roth_retirement]
   end
 
   private
