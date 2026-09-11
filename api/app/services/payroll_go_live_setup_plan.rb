@@ -87,6 +87,8 @@ class PayrollGoLiveSetupPlan
           errors << "#{target.full_name}: the source employee is already matched to another successor employee"
         elsif source.employment_type != target.employment_type
           errors << "#{target.full_name}: source and successor tax classifications do not match"
+        elsif source.individual_filer? && target.individual_filer? && source.valid_filing_ssn? && target.valid_filing_ssn? && source.ssn_digits != target.ssn_digits
+          errors << "#{target.full_name}: source and successor Social Security numbers conflict; verify employee identity before copying setup"
         else
           matches << [ source, target ]
           matched_source_ids << source.id
@@ -123,7 +125,7 @@ class PayrollGoLiveSetupPlan
     values = [
       "Paid payroll, checks, tax filings, YTD rows, loan transactions, and audit history are never copied.",
       "The source EIN is not moved during setup transfer. Complete the legal-employer handoff only after go-live approval.",
-      "Loan deduction schedules are copied without balances; each opening balance must be independently verified."
+      "Balance-tracked and generic recurring loan deductions are copied inactive until the successor balance and repayment schedule are verified. Existing successor loan schedules are retained."
     ]
     values << "The source client has no EIN recorded" if source_company.ein.blank?
     values

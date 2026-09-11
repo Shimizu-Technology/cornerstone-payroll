@@ -31,6 +31,8 @@ import {
 import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
+import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
+import { PayrollResultBreakdown, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
 export function PayrollItemDetail(): ReactElement {
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
@@ -133,7 +135,8 @@ export function PayrollItemDetail(): ReactElement {
   }
 
   const employeeName = `${employee.first_name} ${employee.last_name}`;
-  const taxes = Number(payrollItem.withholding_tax || 0) + Number(payrollItem.social_security_tax || 0) + Number(payrollItem.medicare_tax || 0) + Number(payrollItem.additional_medicare_tax || 0);
+  const taxes = payrollTaxSummary(payrollItem).total;
+  const disclosure = (payrollItem as PayrollItem & { component_disclosure?: PayrollComponentDisclosure }).component_disclosure;
   const inputSource = payrollItem.import_source || payrollItem.timekeeping_source || 'manual';
 
   return (
@@ -161,7 +164,7 @@ export function PayrollItemDetail(): ReactElement {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
           <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
-          <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Math.max(0, Number(payrollItem.total_deductions || 0) - taxes))} detail="Retirement, loans, insurance, and fields" />
+          <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
           <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
@@ -173,7 +176,7 @@ export function PayrollItemDetail(): ReactElement {
               <ContextRow icon={Clock3} label="Regular hours" value={Number(payrollItem.hours_worked || 0).toFixed(2)} />
               <ContextRow icon={Clock3} label="Overtime hours" value={Number(payrollItem.overtime_hours || 0).toFixed(2)} />
               <ContextRow icon={Banknote} label="Applied pay rate" value={formatCurrency(Number(payrollItem.pay_rate || 0))} />
-              <ContextRow icon={Banknote} label="Bonus" value={formatCurrency(Number(payrollItem.bonus || 0))} />
+              <ContextRow icon={Banknote} label="One-time bonus" value={formatCurrency(Number(payrollItem.bonus || 0))} />
               <ContextRow icon={ReceiptText} label="Reported tips" value={formatCurrency(Number(payrollItem.reported_tips || 0))} />
             </CardContent>
           </Card>
@@ -191,16 +194,8 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
         </div>
 
-        {(payrollItem.custom_earnings?.length || payrollItem.custom_deductions?.length || payrollItem.payroll_field_entries?.length) ? (
-          <Card>
-            <CardHeader><CardTitle>Applied payroll components</CardTitle><p className="mt-2 text-sm text-neutral-500">Named additions, deductions, and payroll fields recorded on this result.</p></CardHeader>
-            <CardContent className="grid gap-6 lg:grid-cols-3">
-              <ComponentList title="Custom earnings" entries={(payrollItem.custom_earnings || []).map((entry) => ({ label: entry.label, amount: entry.amount }))} />
-              <ComponentList title="Custom deductions" entries={(payrollItem.custom_deductions || []).map((entry) => ({ label: entry.label, amount: entry.amount }))} />
-              <ComponentList title="Payroll fields" entries={(payrollItem.payroll_field_entries || []).filter((entry) => entry.active !== false).map((entry) => ({ label: entry.label, amount: entry.amount }))} />
-            </CardContent>
-          </Card>
-        ) : null}
+        {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
+        {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} />}
 
         <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
       </main>
@@ -239,13 +234,4 @@ interface ContextRowProps {
 
 function ContextRow({ icon: Icon, label, value }: ContextRowProps): ReactElement {
   return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div></div>;
-}
-
-interface ComponentListProps {
-  title: string;
-  entries: Array<{ label: string; amount: number }>;
-}
-
-function ComponentList({ title, entries }: ComponentListProps): ReactElement {
-  return <section><h2 className="text-sm font-bold text-neutral-950">{title}</h2>{entries.length ? <div className="mt-4 space-y-2">{entries.map((entry, index) => <div key={`${entry.label}-${index}`} className="flex items-center justify-between gap-4 rounded-xl bg-neutral-50 px-4 py-2 text-sm"><span className="font-medium text-neutral-700">{entry.label}</span><span className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(entry.amount || 0))}</span></div>)}</div> : <p className="mt-4 text-sm text-neutral-500">None applied.</p>}</section>;
 }

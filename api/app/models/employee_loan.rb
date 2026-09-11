@@ -22,6 +22,8 @@ class EmployeeLoan < ApplicationRecord
   validates :payment_amount, numericality: { greater_than: 0 }, allow_nil: true
   validates :status, presence: true, inclusion: { in: STATUSES }
 
+  validate :repayment_scope_is_valid
+
   scope :active, -> { where(status: "active") }
   scope :paid_off, -> { where(status: "paid_off") }
   scope :for_employee, ->(employee_id) { where(employee_id: employee_id) }
@@ -34,10 +36,28 @@ class EmployeeLoan < ApplicationRecord
     status == "paid_off"
   end
 
-  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil, notes: nil, recorded_by: nil)
+  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil, notes: nil, recorded_by: nil, schedule_snapshot: {})
     raise ArgumentError, "Payment amount must be positive" unless amount.positive?
 
     with_lock do
+      if payroll_item
+        existing = loan_transactions.payments.find_by(payroll_item_id: payroll_item.id)
+        if existing && !existing.reversal
+          raise ArgumentError, "Payroll loan payment differs from its recorded amount" unless existing.amount == amount
+          return existing.amount
+        end
+        unless payroll_item.employee_id == employee_id && payroll_item.company_id == company_id
+          raise ArgumentError, "Payroll loan payment belongs to another employee or client"
+        end
+        raise ArgumentError, "Reversed payroll payments cannot be reapplied; create a correction payroll" if existing
+        snapshot = schedule_snapshot.to_h.stringify_keys
+        if snapshot["default"] && (snapshot["payment_amount"].to_s != payment_amount.to_s || snapshot["first_deduction_date"].to_s != first_deduction_date.to_s)
+          raise ArgumentError, "#{name}: repayment schedule changed. Unapprove and recalculate this payroll before committing"
+        end
+        unless active? && amount <= current_balance && repayment_schedule_active_on?(transaction_pay_date(pay_period, date)) && scheduled_payment_for(pay_date: transaction_pay_date(pay_period, date), requested_amount: amount) == amount
+          raise ArgumentError, "#{name}: loan balance or schedule changed. Unapprove and recalculate this payroll before committing"
+        end
+      end
       raise ArgumentError, "Loan is not active" unless active?
 
       actual_payment = [ amount, current_balance ].min
@@ -125,12 +145,68 @@ class EmployeeLoan < ApplicationRecord
 
       update!(
         current_balance: (balance_before + amount).round(2),
-        status: "active"
+        status: "active",
+        paid_off_date: nil
       )
     end
   end
 
+  # Calculation is read-only; the ledger moves only when payroll is committed.
+  def scheduled_payment_for(pay_date:, requested_amount:)
+    return 0.to_d unless active?
+    return 0.to_d if first_deduction_date.present? && pay_date < first_deduction_date
+    return 0.to_d if balance_as_of.present? && pay_date < balance_as_of
+
+    [ requested_amount.to_d, current_balance ].min.round(2)
+  end
+
+  def reverse_payroll_payment!(payment, actor:, reason:)
+    with_lock do
+      payment.reload
+      return if payment.reversal
+      raise ArgumentError, "Payment does not belong to this loan" unless payment.employee_loan_id == id && payment.source == "payroll"
+
+      new_balance = current_balance + payment.amount
+      loan_transactions.create!(
+        transaction_type: "adjustment", source: "payroll", amount: payment.amount,
+        balance_before: current_balance, balance_after: new_balance,
+        transaction_date: Date.current, payroll_item: payment.payroll_item,
+        pay_period: payment.pay_period, reverses_transaction: payment,
+        recorded_by: actor, notes: "Payroll void: #{reason}"
+      )
+      update!(current_balance: new_balance, status: paid_off? ? "active" : status, paid_off_date: nil)
+    end
+  end
+
   private
+
+  def repayment_scope_is_valid
+    errors.add(:company, "must match the employee's client") if employee && company_id != employee.company_id
+    if deduction_type && (deduction_type.company_id != company_id || !deduction_type.loan? || !deduction_type.post_tax?)
+      errors.add(:deduction_type, "must be a post-tax loan deduction for this client")
+    end
+    if deduction_type_id && self.class.where(employee_id: employee_id, deduction_type_id: deduction_type_id).where.not(id: id).exists?
+      errors.add(:deduction_type, "already has a loan balance; use a separate repayment schedule")
+    end
+    if first_deduction_date && balance_as_of && first_deduction_date < balance_as_of
+      errors.add(:first_deduction_date, "must be on or after the verified balance date")
+    end
+  end
+
+  def repayment_schedule_active_on?(pay_date)
+    if employee_payroll_fields.exists?
+      employee_payroll_fields.active.effective_on(pay_date).joins(:payroll_field_definition)
+        .where(payroll_field_definitions: { active: true }).exists?
+    elsif deduction_type_id
+      deduction_type&.active? && employee.employee_deductions.active.exists?(deduction_type_id: deduction_type_id)
+    else
+      false
+    end
+  end
+
+  def transaction_pay_date(pay_period, date)
+    pay_period&.pay_date || date || Date.current
+  end
 
   def initialize_balance_provenance
     self.opening_balance ||= original_amount

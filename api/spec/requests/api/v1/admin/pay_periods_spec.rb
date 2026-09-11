@@ -1365,7 +1365,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       assignment = response.parsed_body.dig("payroll_field_inputs", "assignments", 0)
       expect(assignment).to include("editable" => false)
-      expect(assignment.fetch("skipped_reason")).to match(/already supplied/i)
+      expect(assignment.fetch("skipped_reason")).to eq("Supplied by this payroll's direct loan deduction")
     end
   end
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -518,6 +518,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.decimal "current_balance", precision: 10, scale: 2, default: "0.0", null: false
     t.bigint "deduction_type_id"
     t.bigint "employee_id", null: false
+    t.date "first_deduction_date"
     t.string "name", null: false
     t.text "notes"
     t.decimal "opening_balance", precision: 10, scale: 2, null: false
@@ -532,6 +533,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.index ["company_id"], name: "index_employee_loans_on_company_id"
     t.index ["created_by_id"], name: "index_employee_loans_on_created_by_id"
     t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
+    t.index [ "employee_id", "deduction_type_id" ], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
     t.check_constraint "balance_source::text = ANY (ARRAY['new_loan'::character varying::text, 'quickbooks'::character varying::text, 'statement'::character varying::text, 'employee_confirmation'::character varying::text, 'other_verified'::character varying::text])", name: "employee_loans_balance_source_check"
@@ -552,6 +554,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.index ["employee_id", "active"], name: "idx_employee_payroll_fields_employee_active"
     t.index ["employee_id", "payroll_field_definition_id"], name: "idx_employee_payroll_fields_unique", unique: true
     t.index ["employee_id"], name: "index_employee_payroll_fields_on_employee_id"
+    t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index ["employee_loan_id"], name: "index_employee_payroll_fields_on_employee_loan_id"
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
@@ -610,6 +613,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.datetime "updated_at", null: false
     t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
     t.integer "w4_form_version", default: 2020, null: false
+    t.date "w4_signed_on"
+    t.string "w4_source_reference"
     t.boolean "w4_step2_multiple_jobs", default: false, null: false
     t.decimal "w4_step4a_other_income", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
@@ -741,6 +746,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
     t.date "w4_effective_on"
     t.integer "w4_form_version", default: 2020, null: false
+    t.date "w4_signed_on"
+    t.string "w4_source_reference"
     t.boolean "w4_step2_multiple_jobs", default: false, null: false
     t.decimal "w4_step4a_other_income", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
@@ -1535,6 +1542,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.bigint "pay_period_id"
     t.bigint "payroll_item_id"
     t.bigint "recorded_by_id"
+    t.bigint "reverses_transaction_id"
     t.string "source", null: false
     t.date "transaction_date", null: false
     t.string "transaction_type", null: false
@@ -1544,6 +1552,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
     t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
     t.index ["recorded_by_id"], name: "index_loan_transactions_on_recorded_by_id"
+    t.index [ "reverses_transaction_id" ], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
     t.check_constraint "source::text = ANY (ARRAY['opening_balance'::character varying::text, 'payroll'::character varying::text, 'manual'::character varying::text])", name: "loan_transactions_source_check"
   end
@@ -1953,11 +1962,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.string "category", null: false
     t.datetime "created_at", null: false
     t.bigint "deduction_type_id", null: false
+    t.bigint "employee_loan_id"
     t.string "label", null: false
+    t.jsonb "loan_schedule_snapshot", default: {}, null: false
     t.bigint "payroll_item_id", null: false
     t.string "reporting_group"
     t.datetime "updated_at", null: false
     t.index ["deduction_type_id"], name: "index_payroll_item_deductions_on_deduction_type_id"
+    t.index [ "employee_loan_id" ], name: "index_payroll_item_deductions_on_employee_loan_id"
     t.index ["payroll_item_id", "deduction_type_id"], name: "idx_pi_deductions_on_pi_and_dt", unique: true
     t.index ["payroll_item_id"], name: "index_payroll_item_deductions_on_payroll_item_id"
     t.index ["reporting_group"], name: "idx_payroll_item_deductions_reporting_group"
@@ -2007,6 +2019,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.decimal "additional_withholding_override", precision: 10, scale: 2
     t.bigint "annual_tax_config_id"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
+    t.string "bonus_source"
     t.jsonb "calculation_context_snapshot", default: {}, null: false
     t.decimal "cash_tips_reported", precision: 14, scale: 2
     t.date "check_date"
@@ -2032,6 +2045,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.decimal "holiday_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "hours_worked", precision: 8, scale: 2, default: "0.0"
     t.string "import_source"
+    t.decimal "imported_bonus", precision: 10, scale: 2
     t.decimal "insurance_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "loan_deduction", precision: 10, scale: 2, default: "0.0"
     t.decimal "loan_payment", precision: 10, scale: 2, default: "0.0"
@@ -2091,6 +2105,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
     t.index ["tax_rule_snapshot"], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index ["voided"], name: "index_payroll_items_on_voided"
+    t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying::text, 'mosa_revel'::character varying::text]))", name: "payroll_items_bonus_source_check"
+    t.check_constraint "imported_bonus IS NULL OR imported_bonus >= 0::numeric", name: "payroll_items_imported_bonus_check"
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
   end
 
@@ -3103,4 +3119,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_09_170000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
+  add_foreign_key "loan_transactions", "loan_transactions", column: "reverses_transaction_id"
+  add_foreign_key "payroll_item_deductions", "employee_loans"
 end

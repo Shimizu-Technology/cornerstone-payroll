@@ -30,6 +30,7 @@ module PayrollImport
     TIPS_FOH_SHEET = "TIPS - FOH"
     LOANS_SHEET = "LOANS (NO INSTALLMENTS)"
     INSTALLMENT_SHEET = "INSTALLMENT LOANS"
+    BONUS_SHEET = "BONUSES"
     SKIP_SHEETS = [ "SUMMARY" ].freeze
 
     class << self
@@ -72,6 +73,7 @@ module PayrollImport
       parse_tips_sheet(xlsx, TIPS_FOH_SHEET, "foh", employees)
       parse_loans_sheet(xlsx, employees)
       parse_installment_sheet(xlsx, employees)
+      parse_bonus_sheet(xlsx, employees)
 
       employees.values
     end
@@ -188,6 +190,27 @@ module PayrollImport
         emp[:installment_payment] += payment_amount
         emp[:installment_estimated_ending_balance] = [ emp[:installment_estimated_ending_balance], estimated_ending_amount ].max
         emp[:loan_deduction] += payment_amount
+      end
+    end
+
+    # Optional explicit bonus sheet: row 4 headers, C last name, D first name,
+    # F one-time bonus. Blank is absent; zero explicitly clears an imported bonus.
+    def parse_bonus_sheet(xlsx, employees)
+      return unless xlsx.sheets.include?(BONUS_SHEET)
+
+      sheet = xlsx.sheet(BONUS_SHEET)
+      (5..sheet.last_row).each do |row_num|
+        last_name = sheet.cell(row_num, 3)
+        first_name = sheet.cell(row_num, 4)
+        value = sheet.cell(row_num, 6)
+        next if last_name.blank? || value.blank?
+
+        employee = find_or_init(employees, last_name, first_name)
+        raise ArgumentError, "Duplicate bonus row for #{first_name} #{last_name}." if employee.key?(:bonus)
+
+        employee[:bonus] = PayrollBonusInput.amount(value.to_s.delete("$,"))
+      rescue ArgumentError => e
+        raise ArgumentError, "BONUSES row #{row_num}: #{e.message}"
       end
     end
 

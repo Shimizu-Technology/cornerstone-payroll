@@ -83,6 +83,11 @@ class PayPeriodCorrectionService
       emp_ytds.values.sort_by(&:employee_id).each(&:lock!)
       co_ytd&.lock!
 
+      EmployeeLoan.where(employee_id: employee_ids).order(:employee_id, :id).lock.load
+      LoanTransaction.payments.where(payroll_item_id: all_items.map(&:id), source: "payroll").order(:employee_loan_id, :id).each do |payment|
+        payment.employee_loan.reverse_payroll_payment!(payment, actor: actor, reason: reason)
+      end
+
       all_items.each do |item|
         emp_ytds[item.employee_id]&.subtract_payroll_item!(item)
         co_ytd&.subtract_payroll_item!(item)

@@ -615,6 +615,45 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         ])
       end
 
+      it "saves a verified hire date with unchanged unformatted imported SSN and preserves address review" do
+        review_items = [
+          { "code" => "verify_hire_date", "message" => "Verify hire date", "fields" => [ "hire_date" ] },
+          { "code" => "employee_address_missing", "message" => "Verify address", "fields" => %w[address_line1 city state zip] }
+        ]
+        employee.update!(configuration_source: "quickbooks_history", configuration_review_status: "needs_review",
+          configuration_review_items: review_items, ssn_encrypted: "000000001", hire_date: nil,
+          address_line1: nil, city: nil, state: nil, zip: nil)
+        original_rate = employee.pay_rate
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { hire_date: "2025-05-28", ssn: "000-00-0001" }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload.hire_date).to eq(Date.new(2025, 5, 28))
+        expect(employee.configuration_review_items).to eq(review_items)
+        expect(employee.configuration_review_status).to eq("needs_review")
+        expect(employee.address_line1).to be_nil
+        expect(employee.pay_rate).to eq(original_rate)
+      end
+
+      it "still requires confirmation for a genuine identifier change" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { ssn: "000-00-0099" } }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("can't be blank")
+      end
+
+      it "rejects an implausible hire year without saving other submitted changes" do
+        original_name = employee.first_name
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { hire_date: "0006-04-20", first_name: "Changed" }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "hire_date")).to include("must have a year between 1900 and next year")
+        expect(employee.reload.first_name).to eq(original_name)
+      end
+
       it "requires legacy incomplete filing data to be completed before saving edits" do
         employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
 

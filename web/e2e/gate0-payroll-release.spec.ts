@@ -1829,6 +1829,109 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(String((await responseJson(retryApply)).error)).toMatch(/non-editable pay period/i);
   });
 
+  test('enters and clears a one-time bonus beside hours without creating a recurring addition', async ({ browser }) => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email,
+      'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      const periodPath = `admin/pay_periods/${fixture.bonus_sync_pay_period_id}`;
+      const baseline = await accountantApi.post(`${periodPath}/run_payroll`);
+      expect(baseline.ok()).toBeTruthy();
+      const baselineBody = await baseline.json();
+      const initial = baselineBody.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      const grossWithoutBonus = Number(initial.gross_pay) - Number(initial.bonus || 0);
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const bonus = page.getByRole('textbox', { name: 'Bonus this payroll for Avery Example', exact: true });
+      await expect(bonus).toBeVisible();
+      await bonus.fill('321.09');
+      await bonus.press('Tab');
+      await page.route('**/run_payroll', async (route) => {
+        await route.fulfill({ json: {
+          ...baselineBody,
+          results: { success: [], errors: [{ employee_id: fixture.employee_id, error: 'Review this employee setup before retrying.' }] },
+        } });
+      }, { times: 1 });
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
+      await expect(bonus).toHaveValue('321.09');
+      const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const result = await (await save).json();
+      expect(result.results.errors).toEqual([]);
+      const updated = result.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      expect(Number(updated.bonus)).toBe(321.09);
+      expect(Number(updated.gross_pay)).toBeCloseTo(grossWithoutBonus + 321.09, 2);
+      await expect(bonus).toHaveValue('321.09');
+      await page.reload();
+      await expect(bonus).toHaveValue('321.09');
+      await bonus.fill('0');
+      await bonus.press('Tab');
+      const clear = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
+      const cleared = await (await clear).json();
+      expect(cleared.results.errors).toEqual([]);
+      const finalItem = cleared.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
+      expect(Number(finalItem.bonus)).toBe(0);
+      expect(Number(finalItem.gross_pay)).toBeCloseTo(grossWithoutBonus, 2);
+      await page.screenshot({ path: 'test-results/feedback-bonus-worksheet.png', fullPage: true });
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('accepts a first direct loan entry with an untouched default and restores the default after clearing', async ({ browser }) => {
+    const fieldResponse = await adminApi.post('admin/payroll_fields', { data: { payroll_field: {
+      name: `Feedback loan ${randomUUID()}`, kind: 'deduction', tax_treatment: 'post_tax_deduction', category: 'loan',
+      amount_type: 'fixed', default_amount: 50, show_in_payroll_grid: true, active: true,
+    } } });
+    expect(fieldResponse.ok()).toBeTruthy();
+    const { payroll_field: field } = await fieldResponse.json();
+    const assignment = await adminApi.post(`admin/employees/${fixture.employee_id}/payroll_fields`, { data: {
+      employee_payroll_field: { payroll_field_definition_id: field.id, amount: 50, active: true },
+    } });
+    expect(assignment.ok()).toBeTruthy();
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    try {
+      const page = await context.newPage();
+      await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Avery Example', exact: true });
+      if (!await loan.isVisible()) await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
+      const regularHours = page.getByRole('row').filter({ has: loan }).getByRole('textbox').first();
+      await regularHours.fill('80');
+      await regularHours.press('Tab');
+      await loan.fill('75');
+      await loan.press('Tab');
+      const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
+      const body = await (await saved).json();
+      expect(body.results.errors).toEqual([]);
+      const item = body.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
+      expect(Number(item.loan_deduction)).toBe(75);
+      expect(Number(item.loan_payment)).toBe(75);
+      await page.reload();
+      await expect(loan).toHaveValue('75.00');
+      await loan.fill('0');
+      await loan.press('Tab');
+      const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
+      const final = await (await cleared).json();
+      expect(final.results.errors).toEqual([]);
+      const finalItem = final.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
+      expect(Number(finalItem.loan_deduction)).toBe(0);
+      const restoredDefault = finalItem.payroll_field_entries.find((entry: { payroll_field_definition_id: number }) => entry.payroll_field_definition_id === field.id);
+      expect(restoredDefault).toMatchObject({ active: true, source: 'employee_default' });
+      expect(Number(restoredDefault.amount)).toBe(50);
+      expect(Number(finalItem.total_deductions)).toBeCloseTo(Number(item.total_deductions) - 25, 2);
+      expect(Number(finalItem.net_pay)).toBeCloseTo(Number(item.net_pay) + 25, 2);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('records a historical correction beside the locked source and exposes its immutable review workflow', async ({ browser }): Promise<void> => {
     const sourceBefore = await adminApi.get(`admin/imported_pay_periods/${fixture.historical_pay_period_id}`);
     expect(sourceBefore.ok()).toBeTruthy();
@@ -1902,4 +2005,58 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     );
     expect(eventResponse.ok()).toBeTruthy();
   });
+
+  test('creates and edits a verified loan repayment schedule through the real UI', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const loanName = `Verified UI loan ${randomUUID()}`;
+    let loanId: number | undefined;
+    try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(10_000);
+      await page.goto('/employee-loans');
+      await page.getByRole('button', { name: 'Set up loan', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Employee *', exact: true }).selectOption(String(fixture.employee_id));
+      await page.getByLabel('Loan name *', { exact: true }).fill(loanName);
+      await page.getByRole('combobox', { name: 'Payroll deduction schedule', exact: true }).selectOption('new');
+      await page.getByLabel('Payment per payroll', { exact: true }).fill('250');
+      await page.getByLabel('Confirmed opening balance *', { exact: true }).fill('650');
+      await page.getByLabel('Balance verified as of *', { exact: true }).fill('2026-09-01');
+      await page.getByRole('combobox', { name: 'Verification source', exact: true }).selectOption('statement');
+      await page.getByLabel('First deduction payday', { exact: false }).fill('2026-09-10');
+      const createdResponse = page.waitForResponse(response => response.url().endsWith('/admin/employee_loans') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Create Loan', exact: true }).click();
+      const created = await createdResponse;
+      expect(created.status()).toBe(201);
+      const createdLoan = (await created.json()).loan;
+      loanId = createdLoan.id;
+      expect(Number(createdLoan.current_balance)).toBe(650);
+      expect(Number(createdLoan.payment_amount)).toBe(250);
+      expect(createdLoan.first_deduction_date).toBe('2026-09-10');
+      expect(createdLoan.scheduled).toBe(true);
+      await page.getByRole('button', { name: new RegExp(loanName) }).click();
+      await page.getByLabel('Payment each payday', { exact: true }).fill('200');
+      await page.getByLabel('First deduction payday', { exact: true }).fill('2026-09-24');
+      const updatedResponse = page.waitForResponse(response => response.url().endsWith(`/admin/employee_loans/${loanId}`) && response.request().method() === 'PATCH');
+      await page.getByRole('button', { name: 'Save repayment schedule', exact: true }).click();
+      expect((await updatedResponse).ok()).toBeTruthy();
+      await page.reload();
+      await page.getByRole('button', { name: new RegExp(loanName) }).click();
+      await expect(page.getByLabel('Payment each payday', { exact: true })).toHaveValue('200.0');
+      await expect(page.getByLabel('First deduction payday', { exact: true })).toHaveValue('2026-09-24');
+      const saved = await adminApi.get(`admin/employee_loans/${loanId}`);
+      const savedLoan = (await saved.json()).loan;
+      expect(Number(savedLoan.payment_amount)).toBe(200);
+      expect(savedLoan.first_deduction_date).toBe('2026-09-24');
+      const schedules = await adminApi.get('admin/employee_loans');
+      const schedule = (await schedules.json()).loan_schedules.find((row: { employee_id: number; deduction_type_id?: number }) => row.employee_id === fixture.employee_id && row.deduction_type_id === savedLoan.deduction_type_id);
+      expect(Number(schedule.amount)).toBe(200);
+      expect(schedule.tracked).toBe(true);
+    } finally {
+      if (loanId) await adminApi.delete(`admin/employee_loans/${loanId}`);
+      await context.close();
+    }
+  });
+
 });

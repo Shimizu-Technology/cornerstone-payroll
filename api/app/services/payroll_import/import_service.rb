@@ -3,7 +3,7 @@
 module PayrollImport
   # Orchestrates the payroll import process:
   # 1. Parse Revel PDF (hours only; source pay values are never imported)
-  # 2. Parse Excel template (tips + loans)
+  # 2. Parse Excel template (tips, loans, and explicit per-payroll bonuses)
   # 3. Match names to Employee records
   # 4. Return preview data
   # 5. Apply import to create/update PayrollItems
@@ -164,6 +164,7 @@ module PayrollImport
             payroll_item.tips = 0.0  # Reset to avoid double-counting
             payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
             payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
+            PayrollBonusInput.import!(payroll_item, row[:bonus])
             payroll_item.import_source = "mosa_revel"
             payroll_item.sync_default_payroll_adjustments!(employee)
 
@@ -229,7 +230,12 @@ module PayrollImport
     end
 
     def merge_excel_rows(existing, incoming)
+      if existing.key?(:bonus) && incoming.key?(:bonus)
+        raise ArgumentError, "Multiple bonus rows matched the same employee. Combine them into one approved amount."
+      end
+
       {
+        **(existing.key?(:bonus) ? { bonus: existing[:bonus] } : incoming.slice(:bonus)),
         last_name: existing[:last_name] || incoming[:last_name],
         first_name: existing[:first_name] || incoming[:first_name],
         total_tips: existing[:total_tips].to_f + incoming[:total_tips].to_f,
@@ -253,7 +259,14 @@ module PayrollImport
     end
 
     def build_preview_row(pdf_row, employee, match, excel_data)
+      existing_item = pay_period.payroll_items.find_by(employee_id: employee.id)
+      source_bonus = excel_data&.dig(:bonus)
+      retained_bonus = existing_item && PayrollBonusInput.manual?(existing_item)
       row = {
+        bonus: source_bonus,
+        current_bonus: existing_item&.bonus&.to_f || 0.0,
+        effective_bonus: retained_bonus || source_bonus.nil? ? (existing_item&.bonus&.to_f || 0.0) : source_bonus.to_f,
+        bonus_keeps_manual: !!retained_bonus,
         employee_id: employee.id,
         employee_name: employee.full_name,
         employment_type: employee.employment_type,

@@ -126,6 +126,8 @@ class PayrollGoLiveSetupTransferService
   def self.copy_deduction_types!(review)
     review.source_company.deduction_types.index_with do |source|
       review.company.deduction_types.find_or_initialize_by(name: source.name).tap do |target|
+        next if target.persisted? && review.company.employee_loans.exists?(deduction_type_id: target.id)
+
         target.update!(source.attributes.slice(*DEDUCTION_TYPE_FIELDS))
       end
     end
@@ -134,15 +136,26 @@ class PayrollGoLiveSetupTransferService
   def self.copy_payroll_field_definitions!(review)
     review.source_company.payroll_field_definitions.index_with do |source|
       review.company.payroll_field_definitions.find_or_initialize_by(name: source.name).tap do |target|
+        next if target.persisted? && target.employee_payroll_fields.where.not(employee_loan_id: nil).exists?
+
         target.update!(source.attributes.slice(*PAYROLL_FIELD_FIELDS))
       end
     end
   end
 
   def self.copy_employee!(source, target, review, actor, department_map, deduction_type_map, definition_map)
-    target.update!(source.attributes.slice(*EMPLOYEE_FIELDS).merge(
-      department: source.department && department_map.fetch(source.department)
-    ))
+    attributes = source.attributes.slice(*EMPLOYEE_FIELDS)
+    held_loan_adjustments = false
+    attributes["default_payroll_adjustments"] = Employee.normalize_payroll_adjustments(source.default_payroll_adjustments).map do |adjustment|
+      if adjustment["active"] != false && adjustment["treatment"] == "post_tax_deduction" && adjustment["label"].match?(/\bloan\b/i)
+        held_loan_adjustments = true
+        adjustment.merge("active" => false)
+      else
+        adjustment
+      end
+    end
+    target.update!(attributes.merge(department: source.department && department_map.fetch(source.department)))
+    flag_loan_reconciliation!(target) if held_loan_adjustments
     copy_w4!(source, target, review, actor)
     copy_wage_rates!(source, target)
     copy_deductions!(source, target, deduction_type_map)
@@ -178,27 +191,51 @@ class PayrollGoLiveSetupTransferService
   def self.copy_deductions!(source, target, type_map)
     source.employee_deductions.each do |source_deduction|
       deduction_type = type_map.fetch(source_deduction.deduction_type)
+      tracked = source.employee_loans.exists?(deduction_type_id: source_deduction.deduction_type_id)
+      if target.employee_loans.exists?(deduction_type_id: deduction_type.id)
+        flag_loan_reconciliation!(target)
+        next
+      end
       target.employee_deductions.find_or_initialize_by(deduction_type: deduction_type).update!(
         amount: source_deduction.amount,
         is_percentage: source_deduction.is_percentage,
-        active: source_deduction.active
+        active: tracked ? false : source_deduction.active
       )
+      flag_loan_reconciliation!(target) if tracked
     end
   end
 
   def self.copy_payroll_fields!(source, target, definition_map)
     source.employee_payroll_fields.each do |source_field|
       definition = definition_map.fetch(source_field.payroll_field_definition)
-      target.employee_payroll_fields.find_or_initialize_by(payroll_field_definition: definition).update!(
+      target_field = target.employee_payroll_fields.find_or_initialize_by(payroll_field_definition: definition)
+      if target_field.employee_loan_id.present?
+        flag_loan_reconciliation!(target)
+        next
+      end
+      tracked = source_field.employee_loan_id.present?
+      target_field.update!(
         amount: source_field.amount,
         percentage: source_field.percentage,
-        active: source_field.active,
+        active: tracked ? false : source_field.active,
         start_date: source_field.start_date,
         end_date: source_field.end_date,
         notes: "Copied from reviewed predecessor setup; verify before first live payroll",
         employee_loan: nil
       )
+      flag_loan_reconciliation!(target) if tracked
     end
+  end
+
+  def self.flag_loan_reconciliation!(target)
+    code = "loan_balance_not_transferred"
+    items = target.configuration_review_items.reject { |item| item["code"] == code }
+    items << {
+      "code" => code,
+      "message" => "A transferred loan deduction requires a verified successor obligation and repayment schedule. Copied loan deductions are inactive; existing successor loan schedules were retained. Reconcile in Employee Loans before payroll.",
+      "fields" => []
+    }
+    target.update!(configuration_review_status: "needs_review", configuration_review_items: items)
   end
 
   def self.copy_work_profile!(source, target, review, actor)

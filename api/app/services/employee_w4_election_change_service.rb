@@ -6,6 +6,7 @@ class EmployeeW4ElectionChangeService
   def initialize(employee:, attributes:, actor:, source:, reason:)
     @employee = employee
     @attributes = attributes.to_h.symbolize_keys.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+    @attributes[:w4_source_reference] = @attributes[:w4_source_reference].to_s.strip.presence if @attributes.key?(:w4_source_reference)
     @actor = actor
     @source = source
     @reason = reason.to_s.strip
