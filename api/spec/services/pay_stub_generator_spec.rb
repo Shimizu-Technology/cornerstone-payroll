@@ -200,7 +200,7 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$25.00")
   end
 
-  it "uses stored tax and retirement YTD snapshots in total deductions YTD" do
+  it "uses stored tax snapshots and source-backed retirement in total deductions YTD" do
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
     create(:payroll_item,
       pay_period: prior_period,
@@ -222,10 +222,10 @@ RSpec.describe PayStubGenerator do
       custom_deductions: []
     )
 
-    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(72.0)
+    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(2033.0)
   end
 
-  it "does not include unrelated cross-tuple payroll field history in YTD deduction totals" do
+  it "keeps field histories separate while including all saved deductions in the YTD total" do
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
     prior_item = create(:payroll_item,
       pay_period: prior_period,
@@ -260,7 +260,9 @@ RSpec.describe PayStubGenerator do
 
     generator = described_class.new(payroll_item)
 
-    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(25.0)
+    rent_entry = payroll_item.payroll_item_field_entries.find_by!(label: "Rent Deduction")
+    expect(generator.send(:ytd_payroll_field_amount, rent_entry)).to eq(20.0)
+    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(1024.0)
   end
 
   it "limits payroll field YTD values to the current calendar year" do

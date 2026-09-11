@@ -103,7 +103,7 @@ module TimeTracking
             next
           end
 
-          if employee.variable_salary? && item.salary_override.to_f <= 0
+          if item.variable_salary_missing?
             results[:errors] << {
               source_user_id: source_user_id,
               employee_id: employee.id,

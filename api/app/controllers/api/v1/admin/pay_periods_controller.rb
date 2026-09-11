@@ -403,7 +403,7 @@ module Api
                 )
               end
 
-              if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
+              if payroll_item.variable_salary_missing?
                 results[:errors] << {
                   employee_id: employee.id,
                   error: "Enter this employee's variable salary amount for the pay period before recalculating."
@@ -1556,6 +1556,10 @@ module Api
             ytd_map = rows.each_with_object({}) do |(employee_id, *values), map|
               map[employee_id] = aggregate_columns.keys.zip(values.map(&:to_f)).to_h
             end
+            retirement_totals = PayrollRetirementTotals.for_scope_by_employee(
+              PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).not_voided
+            )
+            retirement_totals.each { |employee_id, totals| ytd_map.fetch(employee_id).merge!(totals) }
           else
             ytd_map = {}
           end

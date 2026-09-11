@@ -42,6 +42,7 @@ class PayrollCalculator
   end
 
   def apply_loan_payments!
+    PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item)
     ApplicationRecord.transaction { process_loan_payments }
   end
 
@@ -178,6 +179,10 @@ class PayrollCalculator
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
   def calculate_base_gross_for_payroll_fields
+    unless historical_calculation? || is_a?(ContractorPayrollCalculator)
+      PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item)
+      PayrollRetirementConfigurationGuard.new(employee: employee, payroll_item: payroll_item).validate!
+    end
     @exclude_payroll_field_entry_totals = true
     calculate_gross_pay
   ensure
@@ -429,14 +434,15 @@ class PayrollCalculator
 
   def update_ytd_on_item
     ytd = ytd_before_totals
+    retirement_totals = PayrollRetirementTotals.for_item(payroll_item)
 
     payroll_item.ytd_gross = ytd[:gross_pay].to_f + payroll_item.gross_pay.to_f
     payroll_item.ytd_net = ytd[:net_pay].to_f + payroll_item.net_pay.to_f
     payroll_item.ytd_withholding_tax = ytd[:withholding_tax].to_f + payroll_item.withholding_tax.to_f
     payroll_item.ytd_social_security_tax = ytd[:social_security_tax].to_f + payroll_item.social_security_tax.to_f
     payroll_item.ytd_medicare_tax = ytd[:medicare_tax].to_f + payroll_item.medicare_tax.to_f
-    payroll_item.ytd_retirement = ytd[:retirement].to_f + payroll_item.retirement_payment.to_f
-    payroll_item.ytd_roth_retirement = ytd[:roth_retirement].to_f + payroll_item.roth_retirement_payment.to_f
+    payroll_item.ytd_retirement = ytd[:retirement].to_d + retirement_totals[:retirement]
+    payroll_item.ytd_roth_retirement = ytd[:roth_retirement].to_d + retirement_totals[:roth_retirement]
   end
 
   private
@@ -564,6 +570,9 @@ class PayrollCalculator
 
   def skip_employee_deduction?(deduction_type)
     return true if payroll_item.loan_deduction.to_f.positive? && deduction_type&.loan?
+    # New payrolls reject overlapping elections explicitly. Retain the legacy
+    # precedence only when reproducing a saved historical calculation snapshot.
+    return false unless historical_calculation?
     return false unless deduction_type&.sub_category == "retirement"
     return employee_value(:roth_retirement_rate).to_f.positive? if roth_retirement_deduction?(deduction_type)
 

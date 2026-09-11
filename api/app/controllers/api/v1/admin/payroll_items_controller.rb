@@ -139,7 +139,12 @@ module Api
         private
 
         def with_financial_pay_period_lock
-          @pay_period.with_lock { yield }
+          @pay_period.with_lock(requires_new: true) do
+            yield
+            # Actions render calculation errors locally. Roll back the input
+            # save too, so failed recalculation cannot leave old totals behind.
+            raise ActiveRecord::Rollback if response.status >= 400
+          end
         end
 
         def calculate_with_timekeeping!(payroll_item)

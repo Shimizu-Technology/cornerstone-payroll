@@ -178,6 +178,17 @@ class EmployeeLoan < ApplicationRecord
     end
   end
 
+  # A stopped field assignment must not hide a separate legacy schedule.
+  # Calculation and commit use the same eligibility rule for either source.
+  def repayment_schedule_active_on?(pay_date)
+    field_schedule_active = employee_payroll_fields.active.effective_on(pay_date).joins(:payroll_field_definition)
+      .where(payroll_field_definitions: { active: true }).exists?
+    legacy_schedule_active = deduction_type&.active? &&
+      employee.employee_deductions.active.exists?(deduction_type_id: deduction_type_id)
+
+    field_schedule_active || legacy_schedule_active == true
+  end
+
   private
 
   def repayment_scope_is_valid
@@ -190,17 +201,6 @@ class EmployeeLoan < ApplicationRecord
     end
     if first_deduction_date && balance_as_of && first_deduction_date < balance_as_of
       errors.add(:first_deduction_date, "must be on or after the verified balance date")
-    end
-  end
-
-  def repayment_schedule_active_on?(pay_date)
-    if employee_payroll_fields.exists?
-      employee_payroll_fields.active.effective_on(pay_date).joins(:payroll_field_definition)
-        .where(payroll_field_definitions: { active: true }).exists?
-    elsif deduction_type_id
-      deduction_type&.active? && employee.employee_deductions.active.exists?(deduction_type_id: deduction_type_id)
-    else
-      false
     end
   end
 
