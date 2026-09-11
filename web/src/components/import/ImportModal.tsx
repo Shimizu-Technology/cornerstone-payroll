@@ -41,6 +41,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
+  const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +56,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     setExcludedIds(new Set());
     setTipsPaidOutFromTips(false);
     setReviewedSuggestedMatches(false);
+    setReviewedOverwrite(false);
     setResults(null);
   };
 
@@ -70,6 +72,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
       setLoading(true);
       setError(null);
       setReviewedSuggestedMatches(false);
+      setReviewedOverwrite(false);
       setExcludedIds(new Set());
       const data = await payPeriodsApi.previewImport(
         payPeriodId,
@@ -95,6 +98,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         import_id: previewData.import_id,
         excluded_employee_ids: Array.from(excludedIds),
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
+        force_overwrite: reviewedOverwrite,
       });
       setResults({
         success: response.results.success.length,
@@ -109,6 +113,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   };
 
   const toggleExclude = (employeeId: number) => {
+    setReviewedOverwrite(false);
     setExcludedIds((prev) => {
       const next = new Set(prev);
       if (next.has(employeeId)) {
@@ -122,6 +127,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
 
   const matched = previewData?.preview.matched || [];
   const included = matched.filter((r) => !excludedIds.has(r.employee_id));
+  const missingPeriodPay = included.filter((row) => row.period_pay_missing);
+  const overwriteRows = included.filter((row) => row.overwrite_required);
   const unresolvedCount = previewData
     ? previewData.preview.unmatched_pdf_names.length
       + previewData.preview.unmatched_excel_names.length
@@ -131,6 +138,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   const canApply = Boolean(
     previewData?.preview.can_apply
       && included.length > 0
+      && missingPeriodPay.length === 0
+      && (overwriteRows.length === 0 || reviewedOverwrite)
       && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
   );
 
@@ -143,7 +152,9 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
             {step === 'upload' && 'Upload Revel hours and the optional per-payroll tips, deductions and bonus workbook.'}
             {step === 'preview' && (unresolvedCount > 0
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? '' : 's'} need attention before this import can be applied.`
-              : `${included.length} employees are ready. Review the source matches and apply.`)}
+              : missingPeriodPay.length > 0
+                ? 'Enter the missing period pay before applying this import.'
+                : `${included.length} employees are ready. Review the source matches and apply.`)}
             {step === 'applying' && 'Applying import...'}
             {step === 'done' && 'Import complete.'}
           </DialogDescription>
@@ -215,6 +226,19 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
 
         {step === 'preview' && previewData && (
           <div className="space-y-3">
+            {missingPeriodPay.length > 0 && (
+              <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
+                <p className="mt-1">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. You can also uncheck these employees to import the other rows first.</p>
+                <Button variant="outline" className="mt-3" onClick={handleClose}>Return to payroll worksheet</Button>
+              </div>
+            )}
+            {overwriteRows.length > 0 && (
+              <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="mt-0.5" />
+                <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. Saved period pay and manually entered bonuses are retained.</span>
+              </label>
+            )}
             {unresolvedCount > 0 && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
                 <p className="font-medium">Nothing has been imported. Resolve these source rows first.</p>
@@ -316,8 +340,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <p>{formatCurrency(row.pay_rate)}</p>
-                          <p className="text-[11px] text-gray-500">from employee profile</p>
+                          <p>{row.period_pay_required ? (row.current_period_pay ? formatCurrency(row.current_period_pay) : 'Missing period pay') : formatCurrency(row.pay_rate)}</p>
+                          <p className="text-[11px] text-gray-500">{row.period_pay_required ? 'Pay this period · retained' : 'from employee profile'}</p>
                         </TableCell>
                         <TableCell className="text-right">
                           {row.total_tips > 0 ? (
@@ -429,6 +453,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 setStep('upload');
                 setPreviewData(null);
                 setReviewedSuggestedMatches(false);
+                setReviewedOverwrite(false);
                 setExcludedIds(new Set());
               }}>
                 Back

@@ -2060,3 +2060,72 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   });
 
 });
+
+test('calculates two variable-pay owners with distinct recurring retirement funding through the worksheet', async ({ browser }) => {
+  const fixture = loadFixture();
+  const companyId = fixture.other_company_id;
+  const headers = { 'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(companyId) };
+  const api = await playwrightRequest.newContext({
+    baseURL: process.env.E2E_API_URL || `http://127.0.0.1:${process.env.E2E_API_PORT || '4317'}/api/v1/`,
+    extraHTTPHeaders: headers,
+  });
+  const context = await browser.newContext({ extraHTTPHeaders: headers });
+  try {
+    const employees: { id: number; first_name: string; last_name: string }[] = [];
+    for (const [index, amount] of [900.00, 1200.00].entries()) {
+      const employeeResponse = await api.post('admin/employees', { data: { employee: {
+        first_name: 'Scenario', last_name: `Owner${index + 1}`, ssn: `900-88-100${index}`, ssn_confirmation: `900-88-100${index}`,
+        employment_type: 'salary', salary_type: 'variable', pay_rate: 0, pay_frequency: 'biweekly',
+        filing_status: 'single', allowances: 0, retirement_rate: 0, employer_retirement_match_rate: 0.04,
+        hire_date: '2026-01-01', w4_effective_on: '2026-01-01',
+        address_line1: '100 Synthetic Avenue', city: 'Hagatna', state: 'GU', zip: '96910',
+        default_payroll_adjustments: [{ label: 'Recurring retirement-funding bonus', amount, treatment: 'taxable_addition', active: true }],
+      } } });
+      expect(employeeResponse.ok(), await employeeResponse.text()).toBeTruthy();
+      const employee = (await employeeResponse.json()).data;
+      employees.push(employee);
+      const fieldResponse = await api.post('admin/payroll_fields', { data: { payroll_field: {
+        name: `Owner ${index + 1} fixed 401(k)`, kind: 'deduction', tax_treatment: 'pre_tax_deduction', category: 'retirement',
+        reporting_group: '401k_pre_tax', amount_type: 'fixed', default_amount: amount, show_in_payroll_grid: true, active: true,
+      } } });
+      expect(fieldResponse.ok(), await fieldResponse.text()).toBeTruthy();
+      const field = (await fieldResponse.json()).payroll_field;
+      const assignment = await api.post(`admin/employees/${employee.id}/payroll_fields`, { data: {
+        employee_payroll_field: { payroll_field_definition_id: field.id, amount, active: true },
+      } });
+      expect(assignment.ok(), await assignment.text()).toBeTruthy();
+    }
+    const periodResponse = await api.post('admin/pay_periods', { data: { pay_period: {
+      start_date: '2026-09-01', end_date: '2026-09-14', pay_date: '2026-09-18', run_purpose: 'regular', includes_base_salary: true,
+    } } });
+    expect(periodResponse.ok(), await periodResponse.text()).toBeTruthy();
+    const periodId = (await periodResponse.json()).pay_period.id;
+    const page = await context.newPage();
+    await page.goto(`/companies/${companyId}/pay-runs/${periodId}/work`);
+    for (const employee of employees) {
+      const pay = page.getByRole('textbox', { name: `Pay this period for ${employee.first_name} ${employee.last_name}`, exact: true });
+      await expect(pay).toBeVisible();
+      await pay.fill('9000.00');
+      await pay.press('Tab');
+    }
+    const calculated = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
+    const body = await (await calculated).json();
+    expect(body.results.errors).toEqual([]);
+    for (const [index, employee] of employees.entries()) {
+      const item = body.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === employee.id);
+      expect(Number(item.gross_pay)).toBe([9900.00, 10200.00][index]);
+      expect(Number(item.net_pay)).toBe([6466.34, 6443.39][index]);
+      const detail = await api.get(`admin/pay_periods/${periodId}/payroll_items/${item.id}`);
+      expect(detail.ok()).toBeTruthy();
+      expect(Number((await detail.json()).payroll_item.ytd.retirement)).toBe([900.00, 1200.00][index]);
+    }
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Pay this period for Scenario Owner1', exact: true })).toHaveValue('9000.00');
+    await page.getByRole('textbox', { name: 'Pay this period for Scenario Owner1', exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: 'test-results/client-variable-pay-worksheet.png', fullPage: true });
+  } finally {
+    await context.close();
+    await api.dispose();
+  }
+});

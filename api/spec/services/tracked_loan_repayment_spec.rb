@@ -150,16 +150,48 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(item.payroll_item_deductions.first.employee_loan).to eq(loan)
   end
 
-  it "allows a direct loan to replace an untouched default but rejects a second explicit source" do
+  it "rejects a direct amount that would suppress a tracked balance, then commits a named override correctly" do
     item.loan_deduction = 40
     applier = PayrollFieldInputApplier.new(pay_period: period, company_id: company.id)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "default" } }) }.not_to raise_error
-    calculate
-    expect(item.loan_payment).to eq(40)
-    expect(item.payroll_item_deductions).to be_empty
+    expect { calculate }.to raise_error(ArgumentError, /direct amount does not update a tracked loan balance/)
+    expect(loan.reload.current_balance).to eq(75)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 30 } }) }.to raise_error(ArgumentError, /only one loan deduction source/)
     item.loan_deduction = 0
+    applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 40 } })
     calculate
-    expect(item.payroll_item_deductions.sum(&:amount)).to eq(75)
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(40)
+    period.update!(status: "approved")
+    PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+    expect(loan.reload.current_balance).to eq(35)
+  end
+
+  it "allows an unrelated direct payment when the tracked schedule is not due or has stopped" do
+    item.loan_deduction = 40
+    loan.update!(first_deduction_date: period.pay_date + 1)
+    expect { calculate }.not_to raise_error
+    expect(item.loan_payment).to eq(40)
+    loan.update!(first_deduction_date: period.pay_date)
+    assignment.update!(end_date: period.pay_date - 1)
+    expect { calculate }.not_to raise_error
+    expect(loan.reload.current_balance).to eq(75)
+  end
+
+  it "protects a legacy loan repayment schedule from the same direct override" do
+    assignment.destroy!
+    deduction_type = DeductionType.create!(company: company, name: "Legacy loan", category: "post_tax", sub_category: "loan")
+    loan.update!(deduction_type: deduction_type)
+    employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
+    item.loan_deduction = 40
+    expect { calculate }.to raise_error(ArgumentError, /named loan repayment/)
+  end
+
+  it "also blocks committing an older saved direct payment that bypassed the tracked schedule" do
+    item.update!(loan_deduction: 40, loan_payment: 40)
+    period.update!(status: "approved")
+    expect { PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit! }.to raise_error(ArgumentError, /named loan repayment/)
+    expect(period.reload).to be_approved
+    expect(loan.reload.current_balance).to eq(75)
+    expect(loan.loan_transactions).to be_empty
   end
 end

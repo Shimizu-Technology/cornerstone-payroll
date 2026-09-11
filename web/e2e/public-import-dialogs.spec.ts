@@ -258,3 +258,50 @@ test('PayrollIntakeImportModal guards preview, apply, and nested employee creati
   await expect(createDialog).not.toBeVisible();
   await expect(dialog).toBeVisible();
 });
+
+test('MoSa import routes missing period pay to the worksheet and requires review before replacing saved hours', async ({ page }): Promise<void> => {
+  let periodPayEntered = false;
+  await page.route('**/admin/pay_periods/701/preview_import', async (route): Promise<void> => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      import_id: 904,
+      preview: {
+        matched: [{ employee_id: 801, employee_name: 'Variable Salary', employment_type: 'salary', pay_rate: 200000,
+          confidence: 1, matched_name: 'Variable Salary', regular_hours: 0, overtime_hours: 0, total_hours: 0,
+          pdf_employee_name: 'Variable Salary', total_tips: 0, tip_pool: null, loan_deduction: 0,
+          period_pay_required: true, period_pay_missing: !periodPayEntered,
+          current_period_pay: periodPayEntered ? 9000.00 : null, overwrite_required: periodPayEntered }],
+        unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [],
+        pdf_count: 1, excel_count: 0, matched_count: 1, can_apply: true, tips_paid_out_from_tips: false,
+      },
+    }) });
+  });
+  await mountHarness(page, 'mountImportModalHarness');
+  const dialog = page.getByRole('dialog', { name: 'Import Payroll Data' });
+  const preview = async (): Promise<void> => {
+    await dialog.locator('input[type="file"]').first().setInputFiles({ name: 'hours.pdf', mimeType: 'application/pdf', buffer: Buffer.from('fixture') });
+    await dialog.getByRole('button', { name: 'Preview Import' }).click();
+  };
+  await preview();
+  await expect(dialog.getByRole('alert')).toContainText('Period pay is required for Variable Salary');
+  await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Return to payroll worksheet' }).click();
+  await expect(dialog).not.toBeVisible();
+
+  periodPayEntered = true;
+  await page.getByRole('button', { name: 'Open payroll import' }).click();
+  await preview();
+  await expect(dialog.getByText('$9,000.00')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: /Replace existing hours/ }).check();
+  await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeEnabled();
+  const failure = await holdAndRejectPost(page, '**/admin/pay_periods/701/apply_import', 'Reviewed request received');
+  try {
+    const requestPromise = page.waitForRequest((request) => request.url().endsWith('/apply_import'));
+    await dialog.getByRole('button', { name: /Apply Import/ }).click();
+    expect((await requestPromise).postDataJSON()).toMatchObject({ import_id: 904, force_overwrite: true });
+    failure.release();
+    await expect(dialog.getByText('Reviewed request received')).toBeVisible();
+  } finally {
+    await failure.cleanup();
+  }
+});
