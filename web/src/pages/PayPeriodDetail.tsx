@@ -981,7 +981,7 @@ export function PayPeriodDetail({
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
   const canEditPayPeriod = !isCommitted && !isVoided;
-  const canImportMosa = isDraft && canEditPayPeriod;
+  const canImportMosa = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
   const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
   const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
@@ -1568,7 +1568,7 @@ export function PayPeriodDetail({
 
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
@@ -1578,32 +1578,32 @@ export function PayPeriodDetail({
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</p>
-                <p className="mt-1 wrap-break-word text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Deductions</p>
-                <p className="mt-1 wrap-break-word text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</p>
-                <p className="mt-1 wrap-break-word text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
               </CardContent>
             </Card>
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">DRT Deposit</p>
-                <p className="mt-1 wrap-break-word text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
               </CardContent>
             </Card>
             {contractorItems.length > 0 && (
               <Card className="border-emerald-200 bg-emerald-50">
                 <CardContent className="pt-5 pb-4">
                   <p className="text-xs font-medium text-emerald-700 uppercase tracking-wider">1099 Contractors ({contractorItems.length})</p>
-                  <p className="mt-1 wrap-break-word text-xl font-semibold text-emerald-800 sm:text-2xl">{formatCurrency(totalContractorPay)}</p>
+                  <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-emerald-800 sm:text-2xl">{formatCurrency(totalContractorPay)}</p>
                 </CardContent>
               </Card>
             )}

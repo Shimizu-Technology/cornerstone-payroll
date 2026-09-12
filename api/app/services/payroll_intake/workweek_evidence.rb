@@ -12,21 +12,21 @@ module PayrollIntake
       workweek = pay_period.resolved_company_workweek
       raise ArgumentError, "Confirm the employer's legal overtime workweek before previewing payroll intake" unless workweek&.confirmed?
       if workweek.starts_at_minutes.to_i != 0
-        raise ArgumentError, "Spike payroll intake requires a legal workweek that starts at midnight"
+        raise ArgumentError, "Payroll intake requires a legal workweek that starts at midnight"
       end
       unless (pay_period.end_date - pay_period.start_date).to_i == PERIOD_DAYS - 1
-        raise ArgumentError, "Spike payroll intake requires a 14-day pay period containing two complete legal workweeks"
+        raise ArgumentError, "Payroll intake requires a 14-day pay period containing two complete legal workweeks"
       end
       unless pay_period.start_date.wday == workweek.starts_on_weekday
-        raise ArgumentError, "Spike payroll intake requires the pay period to begin on the confirmed legal workweek start day"
+        raise ArgumentError, "Payroll intake requires the pay period to begin on the confirmed legal workweek start day"
       end
       if workweek.effective_on > pay_period.start_date || (workweek.ends_on.present? && workweek.ends_on < pay_period.end_date)
-        raise ArgumentError, "The confirmed legal workweek must cover the complete Spike pay period"
+        raise ArgumentError, "The confirmed legal workweek must cover the complete pay period"
       end
 
       end_workweek = CompanyWorkweek.for_date(pay_period.company_id, pay_period.end_date)
       unless end_workweek&.id == workweek.id
-        raise ArgumentError, "One confirmed legal workweek must cover the complete Spike pay period"
+        raise ArgumentError, "One confirmed legal workweek must cover the complete pay period"
       end
 
       {

@@ -83,6 +83,48 @@ RSpec.describe PayrollImport::ImportService do
       expect(payroll_item.tips_paid_out).to eq(75.0)
     end
 
+    it "uses the legacy workbook-level tip setting when the per-employee answer is blank" do
+      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 10.0)
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 40,
+            overtime_hours: 0,
+            total_tips: 75.0,
+            tips_already_paid: nil
+          }
+        ],
+        tips_paid_out_from_tips: true
+      )
+
+      expect(result[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).tips_paid_out).to eq(75.0)
+    end
+
+    it "lets an explicit per-employee answer override the legacy workbook-level tip setting" do
+      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 10.0)
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 40,
+            overtime_hours: 0,
+            total_tips: 75.0,
+            tips_already_paid: false
+          }
+        ],
+        tips_paid_out_from_tips: true
+      )
+
+      expect(result[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).tips_paid_out).to eq(0.0)
+    end
+
     it "clears stale paid-out tip offsets when a re-import no longer marks tips as paid out" do
       employee = create(
         :employee,
@@ -129,6 +171,22 @@ RSpec.describe PayrollImport::ImportService do
   end
 
   describe "#preview" do
+    it "never resolves a stable employee ID from another client" do
+      create(:employee, company: company, first_name: "Avery", last_name: "Example")
+      other_employee = create(:employee, company: create(:company), first_name: "Outside", last_name: "Worker")
+
+      result = service.preview(
+        pdf_records: [],
+        excel_records: [
+          { employee_id: other_employee.id, employee_name: other_employee.full_name, total_tips: 50.0 }
+        ]
+      )
+
+      expect(result[:matched]).to be_empty
+      expect(result[:unmatched_excel_names]).to eq([ other_employee.full_name ])
+      expect(result[:can_apply]).to be(false)
+    end
+
     it "merges excel rows that fuzzy-match to the same employee" do
       employee = create(:employee, company: company, first_name: "Jane", last_name: "Doe")
       matcher = instance_double(PayrollImport::NameMatcher)

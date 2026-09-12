@@ -1156,7 +1156,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(safeDialog.getByText('Revel pay rates and pay amounts are ignored.', { exact: false })).toBeVisible();
     await safeDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.safe_payroll_import_pdf_path);
     await safeDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.safe_payroll_import_workbook_path);
-    await safeDialog.getByLabel(/Tips in this workbook were already paid out daily/).check();
+    await safeDialog.getByRole('checkbox', { name: /Legacy workbook fallback: all tips in this workbook were already paid out daily/i }).check();
     await safeDialog.getByRole('button', { name: 'Preview Import' }).click();
 
     await expect(safeDialog.getByText(/Review 2 suggested name matches/)).toBeVisible();

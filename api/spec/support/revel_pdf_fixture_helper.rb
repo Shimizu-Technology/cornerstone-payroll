@@ -17,13 +17,16 @@ module RevelPdfFixtureHelper
     "Fees".ljust(20)
   ].join.freeze
 
-  def build_revel_pdf(rows)
+  def build_revel_pdf(rows, period_start: nil, period_end: nil)
     fixture = Tempfile.new([ "deidentified-revel-payroll", ".pdf" ])
     fixture.close
 
     Prawn::Document.generate(fixture.path, page_size: [ 1_000, 700 ], margin: 20) do |pdf|
       pdf.font("Courier")
       pdf.text("Synthetic payroll fixture — no production data", size: 6)
+      if period_start && period_end
+        pdf.text("Payroll period: #{period_start.iso8601} to #{period_end.iso8601}", size: 6)
+      end
       pdf.move_down(4)
       pdf.text(REVEL_HEADER, size: 4)
       rows.each { |row| pdf.text(revel_row(**row), size: 4) }
