@@ -17,6 +17,7 @@ class PayPeriodLifecycleService
 
   def approve!
     with_financial_pay_period_lock do
+      validate_current_intake!
       unless pay_period.calculated?
         raise InvalidTransitionError, "Can only approve a calculated pay period"
       end
@@ -54,6 +55,7 @@ class PayPeriodLifecycleService
   def commit!
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
+      validate_current_intake!
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
       end
@@ -116,6 +118,13 @@ class PayPeriodLifecycleService
 
     names = missing.map(&:employee_full_name).join(", ")
     raise InvalidTransitionError, "Enter Pay this period and recalculate payroll for #{names} before approval or commit. Recurring bonuses do not replace period pay."
+  end
+
+  def validate_current_intake!
+    return unless pay_period.intake_stale?
+
+    raise InvalidTransitionError,
+          "Payroll source revision changed after calculation. Apply the current source package and recalculate before approval or commit."
   end
 
   def validate_go_live_gate!

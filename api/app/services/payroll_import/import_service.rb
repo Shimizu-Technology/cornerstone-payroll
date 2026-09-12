@@ -209,7 +209,10 @@ module PayrollImport
           calculated_at: Time.current,
           calculated_by_id: actor&.id,
           approved_at: nil,
-          approved_by_id: nil
+          approved_by_id: nil,
+          intake_stale_at: nil,
+          intake_stale_reason: nil,
+          intake_stale_session: nil
         )
       end
 

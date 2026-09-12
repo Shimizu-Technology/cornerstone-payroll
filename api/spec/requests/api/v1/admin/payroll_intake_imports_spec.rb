@@ -170,20 +170,57 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("import", "warnings").map { |warning| warning["code"] }).to include("duplicate_source")
     end
 
-    it "does not reuse a stale duplicate preview after the parser version changes" do
-      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v1")
+    it "requires an explicit correction reason before a different source replaces the current package" do
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
-      first_id = JSON.parse(response.body).dig("import", "id")
+      current_package = response.parsed_body.fetch("import")
 
-      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v2")
+      post preview_path, params: {
+        source_type: "spike_email",
+        pasted_text: spike_text.sub("$75.75", "$76.75")
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Confirm that this corrected source replaces revision 1")
+      expect(response.parsed_body.dig("details", "replacement_required")).to be(true)
+      expect(response.parsed_body.dig("details", "current_package", "package_id")).to eq(current_package.fetch("package_id"))
+      expect(PayrollIntakeSession.where(pay_period: pay_period).count).to eq(1)
+    end
+
+    it "invalidates an existing calculation when the first source arrives after calculation began" do
+      pay_period.update!(status: "calculated", calculated_at: 1.hour.ago, calculated_by_id: admin_user.id)
+
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
 
       expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to have_attributes(
+        status: "draft",
+        calculated_at: nil,
+        intake_stale_session_id: response.parsed_body.dig("import", "id")
+      )
+      expect(pay_period.intake_stale_reason).to include("received after payroll calculation began")
+    end
+
+    it "does not reuse a stale duplicate preview after the parser version changes" do
+      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v1")
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      first_package = JSON.parse(response.body).fetch("import")
+
+      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v2")
+      post preview_path, params: {
+        source_type: "spike_email",
+        pasted_text: spike_text,
+        supersedes_package_id: first_package.fetch("package_id"),
+        supersession_reason: "Re-previewed with the corrected parser."
+      }
+
+      expect(response).to have_http_status(:ok)
       json = JSON.parse(response.body)
-      expect(json.dig("import", "id")).not_to eq(first_id)
+      expect(json.dig("import", "id")).not_to eq(first_package.fetch("id"))
       expect(json["duplicate"]).to eq(false)
       expect(json.dig("import", "parser_version")).to eq("spike_email:test-v2")
       expect(json.dig("import", "package_revision")).to eq(2)
+      expect(json.dig("import", "supersedes_package_id")).to eq(first_package.fetch("package_id"))
+      expect(PayrollIntakeSession.find(first_package.fetch("id"))).to be_superseded
     end
 
     it "uploads source files outside the database transaction" do
@@ -317,6 +354,43 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(alice_item.gross_pay.to_f).to be > 126.0
     end
 
+    it "preserves the applied revision but blocks approval until its corrected replacement is applied" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      first_package = response.parsed_body.fetch("import")
+      post apply_path(first_package.fetch("id")), params: {
+        acknowledge_warnings: true,
+        rows: first_package.fetch("rows").map do |source_row|
+          { id: source_row.fetch("id"), disposition: "included", employee_id: source_row.fetch("employee_id") }
+        end
+      }
+      expect(response).to have_http_status(:ok)
+
+      post preview_path, params: {
+        source_type: "spike_email",
+        pasted_text: spike_text.sub("$75.75", "$76.75"),
+        supersedes_package_id: first_package.fetch("package_id"),
+        supersession_reason: "Client corrected Alice's second-week tips."
+      }
+
+      expect(response).to have_http_status(:ok)
+      corrected = response.parsed_body.fetch("import")
+      expect(corrected).to include(
+        "package_revision" => 2,
+        "current" => true,
+        "supersedes_package_id" => first_package.fetch("package_id"),
+        "supersession_reason" => "Client corrected Alice's second-week tips."
+      )
+      expect(PayrollIntakeSession.find(first_package.fetch("id"))).to be_superseded
+      expect(pay_period.reload).to have_attributes(
+        status: "draft",
+        calculated_at: nil,
+        intake_stale_session_id: corrected.fetch("id")
+      )
+      expect {
+        PayPeriodLifecycleService.new(pay_period: pay_period, actor: admin_user).approve!
+      }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Apply the current source package/)
+    end
+
     it "blocks duplicate employee mappings within the same intake session" do
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
       import = JSON.parse(response.body).fetch("import")
@@ -382,9 +456,11 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         acknowledge_warnings: true,
         force_overwrite: true,
         rows: import.fetch("rows").map do |row|
+          included = row.fetch("source_employee_name") == "Alice Barista"
           {
             id: row.fetch("id"),
-            include: row.fetch("source_employee_name") == "Alice Barista",
+            disposition: included ? "included" : "excluded",
+            disposition_reason: included ? nil : "Not part of this reviewed payroll run.",
             employee_id: row.fetch("employee_id")
           }
         end
@@ -437,9 +513,11 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         acknowledge_warnings: true,
         force_overwrite: true,
         rows: import.fetch("rows").map do |intake_row|
+          included = intake_row.fetch("source_employee_name") == "Alice Barista"
           {
             id: intake_row.fetch("id"),
-            include: intake_row.fetch("source_employee_name") == "Alice Barista",
+            disposition: included ? "included" : "excluded",
+            disposition_reason: included ? nil : "Not part of this reviewed payroll run.",
             employee_id: intake_row.fetch("employee_id")
           }
         end
@@ -470,9 +548,11 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         acknowledge_warnings: true,
         force_overwrite: true,
         rows: import.fetch("rows").map do |row|
+          included = row.fetch("source_employee_name") == "Alice Barista"
           {
             id: row.fetch("id"),
-            include: row.fetch("source_employee_name") == "Alice Barista",
+            disposition: included ? "included" : "excluded",
+            disposition_reason: included ? nil : "Not part of this reviewed payroll run.",
             employee_id: row.fetch("employee_id")
           }
         end

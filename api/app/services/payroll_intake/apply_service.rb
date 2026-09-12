@@ -20,7 +20,6 @@ module PayrollIntake
       PayrollIntake::SourcePackageVerifier.new(session: session).verify!
 
       results = { applied: [], skipped: [], errors: [] }
-      overrides_by_key = build_overrides_by_key
 
       ActiveRecord::Base.transaction do
         pay_period.with_lock do
@@ -34,15 +33,25 @@ module PayrollIntake
               session.evidence_snapshot.to_h["workweek"]
             )
 
-            rows = session.rows.includes(:employee).to_a
-            duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
+            disposition_plan = PayrollIntake::DispositionPlan.new(
+              session: session,
+              row_overrides: row_overrides,
+              actor: actor
+            ).validate!
+            decisions = disposition_plan.decisions
+            duplicate_employee_ids = duplicate_employee_ids_for(decisions, excluded_employee_ids)
 
-            rows.each do |row|
-              override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
-              include_row = include_row?(override)
-              unless include_row
-                row.update!(status: "skipped", excluded: true)
-                results[:skipped] << { row_id: row.id, source_employee_name: row.source_employee_name, reason: "excluded" }
+            decisions.each do |decision|
+              row = decision.row
+              override = decision.override
+              unless decision.included?
+                disposition_plan.apply!(decision, status: "skipped")
+                results[:skipped] << {
+                  row_id: row.id,
+                  source_employee_name: row.source_employee_name,
+                  reason: decision.disposition,
+                  target_pay_period_id: decision.target_pay_period&.id
+                }
                 next
               end
 
@@ -58,8 +67,12 @@ module PayrollIntake
               end
 
               if excluded_employee_ids.include?(employee.id)
-                row.update!(status: "skipped", excluded: true, employee: employee)
-                results[:skipped] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, reason: "Excluded from this pay period" }
+                results[:errors] << {
+                  row_id: row.id,
+                  employee_id: employee.id,
+                  source_employee_name: row.source_employee_name,
+                  error: "This employee is excluded from the pay period. Choose Excluded and record why."
+                }
                 next
               end
 
@@ -114,6 +127,13 @@ module PayrollIntake
                 loan_deduction: values[:loan_deduction],
                 validation_errors: []
               )
+              disposition_plan.apply!(
+                decision,
+                status: "applied",
+                employee: employee,
+                payroll_item: payroll_item,
+                staff_overrides: override
+              )
 
               results[:applied] << {
                 row_id: row.id,
@@ -130,7 +150,11 @@ module PayrollIntake
 
             raise ActiveRecord::Rollback if results[:errors].any?
 
-            update_pay_period_after_apply! if results[:applied].any?
+            if results[:applied].any?
+              update_pay_period_after_apply!
+            elsif pay_period.intake_stale_session_id == session.id
+              pay_period.clear_intake_stale!
+            end
             session.mark_reviewed!(actor: actor) if session.status == "previewed"
             session.mark_applied!(actor: actor)
           end
@@ -144,23 +168,6 @@ module PayrollIntake
 
     attr_reader :session, :pay_period, :company, :row_overrides, :actor, :force_overwrite, :acknowledge_warnings
 
-    def build_overrides_by_key
-      row_overrides.each_with_object({}) do |override, acc|
-        data = override.respond_to?(:to_unsafe_h) ? override.to_unsafe_h : override.to_h
-        data = data.deep_symbolize_keys
-        key = data[:id].presence || data[:row_id].presence || data[:position].presence
-        next if key.blank?
-
-        acc[key.to_s] = data
-      end
-    end
-
-    def include_row?(override)
-      return true unless override.key?(:include)
-
-      ActiveModel::Type::Boolean.new.cast(override[:include])
-    end
-
     def acknowledged?(override)
       acknowledge_warnings || ActiveModel::Type::Boolean.new.cast(override[:acknowledge_warnings])
     end
@@ -172,12 +179,11 @@ module PayrollIntake
       Employee.active.find_by(id: employee_id, company_id: company.id)
     end
 
-    def duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
-      mapped_employee_ids = rows.filter_map do |row|
-        override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
-        next unless include_row?(override)
+    def duplicate_employee_ids_for(decisions, excluded_employee_ids)
+      mapped_employee_ids = decisions.filter_map do |decision|
+        next unless decision.included?
 
-        employee = employee_for(row, override)
+        employee = employee_for(decision.row, decision.override)
         next if employee.blank? || excluded_employee_ids.include?(employee.id)
 
         employee.id
@@ -270,7 +276,10 @@ module PayrollIntake
         approved_at: nil,
         approved_by_id: nil,
         unapproved_at: nil,
-        unapproved_by_id: nil
+        unapproved_by_id: nil,
+        intake_stale_at: nil,
+        intake_stale_reason: nil,
+        intake_stale_session: nil
       )
     end
 

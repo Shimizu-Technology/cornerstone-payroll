@@ -19,6 +19,34 @@ module Api
                     disposition: "attachment"
         end
 
+        # GET /api/v1/admin/pay_periods/:pay_period_id/current_import
+        # Reopens the latest unapplied MoSa review without requiring another upload.
+        def current
+          source_package = @pay_period.payroll_intake_sessions.current
+                                      .where(source_type: "mosa_revel", status: %w[previewed reviewed])
+                                      .order(package_revision: :desc, id: :desc)
+                                      .first
+          import_record = PayrollImportRecord.find_by(
+            pay_period: @pay_period,
+            payroll_intake_session: source_package,
+            status: "previewed"
+          ) if source_package
+          unless source_package && import_record
+            return render json: { error: "There is no current MoSa import waiting for review." }, status: :not_found
+          end
+
+          preview_data = preview_from_source_package(source_package)
+          preview_data[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(
+            import_record.raw_data.to_h.fetch("tips_paid_out_from_tips", false)
+          )
+          render json: {
+            import_id: import_record.id,
+            preview: preview_data,
+            source_package: source_package_json(source_package),
+            duplicate: false
+          }
+        end
+
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_import
         # Upload PDF + optional Excel, get matched preview
         def preview
@@ -38,12 +66,19 @@ module Api
               pay_period: @pay_period,
               source_type: "mosa_revel",
               files: [ pdf_file, excel_file ].compact,
-              actor: current_user
+              actor: current_user,
+              supersedes_package_id: params[:supersedes_package_id],
+              supersession_reason: params[:supersession_reason]
             ).call
             source_package = package_result.fetch(:session)
-            if package_result[:duplicate] && source_package.applied_at.present?
+            if package_result[:duplicate] && !source_package.applyable?
+              message = if source_package.superseded?
+                "This exact Revel package belongs to a superseded revision. Continue with the current corrected package."
+              else
+                "This exact Revel package was already applied. Upload a corrected source only when something changed."
+              end
               return render json: {
-                error: "This exact Revel package was already applied. Upload a corrected source only when something changed."
+                error: message
               }, status: :unprocessable_entity
             end
 
@@ -81,6 +116,11 @@ module Api
               source_package: source_package_json(source_package),
               duplicate: package_result[:duplicate]
             }
+          rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
+            render json: {
+              error: e.message,
+              details: { replacement_required: true, current_package: replacement_package_json(e.current_session) }
+            }, status: :unprocessable_entity
           rescue ArgumentError => e
             render json: { error: e.message }, status: :unprocessable_entity
           rescue StandardError => e
@@ -106,37 +146,29 @@ module Api
             unless source_package
               return render json: { error: "This preview predates verified source retention. Preview the files again before applying." }, status: :unprocessable_entity
             end
+            unless source_package.applyable?
+              return render json: {
+                error: source_package.superseded? ?
+                  "This source package was replaced by a corrected revision. Review and apply the current package." :
+                  "Only the current previewed source package can be applied."
+              }, status: :unprocessable_entity
+            end
             PayrollIntake::SourcePackageVerifier.new(session: source_package).verify!
 
-            blocking_rows = source_package.rows.select(&:blocking_errors?)
-            if blocking_rows.any?
-              return render json: {
-                error: "Resolve every blocked source row, then preview the corrected files again before applying.",
-                details: {
-                  blocked_rows: blocking_rows.map do |row|
-                    {
-                      source_employee_name: row.source_employee_name,
-                      validation_errors: row.errors_payload
-                    }
-                  end
-                }
-              }, status: :unprocessable_entity
-            end
+            disposition_plan = PayrollIntake::DispositionPlan.new(
+              session: source_package,
+              row_overrides: mosa_disposition_overrides(source_package),
+              actor: current_user
+            ).validate!
+            included_decisions = disposition_plan.decisions.select(&:included?)
 
-            unresolved_names = import_record.unmatched_pdf_names.to_a + import_record.raw_data.to_h.fetch("unmatched_excel_names", []).to_a
-            duplicate_matches = import_record.raw_data.to_h.fetch("duplicate_employee_matches", []).to_a
-
-            if unresolved_names.any? || duplicate_matches.any?
-              return render json: {
-                error: "Resolve every unmatched or duplicate source row, then preview the files again before applying.",
-                details: {
-                  unmatched_names: unresolved_names,
-                  duplicate_matches: duplicate_matches
-                }
-              }, status: :unprocessable_entity
-            end
+            validate_mosa_included_rows!(included_decisions)
+            included_employee_ids = included_decisions.map { |decision| decision.row.employee_id }.compact.to_set
 
             low_confidence_matches = import_record.raw_data.to_h.fetch("low_confidence_matches", []).to_a
+            low_confidence_matches = low_confidence_matches.select do |match|
+              included_employee_ids.include?((match["employee_id"] || match[:employee_id]).to_i)
+            end
             acknowledged_low_confidence = ActiveModel::Type::Boolean.new.cast(params[:acknowledge_low_confidence_matches])
             if low_confidence_matches.any? && !acknowledged_low_confidence
               return render json: {
@@ -145,16 +177,13 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
-
             # The persisted server preview is authoritative. The browser may
             # exclude rows, but it cannot rewrite imported hours or money.
-            excluded_employee_ids = Array(params[:excluded_employee_ids]).map(&:to_i).to_set
             matched_data = import_record.matched_data
               .map(&:deep_symbolize_keys)
-              .reject { |row| excluded_employee_ids.include?(row[:employee_id].to_i) }
+              .select { |row| included_employee_ids.include?(row[:employee_id].to_i) }
 
-            if matched_data.empty?
+            if included_decisions.any? && matched_data.empty?
               return render json: {
                 error: "Keep at least one matched employee in the import.",
                 details: { remaining_matched_rows: matched_data.length }
@@ -165,15 +194,37 @@ module Api
             tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(
               import_record.raw_data.to_h.fetch("tips_paid_out_from_tips", false)
             )
-            results = nil
+            results = { success: [], skipped: [], errors: [] }
             applied = false
             ActiveRecord::Base.transaction do
-              results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
+              if matched_data.any?
+                service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
+                results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
+              end
               raise ActiveRecord::Rollback if results[:errors].any?
 
               import_record.update!(status: "applied", validation_errors: [])
+              disposition_plan.decisions.each do |decision|
+                if decision.included?
+                  payroll_item = @pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
+                  disposition_plan.apply!(
+                    decision,
+                    status: "applied",
+                    employee: decision.row.employee,
+                    payroll_item: payroll_item
+                  )
+                else
+                  disposition_plan.apply!(decision, status: "skipped")
+                  results[:skipped] << {
+                    employee_id: decision.row.employee_id,
+                    name: decision.row.source_employee_name,
+                    reason: decision.reason
+                  }
+                end
+              end
               source_package.mark_reviewed!(actor: current_user) if source_package.status == "previewed"
               source_package.mark_applied!(actor: current_user)
+              @pay_period.clear_intake_stale! if @pay_period.intake_stale_session_id == source_package.id
               applied = true
             end
 
@@ -189,6 +240,9 @@ module Api
               results: results,
               pay_period: pay_period_json(@pay_period.reload)
             }
+          rescue ArgumentError => e
+            import_record&.update(status: "previewed", validation_errors: [ e.message ])
+            render json: { error: e.message }, status: :unprocessable_entity
           rescue StandardError => e
             # Keep record previewed so operator can retry apply without re-uploading.
             import_record&.update(status: "previewed", validation_errors: [ e.message ])
@@ -203,7 +257,7 @@ module Api
           preview = evidence.fetch("preview", {})
           matched = source_package.rows.filter_map do |row|
             payload = row.source_payload.to_h
-            payload["preview_row"] if payload["row_kind"] == "matched"
+            payload["preview_row"].to_h.merge("source_row_id" => row.id) if payload["row_kind"] == "matched"
           end
 
           {
@@ -220,6 +274,7 @@ module Api
             excel_count: preview["excel_count"].to_i,
             matched_count: matched.length,
             source_warnings: source_package.warnings || [],
+            source_rows: source_package.rows.map { |row| source_row_json(row) },
             can_apply: source_package.rows.none?(&:blocking_errors?) && Array(preview["duplicate_employee_matches"]).empty?
           }
         end
@@ -230,9 +285,104 @@ module Api
             package_id: source_package.package_id,
             package_revision: source_package.package_revision,
             package_schema_version: source_package.package_schema_version,
+            current: source_package.current?,
+            superseded_at: source_package.superseded_at,
+            supersedes_package_id: source_package.supersedes&.package_id,
+            supersedes_revision: source_package.supersedes&.package_revision,
+            supersession_reason: source_package.supersession_reason,
+            replacement_package_id: source_package.replacement_session&.package_id,
+            replacement_revision: source_package.replacement_session&.package_revision,
             verified_source_count: source_package.documents.count { |document| document.verification_status == "verified" },
-            source_count: source_package.documents.length
+            source_count: source_package.documents.length,
+            disposition_targets: disposition_targets_json
           }
+        end
+
+        def source_row_json(row)
+          {
+            id: row.id,
+            position: row.position,
+            source_employee_name: row.source_employee_name,
+            employee_id: row.employee_id,
+            employee_name: row.employee&.full_name,
+            row_kind: row.source_payload.to_h["row_kind"],
+            disposition: row.disposition,
+            disposition_reason: row.disposition_reason,
+            target_pay_period_id: row.target_pay_period_id,
+            errors: row.errors_payload,
+            warnings: row.warnings_payload
+          }
+        end
+
+        def replacement_package_json(session)
+          {
+            id: session.id,
+            package_id: session.package_id,
+            package_revision: session.package_revision,
+            status: session.status,
+            applied_at: session.applied_at,
+            created_at: session.created_at
+          }
+        end
+
+        def disposition_targets_json
+          PayPeriod.where(company_id: @pay_period.company_id, cycle: "regular", correction_status: nil)
+                   .where.not(id: @pay_period.id)
+                   .where("start_date > ?", @pay_period.end_date)
+                   .where.not(status: "committed")
+                   .period_chronological
+                   .map do |period|
+            {
+              id: period.id,
+              label: "#{period.period_description} · pay #{period.pay_date.strftime('%m/%d/%Y')}",
+              start_date: period.start_date,
+              end_date: period.end_date,
+              pay_date: period.pay_date
+            }
+          end
+        end
+
+        def mosa_disposition_overrides(source_package)
+          submitted = params.permit(rows: [ :id, :row_id, :position, :disposition, :disposition_reason, :target_pay_period_id ])[:rows]
+          return submitted if submitted.present?
+
+          excluded_ids = Array(params[:excluded_employee_ids]).map(&:to_i).to_set
+          source_package.rows.map do |row|
+            if row.source_payload.to_h["row_kind"] == "matched"
+              excluded = excluded_ids.include?(row.employee_id)
+              {
+                id: row.id,
+                disposition: excluded ? "excluded" : "included",
+                disposition_reason: excluded ? "Excluded through the legacy reviewed import control." : nil
+              }
+            else
+              { id: row.id, disposition: "pending" }
+            end
+          end
+        end
+
+        def validate_mosa_included_rows!(decisions)
+          duplicate_ids = decisions.filter_map { |decision| decision.row.employee_id }.tally.select { |_id, count| count > 1 }.keys
+          excluded_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
+          errors = decisions.flat_map do |decision|
+            row = decision.row
+            messages = []
+            messages << "#{row.source_employee_name} must be matched to a Cornerstone employee or given a non-payroll outcome." if row.employee.blank?
+            if excluded_ids.include?(row.employee_id)
+              messages << "#{row.source_employee_name} is excluded from this pay period; choose Excluded and record why."
+            end
+            row.errors_payload.each do |payload|
+              code = (payload["code"] || payload[:code]).to_s
+              next if code == "duplicate_employee" && !duplicate_ids.include?(row.employee_id)
+
+              messages << (payload["message"] || payload[:message] || "Resolve the retained source-row error.")
+            end
+            messages
+          end
+          if duplicate_ids.any?
+            errors << "Multiple included source rows map to the same employee. Exclude, defer, or mark the extra row informational."
+          end
+          raise ArgumentError, errors.uniq.join(" ") if errors.any?
         end
 
         def set_pay_period
@@ -252,6 +402,9 @@ module Api
             pay_date: pay_period.pay_date,
             status: pay_period.status,
             period_description: pay_period.period_description,
+            intake_stale_at: pay_period.intake_stale_at,
+            intake_stale_reason: pay_period.intake_stale_reason,
+            intake_stale_session_id: pay_period.intake_stale_session_id,
             employee_count: pay_period.payroll_items.count,
             total_gross: pay_period.payroll_items.sum(:gross_pay),
             total_net: pay_period.payroll_items.sum(:net_pay),

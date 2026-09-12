@@ -1075,16 +1075,32 @@ export const payPeriodsApi = {
     pdfFile: File,
     excelFile?: File,
     tipsPaidOutFromTips = false,
+    replacement?: { supersedesPackageId: string; reason: string },
   ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);
     if (excelFile) formData.append('excel_file', excelFile);
     formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
+    if (replacement?.supersedesPackageId) formData.append('supersedes_package_id', replacement.supersedesPackageId);
+    if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
+  currentImport: (id: number): Promise<ImportPreviewResponse> =>
+    api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   applyImport: (
     id: number,
-    data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean; force_overwrite?: boolean },
+    data: {
+      import_id: number;
+      excluded_employee_ids?: number[];
+      rows?: Array<{
+        id: number;
+        disposition: PayrollIntakeDisposition;
+        disposition_reason?: string | null;
+        target_pay_period_id?: number | null;
+      }>;
+      acknowledge_low_confidence_matches?: boolean;
+      force_overwrite?: boolean;
+    },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
   downloadSupplementalTemplate: (id: number): Promise<Blob> =>
@@ -1322,6 +1338,16 @@ export interface PayrollIntakeWarning {
   severity: 'info' | 'warning' | 'error' | string;
 }
 
+export type PayrollIntakeDisposition = 'pending' | 'included' | 'excluded' | 'deferred' | 'informational';
+
+export interface PayrollIntakeDispositionTarget {
+  id: number;
+  label: string;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+}
+
 export interface PayrollIntakeDocumentData {
   id: number;
   document_type: 'pasted_text' | 'image' | 'pdf' | 'other';
@@ -1343,6 +1369,11 @@ export interface PayrollIntakeRowData {
   position: number;
   status: 'pending' | 'ready' | 'needs_review' | 'applied' | 'skipped' | 'failed';
   excluded: boolean;
+  disposition: PayrollIntakeDisposition;
+  disposition_reason?: string | null;
+  dispositioned_at?: string | null;
+  dispositioned_by_id?: number | null;
+  target_pay_period_id?: number | null;
   source_employee_name: string;
   employee_id: number | null;
   employee_name?: string | null;
@@ -1378,6 +1409,14 @@ export interface PayrollIntakeImportData {
   package_id: string;
   package_revision: number;
   package_schema_version: string;
+  current: boolean;
+  superseded_at?: string | null;
+  supersedes_id?: number | null;
+  supersedes_package_id?: string | null;
+  supersedes_revision?: number | null;
+  supersession_reason?: string | null;
+  replacement_package_id?: string | null;
+  replacement_revision?: number | null;
   evidence_snapshot?: Record<string, unknown>;
   warnings: PayrollIntakeWarning[];
   totals: Record<string, number>;
@@ -1392,11 +1431,15 @@ export interface PayrollIntakeImportData {
 export interface PayrollIntakePreviewResponse {
   import: PayrollIntakeImportData;
   duplicate: boolean;
+  disposition_targets: PayrollIntakeDispositionTarget[];
 }
 
 export interface PayrollIntakeApplyRowPayload {
   id: number;
   include: boolean;
+  disposition: PayrollIntakeDisposition;
+  disposition_reason?: string | null;
+  target_pay_period_id?: number | null;
   employee_id: number | null;
   week1_hours?: number;
   week2_hours?: number;
@@ -1421,17 +1464,19 @@ export interface PayrollIntakeApplyResponse {
 }
 
 export const payrollIntakeImportsApi = {
-  preview: async (payPeriodId: number, data: { source_type?: string; pasted_text?: string; files?: File[] }) => {
+  preview: async (payPeriodId: number, data: { source_type?: string; pasted_text?: string; files?: File[]; supersedes_package_id?: string; supersession_reason?: string }) => {
     const formData = new FormData();
     formData.append('source_type', data.source_type || 'spike_email');
     if (data.pasted_text) formData.append('pasted_text', data.pasted_text);
+    if (data.supersedes_package_id) formData.append('supersedes_package_id', data.supersedes_package_id);
+    if (data.supersession_reason) formData.append('supersession_reason', data.supersession_reason);
     (data.files || []).forEach((file) => formData.append('files[]', file));
     return api.postForm<PayrollIntakePreviewResponse>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/preview`, formData);
   },
   apply: (payPeriodId: number, importId: number, data: { rows: PayrollIntakeApplyRowPayload[]; force_overwrite?: boolean; acknowledge_warnings?: boolean }) =>
     api.post<PayrollIntakeApplyResponse>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/apply`, data),
   list: (payPeriodId: number) =>
-    api.get<{ imports: PayrollIntakeImportData[] }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports`),
+    api.get<{ imports: PayrollIntakeImportData[]; disposition_targets: PayrollIntakeDispositionTarget[] }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports`),
   show: (payPeriodId: number, importId: number) =>
     api.get<{ import: PayrollIntakeImportData }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}`),
 };
@@ -1477,6 +1522,7 @@ export interface DeleteDraftCorrectionRunResponse {
 
 // Import types
 export interface ImportPreviewRow {
+  source_row_id: number;
   period_pay_required?: boolean;
   current_period_pay?: string | null;
   period_pay_missing?: boolean;
@@ -1508,6 +1554,20 @@ export interface ImportPreviewRow {
   tips_already_paid?: boolean | null;
 }
 
+export interface MosaSourceRow {
+  id: number;
+  position: number;
+  source_employee_name: string;
+  employee_id: number | null;
+  employee_name?: string | null;
+  row_kind: 'matched' | 'unmatched_revel' | 'unmatched_workbook' | string;
+  disposition: PayrollIntakeDisposition;
+  disposition_reason?: string | null;
+  target_pay_period_id?: number | null;
+  errors: PayrollIntakeWarning[];
+  warnings: PayrollIntakeWarning[];
+}
+
 export interface ImportPreviewResponse {
   import_id: number;
   duplicate?: boolean;
@@ -1516,8 +1576,16 @@ export interface ImportPreviewResponse {
     package_id: string;
     package_revision: number;
     package_schema_version: string;
+    current: boolean;
+    superseded_at?: string | null;
+    supersedes_package_id?: string | null;
+    supersedes_revision?: number | null;
+    supersession_reason?: string | null;
+    replacement_package_id?: string | null;
+    replacement_revision?: number | null;
     verified_source_count: number;
     source_count: number;
+    disposition_targets: PayrollIntakeDispositionTarget[];
   };
   preview: {
     matched: ImportPreviewRow[];
@@ -1541,6 +1609,7 @@ export interface ImportPreviewResponse {
     can_apply: boolean;
     tips_paid_out_from_tips: boolean;
     source_warnings?: { code: string; message: string; severity: string }[];
+    source_rows: MosaSourceRow[];
   };
 }
 

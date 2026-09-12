@@ -129,6 +129,12 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       expect(response.parsed_body.dig("preview", "tips_paid_out_from_tips")).to be(true)
       expect(response.parsed_body.dig("source_package", "package_id")).to eq(source_package.package_id)
       expect(PayrollImportRecord.last.raw_data.fetch("tips_paid_out_from_tips")).to be(true)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/current_import"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("import_id")).to eq(PayrollImportRecord.last.id)
+      expect(response.parsed_body.dig("preview", "tips_paid_out_from_tips")).to be(true)
     end
   end
 
@@ -142,6 +148,40 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
         source_label: PayrollIntake::Adapters::MosaRevel::SOURCE_LABEL,
         parser_version: PayrollIntake::Adapters::MosaRevel::PARSER_VERSION
       )
+      included_row = create(
+        :payroll_intake_row,
+        payroll_intake_session: source_package,
+        employee: included_employee,
+        position: 0,
+        source_employee_name: included_employee.full_name,
+        regular_hours: 40,
+        reported_tips: 25,
+        tips_paid_out: 25,
+        source_payload: { "row_kind" => "matched" }
+      )
+      excluded_row = create(
+        :payroll_intake_row,
+        payroll_intake_session: source_package,
+        employee: excluded_employee,
+        position: 1,
+        source_employee_name: excluded_employee.full_name,
+        regular_hours: 10,
+        reported_tips: 0,
+        tips_paid_out: 0,
+        source_payload: { "row_kind" => "matched" }
+      )
+      unmatched_names = unmatched_pdf_names + Array(raw_data[:unmatched_excel_names] || raw_data["unmatched_excel_names"])
+      unmatched_names.each_with_index do |name, index|
+        create(
+          :payroll_intake_row,
+          payroll_intake_session: source_package,
+          employee: nil,
+          position: index + 2,
+          source_employee_name: name,
+          source_payload: { "row_kind" => "unmatched_workbook" },
+          validation_errors: [ { code: "unmatched_employee", message: "No employee match", severity: "error" } ]
+        )
+      end
       PayrollImportRecord.create!(
         pay_period: pay_period,
         payroll_intake_session: source_package,
@@ -154,37 +194,75 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
         }.merge(raw_data),
         unmatched_pdf_names: unmatched_pdf_names,
         matched_data: [
-          { employee_id: included_employee.id, regular_hours: 40.0, total_tips: 25.0 },
-          { employee_id: excluded_employee.id, regular_hours: 10.0, total_tips: 0.0 }
+          { source_row_id: included_row.id, employee_id: included_employee.id, regular_hours: 40.0, total_tips: 25.0 },
+          { source_row_id: excluded_row.id, employee_id: excluded_employee.id, regular_hours: 10.0, total_tips: 0.0 }
         ]
       )
     end
 
-    it "refuses to apply when any Revel or workbook source row is unresolved" do
+    def reviewed_rows(import, included_employee_ids: [ included_employee.id, excluded_employee.id ])
+      import.payroll_intake_session.rows.in_order.map do |row|
+        if included_employee_ids.include?(row.employee_id)
+          { id: row.id, disposition: "included" }
+        else
+          {
+            id: row.id,
+            disposition: row.employee_id.present? ? "excluded" : "informational",
+            disposition_reason: row.employee_id.present? ? "Excluded from this reviewed run." : "Source-only row; no payroll is due."
+          }
+        end
+      end
+    end
+
+    it "refuses to apply until every Revel or workbook source row has an explicit outcome" do
       import = create_preview!(raw_data: { unmatched_excel_names: [ "Missing Worker" ] })
 
       expect(PayrollImport::ImportService).not_to receive(:new)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id },
+           params: {
+             import_id: import.id,
+             rows: reviewed_rows(import).select { |row| import.payroll_intake_session.rows.find(row.fetch(:id)).employee_id.present? }
+           },
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/Resolve every unmatched or duplicate source row/)
-      expect(response.parsed_body.fetch("details")).to include(
-        "unmatched_names" => [ "Missing Worker" ],
-        "duplicate_matches" => []
-      )
+      expect(response.parsed_body.fetch("error")).to match(/Choose an outcome for Missing Worker/)
       expect(import.reload.status).to eq("previewed")
+    end
+
+    it "allows an unmatched source row to be documented as informational while matched payroll rows apply" do
+      import = create_preview!(raw_data: { unmatched_excel_names: [ "Former Worker" ] })
+      service = instance_double(PayrollImport::ImportService)
+      matched_data = import.matched_data.map(&:deep_symbolize_keys)
+
+      expect(PayrollImport::ImportService).to receive(:new).with(pay_period, actor: admin_user).and_return(service)
+      expect(service).to receive(:apply!).with(
+        matched: matched_data,
+        force_overwrite: false,
+        tips_paid_out_from_tips: false
+      ).and_return(success: [], skipped: [], errors: [])
+      [ included_employee, excluded_employee ].each do |employee|
+        create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      end
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import.id, rows: reviewed_rows(import) },
+           as: :json
+
+      expect(response).to have_http_status(:ok)
+      unmatched_row = import.payroll_intake_session.rows.find_by!(source_employee_name: "Former Worker")
+      expect(unmatched_row.reload).to have_attributes(
+        disposition: "informational",
+        disposition_reason: "Source-only row; no payroll is due.",
+        status: "skipped",
+        applied_payroll_item_id: nil
+      )
     end
 
     it "refuses to apply a source package with blocking row errors" do
       import = create_preview!
-      create(
-        :payroll_intake_row,
-        payroll_intake_session: import.payroll_intake_session,
-        employee: included_employee,
-        source_employee_name: included_employee.full_name,
+      import.payroll_intake_session.rows.find_by!(employee: included_employee).update!(
         validation_errors: [
           { code: "doubletime_not_supported", message: "Double-time requires review", severity: "error" }
         ]
@@ -193,14 +271,11 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       expect(PayrollImport::ImportService).not_to receive(:new)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id },
+           params: { import_id: import.id, rows: reviewed_rows(import) },
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/Resolve every blocked source row/)
-      expect(response.parsed_body.dig("details", "blocked_rows")).to contain_exactly(
-        include("source_employee_name" => included_employee.full_name)
-      )
+      expect(response.parsed_body.fetch("error")).to match(/Double-time requires review/)
       expect(import.reload.status).to eq("previewed")
     end
 
@@ -222,13 +297,38 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       expect(PayrollImport::ImportService).not_to receive(:new)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id },
+           params: { import_id: import.id, rows: reviewed_rows(import) },
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to match(/fingerprint/)
       expect(import.reload.status).to eq("previewed")
       expect(import.payroll_intake_session.documents.first.reload.verification_status).to eq("failed")
+    end
+
+    it "refuses to apply a MoSa preview after a corrected package supersedes it" do
+      import = create_preview!
+      source_package = import.payroll_intake_session
+      source_package.mark_superseded!(actor: admin_user)
+      create(
+        :payroll_intake_session,
+        company: company,
+        pay_period: pay_period,
+        source_type: "mosa_revel",
+        source_label: PayrollIntake::Adapters::MosaRevel::SOURCE_LABEL,
+        parser_version: PayrollIntake::Adapters::MosaRevel::PARSER_VERSION,
+        package_revision: source_package.package_revision + 1,
+        supersedes: source_package,
+        supersession_reason: "MoSa sent corrected loan deductions."
+      )
+
+      expect(PayrollImport::ImportService).not_to receive(:new)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import.id, rows: reviewed_rows(import) },
+           as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("replaced by a corrected revision")
     end
 
     it "requires explicit confirmation of suggested name matches" do
@@ -241,7 +341,7 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       )
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id },
+           params: { import_id: import.id, rows: reviewed_rows(import) },
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
@@ -264,15 +364,23 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
 
       expect(PayrollImport::ImportService).to receive(:new).with(pay_period, actor: admin_user).and_return(service)
       expect(service).to receive(:apply!).with(
-        matched: [ { employee_id: included_employee.id, regular_hours: 40.0, total_tips: 25.0 } ],
+        matched: [
+          {
+            source_row_id: import.payroll_intake_session.rows.find_by!(employee: included_employee).id,
+            employee_id: included_employee.id,
+            regular_hours: 40.0,
+            total_tips: 25.0
+          }
+        ],
         force_overwrite: false,
         tips_paid_out_from_tips: false
       ).and_return(success: [], skipped: [], errors: [])
+      create(:payroll_item, pay_period: pay_period, company: company, employee: included_employee)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
            params: {
              import_id: import.id,
-             excluded_employee_ids: [ excluded_employee.id ],
+             rows: reviewed_rows(import, included_employee_ids: [ included_employee.id ]),
              acknowledge_low_confidence_matches: true,
              tips_paid_out_from_tips: true,
              matched: [
@@ -290,20 +398,23 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       )
     end
 
-    it "refuses an API request that excludes every matched employee" do
+    it "records a fully nonpay source package without creating payroll items" do
       import = create_preview!
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
            params: {
              import_id: import.id,
-             excluded_employee_ids: [ included_employee.id, excluded_employee.id ]
+             rows: reviewed_rows(import, included_employee_ids: [])
            },
            as: :json
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to eq("Keep at least one matched employee in the import.")
-      expect(response.parsed_body.fetch("details")).to eq("remaining_matched_rows" => 0)
-      expect(import.reload.status).to eq("previewed")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "success")).to eq([])
+      expect(response.parsed_body.dig("results", "skipped").length).to eq(import.payroll_intake_session.rows.count)
+      expect(import.reload.status).to eq("applied")
+      expect(import.payroll_intake_session.reload.status).to eq("applied")
+      expect(import.payroll_intake_session.rows.reload).to all(have_attributes(status: "skipped", disposition: "excluded"))
+      expect(pay_period.payroll_items).to be_empty
     end
 
     it "uses the persisted tip payout mode even when apply submits a different value" do
@@ -316,9 +427,11 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
         force_overwrite: false,
         tips_paid_out_from_tips: true
       ).and_return(success: [], skipped: [], errors: [])
+      create(:payroll_item, pay_period: pay_period, company: company, employee: included_employee)
+      create(:payroll_item, pay_period: pay_period, company: company, employee: excluded_employee)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id, tips_paid_out_from_tips: false },
+           params: { import_id: import.id, rows: reviewed_rows(import), tips_paid_out_from_tips: false },
            as: :json
 
       expect(response).to have_http_status(:ok)
@@ -345,7 +458,7 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       end
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
-           params: { import_id: import.id },
+           params: { import_id: import.id, rows: reviewed_rows(import) },
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)

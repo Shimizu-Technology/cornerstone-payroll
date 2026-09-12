@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
-import { ArrowRight, Loader2, LockKeyhole, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader2, LockKeyhole, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -981,8 +981,8 @@ export function PayPeriodDetail({
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
   const canEditPayPeriod = !isCommitted && !isVoided;
-  const canImportMosa = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
-  const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
+  const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
+  const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
   const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
   const canLinkAireRecord = isCommitted && !isVoided && activeTimeTrackingSources.includes('aire_services');
@@ -1340,7 +1340,7 @@ export function PayPeriodDetail({
           </Button>
         </>
       )}
-      {isDraft && (
+      {!isCommitted && !isVoided && (
         <>
           {canImportMosa && (
             <Button variant="outline" onClick={() => setImportModalOpen(true)}>
@@ -1357,6 +1357,10 @@ export function PayPeriodDetail({
               Import Time Tracking
             </Button>
           )}
+        </>
+      )}
+      {isDraft && (
+        <>
           <Button onClick={handleRunPayroll} disabled={processing}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
@@ -1399,6 +1403,31 @@ export function PayPeriodDetail({
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
+          </div>
+        )}
+
+        {payPeriod.intake_stale_at && (
+          <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700" aria-hidden="true" />
+                <div>
+                  <p className="font-semibold">This payroll is stale because the source changed</p>
+                  <p className="mt-1 max-w-4xl text-sm leading-6 text-red-800">{payPeriod.intake_stale_reason}</p>
+                  <p className="mt-1 text-sm text-red-800">Review and apply the current source package. Payroll cannot be approved or committed until that revision is applied.</p>
+                </div>
+              </div>
+              {(canImportMosa || canImportSpikeIntake) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 border-red-300 bg-white text-red-900 hover:bg-red-100"
+                  onClick={() => canImportMosa ? setImportModalOpen(true) : setPayrollIntakeImportOpen(true)}
+                >
+                  Review current source
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -3202,6 +3231,7 @@ export function PayPeriodDetail({
         open={importModalOpen}
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
+        onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}
         onImportComplete={handleImportComplete}
       />
 
@@ -3211,6 +3241,7 @@ export function PayPeriodDetail({
         payPeriodId={payPeriod.id}
         employees={employees}
         onEmployeeCreated={(employee) => setEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee])}
+        onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}
         onImportComplete={handleImportComplete}
       />
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardList, FileText, UploadCloud, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, FileText, RefreshCw, UploadCloud, UserPlus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { employeeWageRatesApi, employeesApi, payrollIntakeImportsApi } from '@/services/api';
 import type {
   PayrollIntakeApplyRowPayload,
+  PayrollIntakeDispositionTarget,
   PayrollIntakeImportData,
   PayrollIntakeRowData,
 } from '@/services/api';
@@ -31,6 +32,7 @@ interface PayrollIntakeImportModalProps {
   payPeriodId: number;
   employees: Employee[];
   onEmployeeCreated?: (employee: Employee) => void;
+  onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
 }
 
@@ -88,7 +90,10 @@ function severityVariant(severity?: string) {
 }
 
 function readinessBadge(row: EditableRow) {
-  if (!row.include) return <Badge variant="outline">Skipped</Badge>;
+  if (row.disposition === 'pending') return <Badge variant="danger">Needs outcome</Badge>;
+  if (row.disposition === 'excluded') return <Badge variant="outline">Excluded</Badge>;
+  if (row.disposition === 'deferred') return <Badge variant="warning">Deferred</Badge>;
+  if (row.disposition === 'informational') return <Badge variant="info">Informational</Badge>;
   if (!row.employee_id) return <Badge variant="danger">Needs match</Badge>;
   if ((row.errors || []).length > 0) return <Badge variant="danger">Blocked</Badge>;
   if ((row.warnings || []).length > 0) return <Badge variant="warning">Review</Badge>;
@@ -101,6 +106,7 @@ export function PayrollIntakeImportModal({
   payPeriodId,
   employees,
   onEmployeeCreated,
+  onSourcePreviewed,
   onImportComplete,
 }: PayrollIntakeImportModalProps) {
   const [step, setStep] = useState<Step>('upload');
@@ -118,11 +124,29 @@ export function PayrollIntakeImportModal({
   const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>(() => defaultNewEmployeeForm());
   const [creatingEmployee, setCreatingEmployee] = useState(false);
   const [createEmployeeError, setCreateEmployeeError] = useState<string | null>(null);
+  const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
+  const [dispositionTargets, setDispositionTargets] = useState<PayrollIntakeDispositionTarget[]>([]);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [replacementReason, setReplacementReason] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalEmployees(employees);
   }, [employees]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    let active = true;
+    payrollIntakeImportsApi.list(payPeriodId).then((response) => {
+      if (!active) return;
+      setCurrentPackage(response.imports.find((entry) => entry.source_type === 'spike_email' && entry.current) || null);
+      setDispositionTargets(response.disposition_targets || []);
+    }).catch((err) => {
+      if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
+    });
+    return () => { active = false; };
+  }, [open, payPeriodId]);
 
   const employeeOptions = useMemo(() => (
     [...localEmployees]
@@ -131,18 +155,18 @@ export function PayrollIntakeImportModal({
   ), [localEmployees]);
 
   const totals = useMemo(() => rows.reduce((acc, row) => {
-    if (!row.include) return acc;
+    if (row.disposition !== 'included') return acc;
     acc.regular += toNumber(row.regular_hours);
     acc.overtime += toNumber(row.overtime_hours);
     acc.tips += toNumber(row.reported_tips);
     return acc;
   }, { regular: 0, overtime: 0, tips: 0 }), [rows]);
 
-  const includedRows = rows.filter((row) => row.include);
+  const includedRows = rows.filter((row) => row.disposition === 'included');
   const duplicateEmployeeIds = useMemo(() => {
     const counts = new Map<number, number>();
     rows.forEach((row) => {
-      if (!row.include || !row.employee_id) return;
+      if (row.disposition !== 'included' || !row.employee_id) return;
       counts.set(row.employee_id, (counts.get(row.employee_id) || 0) + 1);
     });
     return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([employeeId]) => employeeId));
@@ -151,7 +175,25 @@ export function PayrollIntakeImportModal({
   const hasBlockingRowErrors = includedRows.some((row) => (row.errors || []).length > 0);
   const hasBlockingMissingMatches = includedRows.some((row) => !row.employee_id);
   const hasDuplicateEmployeeMappings = duplicateEmployeeIds.size > 0;
-  const canApply = includedRows.length > 0 && !hasBlockingMissingMatches && !hasDuplicateEmployeeMappings && !hasBlockingRowErrors && (!hasWarnings || acknowledgeWarnings);
+  const hasIncompleteDispositions = rows.some((row) => (
+    row.disposition === 'pending'
+      || (['excluded', 'deferred', 'informational'].includes(row.disposition) && !row.disposition_reason?.trim())
+      || (row.disposition === 'deferred' && !row.target_pay_period_id)
+  ));
+  const canApply = rows.length > 0 && !hasIncompleteDispositions && !hasBlockingMissingMatches && !hasDuplicateEmployeeMappings && !hasBlockingRowErrors && (!hasWarnings || acknowledgeWarnings);
+  const replacementReady = !replacementConfirmed || replacementReason.trim().length > 0;
+
+  const reviewPackage = (sourcePackage: PayrollIntakeImportData) => {
+    setImportData(sourcePackage);
+    setRows(sourcePackage.rows.map((row) => {
+      const disposition = row.disposition !== 'pending'
+        ? row.disposition
+        : row.employee_id && (row.errors || []).length === 0 ? 'included' : 'pending';
+      return { ...row, disposition, include: disposition === 'included' };
+    }));
+    setAcknowledgeWarnings(false);
+    setStep('preview');
+  };
 
   const reset = () => {
     setStep('upload');
@@ -167,6 +209,10 @@ export function PayrollIntakeImportModal({
     setCreateEmployeeRow(null);
     setCreateEmployeeError(null);
     setCreatingEmployee(false);
+    setCurrentPackage(null);
+    setDispositionTargets([]);
+    setReplacementConfirmed(false);
+    setReplacementReason('');
   };
 
   const handleClose = () => {
@@ -198,11 +244,13 @@ export function PayrollIntakeImportModal({
         source_type: 'spike_email',
         pasted_text: pastedText,
         files,
+        supersedes_package_id: currentPackage && replacementConfirmed ? currentPackage.package_id : undefined,
+        supersession_reason: currentPackage && replacementConfirmed ? replacementReason.trim() : undefined,
       });
-      setImportData(response.import);
-      setRows(response.import.rows.map((row) => ({ ...row, include: row.status !== 'skipped' })));
-      setAcknowledgeWarnings(false);
-      setStep('preview');
+      setDispositionTargets(response.disposition_targets || []);
+      setCurrentPackage(response.import.current ? response.import : currentPackage);
+      reviewPackage(response.import);
+      onSourcePreviewed?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to preview payroll intake');
     } finally {
@@ -374,7 +422,7 @@ export function PayrollIntakeImportModal({
       };
       setLocalEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee]);
       onEmployeeCreated?.(employee);
-      updateRow(createEmployeeRow.id, { employee_id: employee.id });
+      updateRow(createEmployeeRow.id, { employee_id: employee.id, disposition: 'included', include: true });
       setCreateEmployeeRow(null);
     } catch (err) {
       setCreateEmployeeError(err instanceof Error ? err.message : 'Failed to create employee');
@@ -385,7 +433,10 @@ export function PayrollIntakeImportModal({
 
   const buildApplyRows = (): PayrollIntakeApplyRowPayload[] => rows.map((row) => ({
     id: row.id,
-    include: row.include,
+    include: row.disposition === 'included',
+    disposition: row.disposition,
+    disposition_reason: row.disposition_reason,
+    target_pay_period_id: row.target_pay_period_id,
     employee_id: row.employee_id,
     week1_hours: toNumber(row.week1_hours),
     week2_hours: toNumber(row.week2_hours),
@@ -452,7 +503,41 @@ export function PayrollIntakeImportModal({
         )}
 
         {step === 'upload' && (
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_360px]">
+          <div className="space-y-5">
+            {currentPackage && (
+              <div className="rounded-3xl border border-warning-200 bg-warning-50 p-5 text-warning-950">
+                <div className="flex items-start gap-3">
+                  <RefreshCw className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+                  <div className="flex-1">
+                    <p className="font-semibold">Revision {currentPackage.package_revision} is the current retained source</p>
+                    <p className="mt-1 text-sm leading-6 text-warning-800">
+                      {['previewed', 'reviewed'].includes(currentPackage.status)
+                        ? 'Continue the saved review, or upload a corrected source and document what changed.'
+                        : 'This source was already applied. Upload again only when the client sent a correction.'}
+                    </p>
+                    {['previewed', 'reviewed'].includes(currentPackage.status) && (
+                      <Button type="button" variant="outline" size="sm" className="mt-3 border-warning-300 bg-white" onClick={() => reviewPackage(currentPackage)}>
+                        Continue revision {currentPackage.package_revision}
+                      </Button>
+                    )}
+                    <label className="mt-3 flex items-start gap-2 text-sm font-medium">
+                      <input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} className="mt-0.5 rounded border-warning-300" />
+                      <span>This corrected source replaces revision {currentPackage.package_revision}.</span>
+                    </label>
+                    {replacementConfirmed && (
+                      <Input
+                        label="What changed?"
+                        value={replacementReason}
+                        onChange={(event) => setReplacementReason(event.target.value)}
+                        placeholder="Example: Client corrected Rosie’s Week 2 hours."
+                        className="mt-3 bg-white"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_360px]">
             <div className="space-y-4">
               <div>
                 <label htmlFor="payroll-intake-source-text" className="mb-2 block text-sm font-semibold text-neutral-800">
@@ -528,6 +613,7 @@ export function PayrollIntakeImportModal({
               </Card>
             </div>
           </div>
+          </div>
         )}
 
         {step === 'preview' && importData && (
@@ -557,10 +643,10 @@ export function PayrollIntakeImportModal({
             )}
 
             <div className="overflow-x-auto rounded-3xl border border-neutral-200 bg-white shadow-sm">
-              <Table>
+              <Table className="min-w-[1380px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10">Use</TableHead>
+                    <TableHead className="min-w-[150px]">Outcome</TableHead>
                     <TableHead className="min-w-[220px]">Source / Employee</TableHead>
                     <TableHead className="min-w-[120px] text-right">Week 1</TableHead>
                     <TableHead className="min-w-[120px] text-right">Week 2</TableHead>
@@ -574,14 +660,27 @@ export function PayrollIntakeImportModal({
                 </TableHeader>
                 <TableBody>
                   {rows.map((row) => (
-                    <TableRow key={row.id} className={!row.include ? 'opacity-50' : ''}>
+                    <TableRow key={row.id} className={row.disposition !== 'included' ? 'bg-neutral-50/70' : ''}>
                       <TableCell>
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300"
-                          checked={row.include}
-                          onChange={(event) => updateRow(row.id, { include: event.target.checked })}
-                        />
+                        <Select
+                          aria-label={`Outcome for ${row.source_employee_name}`}
+                          value={row.disposition}
+                          onChange={(event) => {
+                            const disposition = event.target.value as EditableRow['disposition'];
+                            updateRow(row.id, {
+                              disposition,
+                              include: disposition === 'included',
+                              disposition_reason: disposition === 'included' ? null : row.disposition_reason,
+                              target_pay_period_id: disposition === 'deferred' ? row.target_pay_period_id : null,
+                            });
+                          }}
+                        >
+                          <option value="pending">Choose outcome</option>
+                          <option value="included">Include in this payroll</option>
+                          <option value="excluded">Exclude from payroll</option>
+                          <option value="deferred">Move to a future payroll</option>
+                          <option value="informational">Informational only</option>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <div className="space-y-2">
@@ -591,20 +690,42 @@ export function PayrollIntakeImportModal({
                               <p className="text-xs text-neutral-500">Match confidence {Math.round(row.match_confidence * 100)}%</p>
                             )}
                           </div>
-                          <div className="flex min-w-[320px] items-center gap-2">
-                            <Select
-                              value={row.employee_id ? String(row.employee_id) : ''}
-                              onChange={(event) => updateRow(row.id, { employee_id: event.target.value ? Number(event.target.value) : null })}
-                              className="min-w-[230px] flex-1"
-                            >
-                              <option value="">Select employee</option>
-                              {employeeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                            </Select>
-                            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => openCreateEmployee(row)}>
-                              <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                              New
-                            </Button>
-                          </div>
+                          {row.disposition === 'included' && (
+                            <div className="flex min-w-[320px] items-center gap-2">
+                              <Select
+                                value={row.employee_id ? String(row.employee_id) : ''}
+                                onChange={(event) => updateRow(row.id, { employee_id: event.target.value ? Number(event.target.value) : null })}
+                                className="min-w-[230px] flex-1"
+                              >
+                                <option value="">Select employee</option>
+                                {employeeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                              </Select>
+                              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => openCreateEmployee(row)}>
+                                <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                New
+                              </Button>
+                            </div>
+                          )}
+                          {['excluded', 'deferred', 'informational'].includes(row.disposition) && (
+                            <div className="space-y-2">
+                              <Input
+                                aria-label={`Reason for ${row.source_employee_name}`}
+                                value={row.disposition_reason || ''}
+                                onChange={(event) => updateRow(row.id, { disposition_reason: event.target.value })}
+                                placeholder="Required reason"
+                              />
+                              {row.disposition === 'deferred' && (
+                                <Select
+                                  aria-label={`Future payroll for ${row.source_employee_name}`}
+                                  value={row.target_pay_period_id ? String(row.target_pay_period_id) : ''}
+                                  onChange={(event) => updateRow(row.id, { target_pay_period_id: event.target.value ? Number(event.target.value) : null })}
+                                >
+                                  <option value="">Choose future payroll</option>
+                                  {dispositionTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+                                </Select>
+                              )}
+                            </div>
+                          )}
                           {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => (
                             <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} className="mr-1 whitespace-normal text-left">
                               {warning.message}
@@ -679,7 +800,7 @@ export function PayrollIntakeImportModal({
           {step === 'upload' && (
             <>
               <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || (!pastedText.trim() && files.length === 0)}>
+              <Button onClick={handlePreview} disabled={loading || !replacementReady || (!pastedText.trim() && files.length === 0)}>
                 {loading ? 'Extracting...' : 'Preview Intake'}
               </Button>
             </>
@@ -687,11 +808,13 @@ export function PayrollIntakeImportModal({
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>Back</Button>
-              {!canApply && (hasBlockingMissingMatches || hasDuplicateEmployeeMappings || hasBlockingRowErrors) && (
+              {!canApply && (hasIncompleteDispositions || hasBlockingMissingMatches || hasDuplicateEmployeeMappings || hasBlockingRowErrors) && (
                 <span className="mr-auto flex items-center gap-2 text-sm text-danger-600">
                   <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                  {hasBlockingMissingMatches
-                    ? 'Match all included rows.'
+                  {hasIncompleteDispositions
+                    ? 'Choose and complete an outcome for every source row.'
+                    : hasBlockingMissingMatches
+                      ? 'Match all included rows.'
                     : hasDuplicateEmployeeMappings
                       ? 'Each included row must map to a different employee.'
                       : 'Resolve all blocked row errors before applying.'}
