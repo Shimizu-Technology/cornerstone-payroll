@@ -253,6 +253,7 @@ Rails.application.routes.draw do
             end
             member do
               post :apply
+              get "documents/:document_id/download", action: :download_source_document, as: :source_document_download
             end
           end
 

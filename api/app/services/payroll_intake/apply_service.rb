@@ -17,6 +17,7 @@ module PayrollIntake
     def call
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
       raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+      PayrollIntake::SourcePackageVerifier.new(session: session).verify!
 
       results = { applied: [], skipped: [], errors: [] }
       overrides_by_key = build_overrides_by_key

@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollIntakeImportsController < BaseController
         before_action :set_pay_period
-        before_action :set_session, only: [ :show, :apply ]
+        before_action :set_session, only: [ :show, :apply, :download_source_document ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports
         def index
@@ -62,6 +62,38 @@ module Api
           render json: { error: "Payroll intake apply failed. #{e.message}" }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/:id/documents/:document_id/download
+        def download_source_document
+          document = @session.documents.find(params[:document_id])
+          if document.verification_status == "legacy_unverified"
+            return render json: { error: "This legacy source predates verified package retention." }, status: :unprocessable_entity
+          end
+
+          bytes = PayrollIntake::SourcePackageVerifier.new(session: @session).verified_bytes!(document)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: @session.company.organization_id,
+            company_id: @session.company_id,
+            action: "payroll_intake_imports#download_source_document",
+            record_type: "payroll_intake_sessions",
+            record_id: @session.id,
+            subject_name: @session.source_label,
+            metadata: {
+              package_id: @session.package_id,
+              package_revision: @session.package_revision,
+              document_id: document.id,
+              source_role: document.source_role,
+              sha256: document.sha256
+            }
+          )
+          send_data bytes,
+                    filename: document.filename.presence || "payroll-source-#{document.id}.txt",
+                    type: document.content_type.presence || "text/plain",
+                    disposition: "attachment"
+        rescue PayrollIntake::SourcePackageVerifier::VerificationError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         private
 
         def set_pay_period
@@ -102,6 +134,9 @@ module Api
             status: session.status,
             import_hash: session.import_hash,
             parser_version: session.parser_version,
+            package_id: session.package_id,
+            package_revision: session.package_revision,
+            package_schema_version: session.package_schema_version,
             evidence_snapshot: session.evidence_snapshot || {},
             warnings: session.warnings || [],
             totals: session.totals || {},
@@ -119,10 +154,18 @@ module Api
           {
             id: document.id,
             document_type: document.document_type,
+            source_role: document.source_role,
+            position: document.position,
             filename: document.filename,
             content_type: document.content_type,
+            byte_size: document.byte_size,
+            sha256: document.sha256,
+            verification_status: document.verification_status,
+            verified_at: document.verified_at,
             metadata: document.metadata || {},
-            text_preview: document.text_content.to_s.truncate(500)
+            text_preview: document.text_content.to_s.truncate(500),
+            download_path: document.verification_status == "legacy_unverified" ? nil :
+              "/api/v1/admin/pay_periods/#{document.payroll_intake_session.pay_period_id}/payroll_intake_imports/#{document.payroll_intake_session_id}/documents/#{document.id}/download"
           }
         end
 
