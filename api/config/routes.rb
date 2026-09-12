@@ -388,6 +388,7 @@ Rails.application.routes.draw do
             post :mark_paid_off
             post :suspend
             post :reactivate
+            post :stop
           end
         end
 

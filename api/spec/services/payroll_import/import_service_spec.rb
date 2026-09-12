@@ -171,6 +171,58 @@ RSpec.describe PayrollImport::ImportService do
   end
 
   describe "#preview" do
+    it "routes a reconciled recurring workbook amount through the named ledger instead of a direct scalar" do
+      employee = create(:employee, company: company, first_name: "Mo", last_name: "Owner")
+      deduction_type = DeductionType.create!(company: company, name: "Owner recurring repayment", category: "post_tax", sub_category: "loan")
+      loan = EmployeeLoan.create!(
+        company: company,
+        employee: employee,
+        deduction_type: deduction_type,
+        name: "Owner recurring repayment",
+        tracking_mode: "recurring_no_balance",
+        payment_amount: 50,
+        first_deduction_date: pay_period.pay_date
+      )
+      employee.employee_deductions.create!(deduction_type: deduction_type, amount: 50, active: true)
+
+      result = service.preview(
+        pdf_records: [ { employee_name: "Owner, Mo", regular_hours: 0 } ],
+        excel_records: [ { employee_id: employee.id, loan_deduction: 50, recurring_loan_deduction: 50 } ]
+      )
+
+      expect(result[:can_apply]).to be(true)
+      expect(result[:matched]).to contain_exactly(include(
+        employee_id: employee.id,
+        loan_deduction: 0.0,
+        loan_reconciliation_errors: [],
+        loan_reconciliation_matches: [ include(employee_loan_id: loan.id, amount: 50.to_d) ]
+      ))
+    end
+
+    it "blocks a legacy recurring workbook amount until its named ledger exists" do
+      employee = create(:employee, company: company, first_name: "Sarah", last_name: "Owner")
+
+      result = service.preview(
+        pdf_records: [ { employee_name: "Owner, Sarah", regular_hours: 0 } ],
+        excel_records: [ { employee_id: employee.id, loan_deduction: 50, recurring_loan_deduction: 50 } ]
+      )
+
+      expect(result[:can_apply]).to be(false)
+      expect(result[:matched].first[:loan_reconciliation_errors]).to include(/Set up the named recurring deduction/)
+    end
+
+    it "keeps a generated one-payroll deduction available when no named loan is due" do
+      employee = create(:employee, company: company, first_name: "Avery", last_name: "Example")
+
+      result = service.preview(
+        pdf_records: [ { employee_name: "Example, Avery", regular_hours: 40 } ],
+        excel_records: [ { employee_id: employee.id, loan_deduction: 20, one_payroll_deduction: 20 } ]
+      )
+
+      expect(result[:can_apply]).to be(true)
+      expect(result[:matched]).to contain_exactly(include(loan_deduction: 20.0, loan_reconciliation_errors: []))
+    end
+
     it "never resolves a stable employee ID from another client" do
       create(:employee, company: company, first_name: "Avery", last_name: "Example")
       other_employee = create(:employee, company: create(:company), first_name: "Outside", last_name: "Worker")

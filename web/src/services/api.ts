@@ -1556,11 +1556,20 @@ export interface ImportPreviewRow {
   tips_foh?: number;
   tip_pool: string | null;
   loan_deduction: number;
+  one_payroll_deduction?: number;
   recurring_loan_deduction?: number;
   installment_beginning_balance?: number;
   installment_new_amount?: number;
   installment_payment?: number;
   installment_estimated_ending_balance?: number;
+  loan_reconciliation_matches?: Array<{
+    employee_loan_id: number;
+    tracking_mode: 'balance_tracked' | 'recurring_no_balance';
+    name: string;
+    amount: number;
+  }>;
+  loan_reconciliation_errors?: string[];
+  loan_reconciliation_warnings?: string[];
   tips_already_paid?: boolean | null;
 }
 
@@ -3273,7 +3282,7 @@ export const employeeLoansApi = {
   get: (id: number) =>
     api.get<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`),
   create: (data: {
-    employee_id: number; name: string; original_amount?: number;
+    employee_id: number; name: string; tracking_mode: EmployeeLoan['tracking_mode']; original_amount?: number;
     opening_balance?: number; payment_amount?: number; start_date?: string; first_deduction_date?: string;
     balance_as_of?: string; balance_source?: EmployeeLoan['balance_source'];
     principal_amount_known?: boolean; balance_setup_mode?: 'new_loan' | 'existing_balance';
@@ -3295,6 +3304,8 @@ export const employeeLoansApi = {
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/suspend`, { notes }),
   reactivate: (id: number, notes?: string) =>
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/reactivate`, { notes }),
+  stop: (id: number, reason: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/stop`, { reason }),
 };
 
 export const clientDocumentsApi = {

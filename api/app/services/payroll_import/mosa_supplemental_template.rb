@@ -134,17 +134,26 @@ module PayrollImport
       rows = employees.flat_map do |employee|
         assignment_rows = employee.employee_payroll_fields.active.effective_on(pay_period.pay_date).map do |assignment|
           definition = assignment.payroll_field_definition
+          loan = assignment.employee_loan
+          component_type = if loan&.recurring_no_balance?
+            "recurring deduction (no balance)"
+          elsif loan&.balance_tracked?
+            "installment loan"
+          else
+            definition.category
+          end
           [
-            employee.id, employee.full_name, definition.id, definition.name, definition.category,
+            employee.id, employee.full_name, definition.id, definition.name, component_type,
             assignment.effective_amount_for(0), "KEEP", nil, pay_period.pay_date, assignment.end_date,
-            assignment.employee_loan&.current_balance, nil, nil, nil, nil, "Cornerstone recurring setup", nil
+            loan&.balance_tracked? ? loan.current_balance : nil, nil, nil, nil, nil, "Cornerstone recurring setup", nil
           ]
         end
 
         assigned_loan_ids = employee.employee_payroll_fields.filter_map(&:employee_loan_id)
         loan_rows = employee.employee_loans.active.reject { |loan| assigned_loan_ids.include?(loan.id) }.map do |loan|
           [
-            employee.id, employee.full_name, "loan-#{loan.id}", loan.name, "loan", loan.payment_amount,
+            employee.id, employee.full_name, "loan-#{loan.id}", loan.name,
+            loan.recurring_no_balance? ? "recurring deduction (no balance)" : "installment loan", loan.payment_amount,
             "KEEP", nil, pay_period.pay_date, nil, loan.current_balance, nil, nil, nil, nil,
             "Cornerstone loan ledger", nil
           ]

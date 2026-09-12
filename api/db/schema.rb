@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -511,24 +511,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
   end
 
   create_table "employee_loans", force: :cascade do |t|
-    t.date "balance_as_of", null: false
-    t.string "balance_source", null: false
+    t.date "balance_as_of"
+    t.string "balance_source"
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
-    t.decimal "current_balance", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "current_balance", precision: 10, scale: 2, default: "0.0"
     t.bigint "deduction_type_id"
     t.bigint "employee_id", null: false
     t.date "first_deduction_date"
     t.string "name", null: false
     t.text "notes"
-    t.decimal "opening_balance", precision: 10, scale: 2, null: false
-    t.decimal "original_amount", precision: 10, scale: 2, null: false
+    t.decimal "opening_balance", precision: 10, scale: 2
+    t.decimal "original_amount", precision: 10, scale: 2
     t.date "paid_off_date"
     t.decimal "payment_amount", precision: 10, scale: 2
     t.boolean "principal_amount_known", default: true, null: false
     t.date "start_date"
     t.string "status", default: "active", null: false
+    t.datetime "stopped_at"
+    t.bigint "stopped_by_id"
+    t.string "tracking_mode", default: "balance_tracked", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "status"], name: "index_employee_loans_on_company_id_and_status"
     t.index ["company_id"], name: "index_employee_loans_on_company_id"
@@ -537,7 +540,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
     t.index [ "employee_id", "deduction_type_id" ], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
+    t.index ["stopped_by_id"], name: "index_employee_loans_on_stopped_by_id"
     t.check_constraint "balance_source::text = ANY (ARRAY['new_loan'::character varying::text, 'quickbooks'::character varying::text, 'statement'::character varying::text, 'employee_confirmation'::character varying::text, 'other_verified'::character varying::text])", name: "employee_loans_balance_source_check"
+    t.check_constraint "status::text = 'stopped'::text AND stopped_at IS NOT NULL OR status::text <> 'stopped'::text AND stopped_at IS NULL", name: "employee_loans_stopped_shape"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'paid_off'::character varying::text, 'suspended'::character varying::text, 'stopped'::character varying::text])", name: "employee_loans_status_check"
+    t.check_constraint "tracking_mode::text = 'balance_tracked'::text AND original_amount IS NOT NULL AND original_amount > 0::numeric AND opening_balance IS NOT NULL AND opening_balance > 0::numeric AND current_balance IS NOT NULL AND current_balance >= 0::numeric AND balance_as_of IS NOT NULL AND balance_source IS NOT NULL AND status::text <> 'stopped'::text OR tracking_mode::text = 'recurring_no_balance'::text AND original_amount IS NULL AND opening_balance IS NULL AND current_balance IS NULL AND balance_as_of IS NULL AND balance_source IS NULL AND principal_amount_known = false AND status::text <> 'paid_off'::text", name: "employee_loans_tracking_shape"
+    t.check_constraint "tracking_mode::text = ANY (ARRAY['balance_tracked'::character varying::text, 'recurring_no_balance'::character varying::text])", name: "employee_loans_tracking_mode_check"
   end
 
   create_table "employee_payroll_fields", force: :cascade do |t|
@@ -1535,8 +1543,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
 
   create_table "loan_transactions", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2, null: false
-    t.decimal "balance_after", precision: 10, scale: 2, null: false
-    t.decimal "balance_before", precision: 10, scale: 2, null: false
+    t.decimal "balance_after", precision: 10, scale: 2
+    t.decimal "balance_before", precision: 10, scale: 2
     t.datetime "created_at", null: false
     t.bigint "employee_loan_id", null: false
     t.text "notes"
@@ -1549,12 +1557,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
     t.string "transaction_type", null: false
     t.datetime "updated_at", null: false
     t.index ["employee_loan_id", "pay_period_id"], name: "idx_loan_txns_on_loan_and_pp"
+    t.index ["employee_loan_id", "payroll_item_id"], name: "idx_loan_txns_unique_payroll_payment", unique: true, where: "(((source)::text = 'payroll'::text) AND ((transaction_type)::text = 'payment'::text) AND (payroll_item_id IS NOT NULL))"
     t.index ["employee_loan_id"], name: "index_loan_transactions_on_employee_loan_id"
     t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
     t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
     t.index ["recorded_by_id"], name: "index_loan_transactions_on_recorded_by_id"
     t.index [ "reverses_transaction_id" ], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
+    t.check_constraint "balance_before IS NULL AND balance_after IS NULL OR balance_before IS NOT NULL AND balance_after IS NOT NULL", name: "loan_transactions_balance_pair"
     t.check_constraint "source::text = ANY (ARRAY['opening_balance'::character varying::text, 'payroll'::character varying::text, 'manual'::character varying::text])", name: "loan_transactions_source_check"
   end
 
@@ -2946,6 +2956,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
   add_foreign_key "employee_loans", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "employee_loans", "users", column: "stopped_by_id", on_delete: :nullify
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"

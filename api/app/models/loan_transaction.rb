@@ -15,16 +15,28 @@ class LoanTransaction < ApplicationRecord
 
   validates :transaction_type, presence: true, inclusion: { in: TYPES }
   validates :amount, presence: true, numericality: { greater_than: 0 }
-  validates :balance_before, presence: true, numericality: { greater_than_or_equal_to: 0 }
-  validates :balance_after, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :balance_before, presence: true, numericality: { greater_than_or_equal_to: 0 }, if: :balance_tracked?
+  validates :balance_after, presence: true, numericality: { greater_than_or_equal_to: 0 }, if: :balance_tracked?
   validates :transaction_date, presence: true
   validates :source, presence: true, inclusion: { in: SOURCES }
+  validate :balance_shape_matches_loan
 
   scope :payments, -> { where(transaction_type: "payment") }
   scope :additions, -> { where(transaction_type: "addition") }
   scope :chronological, -> { order(transaction_date: :asc, created_at: :asc) }
 
   private
+
+  def balance_tracked?
+    employee_loan&.balance_tracked? != false
+  end
+
+  def balance_shape_matches_loan
+    return unless employee_loan&.recurring_no_balance?
+    return if balance_before.nil? && balance_after.nil?
+
+    errors.add(:base, "Recurring deduction events do not carry a loan balance")
+  end
 
   def initialize_source
     self.source ||= payroll_item_id.present? ? "payroll" : "manual"
