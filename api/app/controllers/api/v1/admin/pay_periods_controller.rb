@@ -11,14 +11,14 @@ module Api
         # belongs in the same AuditLog stream as commit/void/run_payroll.
         # Read-only previews (`:corrective_paycheck_preview`,
         # `:supplemental_pay_periods`) are deliberately omitted.
-        audit_actions :approve, :unapprove, :commit, :run_payroll, :void,
+        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :record_client_approval,
                       :create_correction_run, :generate_fit_check,
                       :corrective_paychecks, :adopt_confirmed_workweek
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
           :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
-          :comparison, :payroll_field_inputs
+          :comparison, :payroll_field_inputs, :client_review, :record_client_approval
         ]
         around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll ]
 
@@ -128,6 +128,7 @@ module Api
           start_date_was = @pay_period.start_date
           end_date_was = @pay_period.end_date
           pay_date_was = @pay_period.pay_date
+          was_draft = @pay_period.draft?
 
           if !@pay_period.draft? && purpose_fields_submitted?
             return render json: { error: "Run purpose, base salary, and recurring employee setup can only change while the pay period is a draft" }, status: :unprocessable_entity
@@ -146,16 +147,9 @@ module Api
               @pay_period.update!(update_attributes)
               dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
 
-              if dates_changed && !@pay_period.draft?
-                @pay_period.update!(
-                  status: "draft",
-                  approved_by_id: nil,
-                  approved_at: nil,
-                  calculated_at: nil,
-                  calculated_by_id: nil,
-                  unapproved_at: nil,
-                  unapproved_by_id: nil
-                )
+              inputs_changed = @pay_period.previous_changes.keys.intersect?(PayrollReview::CalculationSnapshot::PAY_PERIOD_FIELDS)
+              if !was_draft && (dates_changed || inputs_changed)
+                @pay_period.invalidate_calculation!(reason: "Pay period details changed after calculation.")
               end
             end
 
@@ -450,6 +444,7 @@ module Api
               )
             end
             @pay_period.update!(calculation_attributes)
+            PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
           end
 
           render json: {
@@ -463,6 +458,32 @@ module Api
         # GET /api/v1/admin/pay_periods/:id/comparison
         def comparison
           render json: PayPeriodComparisonBuilder.new(@pay_period).call
+        end
+
+        def client_review
+          review_package = @pay_period.payroll_review_packages.current
+                                      .includes(:generated_by, :approved_by, :approval_recorded_by)
+                                      .order(revision: :desc).first
+          render json: {
+            payroll_review: PayrollReview::PackagePresenter.call(review_package),
+            client_approval_required: @pay_period.company.client_payroll_approval_required?,
+            authorized_client_approvers: authorized_client_approvers
+          }
+        end
+
+        def record_client_approval
+          approver = authorized_client_approver!(params[:client_approver_id])
+          review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).approve!(
+            approver: approver,
+            recorded_by: current_user,
+            method: "email_attestation",
+            acknowledgement: params[:acknowledgement],
+            notes: params[:notes],
+            evidence_reference: params[:evidence_reference]
+          )
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
+        rescue PayrollReview::RevisionService::Error, ActiveRecord::RecordNotFound => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/approve
@@ -1057,6 +1078,13 @@ module Api
             updated_at: pay_period.updated_at
           }
 
+          unless action_name == "index"
+            json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
+            json[:payroll_review] = PayrollReview::PackagePresenter.call(
+              pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
+            )
+          end
+
           # Mutation responses replace the browser's current period too. Retain
           # source capabilities/history there without adding queries to the list.
           json[:time_tracking] = PayPeriodTimeTrackingSummary.call(pay_period) unless action_name == "index"
@@ -1084,6 +1112,19 @@ module Api
           end
 
           json
+        end
+
+        def authorized_client_approvers
+          User.active.client.where(organization_id: @pay_period.company.organization_id).order(:name, :id).select do |user|
+            user.can_access_company?(@pay_period.company_id)
+          end.map { |user| { id: user.id, name: user.name, email: user.email } }
+        end
+
+        def authorized_client_approver!(id)
+          user = User.active.client.where(organization_id: @pay_period.company.organization_id).find(id)
+          raise ActiveRecord::RecordNotFound, "The selected client approver is not assigned to this client." unless user.can_access_company?(@pay_period.company_id)
+
+          user
         end
 
         def payroll_item_json(item)

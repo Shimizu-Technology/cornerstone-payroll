@@ -1108,9 +1108,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         response.request().method() === 'PATCH' &&
         response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
       );
+      const refreshedPeriodPromise = page.waitForResponse((response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === `/api/v1/admin/pay_periods/${fixture.bonus_sync_pay_period_id}`
+      );
       await page.getByRole('button', { name: 'Save & Recalculate' }).click();
       const updateResponse = await updateResponsePromise;
       expect(updateResponse.ok()).toBeTruthy();
+      expect((await refreshedPeriodPromise).ok()).toBeTruthy();
+      await waitForUiCommit(page);
       return updateResponse.request().postDataJSON() as { payroll_item: Record<string, unknown> };
     };
 
@@ -1118,6 +1124,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await firstAdjustmentLabel.fill(originalLabel);
     const revertedEditPayload = await saveAndCaptureUpdatePayload();
     expect(revertedEditPayload.payroll_item).not.toHaveProperty('payroll_adjustments');
+    await expect(page.getByRole('button', { name: 'Calculate Payroll', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     const adjustmentLabels = page.getByPlaceholder('Label (e.g. Uniform repayment)');
@@ -1901,6 +1910,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await expect(bonus).toBeVisible();
       await bonus.fill('321.09');
       await bonus.press('Tab');
+      await expect(page.getByText('Recalculate to include your changes', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
       await page.route('**/run_payroll', async (route) => {
         await route.fulfill({ json: {
           ...baselineBody,
@@ -1910,6 +1921,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
       await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
       await expect(bonus).toHaveValue('321.09');
+      await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
       const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
       const result = await (await save).json();
@@ -1918,6 +1930,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       expect(Number(updated.bonus)).toBe(321.09);
       expect(Number(updated.gross_pay)).toBeCloseTo(grossWithoutBonus + 321.09, 2);
       await expect(bonus).toHaveValue('321.09');
+      await expect(page.getByText('Recalculate to include your changes', { exact: true })).toHaveCount(0);
       await page.reload();
       await expect(bonus).toHaveValue('321.09');
       await bonus.fill('0');

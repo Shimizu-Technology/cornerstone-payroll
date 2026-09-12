@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
-import { AlertTriangle, ArrowRight, Loader2, LockKeyhole, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader2, LockKeyhole, MailCheck, ShieldCheck, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -256,6 +256,49 @@ function derivePayrollUiState(payrollItems: PayrollItem[]) {
   };
 }
 
+function numericRecordsEqual(left: Record<string, number>, right: Record<string, number>): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => Math.abs(toNumber(left[key]) - toNumber(right[key])) < 0.005);
+}
+
+function tipRecordsEqual(
+  left: Record<string, { amount: number; pool: string }>,
+  right: Record<string, { amount: number; pool: string }>,
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => (
+    Math.abs(toNumber(left[key]?.amount) - toNumber(right[key]?.amount)) < 0.005
+    && (left[key]?.pool || '') === (right[key]?.pool || '')
+  ));
+}
+
+function hoursRecordsEqual(left: Record<string, HoursEntry>, right: Record<string, HoursEntry>): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => {
+    const leftEntry = left[key];
+    const rightEntry = right[key];
+    if (!leftEntry || !rightEntry) return false;
+    if (Math.abs(toNumber(leftEntry.regular) - toNumber(rightEntry.regular)) >= 0.005) return false;
+    if (Math.abs(toNumber(leftEntry.overtime) - toNumber(rightEntry.overtime)) >= 0.005) return false;
+
+    const leftRates = leftEntry.wage_rates || [];
+    const rightRates = rightEntry.wage_rates || [];
+    if (leftRates.length !== rightRates.length) return false;
+
+    return leftRates.every((rate, index) => {
+      const comparison = rightRates[index];
+      return comparison
+        && rate.employee_wage_rate_id === comparison.employee_wage_rate_id
+        && rate.label === comparison.label
+        && Math.abs(toNumber(rate.rate) - toNumber(comparison.rate)) < 0.005
+        && Math.abs(toNumber(rate.regular_hours) - toNumber(comparison.regular_hours)) < 0.005
+        && Math.abs(toNumber(rate.overtime_hours) - toNumber(comparison.overtime_hours)) < 0.005
+        && Math.abs(toNumber(rate.holiday_hours) - toNumber(comparison.holiday_hours)) < 0.005
+        && Math.abs(toNumber(rate.pto_hours) - toNumber(comparison.pto_hours)) < 0.005;
+    });
+  });
+}
+
 const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
   pending: { label: 'Tax Sync Pending', variant: 'default' },
   syncing: { label: 'Tax Syncing...', variant: 'info' },
@@ -298,6 +341,13 @@ export function PayPeriodDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
+  const [clientApprovalLoading, setClientApprovalLoading] = useState(false);
+  const [clientApprovers, setClientApprovers] = useState<Array<{ id: number; name: string; email: string }>>([]);
+  const [clientApproverId, setClientApproverId] = useState('');
+  const [clientApprovalEvidence, setClientApprovalEvidence] = useState('');
+  const [clientApprovalNotes, setClientApprovalNotes] = useState('');
+  const [clientApprovalConfirmed, setClientApprovalConfirmed] = useState(false);
   const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -823,6 +873,46 @@ export function PayPeriodDetail({
     }
   };
 
+  const openClientApproval = async (): Promise<void> => {
+    if (!payPeriod) return;
+    setClientApprovalLoading(true);
+    setError(null);
+    try {
+      const response = await payPeriodsApi.clientReview(payPeriod.id);
+      setClientApprovers(response.authorized_client_approvers);
+      setClientApproverId(response.authorized_client_approvers[0]?.id.toString() || '');
+      setClientApprovalEvidence('');
+      setClientApprovalNotes('');
+      setClientApprovalConfirmed(false);
+      setClientApprovalOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load client approval');
+    } finally {
+      setClientApprovalLoading(false);
+    }
+  };
+
+  const recordClientApproval = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!payPeriod?.payroll_review || !clientApproverId) return;
+    setClientApprovalLoading(true);
+    setError(null);
+    try {
+      const response = await payPeriodsApi.recordClientApproval(payPeriod.id, {
+        client_approver_id: Number(clientApproverId),
+        acknowledgement: clientApprovalConfirmed ? payPeriod.payroll_review.acknowledgement : '',
+        evidence_reference: clientApprovalEvidence.trim(),
+        notes: clientApprovalNotes.trim() || undefined,
+      });
+      setPayPeriod({ ...payPeriod, payroll_review: response.payroll_review });
+      setClientApprovalOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record client approval');
+    } finally {
+      setClientApprovalLoading(false);
+    }
+  };
+
   const handleUnapprove = async () => {
     if (!payPeriod) return;
     if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.')) return;
@@ -927,6 +1017,7 @@ export function PayPeriodDetail({
     setPayrollItems((prev) =>
       prev.map((item) => (item.id === updated.id ? updated : item))
     );
+    if (payPeriod) void loadPayPeriod(payPeriod.id, true);
   };
 
   const handlePayrollItemApplied = (updated?: PayrollItem) => {
@@ -1054,6 +1145,27 @@ export function PayPeriodDetail({
       `${assignment.employee_id}:${assignment.payroll_field_definition_id}`,
       assignment,
     ])
+  );
+  const calculatedUiState = derivePayrollUiState(payrollItems);
+  const calculatedHoursMap = buildHoursMap(payrollItems, employees);
+  const payrollFieldDraftsChanged = payrollFieldAssignments.some((assignment) => {
+    const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
+    const currentDraft = payrollFieldDrafts[key];
+    const calculatedMode = assignment.overridden ? 'override' : 'default';
+    const calculatedAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+    return !currentDraft
+      || currentDraft.mode !== calculatedMode
+      || !payrollFieldAmountsEqual(currentDraft.amount, calculatedAmount);
+  });
+  const hasPendingCalculationChanges = isCalculated && (
+    additionalEmployeeIds.size > 0
+    || !hoursRecordsEqual(hoursMap, calculatedHoursMap)
+    || !numericRecordsEqual(salaryOverrideMap, calculatedUiState.salaryOverrides)
+    || !numericRecordsEqual(bonusMap, calculatedUiState.bonuses)
+    || !tipRecordsEqual(tipsMap, calculatedUiState.tips)
+    || !numericRecordsEqual(tipsPaidOutMap, calculatedUiState.tipsPaidOut)
+    || !numericRecordsEqual(loansMap, calculatedUiState.loans)
+    || payrollFieldDraftsChanged
   );
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
@@ -1371,7 +1483,15 @@ export function PayPeriodDetail({
           <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
             Recalculate
           </Button>
-          <Button onClick={handleApprove} disabled={processing}>
+          <Button
+            onClick={handleApprove}
+            disabled={processing || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={hasPendingCalculationChanges
+              ? 'Recalculate the staged payroll changes before approval'
+              : payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved'
+                ? 'Client approval is required for this revision'
+                : undefined}
+          >
             Approve
           </Button>
         </>
@@ -1404,6 +1524,47 @@ export function PayPeriodDetail({
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
           </div>
+        )}
+
+        {hasPendingCalculationChanges && (
+          <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+            <p className="font-semibold">Recalculate to include your changes</p>
+            <p className="mt-1 text-sm leading-6 text-amber-800">
+              The values below have changed, but the calculated payroll and client review still reflect the previous amounts. Recalculate before approval.
+            </p>
+          </div>
+        )}
+
+        {payPeriod.client_payroll_approval_required && payPeriod.payroll_review && (
+          <Card className={payPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}>
+            <CardContent className="flex flex-col gap-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${payPeriod.payroll_review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
+                  {payPeriod.payroll_review.status === 'approved' ? <ShieldCheck className="h-5 w-5" /> : <MailCheck className="h-5 w-5" />}
+                </div>
+                <div>
+                  <p className="font-semibold text-neutral-950">
+                    Client review revision {payPeriod.payroll_review.revision} · {payPeriod.payroll_review.status === 'approved' ? 'Approved' : 'Awaiting approval'}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-neutral-700">
+                    Review ID <span className="font-mono font-semibold">{payPeriod.payroll_review.checksum_short}</span>. This ID changes whenever payroll inputs, source evidence, or calculation results change.
+                  </p>
+                  {payPeriod.payroll_review.status === 'approved' ? (
+                    <p className="mt-1 text-sm text-emerald-800">
+                      Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-amber-900">The client may approve in their portal, or payroll staff may retain and record an explicit approval email. A receipt-only reply does not approve payroll.</p>
+                  )}
+                </div>
+              </div>
+              {payPeriod.payroll_review.status === 'pending' && (
+                <Button type="button" variant="outline" onClick={() => void openClientApproval()} disabled={clientApprovalLoading} className="shrink-0 bg-white">
+                  {clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}
+                </Button>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {payPeriod.intake_stale_at && (
@@ -3324,10 +3485,63 @@ export function PayPeriodDetail({
             });
           }
           setEditingItem(null);
+          void loadPayPeriod(payPeriod.id, true);
         }}
         contractorPayType={editingItem ? employeeLookup.get(editingItem.employee_id)?.contractor_pay_type as 'hourly' | 'flat_fee' | undefined : undefined}
         wageRates={editingItem ? (employeeLookup.get(editingItem.employee_id)?.wage_rates || []) : []}
       />
+
+      <Dialog
+        open={clientApprovalOpen}
+        onOpenChange={(open) => {
+          if (!clientApprovalLoading) setClientApprovalOpen(open);
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={recordClientApproval}>
+            <DialogHeader>
+              <DialogTitle>Record Explicit Client Approval</DialogTitle>
+              <DialogDescription>
+                Use this only when an assigned client approver explicitly approved review revision {payPeriod.payroll_review?.revision}. Keep the source email or document in the client record.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              {clientApprovers.length === 0 ? (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                  No active client portal user is assigned to this client. Add the authorized client contact in Users before recording approval.
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="client_approver">Client approver</Label>
+                    <Select id="client_approver" value={clientApproverId} onChange={(event) => setClientApproverId(event.target.value)} required>
+                      {clientApprovers.map((approver) => <option key={approver.id} value={approver.id}>{approver.name} · {approver.email}</option>)}
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="client_approval_evidence">Retained email reference</Label>
+                    <Input id="client_approval_evidence" value={clientApprovalEvidence} onChange={(event) => setClientApprovalEvidence(event.target.value)} placeholder="Gmail message ID, thread link, or client document reference" required maxLength={500} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="client_approval_notes">Notes (optional)</Label>
+                    <Textarea id="client_approval_notes" value={clientApprovalNotes} onChange={(event) => setClientApprovalNotes(event.target.value)} placeholder="Anything the client asked Cornerstone to retain with this approval." maxLength={2000} />
+                  </div>
+                  <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-800">
+                    <input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300" checked={clientApprovalConfirmed} onChange={(event) => setClientApprovalConfirmed(event.target.checked)} />
+                    <span>I verified that this client—not merely the Cornerstone recipient—explicitly wrote: “{payPeriod.payroll_review?.acknowledgement}” for review ID <span className="font-mono font-semibold">{payPeriod.payroll_review?.checksum_short}</span>. A reply such as “Received, thank you” is receipt only.</span>
+                  </label>
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setClientApprovalOpen(false)} disabled={clientApprovalLoading}>Cancel</Button>
+              <Button type="submit" disabled={clientApprovalLoading || clientApprovers.length === 0 || !clientApproverId || !clientApprovalEvidence.trim() || !clientApprovalConfirmed}>
+                {clientApprovalLoading ? 'Recording…' : 'Bind Approval to This Revision'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={payDateCorrectionOpen}

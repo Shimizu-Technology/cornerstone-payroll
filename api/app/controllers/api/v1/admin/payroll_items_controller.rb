@@ -63,6 +63,7 @@ module Api
 
           if save_payroll_item_and_clear_exclusion(@payroll_item, employee)
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
+            invalidate_prior_calculation!("Payroll employee rows changed after calculation.")
             render json: { payroll_item: payroll_item_json(@payroll_item) }, status: :created
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
@@ -89,6 +90,7 @@ module Api
 
           if @payroll_item.update(attrs)
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
+            invalidate_prior_calculation!("Payroll employee rows changed after calculation.")
             render json: { payroll_item: payroll_item_json(@payroll_item) }
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
@@ -113,6 +115,7 @@ module Api
               exclusion.reason = "Removed from pay period"
             end
             @payroll_item.destroy!
+            invalidate_prior_calculation!("A payroll employee row was removed after calculation.")
           end
 
           head :no_content
@@ -131,6 +134,7 @@ module Api
           @payroll_item.employment_type = @payroll_item.employee.employment_type
           @payroll_item.sync_default_payroll_adjustments!(@payroll_item.employee)
           calculate_with_timekeeping!(@payroll_item)
+          invalidate_prior_calculation!("A payroll employee row was recalculated outside the full payroll calculation.")
           render json: { payroll_item: payroll_item_json(@payroll_item) }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
           render json: { errors: [ e.message ] }, status: :unprocessable_entity
@@ -152,6 +156,10 @@ module Api
             PayrollTimeAllocationService.call!(payroll_item: payroll_item)
             payroll_item.calculate!
           end
+        end
+
+        def invalidate_prior_calculation!(reason)
+          @pay_period.invalidate_calculation!(reason: reason)
         end
 
         def set_pay_period

@@ -214,6 +214,7 @@ module PayrollImport
           intake_stale_reason: nil,
           intake_stale_session: nil
         )
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).issue!
       end
 
       results
