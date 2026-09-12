@@ -19,6 +19,8 @@ module PayrollIntake
       @actor = actor
       @storage = storage
       @file_snapshots = []
+      @stored_references = []
+      @retention_committed = false
     end
 
     def call
@@ -39,36 +41,53 @@ module PayrollIntake
       document_attributes = build_document_attributes
 
       session = nil
+      concurrent_duplicate = nil
       ActiveRecord::Base.transaction do
-        session = PayrollIntakeSession.create!(
-          company: company,
-          pay_period: pay_period,
-          source_type: source_type,
-          source_label: adapter_class::SOURCE_LABEL,
-          import_hash: import_hash,
-          parser_version: adapter_class::PARSER_VERSION,
-          evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence),
-          status: "draft",
-          created_by: actor
-        )
+        pay_period.lock!
+        concurrent_duplicate = existing_duplicate_session
+        unless concurrent_duplicate
+          session = PayrollIntakeSession.create!(
+            company: company,
+            pay_period: pay_period,
+            source_type: source_type,
+            source_label: adapter_class::SOURCE_LABEL,
+            import_hash: import_hash,
+            parser_version: adapter_class::PARSER_VERSION,
+            package_id: SecureRandom.uuid,
+            package_revision: next_package_revision,
+            package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
+            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence),
+            status: "draft",
+            created_by: actor
+          )
 
-        persist_documents!(session, document_attributes)
+          persist_documents!(session, document_attributes)
 
-        normalized[:rows].each do |row_attrs|
-          session.rows.create!(row_attrs)
+          normalized[:rows].each do |row_attrs|
+            session.rows.create!(row_attrs)
+          end
+
+          session.mark_previewed!(warnings: normalized[:warnings], totals: normalized[:totals])
         end
-
-        session.mark_previewed!(warnings: normalized[:warnings], totals: normalized[:totals])
       end
+
+      if concurrent_duplicate
+        cleanup_uploaded_sources!
+        return duplicate_session_result(concurrent_duplicate)
+      end
+
+      @retention_committed = true
 
       { session: session.reload, duplicate: false }
     rescue ActiveRecord::RecordNotUnique
+      cleanup_uploaded_sources!
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
 
       raise
     rescue StandardError => e
-      session&.mark_failed!(e.message) if session&.persisted?
+      cleanup_uploaded_sources! unless @retention_committed
+      session&.mark_failed!(e.message) if session&.id && PayrollIntakeSession.exists?(session.id)
       raise
     end
 
@@ -92,7 +111,8 @@ module PayrollIntake
           file: file,
           data: data,
           filename: sanitize_filename(file.original_filename.to_s.presence || "upload"),
-          content_type: file.content_type.to_s.presence || "application/octet-stream"
+          content_type: file.content_type.to_s.presence || "application/octet-stream",
+          sha256: Digest::SHA256.hexdigest(data)
         }
       end
     end
@@ -111,7 +131,7 @@ module PayrollIntake
           digest << "\n--file--\n"
           digest << snapshot[:filename]
           digest << snapshot[:content_type]
-          digest << Digest::SHA256.hexdigest(snapshot[:data].to_s)
+          digest << snapshot[:sha256]
         end
         digest.hexdigest
       end
@@ -157,27 +177,42 @@ module PayrollIntake
     def build_document_attributes
       attributes = []
       if pasted_text.present?
+        source_bytes = pasted_text.b
         attributes << {
           document_type: "pasted_text",
+          source_role: "pasted_email",
+          position: attributes.length,
           text_content: pasted_text,
+          byte_size: source_bytes.bytesize,
+          sha256: Digest::SHA256.hexdigest(source_bytes),
+          verification_status: "verified",
+          verified_at: Time.current,
           metadata: { character_count: pasted_text.length }
         }
       end
 
-      attributes.concat(uploaded_document_attributes)
+      attributes.concat(uploaded_document_attributes(starting_position: attributes.length))
     end
 
-    def uploaded_document_attributes
+    def uploaded_document_attributes(starting_position:)
       document_uuid = SecureRandom.uuid
       file_snapshots.map.with_index do |snapshot, index|
         key = "payroll-intake/#{company.id}/#{pay_period.id}/#{document_uuid}/#{index}-#{snapshot[:filename]}"
-        uploaded_url = storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
+        @stored_references << key
+        storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
+        verify_retained_source!(key, snapshot)
         {
           document_type: document_type_for(snapshot),
+          source_role: "email_attachment",
+          position: starting_position + index,
           filename: snapshot[:filename],
           content_type: snapshot[:content_type],
           storage_reference: key,
-          metadata: { bytes: snapshot[:data].bytesize, uploaded_url: uploaded_url }
+          byte_size: snapshot[:data].bytesize,
+          sha256: snapshot[:sha256],
+          verification_status: "verified",
+          verified_at: Time.current,
+          metadata: { bytes: snapshot[:data].bytesize }
         }
       end
     end
@@ -218,6 +253,28 @@ module PayrollIntake
 
     def storage_service
       @storage ||= R2StorageService.new
+    end
+
+    def verify_retained_source!(key, snapshot)
+      retained = storage_service.download_with_limit(key, max_bytes: MAX_FILE_BYTES)
+      valid = retained.present? && retained.bytesize == snapshot[:data].bytesize &&
+        ActiveSupport::SecurityUtils.secure_compare(Digest::SHA256.hexdigest(retained), snapshot[:sha256])
+      return if valid
+
+      raise R2StorageService::UploadError, "Payroll source could not be verified after upload"
+    end
+
+    def cleanup_uploaded_sources!
+      @stored_references.each do |key|
+        storage_service.delete(key)
+      rescue StandardError => e
+        Rails.logger.error("Payroll intake source cleanup failed for #{key}: #{e.class}: #{e.message}")
+      end
+      @stored_references.clear
+    end
+
+    def next_package_revision
+      PayrollIntakeSession.where(pay_period: pay_period).maximum(:package_revision).to_i + 1
     end
 
     def document_type_for(snapshot)

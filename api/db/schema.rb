@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1880,6 +1880,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
   end
 
   create_table "payroll_intake_documents", force: :cascade do |t|
+    t.bigint "byte_size"
     t.string "content_type"
     t.datetime "created_at", null: false
     t.string "document_type", null: false
@@ -1887,12 +1888,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
     t.string "filename"
     t.jsonb "metadata", default: {}, null: false
     t.bigint "payroll_intake_session_id", null: false
+    t.integer "position", default: 0, null: false
     t.jsonb "raw_response", default: {}, null: false
+    t.string "sha256"
+    t.string "source_role", default: "legacy_source", null: false
     t.text "storage_reference"
     t.text "text_content"
     t.datetime "updated_at", null: false
+    t.string "verification_error"
+    t.string "verification_status", default: "legacy_unverified", null: false
+    t.datetime "verified_at"
     t.index ["payroll_intake_session_id", "document_type"], name: "idx_payroll_intake_documents_session_type"
+    t.index ["payroll_intake_session_id", "position"], name: "idx_payroll_intake_documents_session_position", unique: true
     t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_documents_session"
+    t.index ["storage_reference"], name: "idx_payroll_intake_documents_storage_reference", unique: true, where: "(storage_reference IS NOT NULL)"
+    t.check_constraint "\"position\" >= 0", name: "payroll_intake_documents_position_nonnegative"
+    t.check_constraint "source_role::text = ANY (ARRAY['pasted_email'::character varying, 'email_attachment'::character varying, 'revel_hours'::character varying, 'supplemental_workbook'::character varying, 'supporting_document'::character varying, 'legacy_source'::character varying]::text[])", name: "payroll_intake_documents_source_role"
+    t.check_constraint "verification_status::text <> 'verified'::text OR byte_size > 0 AND sha256::text ~ '^[0-9a-f]{64}$'::text AND verified_at IS NOT NULL", name: "payroll_intake_documents_verified_fingerprint"
+    t.check_constraint "verification_status::text = ANY (ARRAY['verified'::character varying, 'failed'::character varying, 'legacy_unverified'::character varying]::text[])", name: "payroll_intake_documents_verification_status"
   end
 
   create_table "payroll_intake_rows", force: :cascade do |t|
@@ -1938,6 +1951,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
     t.text "error_message"
     t.jsonb "evidence_snapshot", default: {}, null: false
     t.string "import_hash", null: false
+    t.string "package_id", null: false
+    t.integer "package_revision", null: false
+    t.string "package_schema_version", default: "legacy", null: false
     t.string "parser_version", null: false
     t.bigint "pay_period_id", null: false
     t.datetime "reviewed_at"
@@ -1952,10 +1968,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
     t.index ["company_id", "pay_period_id", "status"], name: "idx_payroll_intake_sessions_company_period_status"
     t.index ["company_id"], name: "index_payroll_intake_sessions_on_company_id"
     t.index ["created_by_id"], name: "index_payroll_intake_sessions_on_created_by_id"
+    t.index ["package_id"], name: "index_payroll_intake_sessions_on_package_id", unique: true
+    t.index ["pay_period_id", "package_revision"], name: "idx_payroll_intake_sessions_period_revision", unique: true
     t.index ["pay_period_id", "source_type", "import_hash"], name: "idx_payroll_intake_sessions_idempotency", unique: true
     t.index ["pay_period_id"], name: "index_payroll_intake_sessions_on_pay_period_id"
     t.index ["reviewed_by_id"], name: "index_payroll_intake_sessions_on_reviewed_by_id"
     t.index ["source_type", "status"], name: "idx_payroll_intake_sessions_source_status"
+    t.check_constraint "package_revision > 0", name: "payroll_intake_sessions_revision_positive"
   end
 
   create_table "payroll_item_deductions", force: :cascade do |t|
