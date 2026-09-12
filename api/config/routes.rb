@@ -40,7 +40,9 @@ Rails.application.routes.draw do
           resources :messages, only: [ :create ], controller: :portal_messages
         end
         resources :employee_change_requests, only: [ :index, :show ]
-        resources :pay_periods, only: [ :index, :show ]
+        resources :pay_periods, only: [ :index, :show ] do
+          post :approve_review, on: :member
+        end
         resources :imported_pay_periods, only: [ :show ]
 
         namespace :reports do
@@ -218,6 +220,8 @@ Rails.application.routes.draw do
         resources :pay_periods do
           resources :payroll_liabilities, only: [ :index ]
           member do
+            get :client_review
+            post :record_client_approval
             post :run_payroll
             post :adopt_confirmed_workweek
             get :payroll_field_inputs

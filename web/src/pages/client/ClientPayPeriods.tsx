@@ -84,7 +84,7 @@ export function ClientPayPeriods(): ReactElement {
       <div className="p-6 lg:p-8 space-y-6">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         <div className="rounded-xl border border-primary-200 bg-primary-50/70 px-4 py-3 text-sm text-primary-800">
-          Finalized Cornerstone payrolls and locked imported payrolls appear together here. Every record is read-only in the client portal.
+          Review-ready Cornerstone payrolls appear here before processing when your approval is required. Finalized Cornerstone payrolls and locked imported payrolls remain available as read-only history.
         </div>
 
         <div className="flex flex-col gap-4 md:flex-row">
@@ -131,7 +131,7 @@ export function ClientPayPeriods(): ReactElement {
                       <Button variant="ghost" size="sm" onClick={() => navigate(period.record_type === 'imported'
                         ? importedPayRunPath(companyId, period.id, { returnTo })
                         : payRunPath(companyId, period.id, 'overview', { returnTo }))}>
-                        View
+                        {period.status === 'calculated' ? 'Review & Approve' : 'View'}
                       </Button>
                     </TableCell>
                   </TableRow>

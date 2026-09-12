@@ -47,6 +47,7 @@ const emptyForm: CompanyFormData = {
   next_check_number: 1001,
   simple_payroll_register_enabled: false,
   historical_payroll_enabled: false,
+  client_payroll_approval_required: false,
 };
 
 function formatEIN(value: string): string {
@@ -240,6 +241,7 @@ export function Clients() {
         next_check_number: c.next_check_number ?? 1001,
         simple_payroll_register_enabled: c.simple_payroll_register_enabled === true,
         historical_payroll_enabled: c.historical_payroll_enabled === true,
+        client_payroll_approval_required: c.client_payroll_approval_required === true,
       });
       setEditingId(id);
       setFormError(null);
@@ -551,6 +553,13 @@ export function Clients() {
                     label="Historical payroll workspace"
                     description="Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review."
                     onToggle={() => updateField('historical_payroll_enabled', form.historical_payroll_enabled !== true)}
+                  />
+
+                  <SettingToggle
+                    checked={form.client_payroll_approval_required === true}
+                    label="Require client approval before payroll approval"
+                    description="Shares each calculated revision in the client portal. Cornerstone cannot approve or commit the run until an assigned client user approves that exact revision, either in the portal or through a retained email attestation."
+                    onToggle={() => updateField('client_payroll_approval_required', form.client_payroll_approval_required !== true)}
                   />
 
                   {/* Check Settings */}

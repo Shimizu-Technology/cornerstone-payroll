@@ -564,6 +564,8 @@ export interface PayPeriod {
   intake_stale_at?: string | null;
   intake_stale_reason?: string | null;
   intake_stale_session_id?: number | null;
+  client_payroll_approval_required?: boolean;
+  payroll_review?: PayrollReviewPackage | null;
   time_tracking?: {
     active_source_types: string[];
     linked_aire_records: AirePayrollRecord[];
@@ -618,6 +620,26 @@ export interface PayPeriod {
   total_net?: number;
   // Nested payroll items (when requested)
   payroll_items?: PayrollItem[];
+}
+
+export interface PayrollReviewPackage {
+  id: number;
+  revision: number;
+  schema_version: string;
+  calculation_checksum: string;
+  checksum_short: string;
+  status: 'pending' | 'approved' | 'superseded';
+  source_manifest: Record<string, unknown>;
+  generated_at: string;
+  generated_by_name?: string | null;
+  approved_at?: string | null;
+  approved_by_id?: number | null;
+  approved_by_name?: string | null;
+  approval_recorded_by_name?: string | null;
+  approval_method?: 'client_portal' | 'email_attestation' | null;
+  approval_notes?: string | null;
+  approval_evidence_reference?: string | null;
+  acknowledgement: string;
 }
 
 export type PayrollLiabilityReconciliationStatus =

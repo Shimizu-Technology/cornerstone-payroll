@@ -4,7 +4,8 @@ module Api
   module V1
     module Client
       class PayPeriodsController < BaseController
-        before_action :set_pay_period, only: :show
+        audit_actions :approve_review
+        before_action :set_pay_period, only: %i[show approve_review]
 
         def index
           result = PayrollHistoryQuery.new(
@@ -24,13 +25,29 @@ module Api
           }
         end
 
+        def approve_review
+          unless current_user&.client?
+            return render json: { error: "A client portal user must approve this payroll revision." }, status: :forbidden
+          end
+
+          review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).approve!(
+            approver: current_user,
+            recorded_by: current_user,
+            method: "client_portal",
+            acknowledgement: params[:acknowledgement],
+            notes: params[:notes]
+          )
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
+        rescue PayrollReview::RevisionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         private
 
         def set_pay_period
-          @pay_period = PayPeriod.reportable_committed
-                                 .where(company_id: current_company_id)
-                                 .includes(payroll_items: :employee)
-                                 .find_by(id: params[:id])
+          scope = PayPeriod.reportable_periods.where(company_id: current_company_id)
+          @pay_period = scope.includes(payroll_items: :employee).find_by(id: params[:id])
+          @pay_period = nil unless client_visible_period?(@pay_period)
           return if @pay_period
 
           render json: { error: "Pay period not found" }, status: :not_found
@@ -58,6 +75,11 @@ module Api
             updated_at: pay_period.updated_at
           }
 
+          json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
+          json[:payroll_review] = PayrollReview::PackagePresenter.call(
+            pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
+          )
+
           if include_items
             json[:payroll_items] = items.map do |item|
               {
@@ -68,7 +90,20 @@ module Api
                 pay_rate: item.pay_rate,
                 total_hours: item.total_hours,
                 hours_worked: item.hours_worked,
+                overtime_hours: item.overtime_hours,
                 gross_pay: item.gross_pay,
+                withholding_tax: item.withholding_tax,
+                social_security_tax: item.social_security_tax,
+                medicare_tax: item.medicare_tax,
+                additional_medicare_tax: item.additional_medicare_tax,
+                state_withheld: 0,
+                retirement_payment: item.retirement_payment,
+                roth_retirement_payment: item.roth_retirement_payment,
+                loan_payment: item.loan_payment,
+                loan_deduction: item.loan_deduction,
+                insurance_payment: item.insurance_payment,
+                custom_deductions: item.custom_deductions || [],
+                payroll_adjustments: item.payroll_adjustments || [],
                 total_deductions: item.total_deductions,
                 net_pay: item.net_pay
               }
@@ -76,6 +111,15 @@ module Api
           end
 
           json
+        end
+
+        def client_visible_period?(pay_period)
+          return false unless pay_period
+          return true if pay_period.committed?
+
+          pay_period.company.client_payroll_approval_required? &&
+            pay_period.status.in?(%w[calculated approved]) &&
+            pay_period.payroll_review_packages.current.exists?
         end
       end
     end

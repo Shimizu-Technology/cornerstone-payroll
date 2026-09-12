@@ -193,4 +193,53 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response).to have_http_status(:not_found)
     expect(response.parsed_body).to eq("error" => "Pay period not found")
   end
+
+  it "shows a calculated review revision and lets the assigned client approve only that revision" do
+    company.update!(client_payroll_approval_required: true)
+    draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
+    review_package = PayrollReview::RevisionService.new(pay_period: draft_pay_period, actor: nil).issue!
+
+    get "/api/v1/client/pay_periods"
+    expect(response.parsed_body.fetch("pay_periods").map { |record| record.fetch("key") })
+      .to include("native:#{draft_pay_period.id}")
+
+    get "/api/v1/client/pay_periods/#{draft_pay_period.id}"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "payroll_review")).to include(
+      "revision" => 1,
+      "status" => "pending",
+      "checksum_short" => review_package.calculation_checksum.first(12)
+    )
+    expect(response.parsed_body.dig("pay_period", "payroll_items", 0)).to include(
+      "gross_pay" => "900.0",
+      "net_pay" => "730.0"
+    )
+
+    post "/api/v1/client/pay_periods/#{draft_pay_period.id}/approve_review", params: {
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
+      notes: "Reviewed against our submitted hours."
+    }
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(review_package.reload).to have_attributes(
+      status: "approved",
+      approved_by: client_user,
+      approval_recorded_by: client_user,
+      approval_method: "client_portal"
+    )
+  end
+
+  it "does not treat a receipt-only reply as payroll approval" do
+    company.update!(client_payroll_approval_required: true)
+    draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
+    review_package = PayrollReview::RevisionService.new(pay_period: draft_pay_period, actor: nil).issue!
+
+    post "/api/v1/client/pay_periods/#{draft_pay_period.id}/approve_review", params: {
+      acknowledgement: "Received, thank you!"
+    }
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body.fetch("error")).to match(/exact payroll revision/)
+    expect(review_package.reload).to be_pending
+  end
 end

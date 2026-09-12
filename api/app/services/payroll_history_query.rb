@@ -36,6 +36,7 @@ class PayrollHistoryQuery
     result = connection.select_one(result_sql)
     raw_rows = decoded_json(result.fetch("data"), fallback: [])
     native_periods = PayPeriod
+      .includes(:company, :payroll_review_packages)
       .where(company_id: @company_id, id: raw_rows.filter_map { |row| row["id"] if row["record_type"] == "native" })
       .index_by(&:id)
     rows = raw_rows.map { |row| serialize(row, native_periods:) }
@@ -161,7 +162,25 @@ class PayrollHistoryQuery
   def client_native_visibility_sql
     return "" unless @audience == :client
 
-    "AND pp.status = 'committed' AND (pp.correction_status IS NULL OR pp.correction_status = 'correction')"
+    <<~SQL.squish
+      AND (pp.correction_status IS NULL OR pp.correction_status = 'correction')
+      AND (
+        pp.status = 'committed'
+        OR (
+          pp.status IN ('calculated', 'approved')
+          AND EXISTS (
+            SELECT 1 FROM companies review_company
+            WHERE review_company.id = pp.company_id
+              AND review_company.client_payroll_approval_required = TRUE
+          )
+          AND EXISTS (
+            SELECT 1 FROM payroll_review_packages review_package
+            WHERE review_package.pay_period_id = pp.id
+              AND review_package.superseded_at IS NULL
+          )
+        )
+      )
+    SQL
   end
 
   def result_sql
@@ -217,6 +236,9 @@ class PayrollHistoryQuery
     status = row.fetch("status")
     correction_status = row["correction_status"]
     editable = @audience == :staff && !imported && status != "committed" && correction_status != "voided"
+    native_period = native_periods[row.fetch("id").to_i] unless imported
+    client_review_ready = !native_period&.company&.client_payroll_approval_required? ||
+      native_period.payroll_review_packages.find { |review_package| review_package.superseded_at.nil? }&.approved?
 
     {
       key: row.fetch("key"),
@@ -251,7 +273,7 @@ class PayrollHistoryQuery
         delete: editable,
         enter_hours: @audience == :staff && !imported && status == "draft" && correction_status != "voided",
         run: @audience == :staff && !imported && %w[draft calculated].include?(status) && correction_status != "voided",
-        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided",
+        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided" && client_review_ready,
         commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
       }
     }
