@@ -89,7 +89,7 @@ module PayrollImport
       xlsx = Roo::Spreadsheet.open(file_path)
       employees = {}
       metadata = workbook_metadata(xlsx)
-      if metadata[:schema_version].to_s.start_with?("cornerstone-mosa-supplemental/") &&
+      if xlsx.sheets.include?("START HERE") &&
           !PayrollImport::MosaSupplementalTemplate::SUPPORTED_SCHEMA_VERSIONS.include?(metadata[:schema_version])
         raise ArgumentError, "This Cornerstone change workbook version is not supported. Download a fresh workbook for this payroll."
       end
@@ -428,12 +428,12 @@ module PayrollImport
       number = BigDecimal(value.to_s.delete("$,"), exception: false)
       raise ArgumentError, "#{label} must be a positive amount." unless number&.finite? && number.positive?
 
-      number.round(2).to_f
+      number.round(2)
     end
 
     def supplemental_changes?(employee)
-      employee[:total_tips].to_f.positive? ||
-        employee[:loan_deduction].to_f.positive? ||
+      employee[:total_tips].to_d.nonzero? ||
+        employee[:loan_deduction].to_d.nonzero? ||
         employee[:bonus].present? ||
         employee[:period_pay].present? ||
         Array(employee[:payroll_components]).any?

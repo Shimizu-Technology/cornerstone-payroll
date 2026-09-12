@@ -846,10 +846,10 @@ export interface PayrollItem {
   salary_override?: number | null;
   period_pay_evidence?: {
     amount: string;
-    employee_id: number;
-    employee_name: string;
-    scope: string;
-    effective_pay_date: string;
+    employee_id?: number;
+    employee_name?: string;
+    scope?: string;
+    effective_pay_date?: string;
     source: string;
     source_type: string;
     notes?: string | null;

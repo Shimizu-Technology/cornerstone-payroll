@@ -163,6 +163,45 @@ RSpec.describe PayrollImport::ImportService do
       expect(existing.reload.salary_override).to eq(9_000.to_d)
     end
 
+    [ nil, BigDecimal("0.00") ].each do |replacement_amount|
+      label = replacement_amount.nil? ? "omitted" : "zero"
+
+      it "clears workbook period pay when a replacement value is #{label}" do
+        pay_period.update!(includes_base_salary: false)
+        employee = create(
+          :employee,
+          company: company,
+          employment_type: "salary",
+          salary_type: "variable",
+          pay_rate: 0
+        )
+        existing = create(
+          :payroll_item,
+          pay_period: pay_period,
+          employee: employee,
+          employment_type: "salary",
+          pay_rate: 0,
+          salary_override: BigDecimal("9000.00"),
+          import_source: "mosa_revel",
+          custom_columns_data: {
+            "period_pay_evidence" => {
+              "amount" => "9000.0",
+              "source_type" => "mosa_change_workbook"
+            }
+          }
+        )
+        allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+        row = { employee_id: employee.id, total_tips: BigDecimal("0.00") }
+        row[:period_pay] = replacement_amount unless replacement_amount.nil?
+
+        result = service.apply!(matched: [ row ])
+
+        expect(result[:errors]).to be_empty
+        expect(existing.reload.salary_override).to be_nil
+        expect(existing.custom_columns_data).not_to have_key("period_pay_evidence")
+      end
+    end
+
     it "replaces imported one-time components authoritatively on re-import" do
       employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20)
       allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
@@ -183,6 +222,95 @@ RSpec.describe PayrollImport::ImportService do
       expect(first[:errors]).to be_empty
       expect(second[:errors]).to be_empty
       expect(pay_period.payroll_items.find_by!(employee: employee).payroll_item_field_entries.where(source: "import")).to be_empty
+    end
+
+    it "preserves existing imported components when a replacement component is invalid" do
+      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20)
+      payroll_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20,
+        import_source: "mosa_revel"
+      )
+      existing = payroll_item.payroll_item_field_entries.create!(
+        label: "Approved reimbursement",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "reimbursement",
+        amount: BigDecimal("75.00"),
+        employee_paid: true,
+        employer_paid: false,
+        source: "import"
+      )
+
+      result = service.apply!(matched: [
+        {
+          employee_id: employee.id,
+          total_tips: BigDecimal("0.00"),
+          payroll_components: [
+            {
+              component_type: "REIMBURSEMENT",
+              label: "Invalid replacement",
+              amount: BigDecimal("-10.00"),
+              kind: "addition",
+              tax_treatment: "non_taxable_addition",
+              category: "reimbursement"
+            }
+          ]
+        }
+      ])
+
+      expect(result[:errors].first[:error]).to match(/must be positive/i)
+      expect(existing.reload).to be_persisted
+      expect(payroll_item.payroll_item_field_entries.where(source: "import").pluck(:label)).to eq([ "Approved reimbursement" ])
+    end
+
+    it "rolls back a valid component replacement when payroll calculation fails" do
+      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20)
+      payroll_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20,
+        import_source: "mosa_revel"
+      )
+      existing = payroll_item.payroll_item_field_entries.create!(
+        label: "Approved reimbursement",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "reimbursement",
+        amount: BigDecimal("75.00"),
+        employee_paid: true,
+        employer_paid: false,
+        source: "import"
+      )
+      allow_any_instance_of(PayrollItem).to receive(:calculate!).and_raise(ArgumentError, "Calculation stopped")
+
+      result = service.apply!(matched: [
+        {
+          employee_id: employee.id,
+          total_tips: BigDecimal("0.00"),
+          payroll_components: [
+            {
+              component_type: "REIMBURSEMENT",
+              label: "Replacement reimbursement",
+              amount: BigDecimal("100.00"),
+              kind: "addition",
+              tax_treatment: "non_taxable_addition",
+              category: "reimbursement",
+              effective_pay_date: pay_period.pay_date.iso8601,
+              source: "Approved receipt"
+            }
+          ]
+        }
+      ])
+
+      expect(result[:errors].first[:error]).to eq("Calculation stopped")
+      expect(existing.reload).to be_persisted
+      expect(payroll_item.payroll_item_field_entries.where(source: "import").pluck(:label)).to eq([ "Approved reimbursement" ])
     end
 
     it "can import Excel tips as already-paid tip offsets for daily tip clients" do

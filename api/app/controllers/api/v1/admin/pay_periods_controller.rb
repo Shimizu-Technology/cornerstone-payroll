@@ -350,8 +350,8 @@ module Api
 
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
-                override_val = params[:salary_overrides][employee_id.to_s].to_f
-                next_override = override_val > 0 ? override_val : nil
+                override_val = BigDecimal(params[:salary_overrides][employee_id.to_s].to_s)
+                next_override = override_val.positive? ? override_val : nil
                 if payroll_item.salary_override.to_d != next_override.to_d
                   payroll_item.clear_imported_period_pay_evidence!
                 end

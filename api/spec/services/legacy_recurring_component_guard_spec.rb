@@ -7,10 +7,10 @@ RSpec.describe LegacyRecurringComponentGuard do
     create(
       :employee,
       default_payroll_adjustments: [
-        { "label" => "Legacy stipend", "amount" => 50.0, "treatment" => "taxable_addition", "active" => true },
-        { "label" => "Legacy rent", "amount" => 25.0, "treatment" => "post_tax_deduction", "active" => true }
+        { "label" => "Legacy stipend", "amount" => BigDecimal("50.00"), "treatment" => "taxable_addition", "active" => true },
+        { "label" => "Legacy rent", "amount" => BigDecimal("25.00"), "treatment" => "post_tax_deduction", "active" => true }
       ],
-      default_custom_earnings: [ { "label" => "Legacy earning", "amount" => 10.0 } ]
+      default_custom_earnings: [ { "label" => "Legacy earning", "amount" => BigDecimal("10.00") } ]
     )
   end
 
@@ -32,7 +32,7 @@ RSpec.describe LegacyRecurringComponentGuard do
 
   it "rejects new or changed free-text recurring behavior" do
     changed = employee.default_payroll_adjustments.deep_dup
-    changed.first["amount"] = 75
+    changed.first["amount"] = BigDecimal("75.00")
 
     expect do
       described_class.validate!(employee: employee, payroll_adjustments: changed)
@@ -41,7 +41,7 @@ RSpec.describe LegacyRecurringComponentGuard do
 
   it "rejects new legacy custom earnings" do
     expect do
-      described_class.validate!(employee: create(:employee), custom_earnings: [ { label: "Stipend", amount: 10 } ])
+      described_class.validate!(employee: create(:employee), custom_earnings: [ { label: "Stipend", amount: BigDecimal("10.00") } ])
     end.to raise_error(described_class::Error, /legacy recurring earnings/)
   end
 end

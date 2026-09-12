@@ -1122,6 +1122,32 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.reload.custom_columns_data.fetch("period_pay_evidence")).to eq(evidence)
     end
 
+    it "clears an imported period-pay amount and evidence for an explicit zero override" do
+      employee.update!(employment_type: "salary", salary_type: "per_period", pay_rate: BigDecimal("9000.00"))
+      item = pay_period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: "salary",
+        pay_rate: 0,
+        salary_override: BigDecimal("9000.00"),
+        import_source: "mosa_revel",
+        custom_columns_data: {
+          "period_pay_evidence" => {
+            "amount" => "9000.0",
+            "source_type" => "mosa_change_workbook"
+          }
+        }
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        salary_overrides: { employee.id.to_s => 0 }
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.salary_override).to be_nil
+      expect(item.custom_columns_data).not_to have_key("period_pay_evidence")
+    end
+
     it "resynchronizes a stale contractor snapshot before recalculating a W-2 employee" do
       employee.allow_tax_classification_change = true
       employee.update!(
