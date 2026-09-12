@@ -4,13 +4,13 @@ module Api
   module V1
     module Admin
       class EmployeeLoansController < BaseController
-        before_action :set_loan, only: [ :show, :update, :destroy, :record_payment, :record_addition, :mark_paid_off, :suspend, :reactivate ]
+        before_action :set_loan, only: [ :show, :update, :destroy, :record_payment, :record_addition, :mark_paid_off, :suspend, :reactivate, :stop ]
 
         # GET /api/v1/admin/employee_loans
         def index
           loans = EmployeeLoan.where(company_id: current_company_id)
             .joins(:employee)
-            .includes(:employee, :deduction_type, :created_by, loan_transactions: :recorded_by)
+            .includes(:employee, :deduction_type, :created_by, :stopped_by, loan_transactions: :recorded_by)
 
           loans = loans.where(employee_id: params[:employee_id]) if params[:employee_id].present?
           loans = loans.where(status: params[:status]) if params[:status].present?
@@ -50,7 +50,12 @@ module Api
           attributes[:payment_amount] ||= schedule.effective_amount_for(0) if schedule.is_a?(EmployeePayrollField)
           attributes[:payment_amount] ||= schedule.amount if schedule.is_a?(EmployeeDeduction)
           attributes[:deduction_type_id] = schedule.deduction_type_id if schedule.is_a?(EmployeeDeduction)
-          configure_opening_balance!(attributes, setup_mode: setup_mode)
+          if attributes[:tracking_mode] == "recurring_no_balance"
+            configure_recurring_deduction!(attributes, schedule_kind: schedule_kind)
+          else
+            attributes[:tracking_mode] = "balance_tracked"
+            configure_opening_balance!(attributes, setup_mode: setup_mode)
+          end
 
           loan = EmployeeLoan.new(attributes)
           loan.company_id = current_company_id
@@ -62,16 +67,18 @@ module Api
             schedule = resolve_schedule(employee, kind: schedule_kind, id: schedule_id, fingerprint: schedule_fingerprint) unless schedule_kind == "new"
             loan.save!
 
-            loan.loan_transactions.create!(
-              transaction_type: "addition",
-              amount: loan.opening_balance,
-              balance_before: 0,
-              balance_after: loan.opening_balance,
-              transaction_date: loan.balance_as_of,
-              notes: setup_mode == "existing_balance" ? "Verified opening balance" : "Initial loan",
-              source: "opening_balance",
-              recorded_by: current_user
-            )
+            if loan.balance_tracked?
+              loan.loan_transactions.create!(
+                transaction_type: "addition",
+                amount: loan.opening_balance,
+                balance_before: 0,
+                balance_after: loan.opening_balance,
+                transaction_date: loan.balance_as_of,
+                notes: setup_mode == "existing_balance" ? "Verified opening balance" : "Initial loan",
+                source: "opening_balance",
+                recorded_by: current_user
+              )
+            end
             configure_repayment_schedule!(loan, schedule: schedule, create_new: schedule_kind == "new")
           end
 
@@ -174,6 +181,17 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # POST /api/v1/admin/employee_loans/:id/stop
+        def stop
+          ApplicationRecord.transaction do
+            @loan.stop!(actor: current_user, reason: params[:reason])
+            stop_repayment_schedule!(@loan)
+          end
+          render json: { loan: loan_payload(@loan.reload, include_transactions: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         private
 
         def set_loan
@@ -188,7 +206,7 @@ module Api
             :employee_id, :name, :original_amount, :payment_amount,
             :start_date, :first_deduction_date, :deduction_type_id, :notes,
             :opening_balance, :balance_as_of, :balance_source,
-            :principal_amount_known, :balance_setup_mode, :schedule_kind, :schedule_id, :schedule_fingerprint
+            :principal_amount_known, :tracking_mode, :balance_setup_mode, :schedule_kind, :schedule_id, :schedule_fingerprint
           )
         end
 
@@ -258,6 +276,22 @@ module Api
           raise ArgumentError, "Enter a valid opening balance"
         end
 
+        def configure_recurring_deduction!(attributes, schedule_kind:)
+          raise ArgumentError, "Choose or create a payroll deduction schedule" if schedule_kind.blank?
+
+          payment_amount = BigDecimal(attributes[:payment_amount].to_s, exception: false)
+          raise ArgumentError, "Payment per payday must be greater than zero" unless payment_amount&.positive?
+          raise ArgumentError, "First deduction payday is required" if attributes[:first_deduction_date].blank?
+
+          attributes[:payment_amount] = payment_amount
+          attributes[:original_amount] = nil
+          attributes[:opening_balance] = nil
+          attributes[:current_balance] = nil
+          attributes[:balance_as_of] = nil
+          attributes[:balance_source] = nil
+          attributes[:principal_amount_known] = false
+        end
+
         def resolve_schedule(employee, kind:, id:, fingerprint: nil)
           return if kind.blank? && id.blank?
 
@@ -275,7 +309,7 @@ module Api
               .where(deduction_types: { company_id: current_company_id, sub_category: "loan", active: true })
               .find_by(id: id) || raise(ArgumentError, "Loan deduction schedule not found")
             if employee.employee_loans.exists?(deduction_type_id: schedule.deduction_type_id)
-              raise ArgumentError, "This deduction schedule already has a loan balance ledger"
+              raise ArgumentError, "This deduction schedule already has a named loan or recurring-deduction ledger"
             end
             schedule
           when "payroll_field"
@@ -283,7 +317,7 @@ module Api
               .where(payroll_field_definitions: { company_id: current_company_id, kind: "deduction", category: "loan", active: true })
               .find_by(id: id) || raise(ArgumentError, "Loan payroll field schedule not found")
             if schedule.employee_loan.present?
-              raise ArgumentError, "This payroll field already has a loan balance ledger"
+              raise ArgumentError, "This payroll field already has a named loan or recurring-deduction ledger"
             end
             schedule
           else
@@ -310,11 +344,11 @@ module Api
             schedule = loan.employee.employee_deductions.create!(deduction_type: deduction_type, amount: loan.payment_amount, active: true, is_percentage: false)
           end
           if schedule.is_a?(EmployeePayrollField)
-            raise ArgumentError, "Balance repayment requires a fixed, post-tax loan deduction" unless schedule.amount_type == "fixed" && schedule.tax_treatment == "post_tax_deduction"
+            raise ArgumentError, "A named loan or recurring deduction must use a fixed, post-tax payroll deduction" unless schedule.amount_type == "fixed" && schedule.tax_treatment == "post_tax_deduction"
 
             schedule.update!(employee_loan: loan, amount: loan.payment_amount || schedule.amount)
           elsif schedule.is_a?(EmployeeDeduction)
-            raise ArgumentError, "Balance repayment requires a fixed, post-tax loan deduction" unless schedule.post_tax? && !schedule.is_percentage?
+            raise ArgumentError, "A named loan or recurring deduction must use a fixed, post-tax payroll deduction" unless schedule.post_tax? && !schedule.is_percentage?
 
             schedule.update!(amount: loan.payment_amount || schedule.amount)
           end
@@ -329,6 +363,13 @@ module Api
               schedule.update!(amount: loan.payment_amount, is_percentage: false)
             end
           end
+        end
+
+        def stop_repayment_schedule!(loan)
+          loan.employee_payroll_fields.each { |schedule| schedule.update!(active: false) }
+          return unless loan.deduction_type_id
+
+          loan.employee.employee_deductions.where(deduction_type_id: loan.deduction_type_id).update_all(active: false, updated_at: Time.current)
         end
 
         def loan_schedule_options
@@ -423,6 +464,7 @@ module Api
             employee_id: loan.employee_id,
             employee_name: loan.employee.full_name,
             name: loan.name,
+            tracking_mode: loan.tracking_mode,
             original_amount: loan.original_amount,
             opening_balance: loan.opening_balance,
             current_balance: loan.current_balance,
@@ -438,6 +480,8 @@ module Api
             effective_first_deduction_date: [ loan.first_deduction_date, loan.balance_as_of, field_schedule&.start_date ].compact.max,
             last_deduction_date: field_schedule&.end_date,
             paid_off_date: loan.paid_off_date,
+            stopped_at: loan.stopped_at,
+            stopped_by_name: loan.stopped_by&.name,
             status: loan.status,
             deduction_type_id: loan.deduction_type_id,
             notes: loan.notes,

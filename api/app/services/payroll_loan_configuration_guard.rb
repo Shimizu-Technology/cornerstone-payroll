@@ -8,11 +8,12 @@ class PayrollLoanConfigurationGuard
 
     pay_date = payroll_item.pay_period.pay_date
     loans = employee.employee_loans.includes(:deduction_type).select do |loan|
-      loan.scheduled_payment_for(pay_date: pay_date, requested_amount: loan.current_balance).positive? &&
+      requested_amount = loan.payment_amount || loan.current_balance || 0
+      loan.scheduled_payment_for(pay_date: pay_date, requested_amount: requested_amount).positive? &&
         loan.repayment_schedule_active_on?(pay_date)
     end
     return if loans.empty?
 
-    raise ArgumentError, "Clear the direct loan deduction and enter the payment under the named loan repayment (#{loans.map(&:name).join(', ')}). A direct amount does not update a tracked loan balance."
+    raise ArgumentError, "Clear the direct loan deduction and enter the payment under the named deduction (#{loans.map(&:name).join(', ')}). A direct amount is not recorded in that ledger."
   end
 end

@@ -19,8 +19,10 @@ module PayrollImport
   # - tips_foh (decimal)
   # - tip_pool (string): "boh", "foh", or "mixed"
   # - loan_deduction (decimal): one-payroll deduction + installment payment
-  # - recurring_loan_deduction (decimal): legacy key for the one-payroll
-  #   LOANS (NO INSTALLMENTS) amount; this does not create a recurring setup
+  # - one_payroll_deduction (decimal): generated-template amount that is not a
+  #   recurring setup and remains a direct deduction for this payroll only
+  # - recurring_loan_deduction (decimal): legacy LOANS (NO INSTALLMENTS)
+  #   amount that must reconcile to a named no-balance deduction ledger
   # - installment_beginning_balance (decimal)
   # - installment_new_amount (decimal)
   # - installment_payment (decimal)
@@ -131,6 +133,7 @@ module PayrollImport
         tips_foh: 0.0,
         tip_pool: nil,
         loan_deduction: 0.0,
+        one_payroll_deduction: 0.0,
         recurring_loan_deduction: 0.0,
         installment_beginning_balance: 0.0,
         installment_new_amount: 0.0,
@@ -210,7 +213,7 @@ module PayrollImport
         bonus = sheet.cell(row_num, 7)
         employee[:bonus] = PayrollBonusInput.amount(bonus.to_s.delete("$,")) unless bonus.blank?
         deduction = to_decimal(sheet.cell(row_num, 8))
-        employee[:recurring_loan_deduction] += deduction
+        employee[:one_payroll_deduction] += deduction
         employee[:loan_deduction] += deduction
         employee[:effective_date] = date(sheet.cell(row_num, 9))
         employee[:recipient] = sheet.cell(row_num, 10).to_s.strip.presence

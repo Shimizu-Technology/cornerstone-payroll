@@ -196,7 +196,7 @@ class PayrollCalculator
 
   def sync_percentage_payroll_field_entries_after_final_gross
     payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee, assignments: payroll_field_assignments_for_calculation)
-    apply_tracked_loan_field_limits! unless historical_calculation?
+    apply_linked_loan_field_rules! unless historical_calculation?
   end
 
   def payroll_field_assignments_for_calculation
@@ -582,17 +582,22 @@ class PayrollCalculator
   end
 
   def loan_schedule_snapshot(loan, default:)
-    { "default" => default, "payment_amount" => loan.payment_amount.to_s, "first_deduction_date" => loan.first_deduction_date.to_s }
+    {
+      "default" => default,
+      "tracking_mode" => loan.tracking_mode,
+      "payment_amount" => loan.payment_amount.to_s,
+      "first_deduction_date" => loan.first_deduction_date.to_s
+    }
   end
 
   def loan_for_deduction_type(type_id)
     loans = employee.employee_loans.where(deduction_type_id: type_id).order(:id).to_a
-    raise ArgumentError, "Multiple loan balances use this deduction; link a separate schedule for each loan" if loans.size > 1
+    raise ArgumentError, "Multiple loan ledgers use this deduction; link a separate schedule to each ledger" if loans.size > 1
 
     loans.first
   end
 
-  def apply_tracked_loan_field_limits!
+  def apply_linked_loan_field_rules!
     employee.employee_payroll_fields.includes(:employee_loan).each do |assignment|
       loan = assignment.employee_loan
       next unless loan
