@@ -1170,6 +1170,7 @@ module Api
             additional_medicare_taxable_wages: item.additional_medicare_taxable_wages,
             annual_tax_config_id: item.annual_tax_config_id,
             tax_rule_snapshot: item.tax_rule_snapshot,
+            retirement_rule_snapshot: item.retirement_rule_snapshot,
             state_withheld: payroll_item_state_withheld(item),
             retirement_payment: item.retirement_payment,
             roth_retirement_payment: item.roth_retirement_payment,

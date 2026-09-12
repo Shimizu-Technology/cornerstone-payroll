@@ -32,7 +32,7 @@ import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
-import { PayrollResultBreakdown, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
+import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
 export function PayrollItemDetail(): ReactElement {
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
@@ -196,6 +196,7 @@ export function PayrollItemDetail(): ReactElement {
 
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
         {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} />}
+        {payrollItem.employment_type !== 'contractor' && <PaycheckRetirementContext item={payrollItem} />}
 
         <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
       </main>

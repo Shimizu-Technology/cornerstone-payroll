@@ -161,19 +161,18 @@ class PayrollCalculator
     payroll_item.cash_tips_reported = payroll_item.reported_tips.to_d.round(2)
   end
 
-  def calculate_retirement
-    payroll_item.retirement_payment = recurring_items_enabled? ? (payroll_item.gross_pay * employee_value(:retirement_rate).to_f).round(2) : 0
-  end
-
-  def calculate_roth_retirement
-    payroll_item.roth_retirement_payment = recurring_items_enabled? ? (payroll_item.gross_pay * employee_value(:roth_retirement_rate).to_f).round(2) : 0
-  end
-
-  def calculate_employer_retirement_match
-    payroll_item.employer_retirement_match = recurring_items_enabled? ?
-      (payroll_item.gross_pay * employee_value(:employer_retirement_match_rate).to_f).round(2) : 0
-    payroll_item.employer_roth_retirement_match = recurring_items_enabled? ?
-      (payroll_item.gross_pay * employee_value(:employer_roth_match_rate).to_f).round(2) : 0
+  def calculate_retirement_contributions
+    historical_snapshot = payroll_item.retirement_rule_snapshot.to_h.deep_symbolize_keys
+    @retirement_calculation = PayrollRetirementCalculation.new(
+      employee: employee,
+      payroll_item: payroll_item,
+      ytd_before: ytd_before_totals,
+      employee_deductions: employee_deductions_for_calculation,
+      historical_election: historical_calculation? ? retirement_election_snapshot_for_historical_calculation : nil,
+      historical_limit: historical_calculation? ? historical_snapshot[:annual_limit] : nil,
+      historical_mode: historical_calculation?,
+      recurring_items_enabled: recurring_items_enabled?
+    ).apply!
   end
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
@@ -225,7 +224,7 @@ class PayrollCalculator
     employee_deductions_for_calculation
       .reject { |ed| skip_employee_deduction?(ed.deduction_type) }
       .select { |ed| ed.deduction_type.active? && ed.deduction_type.pre_tax? }
-      .sum { |ed| ed.calculate_amount(payroll_item.gross_pay) }
+      .sum { |ed| retirement_adjusted_deduction_amount(ed) }
   end
 
   # Apply all employee_deductions and record itemized PayrollItemDeduction records.
@@ -242,7 +241,7 @@ class PayrollCalculator
       next unless dt.active?
       next if skip_employee_deduction?(dt)
 
-      amount = ed.calculate_amount(payroll_item.gross_pay)
+      amount = retirement_adjusted_deduction_amount(ed)
       loan = historical_calculation? ? nil : loan_for_deduction_type(dt.id)
       amount = loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: loan.payment_amount || amount) if loan
       next if amount.zero?
@@ -425,6 +424,7 @@ class PayrollCalculator
 
   def calculate_net_pay
     cap_deductions_to_available_pay!
+    finalize_retirement_snapshot!
 
     payroll_item.net_pay = (
       payroll_item.gross_pay -
@@ -432,6 +432,24 @@ class PayrollCalculator
       non_taxable_additions_total
     ).round(2)
     payroll_item.net_pay = 0.0 if payroll_item.net_pay.negative? && !payroll_item.correction_entry?
+  end
+
+  def finalize_retirement_snapshot!
+    snapshot = payroll_item.retirement_rule_snapshot.to_h.deep_dup
+    return if snapshot.blank?
+
+    actual = PayrollRetirementTotals.for_item(payroll_item)
+    prior_applied = snapshot.fetch("applied", {})
+    actual_values = {
+      "traditional" => actual[:retirement].to_d.to_s("F"),
+      "roth" => actual[:roth_retirement].to_d.to_s("F")
+    }
+    if prior_applied != actual_values
+      snapshot["applied"] = actual_values
+      snapshot["explanations"] = Array(snapshot["explanations"]) |
+        [ "Employee contributions were reduced because the paycheck did not have enough available pay." ]
+    end
+    payroll_item.retirement_rule_snapshot = snapshot
   end
 
   def update_ytd_on_item
@@ -858,8 +876,46 @@ class PayrollCalculator
       employee: employee,
       employee_deductions: employee_deductions_for_calculation,
       payroll_field_assignments: payroll_field_assignments_for_calculation,
-      w4_election: w4_election_for_calculation
+      w4_election: w4_election_for_calculation,
+      retirement_election: retirement_election_for_calculation
     )
+  end
+
+  def retirement_election_for_calculation
+    return nil if historical_calculation? || employee.contractor?
+
+    @retirement_election_for_calculation ||= employee.retirement_election_on(pay_period.pay_date)
+  end
+
+  def retirement_election_snapshot_for_historical_calculation
+    PayrollCalculationContext.retirement_election(@calculation_context) || {
+      election_id: nil,
+      effective_on: nil,
+      source: "legacy_calculation_snapshot",
+      plan_name: "Legacy retirement setup",
+      eligible: true,
+      participating: true,
+      traditional_contribution_type: "percentage",
+      traditional_rate: employee_value(:retirement_rate),
+      traditional_amount: 0,
+      roth_contribution_type: "percentage",
+      roth_rate: employee_value(:roth_retirement_rate),
+      roth_amount: 0,
+      eligible_compensation: "gross_wages",
+      catch_up_enabled: false,
+      limit_priority: "proportional",
+      employer_match_mode: "legacy",
+      legacy_employer_retirement_match_rate: employee_value(:employer_retirement_match_rate),
+      legacy_employer_roth_match_rate: employee_value(:employer_roth_match_rate),
+      employer_match_rate: 0,
+      employer_match_ytd_before_system: 0,
+      employer_match_destination: "traditional",
+      true_up_policy: "none"
+    }
+  end
+
+  def retirement_adjusted_deduction_amount(deduction)
+    @retirement_calculation&.deduction_amounts&.fetch(deduction.object_id, nil) || deduction.calculate_amount(payroll_item.gross_pay)
   end
 
   def ensure_employer_contribution_type!(deduction_type, reporting_group: nil)

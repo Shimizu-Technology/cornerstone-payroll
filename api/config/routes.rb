@@ -197,6 +197,7 @@ Rails.application.routes.draw do
             post :resolve_configuration_review_item
           end
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
+          resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do

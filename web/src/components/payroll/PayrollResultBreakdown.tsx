@@ -51,3 +51,41 @@ export function PaycheckWithholdingContext({ item }: { item: PayrollItem }): Rea
     </CardContent>
   </Card>;
 }
+
+export function PaycheckRetirementContext({ item }: { item: PayrollItem }): ReactElement {
+  const value = item.retirement_rule_snapshot;
+  const snapshot = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  const election = snapshot?.election && typeof snapshot.election === 'object' && !Array.isArray(snapshot.election) ? snapshot.election as Record<string, unknown> : null;
+  const annualLimit = snapshot?.annual_limit && typeof snapshot.annual_limit === 'object' && !Array.isArray(snapshot.annual_limit) ? snapshot.annual_limit as Record<string, unknown> : null;
+  const requested = snapshot?.requested && typeof snapshot.requested === 'object' && !Array.isArray(snapshot.requested) ? snapshot.requested as Record<string, unknown> : {};
+  const applied = snapshot?.applied && typeof snapshot.applied === 'object' && !Array.isArray(snapshot.applied) ? snapshot.applied as Record<string, unknown> : {};
+  const employerMatch = snapshot?.employer_match && typeof snapshot.employer_match === 'object' && !Array.isArray(snapshot.employer_match) ? snapshot.employer_match as Record<string, unknown> : {};
+  const explanations = Array.isArray(snapshot?.explanations) ? snapshot.explanations.map(String) : [];
+  if (!snapshot || !election) return <Card><CardHeader><CardTitle>Retirement rules used</CardTitle></CardHeader><CardContent><p className="text-sm leading-6 text-neutral-600">No retirement-rule snapshot was retained for this paycheck. The saved deduction amounts remain authoritative, but today’s plan settings may differ.</p></CardContent></Card>;
+
+  const requestedTotal = Number(requested.traditional || 0) + Number(requested.roth || 0);
+  const appliedTotal = Number(applied.traditional || 0) + Number(applied.roth || 0);
+  const employerMatchTotal = Number(employerMatch.traditional || 0) + Number(employerMatch.roth || 0);
+  const sourceUrl = typeof annualLimit?.source_url === 'string' ? annualLimit.source_url : null;
+  return <Card>
+    <CardHeader><CardTitle>Retirement rules used</CardTitle><p className="mt-2 text-sm text-neutral-500">The exact election, YTD baseline, and annual limit retained with this paycheck.</p></CardHeader>
+    <CardContent className="space-y-4 text-sm leading-6 text-neutral-700">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <RuleValue label="Plan" value={String(election.plan_name || 'Not recorded')} />
+        <RuleValue label="Eligible pay" value={formatCurrency(Number(snapshot.eligible_compensation || 0))} />
+        <RuleValue label="Employee YTD before" value={formatCurrency(Number(snapshot.ytd_employee_deferral_before || 0))} />
+        <RuleValue label="Employee applied" value={formatCurrency(appliedTotal)} />
+        <RuleValue label="Employer match this check" value={formatCurrency(employerMatchTotal)} />
+        <RuleValue label="Employer match YTD before" value={formatCurrency(Number(employerMatch.prior_ytd || 0))} />
+      </div>
+      <p>Requested {formatCurrency(requestedTotal)}: {formatCurrency(Number(requested.traditional || 0))} Traditional and {formatCurrency(Number(requested.roth || 0))} Roth. Applied {formatCurrency(Number(applied.traditional || 0))} Traditional and {formatCurrency(Number(applied.roth || 0))} Roth.</p>
+      <p>Employer match applied: {formatCurrency(Number(employerMatch.traditional || 0))} Traditional and {formatCurrency(Number(employerMatch.roth || 0))} Roth.</p>
+      {annualLimit ? <p>For pay date year {String(annualLimit.tax_year)}, the saved employee elective-deferral limit was <strong>{formatCurrency(Number(annualLimit.elective_deferral_limit || 0))}</strong>{snapshot.employee_age_at_year_end ? `; age at year end was ${String(snapshot.employee_age_at_year_end)}` : ''}. {snapshot.roth_catch_up_required === true ? 'Roth-only catch-up treatment applied.' : ''} {sourceUrl && <a className="font-semibold text-primary-700 underline decoration-primary-200 underline-offset-2 hover:text-primary-900" href={sourceUrl} target="_blank" rel="noreferrer">View the saved IRS source</a>}</p> : <p className="text-warning-800">No annual limit record was available for this historical paycheck.</p>}
+      {explanations.length > 0 && <ul className="space-y-2 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-warning-900">{explanations.map((explanation) => <li key={explanation}>• {explanation}</li>)}</ul>}
+    </CardContent>
+  </Card>;
+}
+
+function RuleValue({ label, value }: { label: string; value: string }): ReactElement {
+  return <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3"><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-1 font-semibold text-neutral-900">{value}</p></div>;
+}

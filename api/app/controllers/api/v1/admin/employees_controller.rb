@@ -38,6 +38,7 @@ module Api
               include_classification_history: true,
               include_lifecycle: true,
               include_w4_history: true,
+              include_retirement_history: true,
               include_configuration_review_history: true
             )
           }
@@ -376,6 +377,7 @@ module Api
           include_classification_history: false,
           include_lifecycle: false,
           include_w4_history: false,
+          include_retirement_history: false,
           include_configuration_review_history: false
         )
           data = employee.as_json(
@@ -432,6 +434,15 @@ module Api
             )
           end
 
+          if include_retirement_history
+            elections = employee.employee_retirement_elections.includes(:created_by).recent_first.to_a
+            data["retirement_elections"] = elections.map { |election| serialize_retirement_election(election) }
+            data["current_retirement_election"] = serialize_retirement_election(employee.retirement_election_on(Date.current))
+            data["upcoming_retirement_election"] = serialize_retirement_election(
+              elections.select { |election| election.effective_on > Date.current }.min_by { |election| [ election.effective_on, election.id ] }
+            )
+          end
+
           if include_configuration_review_history
             data["configuration_review_resolutions"] = employee.employee_configuration_review_resolutions
               .order(reviewed_at: :desc, id: :desc).map do |resolution|
@@ -445,6 +456,14 @@ module Api
         end
 
         def serialize_w4_election(election)
+          return nil unless election
+
+          election.as_json(except: [ :created_by_id ]).merge(
+            "created_by_name" => election.created_by&.name
+          )
+        end
+
+        def serialize_retirement_election(election)
           return nil unless election
 
           election.as_json(except: [ :created_by_id ]).merge(
