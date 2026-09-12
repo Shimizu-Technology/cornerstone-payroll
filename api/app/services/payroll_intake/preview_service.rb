@@ -6,7 +6,8 @@ require "securerandom"
 module PayrollIntake
   class PreviewService
     SOURCE_ADAPTERS = {
-      "spike_email" => PayrollIntake::Adapters::SpikeEmail
+      "spike_email" => PayrollIntake::Adapters::SpikeEmail,
+      "mosa_revel" => PayrollIntake::Adapters::MosaRevel
     }.freeze
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
@@ -26,7 +27,9 @@ module PayrollIntake
     def call
       raise ArgumentError, "Cannot import into a committed pay period" unless pay_period.can_edit?
       raise ArgumentError, "Unsupported payroll intake source" unless adapter_class
-      raise ArgumentError, "Payroll intake adapter is missing AI extraction configuration" unless adapter_class.respond_to?(:ai_extraction_instructions) && adapter_class.respond_to?(:ai_extraction_schema)
+      unless deterministic_adapter? || (adapter_class.respond_to?(:ai_extraction_instructions) && adapter_class.respond_to?(:ai_extraction_schema))
+        raise ArgumentError, "Payroll intake adapter is missing extraction configuration"
+      end
       raise ArgumentError, "Payroll intake source is not enabled for this company" unless company.payroll_intake_source_enabled?(source_type)
       raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty?
 
@@ -180,7 +183,7 @@ module PayrollIntake
         source_bytes = pasted_text.b
         attributes << {
           document_type: "pasted_text",
-          source_role: "pasted_email",
+          source_role: source_role_for(filename: "pasted-text.txt", content_type: "text/plain", position: attributes.length, pasted: true),
           position: attributes.length,
           text_content: pasted_text,
           byte_size: source_bytes.bytesize,
@@ -203,7 +206,12 @@ module PayrollIntake
         verify_retained_source!(key, snapshot)
         {
           document_type: document_type_for(snapshot),
-          source_role: "email_attachment",
+          source_role: source_role_for(
+            filename: snapshot[:filename],
+            content_type: snapshot[:content_type],
+            position: starting_position + index,
+            pasted: false
+          ),
           position: starting_position + index,
           filename: snapshot[:filename],
           content_type: snapshot[:content_type],
@@ -224,6 +232,10 @@ module PayrollIntake
     end
 
     def extract_rows
+      if deterministic_adapter?
+        return adapter_class.new(pay_period: pay_period, company: company).extract(files: files, pasted_text: pasted_text)
+      end
+
       text_extraction = extract_rows_from_text
       return text_extraction if text_extraction[:rows].present?
 
@@ -283,6 +295,17 @@ module PayrollIntake
       return "image" if content_type.start_with?("image/")
 
       "other"
+    end
+
+    def deterministic_adapter?
+      adapter_class&.instance_methods(false)&.include?(:extract)
+    end
+
+    def source_role_for(filename:, content_type:, position:, pasted:)
+      return "pasted_email" if pasted
+      return "email_attachment" unless adapter_class.respond_to?(:source_role_for)
+
+      adapter_class.source_role_for(filename: filename, content_type: content_type, position: position)
     end
 
     def sanitize_filename(filename)
