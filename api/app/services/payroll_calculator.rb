@@ -162,24 +162,24 @@ class PayrollCalculator
   end
 
   def calculate_retirement
-    payroll_item.retirement_payment = (payroll_item.gross_pay * employee_value(:retirement_rate).to_f).round(2)
+    payroll_item.retirement_payment = recurring_items_enabled? ? (payroll_item.gross_pay * employee_value(:retirement_rate).to_f).round(2) : 0
   end
 
   def calculate_roth_retirement
-    payroll_item.roth_retirement_payment = (payroll_item.gross_pay * employee_value(:roth_retirement_rate).to_f).round(2)
+    payroll_item.roth_retirement_payment = recurring_items_enabled? ? (payroll_item.gross_pay * employee_value(:roth_retirement_rate).to_f).round(2) : 0
   end
 
   def calculate_employer_retirement_match
-    payroll_item.employer_retirement_match =
-      (payroll_item.gross_pay * employee_value(:employer_retirement_match_rate).to_f).round(2)
-    payroll_item.employer_roth_retirement_match =
-      (payroll_item.gross_pay * employee_value(:employer_roth_match_rate).to_f).round(2)
+    payroll_item.employer_retirement_match = recurring_items_enabled? ?
+      (payroll_item.gross_pay * employee_value(:employer_retirement_match_rate).to_f).round(2) : 0
+    payroll_item.employer_roth_retirement_match = recurring_items_enabled? ?
+      (payroll_item.gross_pay * employee_value(:employer_roth_match_rate).to_f).round(2) : 0
   end
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
   def calculate_base_gross_for_payroll_fields
-    unless historical_calculation? || is_a?(ContractorPayrollCalculator)
+    unless historical_calculation? || is_a?(ContractorPayrollCalculator) || !recurring_items_enabled?
       PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item)
       PayrollRetirementConfigurationGuard.new(employee: employee, payroll_item: payroll_item).validate!
     end
@@ -202,8 +202,10 @@ class PayrollCalculator
   def payroll_field_assignments_for_calculation
     @payroll_field_assignments_for_calculation ||= if historical_calculation?
       PayrollCalculationContext.payroll_field_assignments(@calculation_context)
-    else
+    elsif recurring_items_enabled?
       payroll_item.active_payroll_field_assignments_for(employee).to_a
+    else
+      []
     end
   end
 
@@ -776,6 +778,8 @@ class PayrollCalculator
     payroll_item.additional_withholding =
       if payroll_item.additional_withholding_override.present?
         payroll_item.additional_withholding_override.to_f
+      elsif !recurring_items_enabled?
+        0
       else
         employee_value(:additional_withholding).to_f
       end
@@ -802,9 +806,15 @@ class PayrollCalculator
   def employee_deductions_for_calculation
     @employee_deductions_for_calculation ||= if historical_calculation?
       PayrollCalculationContext.employee_deductions(@calculation_context)
-    else
+    elsif recurring_items_enabled?
       employee.employee_deductions.active.includes(:deduction_type).to_a
+    else
+      []
     end
+  end
+
+  def recurring_items_enabled?
+    historical_calculation? || pay_period.recurring_items_enabled?
   end
 
   def historical_calculation?

@@ -189,6 +189,10 @@ class PayPeriod < ApplicationRecord
     run_purpose == "off_cycle_tips"
   end
 
+  def recurring_items_enabled?
+    includes_recurring_items?
+  end
+
   def resolved_company_workweek
     company_workweek || CompanyWorkweek.for_date(company_id, start_date)
   end
@@ -351,10 +355,10 @@ class PayPeriod < ApplicationRecord
 
   def purpose_fields_change_only_in_draft
     return unless persisted?
-    return unless will_save_change_to_run_purpose? || will_save_change_to_includes_base_salary?
+    return unless will_save_change_to_run_purpose? || will_save_change_to_includes_base_salary? || will_save_change_to_includes_recurring_items?
     return if status_in_database == "draft"
 
-    errors.add(:run_purpose, "and base-salary treatment can only change while the pay period is a draft")
+    errors.add(:run_purpose, "base salary, and recurring employee setup can only change while the pay period is a draft")
   end
 
   def end_date_after_start_date
