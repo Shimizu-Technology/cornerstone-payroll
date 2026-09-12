@@ -119,15 +119,18 @@ module PayrollImport
 
       employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
       employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
+      rows_by_employee_id = matched.index_by { |row| row[:employee_id].to_i }
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
       # Fail before writing any source rows. A recurring bonus cannot stand in
       # for the period pay of a variable-salary employee on a regular run.
       missing_salary_names = employees_by_id.values.filter_map do |employee|
         next if excluded_employee_ids.include?(employee.id)
+        next unless employee.variable_salary? && pay_period.includes_base_salary?
 
         item = pay_period.payroll_items.find_by(employee_id: employee.id) || PayrollItem.new(pay_period: pay_period, employee: employee)
-        employee.full_name if item.variable_salary_missing?
+        source_period_pay = decimal_or_zero(rows_by_employee_id.dig(employee.id, :period_pay))
+        employee.full_name if source_period_pay <= 0 && existing_manual_period_pay(item).blank?
       end
       if missing_salary_names.any?
         raise ArgumentError, "Enter Pay this period in the payroll worksheet for #{missing_salary_names.join(', ')}, then preview the import again. Nothing has been imported."
@@ -148,46 +151,50 @@ module PayrollImport
           employee = employees_by_id[employee_id]
           next unless employee
 
+          payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+
+          # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
+          if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
+            results[:errors] << {
+              employee_id: employee.id,
+              name: employee.full_name,
+              error: "Payroll item already exists (manual/non-import). Pass force_overwrite to replace."
+            }
+            next
+          end
+
           begin
-            payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+            PayrollItem.transaction(requires_new: true) do
+              # Set employment info
+              payroll_item.employment_type = employee.employment_type
+              payroll_item.pay_rate = employee.pay_rate
+              payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
+              apply_period_pay!(payroll_item, employee, row)
 
-            # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
-            if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
-              results[:errors] << {
-                employee_id: employee.id,
-                name: employee.full_name,
-                error: "Payroll item already exists (manual/non-import). Pass force_overwrite to replace."
-              }
-              next
+              # Set hours from PDF
+              payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
+              payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
+
+              # Set tips from Excel — reported_tips is the taxable tip source of truth.
+              # Legacy `tips` is cleared to prevent historical double counting.
+              payroll_item.reported_tips = row[:total_tips].to_f
+              row_tips_paid_out = if row[:tips_already_paid].nil?
+                tips_paid_out_from_tips
+              else
+                row[:tips_already_paid]
+              end
+              payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
+              payroll_item.tips = 0.0  # Reset to avoid double-counting
+              payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
+              payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
+              PayrollBonusInput.import!(payroll_item, row[:bonus])
+              payroll_item.import_source = "mosa_revel"
+              payroll_item.sync_default_payroll_adjustments!(employee)
+              apply_imported_components!(payroll_item, row[:payroll_components])
+
+              # Calculate payroll (taxes, deductions, net pay)
+              payroll_item.calculate!
             end
-
-            # Set employment info
-            payroll_item.employment_type = employee.employment_type
-            payroll_item.pay_rate = employee.pay_rate
-            payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
-
-            # Set hours from PDF
-            payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
-            payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
-
-            # Set tips from Excel — reported_tips is the taxable tip source of truth.
-            # Legacy `tips` is cleared to prevent historical double counting.
-            payroll_item.reported_tips = row[:total_tips].to_f
-            row_tips_paid_out = if row[:tips_already_paid].nil?
-              tips_paid_out_from_tips
-            else
-              row[:tips_already_paid]
-            end
-            payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
-            payroll_item.tips = 0.0  # Reset to avoid double-counting
-            payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
-            payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
-            PayrollBonusInput.import!(payroll_item, row[:bonus])
-            payroll_item.import_source = "mosa_revel"
-            payroll_item.sync_default_payroll_adjustments!(employee)
-
-            # Calculate payroll (taxes, deductions, net pay)
-            payroll_item.calculate!
 
             results[:success] << { employee_id: employee.id, name: employee.full_name }
           rescue ActiveRecord::Rollback
@@ -277,7 +284,10 @@ module PayrollImport
         installment_payment: existing[:installment_payment].to_f + incoming[:installment_payment].to_f,
         installment_estimated_ending_balance: [ existing[:installment_estimated_ending_balance].to_f, incoming[:installment_estimated_ending_balance].to_f ].max,
         tips_already_paid: merge_optional_boolean(existing[:tips_already_paid], incoming[:tips_already_paid]),
-        tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
+        tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool]),
+        period_pay: merge_period_pay(existing[:period_pay], incoming[:period_pay]),
+        period_pay_evidence: existing[:period_pay_evidence] || incoming[:period_pay_evidence],
+        payroll_components: merge_payroll_components(existing[:payroll_components], incoming[:payroll_components])
       }
     end
 
@@ -293,6 +303,24 @@ module PayrollImport
       return existing_pool if incoming_pool.blank? || incoming_pool == existing_pool
 
       "mixed"
+    end
+
+    def merge_period_pay(existing_value, incoming_value)
+      values = [ existing_value, incoming_value ].compact.map { |value| decimal_or_zero(value) }.uniq
+      raise ArgumentError, "Multiple period-pay rows matched the same employee. Keep one explicit amount per person." if values.many?
+
+      values.first
+    end
+
+    def merge_payroll_components(existing, incoming)
+      components = Array(existing) + Array(incoming)
+      duplicates = components.group_by do |component|
+        data = component.to_h.with_indifferent_access
+        [ data[:label].to_s.downcase, data[:tax_treatment].to_s ]
+      end.select { |_key, rows| rows.many? }
+      raise ArgumentError, "Multiple one-time component rows matched the same employee and label." if duplicates.any?
+
+      components
     end
 
     def build_preview_row(pdf_row, employee, match, excel_data)
@@ -313,8 +341,15 @@ module PayrollImport
         employee_name: employee.full_name,
         employment_type: employee.employment_type,
         period_pay_required: employee.variable_salary? && pay_period.includes_base_salary?,
-        current_period_pay: existing_item&.salary_override&.to_s("F"),
-        period_pay_missing: (existing_item || PayrollItem.new(pay_period: pay_period, employee: employee)).variable_salary_missing?,
+        # Keep the authoritative workbook value and its evidence in the
+        # server-retained preview. `current_period_pay` is presentation data;
+        # apply! must receive the original amount and proof after the browser
+        # review round trip.
+        period_pay: excel_data&.dig(:period_pay),
+        period_pay_evidence: excel_data&.dig(:period_pay_evidence),
+        current_period_pay: source_period_pay(excel_data) || existing_manual_period_pay(existing_item),
+        period_pay_source: source_period_pay(excel_data) ? "change_workbook" : (existing_manual_period_pay(existing_item).present? ? "payroll_worksheet" : nil),
+        period_pay_missing: period_pay_missing?(employee, existing_item, excel_data),
         overwrite_required: existing_item.present? && existing_item.import_source != "mosa_revel",
         pay_rate: employee.pay_rate.to_f,
         confidence: match[:confidence],
@@ -339,10 +374,140 @@ module PayrollImport
         installment_estimated_ending_balance: excel_data&.dig(:installment_estimated_ending_balance) || 0.0,
         loan_reconciliation_matches: loan_reconciliation.fetch(:matches),
         loan_reconciliation_errors: loan_reconciliation.fetch(:errors),
-        loan_reconciliation_warnings: loan_reconciliation.fetch(:warnings)
+        loan_reconciliation_warnings: loan_reconciliation.fetch(:warnings),
+        payroll_components: Array(excel_data&.dig(:payroll_components))
       }
 
       row
+    end
+
+    def source_period_pay(excel_data)
+      value = excel_data&.dig(:period_pay)
+      decimal_or_zero(value).positive? ? decimal_or_zero(value).to_s("F") : nil
+    end
+
+    def period_pay_missing?(employee, existing_item, excel_data)
+      return false unless employee.variable_salary? && pay_period.includes_base_salary?
+
+      source_period_pay(excel_data).blank? &&
+        existing_manual_period_pay(existing_item).blank?
+    end
+
+    def existing_manual_period_pay(payroll_item)
+      return if payroll_item.blank? || payroll_item.salary_override.to_d <= 0
+
+      evidence = payroll_item.custom_columns_data.to_h["period_pay_evidence"].to_h
+      return if evidence["source_type"] == "mosa_change_workbook"
+
+      payroll_item.salary_override.to_d.to_s("F")
+    end
+
+    def apply_period_pay!(payroll_item, employee, row)
+      amount = decimal_or_zero(row[:period_pay])
+      if amount.zero?
+        evidence = payroll_item.custom_columns_data.to_h["period_pay_evidence"].to_h
+        if evidence["source_type"] == "mosa_change_workbook"
+          payroll_item.salary_override = nil
+          payroll_item.clear_imported_period_pay_evidence!
+        end
+        return
+      end
+      raise ArgumentError, "Pay this employee must be a positive amount." unless amount.positive?
+      raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.variable_salary?
+
+      evidence = row[:period_pay_evidence].to_h.deep_symbolize_keys
+      raise ArgumentError, "Pay this employee must confirm THIS EMPLOYEE ONLY." unless evidence[:scope] == "THIS EMPLOYEE ONLY"
+      raise ArgumentError, "Pay this employee requires a source or reason." if evidence[:source].to_s.strip.blank?
+      unless iso_date(evidence[:effective_pay_date]) == pay_period.pay_date
+        raise ArgumentError, "Pay this employee must use this payroll's pay date."
+      end
+
+      payroll_item.salary_override = amount
+      data = payroll_item.custom_columns_data.is_a?(Hash) ? payroll_item.custom_columns_data.deep_dup : {}
+      data["period_pay_evidence"] = evidence.deep_stringify_keys.merge(
+        "amount" => amount.to_s("F"),
+        "employee_id" => employee.id,
+        "employee_name" => employee.full_name,
+        "source_type" => "mosa_change_workbook"
+      )
+      payroll_item.custom_columns_data = data
+    end
+
+    def apply_imported_components!(payroll_item, components)
+      normalized = Array(components).map { |component| validate_component!(component) }
+      payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy!)
+      normalized.each do |component|
+        payroll_item.payroll_item_field_entries.build(
+          label: component.fetch(:label),
+          kind: component.fetch(:kind),
+          tax_treatment: component.fetch(:tax_treatment),
+          category: component.fetch(:category),
+          amount: component.fetch(:amount),
+          employee_paid: component.fetch(:kind) != "employer_contribution",
+          employer_paid: component.fetch(:kind) == "employer_contribution",
+          reporting_group: component[:reporting_group],
+          source: "import",
+          notes: component[:notes],
+          metadata: component.except(:label, :kind, :tax_treatment, :category, :amount, :reporting_group, :notes)
+        )
+      end
+    end
+
+    def validate_component!(component)
+      data = component.to_h.with_indifferent_access
+      amount = decimal_or_zero(data[:amount])
+      kind = data[:kind].to_s
+      treatment = data[:tax_treatment].to_s
+      category = data[:category].to_s
+      component_type = data[:component_type].to_s
+      rule = PayrollImport::LoanTipExcelParser::GENERATED_COMPONENT_TYPES[component_type]
+      raise ArgumentError, "Imported component label is required." if data[:label].to_s.strip.blank?
+      raise ArgumentError, "Imported component amount must be positive." unless amount.positive?
+      raise ArgumentError, "Imported component type is invalid." unless rule
+      raise ArgumentError, "Imported component kind is invalid." unless PayrollFieldDefinition::KINDS.include?(kind)
+      raise ArgumentError, "Imported component tax treatment is invalid." unless PayrollFieldDefinition::TAX_TREATMENTS.include?(treatment)
+      raise ArgumentError, "Imported component category is invalid." unless PayrollFieldDefinition::CATEGORIES.include?(category)
+      unless kind == rule.fetch(:kind) && treatment == rule.fetch(:tax_treatment)
+        raise ArgumentError, "Imported component type and tax treatment conflict."
+      end
+      raise ArgumentError, "Loan and retirement changes must use their dedicated Cornerstone setup." if category.in?(%w[loan retirement])
+      raise ArgumentError, "Imported component source or reason is required." if data[:source].to_s.strip.blank?
+      unless iso_date(data[:effective_pay_date]) == pay_period.pay_date
+        raise ArgumentError, "Imported components must use this payroll's pay date."
+      end
+      if kind.in?(%w[deduction employer_contribution]) && data[:payee_name].to_s.strip.blank?
+        raise ArgumentError, "Imported deduction and employer contribution components require a payee."
+      end
+      expected_treatments = {
+        "addition" => %w[taxable_addition non_taxable_addition],
+        "deduction" => %w[pre_tax_deduction post_tax_deduction],
+        "employer_contribution" => %w[employer_contribution]
+      }
+      raise ArgumentError, "Imported component type and tax treatment conflict." unless expected_treatments.fetch(kind).include?(treatment)
+
+      {
+        label: data[:label].to_s.strip,
+        amount: amount,
+        kind: kind,
+        tax_treatment: treatment,
+        category: category,
+        reporting_group: PayrollReportingGroups.normalize(data[:reporting_group]),
+        payee_name: data[:payee_name].to_s.strip.presence,
+        effective_pay_date: data[:effective_pay_date].to_s,
+        source: data[:source].to_s.strip,
+        notes: data[:notes].to_s.strip.presence,
+        component_type: component_type
+      }
+    end
+
+    def decimal_or_zero(value)
+      BigDecimal(value.to_s, exception: false)&.round(2) || 0.to_d
+    end
+
+    def iso_date(value)
+      Date.iso8601(value.to_s)
+    rescue Date::Error
+      nil
     end
 
     def low_confidence?(match)

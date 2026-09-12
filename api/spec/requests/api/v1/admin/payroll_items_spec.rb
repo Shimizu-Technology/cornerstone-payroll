@@ -35,6 +35,52 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(json.dig("payroll_item", "component_disclosure", "reconciliation", "net_pay")).to eq(payroll_item.net_pay.to_f)
     end
 
+    it "returns immutable source evidence for imported period pay and typed one-time items" do
+      payroll_item.update!(
+        salary_override: 9_000,
+        custom_columns_data: {
+          "period_pay_evidence" => {
+            "amount" => "9000.0",
+            "scope" => "THIS EMPLOYEE ONLY",
+            "source" => "Owner instruction",
+            "source_type" => "mosa_change_workbook"
+          }
+        }
+      )
+      PayrollItemFieldEntry.create!(
+        payroll_item: payroll_item,
+        label: "Travel reimbursement",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "reimbursement",
+        amount: 150,
+        source: "import",
+        metadata: {
+          "effective_pay_date" => pay_period.pay_date.iso8601,
+          "source" => "Approved receipt",
+          "component_type" => "REIMBURSEMENT"
+        }
+      )
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:ok)
+      item = response.parsed_body.fetch("payroll_item")
+      expect(item.fetch("period_pay_evidence")).to include(
+        "amount" => "9000.0",
+        "scope" => "THIS EMPLOYEE ONLY",
+        "source" => "Owner instruction"
+      )
+      expect(item.fetch("payroll_field_entries")).to contain_exactly(include(
+        "label" => "Travel reimbursement",
+        "source" => "import",
+        "metadata" => include(
+          "effective_pay_date" => pay_period.pay_date.iso8601,
+          "source" => "Approved receipt"
+        )
+      ))
+    end
+
     it "records an explicit zero bonus as a manual input" do
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
         params: { payroll_item: { bonus: 0 } }
@@ -42,6 +88,40 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:ok)
       expect(payroll_item.reload.bonus_source).to eq("manual")
       expect(JSON.parse(response.body).dig("payroll_item", "bonus_source")).to eq("manual")
+    end
+
+    it "replaces imported period-pay evidence when staff enters pay manually" do
+      payroll_item.update!(
+        salary_override: 9_000,
+        custom_columns_data: {
+          "period_pay_evidence" => {
+            "amount" => "9000.0",
+            "source_type" => "mosa_change_workbook"
+          }
+        }
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+        params: { payroll_item: { salary_override: 9_500 } }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload).to have_attributes(salary_override: 9_500.to_d)
+      expect(payroll_item.custom_columns_data).not_to have_key("period_pay_evidence")
+    end
+
+    it "keeps imported period-pay evidence when the item is saved without changing its amount" do
+      evidence = {
+        "amount" => "9000.0",
+        "source_type" => "mosa_change_workbook",
+        "source" => "Owner instruction"
+      }
+      payroll_item.update!(salary_override: 9_000, custom_columns_data: { "period_pay_evidence" => evidence })
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+        params: { payroll_item: { salary_override: 9_000 } }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.custom_columns_data.fetch("period_pay_evidence")).to eq(evidence)
     end
 
     it "invalidates a generated client review revision when an employee payroll row changes" do

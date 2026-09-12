@@ -115,7 +115,7 @@ module PayrollIntake
 
       def validate_workbook!(metadata)
         metadata = metadata.to_h.symbolize_keys
-        if metadata[:schema_version] == PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION
+        if PayrollImport::MosaSupplementalTemplate::SUPPORTED_SCHEMA_VERSIONS.include?(metadata[:schema_version])
           raise ArgumentError, "The change workbook belongs to another Cornerstone client." unless metadata[:company_id].to_i == company.id
           raise ArgumentError, "The change workbook must include its attestation." if metadata[:attestation].blank?
           validate_date!(metadata[:period_start], pay_period.start_date, "start")
@@ -144,7 +144,7 @@ module PayrollIntake
 
       def workbook_warnings(workbook)
         return [] unless workbook
-        return [] if workbook.dig(:metadata, :schema_version) == PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION
+        return [] if PayrollImport::MosaSupplementalTemplate::SUPPORTED_SCHEMA_VERSIONS.include?(workbook.dig(:metadata, :schema_version))
 
         [
           warning(

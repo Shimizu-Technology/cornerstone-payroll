@@ -24,13 +24,23 @@ RSpec.describe PayrollImport::MosaSupplementalTemplate do
   end
 
   it "generates a period-bound workbook prefilled with stable employee IDs" do
-    employee = create(:employee, company: company, first_name: "Avery", last_name: "Example")
+    employee = create(
+      :employee,
+      company: company,
+      first_name: "Avery",
+      last_name: "Example",
+      employment_type: "salary",
+      salary_type: "variable",
+      pay_rate: 0
+    )
     generator = described_class.new(pay_period)
     workbook, file = workbook_from(generator.generate)
 
     expect(workbook.sheets).to contain_exactly(
       "START HERE",
       described_class::EMPLOYEE_CHANGES_SHEET,
+      described_class::OWNER_PERIOD_PAY_SHEET,
+      described_class::ONE_TIME_COMPONENTS_SHEET,
       described_class::DEDUCTIONS_LOANS_SHEET
     )
     start = workbook.sheet("START HERE")
@@ -44,6 +54,11 @@ RSpec.describe PayrollImport::MosaSupplementalTemplate do
     )
     changes = workbook.sheet(described_class::EMPLOYEE_CHANGES_SHEET)
     expect(changes.row(2).first(3)).to eq([ employee.id, employee.full_name, employee.department.name ])
+    owner_pay = workbook.sheet(described_class::OWNER_PERIOD_PAY_SHEET)
+    expect(owner_pay.row(2).first(5)).to eq([ employee.id, employee.full_name, nil, "THIS EMPLOYEE ONLY", pay_period.pay_date ])
+    components = workbook.sheet(described_class::ONE_TIME_COMPONENTS_SHEET)
+    expect(components.row(2).first(2)).to eq([ employee.id, employee.full_name ])
+    expect(components.row(3).first(2)).to eq([ employee.id, employee.full_name ])
     expect(generator.filename).to eq("mosa-test-payroll-changes-2026-09-26.xlsx")
   ensure
     file&.unlink
@@ -75,12 +90,12 @@ RSpec.describe PayrollImport::MosaSupplementalTemplate do
 end
 
 RSpec.describe PayrollImport::LoanTipExcelParser, "generated MoSa template" do
-  def generated_workbook(employee_id:, employee_name:, period_start: Date.new(2026, 9, 13), period_end: Date.new(2026, 9, 26), pay_date: Date.new(2026, 10, 2), no_changes: "NO")
+  def generated_workbook(employee_id:, employee_name:, period_start: Date.new(2026, 9, 13), period_end: Date.new(2026, 9, 26), pay_date: Date.new(2026, 10, 2), no_changes: "NO", owner_scope: "THIS EMPLOYEE ONLY", include_other_changes: true, schema_version: PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION, owner_period_pay: BigDecimal("9000.00"), tips_boh: nil, tips_foh: nil, recurring_loan_amount: nil)
     file = Tempfile.new([ "generated-mosa-changes", ".xlsx" ])
     package = Axlsx::Package.new
     package.workbook.add_worksheet(name: "START HERE") do |sheet|
       [
-        [ "Schema version", PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION ],
+        [ "Schema version", schema_version ],
         [ "Company ID", 44 ],
         [ "Pay period start", period_start ],
         [ "Pay period end", period_end ],
@@ -95,18 +110,100 @@ RSpec.describe PayrollImport::LoanTipExcelParser, "generated MoSa template" do
       ].each { |row| sheet.add_row(row) }
     end
     package.workbook.add_worksheet(name: PayrollImport::MosaSupplementalTemplate::EMPLOYEE_CHANGES_SHEET) do |sheet|
-      sheet.add_row(Array.new(12) { |index| "Header #{index}" })
-      sheet.add_row([ employee_id, employee_name, "FOH", 10, 25, "YES", 150, 20, Date.new(2026, 9, 13), "Cornerstone", "Email approval", "Test change" ])
+      sheet.add_row(Array.new(8) { |index| "Header #{index}" })
+      if include_other_changes || !tips_boh.nil? || !tips_foh.nil?
+        sheet.add_row([ employee_id, employee_name, "FOH", tips_boh || 10, tips_foh || 25, "YES", "Email approval", "Test change" ])
+      end
+    end
+    package.workbook.add_worksheet(name: PayrollImport::MosaSupplementalTemplate::OWNER_PERIOD_PAY_SHEET) do |sheet|
+      sheet.add_row(Array.new(7) { |index| "Header #{index}" })
+      sheet.add_row([ employee_id, employee_name, owner_period_pay, owner_scope, pay_date, "Owner instruction", "Separate amount" ]) unless owner_period_pay.nil?
+    end
+    package.workbook.add_worksheet(name: PayrollImport::MosaSupplementalTemplate::ONE_TIME_COMPONENTS_SHEET) do |sheet|
+      sheet.add_row(Array.new(10) { |index| "Header #{index}" })
+      if include_other_changes
+        sheet.add_row([ employee_id, employee_name, "REIMBURSEMENT", "Travel reimbursement", 150, "reimbursement", nil, pay_date, "Approved receipt", "September travel" ])
+        sheet.add_row([ employee_id, employee_name, "POST-TAX DEDUCTION", "Uniform repayment", 20, "other", "MoSa", pay_date, "Signed instruction", nil ])
+      end
     end
     package.workbook.add_worksheet(name: PayrollImport::MosaSupplementalTemplate::DEDUCTIONS_LOANS_SHEET) do |sheet|
       sheet.add_row(Array.new(17) { |index| "Header #{index}" })
-      sheet.add_row([ employee_id, employee_name, 9, "Owner loan", "loan", 50, "KEEP", 5, Date.new(2026, 9, 13), nil, 300, 0, 50, 250, "MoSa", "Signed schedule", nil ])
+      if include_other_changes || !recurring_loan_amount.nil?
+        amount = recurring_loan_amount || 5
+        opening = include_other_changes ? 300 : 0
+        payment = include_other_changes ? 50 : 0
+        ending = include_other_changes ? 250 : 0
+        sheet.add_row([ employee_id, employee_name, 9, "Owner loan", "loan", 50, "KEEP", amount, Date.new(2026, 9, 13), nil, opening, 0, payment, ending, "MoSa", "Signed schedule", nil ])
+      end
     end
     package.workbook.add_worksheet(name: PayrollImport::MosaSupplementalTemplate::HOUR_CORRECTIONS_SHEET) do |sheet|
       sheet.add_row(Array.new(10) { |index| "Header #{index}" })
     end
     package.serialize(file.path)
     file
+  end
+
+  [ nil, "cornerstone-mosa-supplemental/typo" ].each do |schema_version|
+    label = schema_version.nil? ? "blank" : "misspelled"
+
+    it "rejects a #{label} schema when START HERE is present" do
+      file = generated_workbook(employee_id: 44, employee_name: "Avery Example", schema_version: schema_version)
+
+      expect { described_class.parse(file.path) }.to raise_error(ArgumentError, /version is not supported/)
+    ensure
+      file&.unlink
+    end
+  end
+
+  it "treats negative tips and loan amounts as changes when no changes is attested" do
+    negative_tips = generated_workbook(
+      employee_id: 44,
+      employee_name: "Avery Example",
+      no_changes: "YES",
+      include_other_changes: false,
+      owner_period_pay: nil,
+      tips_boh: BigDecimal("-1.00"),
+      tips_foh: BigDecimal("0.00")
+    )
+    negative_loan = generated_workbook(
+      employee_id: 44,
+      employee_name: "Avery Example",
+      no_changes: "YES",
+      include_other_changes: false,
+      owner_period_pay: nil,
+      recurring_loan_amount: BigDecimal("-1.00")
+    )
+
+    expect { described_class.parse(negative_tips.path) }.to raise_error(ArgumentError, /says there are no supplemental changes/)
+    expect { described_class.parse(negative_loan.path) }.to raise_error(ArgumentError, /says there are no supplemental changes/)
+  ensure
+    negative_tips&.unlink
+    negative_loan&.unlink
+  end
+
+  it "accepts zero values when no changes is attested" do
+    file = generated_workbook(
+      employee_id: 44,
+      employee_name: "Avery Example",
+      no_changes: "YES",
+      include_other_changes: false,
+      owner_period_pay: nil,
+      tips_boh: BigDecimal("0.00"),
+      tips_foh: BigDecimal("0.00"),
+      recurring_loan_amount: BigDecimal("0.00")
+    )
+
+    expect(described_class.parse(file.path)).to contain_exactly(include(total_tips: BigDecimal("0.00")))
+  ensure
+    file&.unlink
+  end
+
+  it "rejects a combined owner amount" do
+    file = generated_workbook(employee_id: 44, employee_name: "Avery Example", owner_scope: "BOTH OWNERS")
+
+    expect { described_class.parse(file.path) }.to raise_error(ArgumentError, /Combined owner amounts are not accepted/)
+  ensure
+    file&.unlink
   end
 
   it "parses supported changes by stable employee ID and reconciles loan balances" do
@@ -130,14 +227,19 @@ RSpec.describe PayrollImport::LoanTipExcelParser, "generated MoSa template" do
       tips_boh: 10.0,
       tips_foh: 25.0,
       tips_already_paid: true,
-      bonus: 150.to_d,
-      one_payroll_deduction: 20.0,
+      period_pay: 9_000.0,
+      period_pay_evidence: include(scope: "THIS EMPLOYEE ONLY", source: "Owner instruction"),
+      payroll_components: contain_exactly(
+        include(label: "Travel reimbursement", amount: 150.0, tax_treatment: "non_taxable_addition"),
+        include(label: "Uniform repayment", amount: 20.0, tax_treatment: "post_tax_deduction", payee_name: "MoSa")
+      ),
+      one_payroll_deduction: 0.0,
       recurring_loan_deduction: 5.0,
       installment_beginning_balance: 300.0,
       installment_new_amount: 0.0,
       installment_payment: 50.0,
       installment_estimated_ending_balance: 250.0,
-      loan_deduction: 75.0
+      loan_deduction: 55.0
     ))
   ensure
     file&.unlink
@@ -164,8 +266,8 @@ RSpec.describe PayrollImport::LoanTipExcelParser, "generated MoSa template" do
     file&.unlink
   end
 
-  it "rejects changed rows when the sender attests that there are no supplemental changes" do
-    file = generated_workbook(employee_id: 44, employee_name: "Avery Example", no_changes: "YES")
+  it "rejects owner pay when the sender attests that there are no supplemental changes" do
+    file = generated_workbook(employee_id: 44, employee_name: "Avery Example", no_changes: "YES", include_other_changes: false)
 
     expect { described_class.parse(file.path) }.to raise_error(ArgumentError, /says there are no supplemental changes/)
   ensure

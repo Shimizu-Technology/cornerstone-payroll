@@ -34,6 +34,12 @@ module PayrollImport
     INSTALLMENT_SHEET = "INSTALLMENT LOANS"
     BONUS_SHEET = "BONUSES"
     SKIP_SHEETS = [ "SUMMARY" ].freeze
+    GENERATED_COMPONENT_TYPES = {
+      "BONUS" => { kind: "addition", tax_treatment: "taxable_addition", default_label: "Bonus", default_category: "other" },
+      "REIMBURSEMENT" => { kind: "addition", tax_treatment: "non_taxable_addition", default_label: "Reimbursement", default_category: "reimbursement" },
+      "OTHER TAXABLE EARNING" => { kind: "addition", tax_treatment: "taxable_addition", default_label: "Other taxable earning", default_category: "other" },
+      "POST-TAX DEDUCTION" => { kind: "deduction", tax_treatment: "post_tax_deduction", default_label: "Post-tax deduction", default_category: "other" }
+    }.freeze
 
     class << self
       def parse(file_path)
@@ -82,9 +88,16 @@ module PayrollImport
     def parse_with_metadata
       xlsx = Roo::Spreadsheet.open(file_path)
       employees = {}
+      metadata = workbook_metadata(xlsx)
+      if xlsx.sheets.include?("START HERE") &&
+          !PayrollImport::MosaSupplementalTemplate::SUPPORTED_SCHEMA_VERSIONS.include?(metadata[:schema_version])
+        raise ArgumentError, "This Cornerstone change workbook version is not supported. Download a fresh workbook for this payroll."
+      end
 
-      if generated_template?(xlsx)
-        parse_generated_employee_changes(xlsx, employees)
+      if generated_template?(xlsx, metadata)
+        parse_generated_employee_changes(xlsx, employees, schema_version: metadata[:schema_version])
+        parse_generated_owner_period_pay(xlsx, employees, pay_date: metadata[:pay_date])
+        parse_generated_one_time_components(xlsx, employees, pay_date: metadata[:pay_date])
         parse_generated_deductions_and_loans(xlsx, employees)
         reject_generated_hour_corrections!(xlsx)
       else
@@ -95,8 +108,7 @@ module PayrollImport
         parse_bonus_sheet(xlsx, employees)
       end
 
-      metadata = workbook_metadata(xlsx)
-      if metadata[:no_changes] && employees.any?
+      if metadata[:no_changes] && employees.values.any? { |employee| supplemental_changes?(employee) }
         raise ArgumentError, "The workbook says there are no supplemental changes but also contains changed rows."
       end
 
@@ -138,14 +150,15 @@ module PayrollImport
         installment_beginning_balance: 0.0,
         installment_new_amount: 0.0,
         installment_payment: 0.0,
-        installment_estimated_ending_balance: 0.0
+        installment_estimated_ending_balance: 0.0,
+        payroll_components: []
       }
     end
 
-    def generated_template?(xlsx)
+    def generated_template?(xlsx, metadata)
       return false unless xlsx.sheets.include?("START HERE")
 
-      workbook_metadata(xlsx)[:schema_version] == PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION
+      PayrollImport::MosaSupplementalTemplate::SUPPORTED_SCHEMA_VERSIONS.include?(metadata[:schema_version])
     end
 
     def workbook_metadata(xlsx)
@@ -188,12 +201,13 @@ module PayrollImport
       }
     end
 
-    def parse_generated_employee_changes(xlsx, employees)
+    def parse_generated_employee_changes(xlsx, employees, schema_version:)
       sheet = xlsx.sheet(PayrollImport::MosaSupplementalTemplate::EMPLOYEE_CHANGES_SHEET)
       each_data_row(sheet, 2) do |row_num|
         employee_id = integer(sheet.cell(row_num, 1))
         employee_name = sheet.cell(row_num, 2).to_s.strip
-        values = (4..12).map { |column| sheet.cell(row_num, column) }
+        last_column = schema_version == PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION ? 8 : 12
+        values = (4..last_column).map { |column| sheet.cell(row_num, column) }
         next if values.all?(&:blank?)
         raise ArgumentError, "EMPLOYEE CHANGES row #{row_num}: Employee ID is required." unless employee_id
 
@@ -210,19 +224,124 @@ module PayrollImport
         employee[:total_tips] = employee[:tips_boh] + employee[:tips_foh]
         employee[:tip_pool] = tip_pool(employee)
         employee[:tips_already_paid] = yes_no(sheet.cell(row_num, 6), row_num: row_num)
-        bonus = sheet.cell(row_num, 7)
-        employee[:bonus] = PayrollBonusInput.amount(bonus.to_s.delete("$,")) unless bonus.blank?
-        deduction = to_decimal(sheet.cell(row_num, 8))
-        employee[:one_payroll_deduction] += deduction
-        employee[:loan_deduction] += deduction
-        employee[:effective_date] = date(sheet.cell(row_num, 9))
-        employee[:recipient] = sheet.cell(row_num, 10).to_s.strip.presence
-        employee[:source] = sheet.cell(row_num, 11).to_s.strip.presence
-        employee[:notes] = sheet.cell(row_num, 12).to_s.strip.presence
+        if schema_version == PayrollImport::MosaSupplementalTemplate::SCHEMA_VERSION
+          employee[:source] = sheet.cell(row_num, 7).to_s.strip.presence
+          employee[:notes] = sheet.cell(row_num, 8).to_s.strip.presence
+        else
+          bonus = sheet.cell(row_num, 7)
+          employee[:bonus] = PayrollBonusInput.amount(bonus.to_s.delete("$,")) unless bonus.blank?
+          deduction = to_decimal(sheet.cell(row_num, 8))
+          employee[:one_payroll_deduction] += deduction
+          employee[:loan_deduction] += deduction
+          employee[:effective_date] = date(sheet.cell(row_num, 9))
+          employee[:recipient] = sheet.cell(row_num, 10).to_s.strip.presence
+          employee[:source] = sheet.cell(row_num, 11).to_s.strip.presence
+          employee[:notes] = sheet.cell(row_num, 12).to_s.strip.presence
+        end
       rescue ArgumentError => e
         raise ArgumentError, "EMPLOYEE CHANGES row #{row_num}: #{e.message}" unless e.message.start_with?("EMPLOYEE CHANGES row")
 
         raise
+      end
+    end
+
+    def parse_generated_owner_period_pay(xlsx, employees, pay_date:)
+      return unless xlsx.sheets.include?(PayrollImport::MosaSupplementalTemplate::OWNER_PERIOD_PAY_SHEET)
+
+      sheet = xlsx.sheet(PayrollImport::MosaSupplementalTemplate::OWNER_PERIOD_PAY_SHEET)
+      each_data_row(sheet, 2) do |row_num|
+        amount_cell = sheet.cell(row_num, 3)
+        next if amount_cell.blank?
+
+        employee_id = integer(sheet.cell(row_num, 1))
+        employee_name = sheet.cell(row_num, 2).to_s.strip
+        amount = positive_decimal!(amount_cell, "OWNER PERIOD PAY row #{row_num}: Pay this employee")
+        scope = sheet.cell(row_num, 4).to_s.strip.upcase
+        effective_pay_date = date(sheet.cell(row_num, 5))
+        source = sheet.cell(row_num, 6).to_s.strip
+        raise ArgumentError, "OWNER PERIOD PAY row #{row_num}: Employee ID is required." unless employee_id
+        unless scope == "THIS EMPLOYEE ONLY"
+          raise ArgumentError, "OWNER PERIOD PAY row #{row_num}: confirm THIS EMPLOYEE ONLY. Combined owner amounts are not accepted."
+        end
+        unless effective_pay_date && pay_date && effective_pay_date == pay_date
+          raise ArgumentError, "OWNER PERIOD PAY row #{row_num}: Effective pay date must match the workbook pay date."
+        end
+        raise ArgumentError, "OWNER PERIOD PAY row #{row_num}: Source / reason is required." if source.blank?
+
+        names = employee_name.split
+        employee = find_or_init(employees, names.last, names[0...-1].join(" "), employee_id: employee_id, employee_name: employee_name)
+        raise ArgumentError, "OWNER PERIOD PAY row #{row_num}: Duplicate period pay for #{employee_name}." if employee[:period_pay].present?
+
+        employee[:period_pay] = amount
+        employee[:period_pay_evidence] = {
+          scope: scope,
+          effective_pay_date: effective_pay_date.iso8601,
+          source: source,
+          notes: sheet.cell(row_num, 7).to_s.strip.presence
+        }
+      end
+    end
+
+    def parse_generated_one_time_components(xlsx, employees, pay_date:)
+      return unless xlsx.sheets.include?(PayrollImport::MosaSupplementalTemplate::ONE_TIME_COMPONENTS_SHEET)
+
+      sheet = xlsx.sheet(PayrollImport::MosaSupplementalTemplate::ONE_TIME_COMPONENTS_SHEET)
+      each_data_row(sheet, 2) do |row_num|
+        type = sheet.cell(row_num, 3).to_s.strip.upcase
+        label = sheet.cell(row_num, 4).to_s.strip
+        amount_cell = sheet.cell(row_num, 5)
+        next if type.blank? && label.blank? && amount_cell.blank?
+
+        employee_id = integer(sheet.cell(row_num, 1))
+        employee_name = sheet.cell(row_num, 2).to_s.strip
+        rule = GENERATED_COMPONENT_TYPES[type]
+        raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Employee ID is required." unless employee_id
+        raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Type is not supported." unless rule
+
+        amount = positive_decimal!(amount_cell, "ONE-TIME COMPONENTS row #{row_num}: Amount")
+        category = sheet.cell(row_num, 6).to_s.strip.downcase.tr(" ", "_").presence || rule.fetch(:default_category)
+        payee = sheet.cell(row_num, 7).to_s.strip.presence
+        effective_pay_date = date(sheet.cell(row_num, 8))
+        source = sheet.cell(row_num, 9).to_s.strip
+        raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Category is not supported." unless PayrollFieldDefinition::CATEGORIES.include?(category)
+        if category.in?(%w[loan retirement])
+          raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Manage #{category} in Cornerstone so balances and annual limits stay correct."
+        end
+        if type == "REIMBURSEMENT" && category != "reimbursement"
+          raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Reimbursements must use the reimbursement category."
+        end
+        if type.in?([ "BONUS", "OTHER TAXABLE EARNING" ]) && category != "other"
+          raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: #{type.titleize} must use the other category."
+        end
+        if rule[:kind] == "deduction" && payee.blank?
+          raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Recipient / payee is required for this type."
+        end
+        unless effective_pay_date && pay_date && effective_pay_date == pay_date
+          raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Effective pay date must match the workbook pay date."
+        end
+        raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Source / reason is required." if source.blank?
+
+        names = employee_name.split
+        employee = find_or_init(employees, names.last, names[0...-1].join(" "), employee_id: employee_id, employee_name: employee_name)
+        component = {
+          component_type: type,
+          label: label.presence || rule.fetch(:default_label),
+          amount: amount,
+          kind: rule.fetch(:kind),
+          tax_treatment: rule.fetch(:tax_treatment),
+          category: category,
+          reporting_group: nil,
+          payee_name: payee,
+          effective_pay_date: effective_pay_date.iso8601,
+          source: source,
+          notes: sheet.cell(row_num, 10).to_s.strip.presence
+        }
+        duplicate = employee[:payroll_components].any? do |existing|
+          existing[:label].casecmp?(component[:label]) && existing[:tax_treatment] == component[:tax_treatment]
+        end
+        raise ArgumentError, "ONE-TIME COMPONENTS row #{row_num}: Duplicate component #{component[:label]} for #{employee_name}." if duplicate
+
+        employee[:payroll_components] << component
       end
     end
 
@@ -303,6 +422,21 @@ module PayrollImport
 
     def yes?(value)
       value.to_s.strip.casecmp("YES").zero?
+    end
+
+    def positive_decimal!(value, label)
+      number = BigDecimal(value.to_s.delete("$,"), exception: false)
+      raise ArgumentError, "#{label} must be a positive amount." unless number&.finite? && number.positive?
+
+      number.round(2)
+    end
+
+    def supplemental_changes?(employee)
+      employee[:total_tips].to_d.nonzero? ||
+        employee[:loan_deduction].to_d.nonzero? ||
+        employee[:bonus].present? ||
+        employee[:period_pay].present? ||
+        Array(employee[:payroll_components]).any?
     end
 
     def integer(value)

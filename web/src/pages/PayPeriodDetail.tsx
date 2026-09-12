@@ -1006,11 +1006,15 @@ export function PayPeriodDetail({
   };
 
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
-    setPayPeriod(updatedPayPeriod);
+    // Import endpoints return the newly calculated rows but not every field
+    // from the canonical pay-run response. Preserve the current run context
+    // (notably the base-salary intent) and then refresh the full record.
+    setPayPeriod((current) => current ? { ...current, ...updatedPayPeriod } : updatedPayPeriod);
     setPayrollItems(updatedPayPeriod.payroll_items || []);
     setHoursMap(buildHoursMap(updatedPayPeriod.payroll_items || [], employees));
     syncDerivedPayrollState(updatedPayPeriod.payroll_items || []);
     setAdditionalEmployeeIds(new Set());
+    void loadPayPeriod(updatedPayPeriod.id, true);
   };
 
   const handlePayrollItemSaved = (updated: PayrollItem) => {
@@ -2684,6 +2688,7 @@ export function PayPeriodDetail({
                     return displayItems.map((item, idx) => {
                     const isManual = !item.import_source;
                     const isSalary = item.employment_type === 'salary';
+                    const isWorkbookPay = item.period_pay_evidence?.source_type === 'mosa_change_workbook';
                     const isContractor = item.employment_type === 'contractor';
                     const empRecord = employeeLookup.get(item.employee_id);
                     const contractorPayType = item.contractor_pay_type || empRecord?.contractor_pay_type;
@@ -2749,7 +2754,12 @@ export function PayPeriodDetail({
                                       AIRE linked
                                     </span>
                                   )}
-                                  {(isManual || (isSalary && item.salary_override)) && !isContractor && (
+                                  {isWorkbookPay && !isContractor && (
+                                    <span className="inline-flex items-center rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800">
+                                      Workbook pay
+                                    </span>
+                                  )}
+                                  {!isWorkbookPay && (isManual || (isSalary && item.salary_override)) && !isContractor && (
                                     <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                                       Manual
                                     </span>
@@ -2839,7 +2849,7 @@ export function PayPeriodDetail({
                               if (isSalary) {
                                 if (!payPeriod.includes_base_salary) return <span className="font-medium text-primary-700">Excluded from this run</span>;
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
-                                if (override > 0) return <span className="text-indigo-600" title="Salary Override">{formatCurrency(override)}/period</span>;
+                                if (override > 0) return <span className="text-indigo-600" title={isWorkbookPay ? "MoSa change workbook pay for this period" : "Salary override"}>{formatCurrency(override)}/period</span>;
                                 if (empRecord?.salary_type === 'variable') return <span className="text-indigo-600 font-medium">Variable</span>;
                                 const payRate = toNumber(item.pay_rate);
                                 const isPerPeriod = empRecord?.salary_type === 'per_period';
