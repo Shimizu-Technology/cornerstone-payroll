@@ -6,7 +6,7 @@ class PayrollIntakeSession < ApplicationRecord
     company_id pay_period_id source_type source_label import_hash parser_version
     package_id package_revision package_schema_version
   ].freeze
-  SOURCE_TYPES = %w[spike_email].freeze
+  SOURCE_TYPES = %w[spike_email mosa_revel].freeze
   STATUSES = %w[draft previewed reviewed applied failed].freeze
 
   belongs_to :company

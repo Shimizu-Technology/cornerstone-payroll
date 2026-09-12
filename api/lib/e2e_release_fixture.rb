@@ -69,7 +69,8 @@ class E2eReleaseFixture
         email: "payroll-fixture@example.test",
         pay_frequency: "biweekly",
         ein: "00-0000001",
-        historical_payroll_enabled: true
+        historical_payroll_enabled: true,
+        payroll_intake_source_types: [ "mosa_revel" ]
       )
       other_company = organization.companies.create!(
         name: "Synthetic Boundary Company",
@@ -701,22 +702,30 @@ class E2eReleaseFixture
         [
           { name: "Example, Avery", regular_hours: 40.0, overtime_hours: 2.0, source_pay: 9_999.99 },
           { name: "Petrius, Rosie", regular_hours: 37.5, overtime_hours: 0.0, source_pay: 8_888.88 }
-        ]
+        ],
+        period_start: Date.new(2026, 8, 30),
+        period_end: Date.new(2026, 9, 12)
       )
       write_revel_pdf!(
         blocked_pdf,
-        [ { name: "Unknown, Worker", regular_hours: 40.0, overtime_hours: 0.0, source_pay: 7_777.77 } ]
+        [ { name: "Unknown, Worker", regular_hours: 40.0, overtime_hours: 0.0, source_pay: 7_777.77 } ],
+        period_start: Date.new(2026, 9, 13),
+        period_end: Date.new(2026, 9, 26)
       )
       write_payroll_workbook!(
         safe_workbook,
         [
           { last_name: "Example", first_name: "Avery", tips: 25.50, deduction: 0.0 },
           { last_name: "Petrius", first_name: "Rosie", tips: 117.50, deduction: 123.50 }
-        ]
+        ],
+        period_end: Date.new(2026, 9, 12),
+        pay_date: Date.new(2026, 9, 18)
       )
       write_payroll_workbook!(
         blocked_workbook,
-        [ { last_name: "Unknown", first_name: "Worker", tips: 50.0, deduction: 25.0 } ]
+        [ { last_name: "Unknown", first_name: "Worker", tips: 50.0, deduction: 25.0 } ],
+        period_end: Date.new(2026, 9, 26),
+        pay_date: Date.new(2026, 10, 2)
       )
 
       {
@@ -727,7 +736,7 @@ class E2eReleaseFixture
       }
     end
 
-    def write_revel_pdf!(path, rows)
+    def write_revel_pdf!(path, rows, period_start:, period_end:)
       header = [
         "Employee", "Role", "Ext. ID", "Wage", "Regular h.", "Overtime h.", "Doubletime h.",
         "Regular", "Overtime", "Doubletime", "Total Hours", "Total", "Fees"
@@ -737,6 +746,7 @@ class E2eReleaseFixture
       Prawn::Document.generate(path.to_s, page_size: [ 1_000, 700 ], margin: 20) do |pdf|
         pdf.font("Courier")
         pdf.text("Synthetic payroll fixture — source pay is intentionally wrong", size: 6)
+        pdf.text("Payroll period: #{period_start.iso8601} to #{period_end.iso8601}", size: 6)
         pdf.move_down(4)
         pdf.text(header.join, size: 4)
         rows.each do |row|
@@ -763,19 +773,23 @@ class E2eReleaseFixture
       end
     end
 
-    def write_payroll_workbook!(path, rows)
+    def write_payroll_workbook!(path, rows, period_end:, pay_date:)
       package = Axlsx::Package.new
       workbook = package.workbook
 
       workbook.add_worksheet(name: "TIPS - FOH") do |sheet|
-        3.times { sheet.add_row([]) }
+        sheet.add_row([])
+        sheet.add_row([ "PAY PERIOD ENDING", nil, nil, nil, nil, period_end ])
+        sheet.add_row([ "PAY DAY", nil, nil, nil, nil, pay_date ])
         sheet.add_row([ nil, nil, "Last Name", "First Name", nil, "Tip Amount" ])
         rows.each do |row|
           sheet.add_row([ nil, nil, row.fetch(:last_name), row.fetch(:first_name), nil, row.fetch(:tips) ])
         end
       end
       workbook.add_worksheet(name: "LOANS (NO INSTALLMENTS)") do |sheet|
-        3.times { sheet.add_row([]) }
+        sheet.add_row([])
+        sheet.add_row([ "PAY PERIOD ENDING", nil, nil, nil, nil, period_end ])
+        sheet.add_row([ "PAY DAY", nil, nil, nil, nil, pay_date ])
         sheet.add_row([ nil, nil, "Last Name", "First Name", nil, "Deduction" ])
         rows.each do |row|
           next if row.fetch(:deduction).zero?

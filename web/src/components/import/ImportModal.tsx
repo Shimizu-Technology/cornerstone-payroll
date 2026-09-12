@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { CheckCircle2, Download } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,6 +60,27 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
     setResults(null);
+    setTemplateDownloading(false);
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setTemplateDownloading(true);
+      setError(null);
+      const blob = await payPeriodsApi.downloadSupplementalTemplate(payPeriodId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'Cornerstone-payroll-changes.xlsx';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download the change workbook');
+    } finally {
+      setTemplateDownloading(false);
+    }
   };
 
   const handleClose = () => {
@@ -149,7 +172,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
-            {step === 'upload' && 'Upload Revel hours and the optional per-payroll tips, deductions and bonus workbook.'}
+            {step === 'upload' && 'Upload the Revel hours PDF and, when needed, one payroll change workbook.'}
             {step === 'preview' && (unresolvedCount > 0
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? '' : 's'} need attention before this import can be applied.`
               : missingPeriodPay.length > 0
@@ -169,6 +192,18 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         {/* Upload Step */}
         {step === 'upload' && (
           <div className="space-y-4 py-2">
+            <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-primary-950">Start with this payroll's change-only workbook</p>
+                  <p className="mt-1 text-sm text-primary-800">It is prefilled with Cornerstone employee IDs and the exact payroll dates. MoSa only enters tips, one-time bonuses, one-payroll deductions, or other approved changes.</p>
+                </div>
+                <Button type="button" variant="outline" onClick={handleDownloadTemplate} disabled={templateDownloading} className="shrink-0">
+                  <Download className="mr-2 h-4 w-4" aria-hidden="true" />
+                  {templateDownloading ? 'Preparing...' : 'Download workbook'}
+                </Button>
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Revel POS Payroll PDF <span className="text-red-500">*</span>
@@ -182,13 +217,13 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               />
               {pdfFile && <p className="text-xs text-gray-500 mt-1">{pdfFile.name}</p>}
               <p className="mt-2 text-xs text-gray-500">
-                Only regular and overtime hours are imported from Revel. Revel pay rates and pay amounts are ignored.
+                Keep using the original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. The dates in the report must match this payroll.
               </p>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tips &amp; payroll deductions workbook (optional)
+                Cornerstone payroll changes workbook (optional)
               </label>
               <input
                 ref={excelInputRef}
@@ -212,8 +247,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 disabled={!excelFile}
               />
               <span>
-                <span className="font-medium">Tips in this workbook were already paid out daily.</span>{' '}
-                Report them as taxable tips and offset them from employee checks.
+                <span className="font-medium">Legacy workbook fallback: all tips in this workbook were already paid out daily.</span>{' '}
+                The generated workbook records this per employee, so this switch is only needed for an older MoSa workbook.
               </span>
             </label>
           </div>
@@ -221,11 +256,23 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
 
         {/* Preview Step */}
         {step === 'upload' && (
-          <p className="text-sm text-gray-500">Optional BONUSES sheet: row 4 headers, column C last name, D first name, F bonus amount. A blank amount preserves the current bonus; zero clears an imported bonus. You can also enter bonuses beside the hours after importing.</p>
+          <p className="text-sm text-gray-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The generated workbook already includes a one-time bonus column.</p>
         )}
 
         {step === 'preview' && previewData && (
           <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+              <span className="inline-flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                {previewData.source_package.verified_source_count} source{previewData.source_package.source_count === 1 ? '' : 's'} retained and verified
+              </span>
+              <span>Package revision {previewData.source_package.package_revision} · {previewData.source_package.package_id.slice(0, 8)}</span>
+            </div>
+            {(previewData.preview.source_warnings || []).map((warning) => (
+              <div key={warning.code} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {warning.message}
+              </div>
+            ))}
             {missingPeriodPay.length > 0 && (
               <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>

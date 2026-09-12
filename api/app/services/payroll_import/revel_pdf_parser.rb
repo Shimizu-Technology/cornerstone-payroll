@@ -43,15 +43,24 @@ module PayrollImport
         new(file_path).parse
       end
 
+      def parse_with_metadata(file_path, source_name: nil)
+        new(file_path).parse_with_metadata(source_name: source_name)
+      end
+
       # Parse PDF from file upload (ActiveStorage blob or Tempfile)
       # @param file [File, Tempfile, ActionDispatch::Http::UploadedFile]
       # @return [Array<Hash>] parsed employee records
       def parse_file(file)
-        return parse(file.path) if file.respond_to?(:path)
+        parse_file_with_metadata(file).fetch(:rows)
+      end
+
+      def parse_file_with_metadata(file)
+        source_name = file.respond_to?(:original_filename) ? file.original_filename.to_s : nil
+        return parse_with_metadata(file.path, source_name: source_name) if file.respond_to?(:path)
 
         tempfile = save_to_temp(file)
         begin
-          parse(tempfile.path)
+          parse_with_metadata(tempfile.path, source_name: source_name)
         ensure
           tempfile.unlink if tempfile
         end
@@ -74,12 +83,22 @@ module PayrollImport
     end
 
     def parse
+      parse_with_metadata.fetch(:rows)
+    end
+
+    def parse_with_metadata(source_name: nil)
       text = extract_text
       lines = text.split("\n")
 
       header_index = find_header_line(lines)
       employee_lines = find_employee_lines(lines, header_index)
-      parse_employee_lines(employee_lines)
+      {
+        rows: parse_employee_lines(employee_lines),
+        metadata: {
+          period: detect_period(text, source_name.presence || File.basename(file_path)),
+          source_name: source_name.presence || File.basename(file_path)
+        }
+      }
     end
 
     private
@@ -96,6 +115,31 @@ module PayrollImport
       reader.pages.map(&:text).join("\n")
     end
 
+    def detect_period(text, source_name)
+      candidates = [ source_name.to_s, text.to_s ]
+      candidates.each do |candidate|
+        iso_match = candidate.match(/(?<start>20\d{2}[-_]\d{2}[-_]\d{2}).{0,40}?(?:to|through|thru|[-–—])\s*(?<finish>20\d{2}[-_]\d{2}[-_]\d{2})/i)
+        if iso_match
+          return {
+            start_date: Date.parse(iso_match[:start].tr("_", "-")).iso8601,
+            end_date: Date.parse(iso_match[:finish].tr("_", "-")).iso8601
+          }
+        end
+
+        us_match = candidate.match(/(?<start>\d{1,2}\/\d{1,2}\/\d{2,4}).{0,40}?(?:to|through|thru|[-–—])\s*(?<finish>\d{1,2}\/\d{1,2}\/\d{2,4})/i)
+        if us_match
+          return {
+            start_date: Date.parse(us_match[:start]).iso8601,
+            end_date: Date.parse(us_match[:finish]).iso8601
+          }
+        end
+      end
+
+      nil
+    rescue Date::Error
+      nil
+    end
+
     # Find the line containing column headers
     def find_header_line(lines)
       lines.each_with_index do |line, idx|
@@ -108,19 +152,19 @@ module PayrollImport
     # Skip header, footer, and empty lines
     def find_employee_lines(lines, header_index)
       start_idx = header_index ? header_index + 1 : 0
-      
+
       employee_lines = []
       i = start_idx
-      
+
       while i < lines.length
         line = lines[i]
-        
+
         # Skip empty lines
         if line.strip.empty?
           i += 1
           next
         end
-        
+
         # Check if this looks like a total/footer line
         # Only break on a real totals line (has "Totals" AND multiple numbers)
         if line.match?(/^\s*Totals/i)
@@ -130,17 +174,17 @@ module PayrollImport
           end
           # Otherwise continue (might be a header)
         end
-        
+
         # Extract employee name portion
         name_part = line[COLUMNS[:employee]]&.strip || ""
-        
+
         # Check if this line has payroll data
         has_numbers = line.match?(/\d+\.\d{2}/)
-        
+
         # Case 1: Line has a name and numbers - could be complete or need next line's name
         if has_numbers && name_part.match?(/[A-Za-z]/)
           # Check if name ends with comma (like "Camacho,") - might need first name from next line
-          if name_part.end_with?(',') && i + 1 < lines.length
+          if name_part.end_with?(",") && i + 1 < lines.length
             next_name = lines[i+1][COLUMNS[:employee]]&.strip || ""
             # If next line has text but no numbers, it's probably the first name
             if next_name.match?(/[A-Za-z]/) && !lines[i+1].match?(/\d+\.\d{2}/)
@@ -152,20 +196,20 @@ module PayrollImport
               next
             end
           end
-          
+
           # Regular complete line
           employee_lines << line
           i += 1
-          
+
         # Case 2: Line has name but no numbers - could be first part of multi-line name
         elsif name_part.match?(/[A-Za-z]/) && !has_numbers
           # Check if this is a name containing comma (e.g., "Camacho," or "Purcell, Cienna")
           # Could be start of multi-line name
-          if (name_part.end_with?(',') || name_part.include?(',')) && i + 1 < lines.length
+          if (name_part.end_with?(",") || name_part.include?(",")) && i + 1 < lines.length
             next_line = lines[i+1]
             next_has_numbers = next_line.match?(/\d+\.\d{2}/)
             next_name = next_line[COLUMNS[:employee]]&.strip || ""
-            
+
             if next_has_numbers && next_name.match?(/[A-Za-z]/)
               # Next line has first name and numbers - merge
               combined_name = "#{name_part} #{next_name}".strip
@@ -175,16 +219,16 @@ module PayrollImport
               next
             end
           end
-          
+
           # Couldn't determine - skip this line
           i += 1
-          
+
         else
           # Doesn't look like employee data
           i += 1
         end
       end
-      
+
       employee_lines
     end
 
@@ -197,20 +241,20 @@ module PayrollImport
 
     def normalize_name(name)
       return "" if name.nil?
-      
+
       # Remove extra whitespace
       name = name.gsub(/\s+/, " ").strip
-      
+
       # Fix trailing commas: "Likiaksa, Stephanie," -> "Likiaksa, Stephanie"
       name = name.sub(/,\s*$/, "") if name.end_with?(",")
-      
+
       # Fix double commas: "Likiaksa, Stephanie, Iuver" -> "Likiaksa, Stephanie Iuver"
       # Actually this might be "Last, First Middle" which is fine
-      
+
       # Revel payroll rows are in "Last, First" format.
       # If comma is missing due to extraction noise, do NOT invert tokens here;
       # leave as-is and let NameMatcher fuzzy logic resolve safely.
-      
+
       name
     end
 
@@ -231,6 +275,7 @@ module PayrollImport
         employee_name: values[:employee],
         regular_hours: values[:regular_hours] || 0.0,
         overtime_hours: values[:overtime_hours] || 0.0,
+        doubletime_hours: values[:doubletime_hours] || 0.0,
         regular_pay: values[:regular_pay] || 0.0,
         overtime_pay: values[:overtime_pay] || 0.0,
         total_hours: values[:total_hours] || 0.0,

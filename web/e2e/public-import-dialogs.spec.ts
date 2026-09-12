@@ -118,6 +118,16 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
   const dialogName = 'Import Payroll Data';
   const dialog = page.getByRole('dialog', { name: dialogName });
   await expect(dialog).toBeVisible();
+  await page.route('**/admin/pay_periods/701/supplemental_template', async (route): Promise<void> => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      body: Buffer.from('PK-generated-workbook'),
+    });
+  });
+  const templateDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download workbook' }).click();
+  expect((await templateDownload).suggestedFilename()).toBe('Cornerstone-payroll-changes.xlsx');
   const pdfInput = dialog.locator('input[type="file"]').first();
   await pdfInput.setInputFiles({ name: 'hours.pdf', mimeType: 'application/pdf', buffer: Buffer.from('fixture') });
 
@@ -143,6 +153,7 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
       contentType: 'application/json',
       body: JSON.stringify({
         import_id: 904,
+        source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', verified_source_count: 1, source_count: 1 },
         preview: {
           matched: [{
             employee_id: 801,
@@ -173,6 +184,7 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
     });
   });
   await dialog.getByRole('button', { name: 'Preview Import' }).click();
+  await expect(dialog.getByText('1 source retained and verified')).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeEnabled();
 
   const applyFailure = await holdAndRejectPost(page, '**/admin/pay_periods/701/apply_import', 'Import apply failed');
@@ -267,6 +279,7 @@ test('MoSa import routes missing period pay to the worksheet and requires review
   await page.route('**/admin/pay_periods/701/preview_import', async (route): Promise<void> => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       import_id: 904,
+      source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', verified_source_count: 2, source_count: 2 },
       preview: {
         matched: [{ employee_id: 801, employee_name: 'Variable Salary', employment_type: 'salary', pay_rate: 200000,
           confidence: 1, matched_name: 'Variable Salary', regular_hours: 0, overtime_hours: 0, total_hours: 0,

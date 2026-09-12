@@ -4,6 +4,7 @@ class PayrollImportRecord < ApplicationRecord
   self.table_name = "payroll_imports"
 
   belongs_to :pay_period
+  belongs_to :payroll_intake_session, optional: true
 
   validates :status, inclusion: { in: %w[pending previewed applied partially_applied failed] }
 

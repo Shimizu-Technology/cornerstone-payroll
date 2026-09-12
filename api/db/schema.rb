@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1869,6 +1869,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_010000) do
     t.string "excel_filename"
     t.jsonb "matched_data", default: []
     t.bigint "pay_period_id", null: false
+    t.bigint "payroll_intake_session_id"
     t.string "pdf_filename"
     t.jsonb "raw_data", default: {}
     t.string "status", default: "pending", null: false
@@ -1877,6 +1878,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_010000) do
     t.jsonb "validation_errors", default: []
     t.index ["pay_period_id", "status"], name: "index_payroll_imports_on_pay_period_id_and_status"
     t.index ["pay_period_id"], name: "index_payroll_imports_on_pay_period_id"
+    t.index ["payroll_intake_session_id"], name: "idx_payroll_imports_intake_session", unique: true
   end
 
   create_table "payroll_intake_documents", force: :cascade do |t|
@@ -3041,6 +3043,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_010000) do
   add_foreign_key "payroll_go_live_reviews", "users", column: "setup_applied_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "technical_signed_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
+  add_foreign_key "payroll_imports", "payroll_intake_sessions", on_delete: :restrict
   add_foreign_key "payroll_intake_documents", "payroll_intake_sessions"
   add_foreign_key "payroll_intake_rows", "employees"
   add_foreign_key "payroll_intake_rows", "payroll_intake_sessions"

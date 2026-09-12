@@ -1087,6 +1087,8 @@ export const payPeriodsApi = {
     data: { import_id: number; excluded_employee_ids?: number[]; acknowledge_low_confidence_matches?: boolean; force_overwrite?: boolean },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
+  downloadSupplementalTemplate: (id: number): Promise<Blob> =>
+    api.getBlob(`/admin/pay_periods/${id}/supplemental_template`),
 
   // CPR-71: Payroll correction workflow
   void: (id: number, data: { reason: string }) =>
@@ -1503,10 +1505,20 @@ export interface ImportPreviewRow {
   installment_new_amount?: number;
   installment_payment?: number;
   installment_estimated_ending_balance?: number;
+  tips_already_paid?: boolean | null;
 }
 
 export interface ImportPreviewResponse {
   import_id: number;
+  duplicate?: boolean;
+  source_package: {
+    id: number;
+    package_id: string;
+    package_revision: number;
+    package_schema_version: string;
+    verified_source_count: number;
+    source_count: number;
+  };
   preview: {
     matched: ImportPreviewRow[];
     unmatched_pdf_names: string[];
@@ -1528,6 +1540,7 @@ export interface ImportPreviewResponse {
     matched_count: number;
     can_apply: boolean;
     tips_paid_out_from_tips: boolean;
+    source_warnings?: { code: string; message: string; severity: string }[];
   };
 }
 
