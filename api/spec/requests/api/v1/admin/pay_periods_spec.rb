@@ -363,6 +363,58 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]["includes_base_salary"]).to be(true)
     end
 
+    it "creates only a parallel comparison when the successor cutover is not approved" do
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: Date.current,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.current,
+          end_date: Date.current + 14.days,
+          pay_date: Date.current + 17.days
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("pay_period", "parallel_run")).to be(true)
+      expect(PayPeriod.order(:id).last).to be_parallel_run
+    end
+
+    it "does not let a comparison run change the live check sequence" do
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: Date.current,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+      company.update!(next_check_number: 4100)
+
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.current,
+          end_date: Date.current + 14.days,
+          pay_date: Date.current + 17.days,
+          starting_check_number: "9900"
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to eq("Starting check number is not used for comparison runs")
+      expect(company.reload.next_check_number).to eq(4100)
+    end
+
     it "defaults a non-regular run to no base salary" do
       post "/api/v1/admin/pay_periods", params: {
         pay_period: {

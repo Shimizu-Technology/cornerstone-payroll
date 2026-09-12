@@ -21,6 +21,7 @@ class PayPeriodLifecycleService
         raise InvalidTransitionError, "Can only approve a calculated pay period"
       end
 
+      validate_go_live_gate!
       validate_variable_period_pay!
       pay_period.update!(
         status: "approved",
@@ -63,6 +64,7 @@ class PayPeriodLifecycleService
         raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
       end
 
+      validate_go_live_gate!
       validate_variable_period_pay!
       pay_period.update!(
         status: "committed",
@@ -114,6 +116,13 @@ class PayPeriodLifecycleService
 
     names = missing.map(&:employee_full_name).join(", ")
     raise InvalidTransitionError, "Enter Pay this period and recalculate payroll for #{names} before approval or commit. Recurring bonuses do not replace period pay."
+  end
+
+  def validate_go_live_gate!
+    PayrollGoLiveGate.new(company: pay_period.company, pay_date: pay_period.pay_date)
+      .require_live_payroll!(parallel_run: pay_period.parallel_run?)
+  rescue PayrollGoLiveGate::BlockedError => e
+    raise InvalidTransitionError, e.message
   end
 
   def record_aire_processing_acknowledgements
