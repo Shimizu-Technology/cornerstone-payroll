@@ -228,6 +228,7 @@ export function PayPeriods() {
     notes: '',
     run_purpose: 'regular' as PayRunPurpose,
     includes_base_salary: true,
+    includes_recurring_items: true,
   });
   const [editFormData, setEditFormData] = useState({
     start_date: '',
@@ -236,6 +237,7 @@ export function PayPeriods() {
     notes: '',
     run_purpose: 'regular' as PayRunPurpose,
     includes_base_salary: true,
+    includes_recurring_items: true,
   });
 
   const currentMutationGuard = (): (() => boolean) => {
@@ -364,7 +366,7 @@ export function PayPeriods() {
       if (!isCurrentMutation()) return;
       setIsCreateOpen(false);
       setCurrentNextCheckNumber(null);
-      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
+      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
@@ -401,6 +403,7 @@ export function PayPeriods() {
       notes: period.notes || '',
       run_purpose: period.run_purpose,
       includes_base_salary: period.includes_base_salary,
+      includes_recurring_items: period.includes_recurring_items,
     });
     setIsEditOpen(true);
   };
@@ -640,7 +643,7 @@ export function PayPeriods() {
 
   const openCreateModal = () => {
     createDatesEditedRef.current = false;
-    setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
+    setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
     void setDefaultDates();
     setCreateError(null);
     setError(null);
@@ -1081,7 +1084,7 @@ export function PayPeriods() {
                       value={formData.run_purpose}
                       onChange={(event) => {
                         const runPurpose = event.target.value as PayRunPurpose;
-                        setFormData({ ...formData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular' });
+                        setFormData({ ...formData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular', includes_recurring_items: runPurpose === 'regular' });
                       }}
                     >
                       {Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -1097,9 +1100,20 @@ export function PayPeriods() {
                     />
                     <span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Regular payroll includes it by default. Non-regular runs do not.</span></span>
                   </label>
+                  <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600"
+                      checked={formData.includes_recurring_items}
+                      onChange={(event) => setFormData({ ...formData, includes_recurring_items: event.target.checked })}
+                    />
+                    <span><span className="block text-sm font-semibold text-neutral-900">Include recurring employee setup</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Adds each employee’s recurring earnings, deductions, loans, retirement, employer contributions, and extra withholding. Special runs leave these out unless you choose this.</span></span>
+                  </label>
                 </div>
                 {formData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs exclude ordinary salary and automatic flat-fee contractor pay.</p>}
                 {formData.run_purpose !== 'regular' && formData.run_purpose !== 'off_cycle_tips' && formData.includes_base_salary && <p className="mt-3 text-xs font-medium text-warning-800">You deliberately enabled base salary for a non-regular run. Verify this is intended before calculating payroll.</p>}
+                {formData.run_purpose !== 'regular' && formData.includes_recurring_items && <p className="mt-3 text-xs font-medium text-warning-800">You deliberately enabled recurring employee setup for a special run. Review every recurring item before calculating payroll.</p>}
+                {formData.run_purpose === 'regular' && !formData.includes_recurring_items && <p className="mt-3 text-xs font-medium text-warning-800">Recurring employee setup is excluded from this regular payroll. Confirm that every recurring deduction and contribution should be skipped.</p>}
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -1239,8 +1253,9 @@ export function PayPeriods() {
               {editingPayPeriod?.status === 'draft' && (
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4">
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2"><Label htmlFor="edit_run_purpose">Run purpose</Label><Select id="edit_run_purpose" value={editFormData.run_purpose} onChange={(event) => { const runPurpose = event.target.value as PayRunPurpose; setEditFormData({ ...editFormData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular' }); }}>{Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div>
+                    <div className="space-y-2"><Label htmlFor="edit_run_purpose">Run purpose</Label><Select id="edit_run_purpose" value={editFormData.run_purpose} onChange={(event) => { const runPurpose = event.target.value as PayRunPurpose; setEditFormData({ ...editFormData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular', includes_recurring_items: runPurpose === 'regular' }); }}>{Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div>
                     <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3"><input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600" checked={editFormData.includes_base_salary} disabled={editFormData.run_purpose === 'off_cycle_tips'} onChange={(event) => setEditFormData({ ...editFormData, includes_base_salary: event.target.checked })} /><span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Locked after payroll is calculated.</span></span></label>
+                    <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3 sm:col-span-2"><input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600" checked={editFormData.includes_recurring_items} onChange={(event) => setEditFormData({ ...editFormData, includes_recurring_items: event.target.checked })} /><span><span className="block text-sm font-semibold text-neutral-900">Include recurring employee setup</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Includes recurring earnings, deductions, loans, retirement, employer contributions, and extra withholding. Locked after payroll is calculated.</span></span></label>
                   </div>
                   {editFormData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs exclude ordinary salary and automatic flat-fee contractor pay.</p>}
                 </div>

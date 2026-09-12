@@ -1465,6 +1465,7 @@ export function PayPeriodDetail({
             {runPurposeLabels[payPeriod.run_purpose] || payPeriod.run_purpose}
           </Badge>
           {!payPeriod.includes_base_salary && <Badge variant="info">Base salary excluded</Badge>}
+          {!payPeriod.includes_recurring_items && <Badge variant="info">Recurring setup excluded</Badge>}
           {isCommitted && payPeriod.committed_at && (
             <span className="text-sm text-gray-500">
               Processed {formatGuamDateTime(payPeriod.committed_at)}

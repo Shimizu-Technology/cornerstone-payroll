@@ -47,6 +47,7 @@ module Api
             status: pay_period.status,
             run_purpose: pay_period.run_purpose,
             includes_base_salary: pay_period.includes_base_salary,
+            includes_recurring_items: pay_period.includes_recurring_items,
             notes: pay_period.notes,
             period_description: pay_period.period_description,
             employee_count: items.size,

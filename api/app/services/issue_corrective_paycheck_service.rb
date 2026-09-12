@@ -535,6 +535,7 @@ class IssueCorrectivePaycheckService
       cycle:                   "supplemental",
       run_purpose:             "correction",
       includes_base_salary:    false,
+      includes_recurring_items: false,
       run_purpose_source:      "system_correction",
       corrects_pay_period_id:  original.id,
       notes:                   build_notes(original)

@@ -167,6 +167,7 @@ class PayPeriodCorrectionService
         correction_status:  "correction",
         run_purpose:        "correction",
         includes_base_salary: locked_source.includes_base_salary,
+        includes_recurring_items: locked_source.includes_recurring_items,
         run_purpose_source: "system_correction",
         source_pay_period_id: locked_source.id,
         notes:              build_correction_notes(locked_source, reason, notes)

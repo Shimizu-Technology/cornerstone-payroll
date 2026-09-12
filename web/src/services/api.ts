@@ -1040,9 +1040,9 @@ export const payPeriodsApi = {
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`
     ),
-  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean }) =>
+  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean; includes_recurring_items?: boolean }) =>
     api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
-  update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean }) =>
+  update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean; includes_recurring_items?: boolean }) =>
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
@@ -4418,6 +4418,7 @@ export interface PayrollHistoryRecord {
   status: 'draft' | 'calculated' | 'approved' | 'committed' | 'locked';
   run_purpose: import('@/types').PayRunPurpose;
   includes_base_salary: boolean;
+  includes_recurring_items: boolean;
   correction_status?: import('@/types').CorrectionStatus | null;
   parallel_run?: boolean;
   notes?: string | null;

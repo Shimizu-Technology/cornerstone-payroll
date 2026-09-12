@@ -97,11 +97,19 @@ RSpec.describe "Client payroll setting interactions", type: :request do
     expect(EmployeeYtdTotal.where(employee: owners, year: 2026).sum(:retirement)).to eq(4200.00.to_d)
   end
 
-  # This characterizes a remaining setup limitation, not a recommended off-cycle
-  # policy: includes_base_salary does not control recurring additions/deductions.
-  it "exposes recurring contributions that still require review on a no-base off-cycle run" do
-    period.update!(run_purpose: "bonus", includes_base_salary: false)
+  it "excludes recurring employee setup by default on a no-base special run" do
+    period.update!(run_purpose: "bonus", includes_base_salary: false, includes_recurring_items: false)
     items = run!(period, pay: 0, bonuses: owners.to_h { |owner| [ owner.id.to_s, 7000 ] })
+
+    expect(items.map(&:gross_pay)).to eq([ 7000.00.to_d, 7000.00.to_d ])
+    expect(items.map { |item| PayrollRetirementTotals.for_item(item)[:retirement] }).to eq([ 0.to_d, 0.to_d ])
+    expect(items.map(&:employer_retirement_match)).to eq([ 0.to_d, 0.to_d ])
+  end
+
+  it "applies recurring employee setup only when the operator explicitly includes it" do
+    period.update!(run_purpose: "bonus", includes_base_salary: false, includes_recurring_items: true)
+    items = run!(period, pay: 0, bonuses: owners.to_h { |owner| [ owner.id.to_s, 7000 ] })
+
     expect(items.map(&:gross_pay)).to eq([ 7900.00.to_d, 8200.00.to_d ])
     expect(items.map { |item| PayrollRetirementTotals.for_item(item)[:retirement] }).to eq([ 900.00.to_d, 1200.00.to_d ])
   end
