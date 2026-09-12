@@ -363,6 +363,58 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]["includes_base_salary"]).to be(true)
     end
 
+    it "creates only a parallel comparison when the successor cutover is not approved" do
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: Date.current,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.current,
+          end_date: Date.current + 14.days,
+          pay_date: Date.current + 17.days
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("pay_period", "parallel_run")).to be(true)
+      expect(PayPeriod.order(:id).last).to be_parallel_run
+    end
+
+    it "does not let a comparison run change the live check sequence" do
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: Date.current,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+      company.update!(next_check_number: 4100)
+
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.current,
+          end_date: Date.current + 14.days,
+          pay_date: Date.current + 17.days,
+          starting_check_number: "9900"
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to eq("Starting check number is not used for comparison runs")
+      expect(company.reload.next_check_number).to eq(4100)
+    end
+
     it "defaults a non-regular run to no base salary" do
       post "/api/v1/admin/pay_periods", params: {
         pay_period: {
@@ -932,6 +984,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["results"]["success"].length).to eq(1)
       expect(json["pay_period"]["status"]).to eq("calculated")
       expect(pay_period.reload.payroll_items.count).to eq(1)
+    end
+
+    it "rejects a post-cutover live calculation without changing payroll state" do
+      existing_item = pay_period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: employee.employment_type,
+        pay_rate: employee.pay_rate,
+        hours_worked: 7,
+        gross_pay: 105,
+        net_pay: 90
+      )
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: pay_period.pay_date,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+      original_attributes = existing_item.attributes
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 4 } }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Live payroll is blocked")
+      expect(pay_period.reload.status).to eq("draft")
+      expect(pay_period.payroll_items.pluck(:id)).to eq([ existing_item.id ])
+      expect(existing_item.reload.attributes).to eq(original_attributes)
     end
 
     it "clears stale unapproval lifecycle metadata when payroll is recalculated" do

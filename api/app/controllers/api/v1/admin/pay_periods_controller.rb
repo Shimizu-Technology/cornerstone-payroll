@@ -88,6 +88,11 @@ module Api
           attrs["run_purpose"] ||= "regular"
           attrs["run_purpose_source"] = "operator_selected" if intent_was_submitted
           attrs["includes_base_salary"] = attrs["run_purpose"] == "regular" unless attrs.key?("includes_base_salary")
+          gate = PayrollGoLiveGate.new(company: current_company, pay_date: attrs["pay_date"])
+          if gate.comparison_only? && starting_check_number.present?
+            raise ArgumentError, "Starting check number is not used for comparison runs"
+          end
+          attrs["parallel_run"] = true if gate.comparison_only?
           @pay_period = PayPeriod.new(attrs)
           @pay_period.company_id = current_company_id
           @pay_period.status = "draft"
@@ -265,6 +270,9 @@ module Api
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end
 
+          PayrollGoLiveGate.new(company: @pay_period.company, pay_date: @pay_period.pay_date)
+            .require_live_payroll!(parallel_run: @pay_period.parallel_run?)
+
           # Determine which employees to calculate:
           # 1. If explicit employee_ids are passed, use those
           # 2. If imported payroll items exist, use imported employees + salary + contractors
@@ -439,6 +447,8 @@ module Api
             pay_period: pay_period_json(@pay_period, include_items: true),
             results: results
           }
+        rescue PayrollGoLiveGate::BlockedError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/pay_periods/:id/comparison
