@@ -23,6 +23,7 @@ class PayrollGoLiveReadiness
     end
     values << "Add an effective W-4 election for every active W-2 employee" if missing_w4_count.positive?
     values << "Verify opening balances for every active recurring loan deduction" if loan_setup_gap_count.positive?
+    values << "Move every legacy recurring earning and adjustment to typed payroll fields" if legacy_recurring_component_count.positive?
     values << "Confirm the successor pay schedule" unless current_schedule&.confirmed?
     values << "Confirm the successor legal workweek" unless current_workweek&.confirmed?
     values << "Record two consecutive passing parallel payrolls" if review.consecutive_pass_count < 2
@@ -40,6 +41,7 @@ class PayrollGoLiveReadiness
       "company_setup_gaps" => PayrollCompanySetupReview.new(review).missing_required_fields.count,
       "employees_missing_w4" => missing_w4_count,
       "loan_setup_gaps" => loan_setup_gap_count,
+      "legacy_recurring_components" => legacy_recurring_component_count,
       "pay_schedule_confirmed" => current_schedule&.confirmed? || false,
       "workweek_confirmed" => current_workweek&.confirmed? || false,
       "consecutive_parallel_passes" => review.consecutive_pass_count,
@@ -82,6 +84,13 @@ class PayrollGoLiveReadiness
         .where(employees: { company_id: company.id }, payroll_field_definitions: { category: "loan", active: true })
         .count { |entry| entry.employee_loan.blank? || !entry.employee_loan.active? }
       deduction_gaps + field_gaps
+    end
+  end
+
+  def legacy_recurring_component_count
+    @legacy_recurring_component_count ||= company.employees.active.sum do |employee|
+      PayrollItem.normalize_custom_earning_entries(employee.default_custom_earnings).size +
+        Employee.normalize_payroll_adjustments(employee.default_payroll_adjustments).count { |entry| entry["active"] != false }
     end
   end
 end

@@ -67,9 +67,18 @@ class ClientEmployeeUpdateService
   def initialize(employee:, attrs:, requested_by:, company:)
     @employee = employee
     @attrs = normalize_attrs(attrs.deep_symbolize_keys)
+    guard_legacy_recurring_components!
     @requested_by = requested_by
     @company = company
   end
+
+  def guard_legacy_recurring_components!
+    options = {}
+    options[:payroll_adjustments] = @attrs[:default_payroll_adjustments] if @attrs.key?(:default_payroll_adjustments)
+    options[:custom_earnings] = @attrs[:default_custom_earnings] if @attrs.key?(:default_custom_earnings)
+    LegacyRecurringComponentGuard.validate!(employee: @employee, **options)
+  end
+  private :guard_legacy_recurring_components!
 
   def create!
     direct_attrs = attrs.slice(*DIRECT_FIELDS)

@@ -53,6 +53,138 @@ RSpec.describe PayrollImport::ImportService do
       )
     end
 
+    it "applies separate owner period pay and typed one-time components with source evidence" do
+      employee = create(
+        :employee,
+        company: company,
+        first_name: "Mo",
+        last_name: "Owner",
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 0
+      )
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 0,
+            overtime_hours: 0,
+            total_tips: 0,
+            period_pay: 9_000,
+            period_pay_evidence: {
+              scope: "THIS EMPLOYEE ONLY",
+              effective_pay_date: pay_period.pay_date.iso8601,
+              source: "Approved owner instruction"
+            },
+            payroll_components: [
+              {
+                component_type: "REIMBURSEMENT",
+                label: "Travel reimbursement",
+                amount: 150,
+                kind: "addition",
+                tax_treatment: "non_taxable_addition",
+                category: "reimbursement",
+                effective_pay_date: pay_period.pay_date.iso8601,
+                source: "Approved receipt"
+              },
+              {
+                component_type: "POST-TAX DEDUCTION",
+                label: "Uniform repayment",
+                amount: 20,
+                kind: "deduction",
+                tax_treatment: "post_tax_deduction",
+                category: "other",
+                payee_name: "MoSa",
+                effective_pay_date: pay_period.pay_date.iso8601,
+                source: "Signed instruction"
+              }
+            ]
+          }
+        ]
+      )
+
+      expect(result[:errors]).to be_empty
+      payroll_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(payroll_item.salary_override).to eq(9_000.to_d)
+      expect(payroll_item.custom_columns_data.fetch("period_pay_evidence")).to include(
+        "scope" => "THIS EMPLOYEE ONLY",
+        "amount" => "9000.0",
+        "source" => "Approved owner instruction",
+        "employee_id" => employee.id
+      )
+      expect(payroll_item.payroll_item_field_entries).to contain_exactly(
+        have_attributes(label: "Travel reimbursement", amount: 150.to_d, tax_treatment: "non_taxable_addition", source: "import"),
+        have_attributes(label: "Uniform repayment", amount: 20.to_d, tax_treatment: "post_tax_deduction", source: "import")
+      )
+      expect(payroll_item.payroll_item_field_entries.find_by!(label: "Uniform repayment").metadata).to include("payee_name" => "MoSa", "source" => "Signed instruction")
+    end
+
+    it "rejects workbook period pay for a fixed-pay employee" do
+      employee = create(:employee, company: company, employment_type: "salary", salary_type: "per_period", pay_rate: 1_000)
+
+      result = service.apply!(
+        matched: [ { employee_id: employee.id, period_pay: 9_000, total_tips: 0 } ]
+      )
+
+      expect(result[:success]).to be_empty
+      expect(result[:errors].first[:error]).to include("only allowed for variable-pay salary employees")
+      expect(pay_period.payroll_items.where(employee: employee)).to be_empty
+    end
+
+    it "does not reuse period pay evidence from a replaced change workbook" do
+      employee = create(
+        :employee,
+        company: company,
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 0
+      )
+      existing = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "salary",
+        pay_rate: 0,
+        salary_override: 9_000,
+        import_source: "mosa_revel",
+        custom_columns_data: {
+          "period_pay_evidence" => {
+            "amount" => "9000.0",
+            "source_type" => "mosa_change_workbook"
+          }
+        }
+      )
+
+      expect {
+        service.apply!(matched: [ { employee_id: employee.id, regular_hours: 0, overtime_hours: 0, total_tips: 0 } ])
+      }.to raise_error(ArgumentError, /Enter Pay this period/)
+      expect(existing.reload.salary_override).to eq(9_000.to_d)
+    end
+
+    it "replaces imported one-time components authoritatively on re-import" do
+      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20)
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+      component = {
+        component_type: "BONUS",
+        label: "Launch bonus",
+        amount: 100,
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        effective_pay_date: pay_period.pay_date.iso8601,
+        source: "CEO approval"
+      }
+
+      first = service.apply!(matched: [ { employee_id: employee.id, total_tips: 0, payroll_components: [ component ] } ])
+      second = service.apply!(matched: [ { employee_id: employee.id, total_tips: 0, payroll_components: [] } ])
+
+      expect(first[:errors]).to be_empty
+      expect(second[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).payroll_item_field_entries.where(source: "import")).to be_empty
+    end
+
     it "can import Excel tips as already-paid tip offsets for daily tip clients" do
       employee = create(
         :employee,
@@ -209,6 +341,33 @@ RSpec.describe PayrollImport::ImportService do
 
       expect(result[:can_apply]).to be(false)
       expect(result[:matched].first[:loan_reconciliation_errors]).to include(/Set up the named recurring deduction/)
+    end
+
+    it "uses a separate workbook amount as the variable employee's period pay" do
+      employee = create(
+        :employee,
+        company: company,
+        first_name: "Sara",
+        last_name: "Owner",
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 0
+      )
+
+      result = service.preview(
+        pdf_records: [ { employee_name: "Owner, Sara", regular_hours: 0 } ],
+        excel_records: [ { employee_id: employee.id, period_pay: 8_500, period_pay_evidence: { source: "Owner instruction" } } ]
+      )
+
+      expect(result[:can_apply]).to be(true)
+      expect(result[:matched]).to contain_exactly(include(
+        employee_id: employee.id,
+        period_pay: 8_500,
+        period_pay_evidence: { source: "Owner instruction" },
+        current_period_pay: "8500.0",
+        period_pay_source: "change_workbook",
+        period_pay_missing: false
+      ))
     end
 
     it "keeps a generated one-payroll deduction available when no named loan is due" do

@@ -298,6 +298,13 @@ class PayrollItem < ApplicationRecord
     self.custom_columns_data = data
   end
 
+  def clear_imported_period_pay_evidence!
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data.delete("period_pay_evidence")
+    data.delete(:period_pay_evidence)
+    self.custom_columns_data = data
+  end
+
   def sync_default_custom_earnings!(source_employee = employee)
     return if custom_earnings_overridden?
     return if pay_period && !pay_period.draft? && !pay_period.calculated?

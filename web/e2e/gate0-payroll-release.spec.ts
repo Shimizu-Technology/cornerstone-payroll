@@ -2202,11 +2202,20 @@ test('calculates two variable-pay owners with distinct recurring retirement fund
         filing_status: 'single', allowances: 0, retirement_rate: 0, employer_retirement_match_rate: 0.04,
         hire_date: '2026-01-01', w4_effective_on: '2026-01-01',
         address_line1: '100 Synthetic Avenue', city: 'Hagatna', state: 'GU', zip: '96910',
-        default_payroll_adjustments: [{ label: 'Recurring retirement-funding bonus', amount, treatment: 'taxable_addition', active: true }],
       } } });
       expect(employeeResponse.ok(), await employeeResponse.text()).toBeTruthy();
       const employee = (await employeeResponse.json()).data;
       employees.push(employee);
+      const additionFieldResponse = await api.post('admin/payroll_fields', { data: { payroll_field: {
+        name: `Owner ${index + 1} recurring retirement-funding addition`, kind: 'addition', tax_treatment: 'taxable_addition', category: 'other',
+        amount_type: 'fixed', default_amount: amount, show_in_payroll_grid: true, active: true,
+      } } });
+      expect(additionFieldResponse.ok(), await additionFieldResponse.text()).toBeTruthy();
+      const additionField = (await additionFieldResponse.json()).payroll_field;
+      const additionAssignment = await api.post(`admin/employees/${employee.id}/payroll_fields`, { data: {
+        employee_payroll_field: { payroll_field_definition_id: additionField.id, amount, active: true },
+      } });
+      expect(additionAssignment.ok(), await additionAssignment.text()).toBeTruthy();
       const fieldResponse = await api.post('admin/payroll_fields', { data: { payroll_field: {
         name: `Owner ${index + 1} fixed 401(k)`, kind: 'deduction', tax_treatment: 'pre_tax_deduction', category: 'retirement',
         reporting_group: '401k_pre_tax', amount_type: 'fixed', default_amount: amount, show_in_payroll_grid: true, active: true,

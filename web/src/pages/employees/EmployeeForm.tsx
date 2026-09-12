@@ -80,6 +80,12 @@ interface PayrollAdjustmentFormRow {
   active: boolean;
 }
 
+interface LegacyCustomEarningFormRow {
+  temp_id: string;
+  label: string;
+  amount: number;
+}
+
 interface EmployeePayrollFieldFormRow {
   temp_id: string;
   id?: number;
@@ -233,6 +239,7 @@ export function EmployeeForm() {
   const [quickPayrollFieldSaving, setQuickPayrollFieldSaving] = useState(false);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
   const [defaultPayrollAdjustments, setDefaultPayrollAdjustments] = useState<PayrollAdjustmentFormRow[]>([]);
+  const [legacyCustomEarnings, setLegacyCustomEarnings] = useState<LegacyCustomEarningFormRow[]>([]);
   const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
     additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
     w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
@@ -379,6 +386,11 @@ export function EmployeeForm() {
         treatment: adjustment.treatment,
         notes: adjustment.notes || '',
         active: adjustment.active !== false,
+      })));
+      setLegacyCustomEarnings((employee.default_custom_earnings || []).map((earning) => ({
+        temp_id: crypto.randomUUID(),
+        label: earning.label,
+        amount: toNumberOrZero(earning.amount),
       })));
       
       setEmployeeStatus(employee.status || 'active');
@@ -579,21 +591,12 @@ export function EmployeeForm() {
     replaceWageRates(wageRates.filter((rate) => rate.temp_id !== tempId));
   };
 
-  const addDefaultPayrollAdjustment = (treatment: PayrollAdjustmentTreatment) => {
-    setDefaultPayrollAdjustments((prev) => [
-      ...prev,
-      { temp_id: crypto.randomUUID(), label: '', amount: 0, treatment, notes: '', active: true },
-    ]);
-  };
-
-  const updateDefaultPayrollAdjustment = (tempId: string, patch: Partial<PayrollAdjustmentFormRow>) => {
-    setDefaultPayrollAdjustments((prev) => prev.map((adjustment) => (
-      adjustment.temp_id === tempId ? { ...adjustment, ...patch } : adjustment
-    )));
-  };
-
   const removeDefaultPayrollAdjustment = (tempId: string) => {
     setDefaultPayrollAdjustments((prev) => prev.filter((adjustment) => adjustment.temp_id !== tempId));
+  };
+
+  const removeLegacyCustomEarning = (tempId: string) => {
+    setLegacyCustomEarnings((prev) => prev.filter((earning) => earning.temp_id !== tempId));
   };
 
   const availablePayrollFields = payrollFields.filter((field) => !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
@@ -879,6 +882,10 @@ export function EmployeeForm() {
             }))
           : undefined,
         default_payroll_adjustments: normalizeDefaultPayrollAdjustments(),
+        default_custom_earnings: legacyCustomEarnings.map((earning) => ({
+          label: earning.label.trim(),
+          amount: roundCurrencyValue(Number(earning.amount) || 0),
+        })),
         w4_change_reason: w4HasChanged ? w4ChangeReason.trim() : undefined,
         w4_source_reference: form.w4_source_reference?.trim() || null,
       };
@@ -1743,20 +1750,21 @@ export function EmployeeForm() {
           </Card>
         )}
 
-        <Card className="mb-6 border-slate-200 bg-slate-50/60">
+        {(defaultPayrollAdjustments.length > 0 || legacyCustomEarnings.length > 0) && (
+        <Card className="mb-6 border-amber-200 bg-amber-50/40">
           <CardHeader>
-            <CardTitle>Employee-Specific Recurring Adjustments</CardTitle>
+            <CardTitle>Legacy recurring items</CardTitle>
             <CardDescription>
-              Use these for additions, reimbursements, or deductions that should recur across payrolls.
+              These older untyped defaults still calculate, but they can no longer be added or changed. Recreate them under Assigned Payroll Fields, verify the typed result, then remove each legacy row here.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div role="note" className="mb-4 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
               <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
               <div className="text-sm leading-6">
-                <p className="font-semibold">These are employee defaults, not a one-time check entry.</p>
+                <p className="font-semibold">Move these to typed payroll fields before cutover.</p>
                 <p className="text-amber-900">
-                  Saving does not recalculate payroll by itself. Rerun an open draft or calculated payroll to refresh its defaults. A manually adjusted payroll item keeps its period-specific values, and approved or committed payrolls do not change.
+                  Typed fields make the tax treatment, category, payee, reporting group, and payday range explicit. Existing legacy rows are read-only; the remove button is available after the replacement has been verified.
                 </p>
               </div>
             </div>
@@ -1775,16 +1783,7 @@ export function EmployeeForm() {
                       Use this side when money should be added to the employee's check.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('taxable_addition')}>
-                      <Plus className="mr-1 h-4 w-4" />
-                      Taxable
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('non_taxable_addition')}>
-                      <Plus className="mr-1 h-4 w-4" />
-                      Non-taxable
-                    </Button>
-                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>Manage typed fields</Button>
                 </div>
                 <div className="mb-4 grid gap-3 md:grid-cols-2">
                   {additionAdjustmentOptions.map((option) => (
@@ -1796,6 +1795,28 @@ export function EmployeeForm() {
                   ))}
                 </div>
                 <div className="space-y-3">
+                  {legacyCustomEarnings.map((earning) => (
+                    <div key={earning.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+                      <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
+                          <Input value={earning.label} disabled />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
+                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(earning.amount)}</div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Legacy type</label>
+                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">Taxable earning</div>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${earning.label}`} onClick={() => removeLegacyCustomEarning(earning.temp_id)}>
+                          <X className="h-4 w-4" aria-hidden="true" />
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                   {defaultPayrollAdjustments.filter((adjustment) => adjustment.treatment.endsWith('_addition')).map((adjustment) => {
                     const treatment = adjustmentTreatmentCopy(adjustment.treatment);
                     return (
@@ -1803,31 +1824,32 @@ export function EmployeeForm() {
                         <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                            <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Bonus, stipend, reimbursement" />
+                            <Input value={adjustment.label} disabled />
                           </div>
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
+                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
                           </div>
                           <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Addition type</label>
-                            <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
+                            <Select value={adjustment.treatment} disabled>
                               {additionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="justify-self-start md:justify-self-end md:self-end" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
-                            <X className="h-4 w-4" />
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                            <X className="h-4 w-4" aria-hidden="true" />
+                            Remove
                           </Button>
                         </div>
                         <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
                         <div className="mt-3">
                           <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
-                          <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
+                          <Input value={adjustment.notes} disabled />
                         </div>
                       </div>
                     );
                   })}
-                  {defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_addition')) && (
+                  {legacyCustomEarnings.length === 0 && defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_addition')) && (
                     <div className="rounded-xl border border-dashed border-emerald-200 bg-white/70 px-4 py-6 text-sm text-emerald-800">No recurring additions set.</div>
                   )}
                 </div>
@@ -1840,16 +1862,6 @@ export function EmployeeForm() {
                     <p className="mt-1 text-sm leading-6 text-rose-800">
                       Use this side only when money should be subtracted from the employee's check.
                     </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('post_tax_deduction')}>
-                      <Plus className="mr-1 h-4 w-4" />
-                      After tax
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('pre_tax_deduction')}>
-                      <Plus className="mr-1 h-4 w-4" />
-                      Before tax
-                    </Button>
                   </div>
                 </div>
                 <div className="mb-4 grid gap-3 md:grid-cols-2">
@@ -1869,26 +1881,27 @@ export function EmployeeForm() {
                         <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                            <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Loan, rent, cash tips, garnishment" />
+                            <Input value={adjustment.label} disabled />
                           </div>
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
+                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
                           </div>
                           <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Deduction type</label>
-                            <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
+                            <Select value={adjustment.treatment} disabled>
                               {deductionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="justify-self-start md:justify-self-end md:self-end" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
-                            <X className="h-4 w-4" />
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                            <X className="h-4 w-4" aria-hidden="true" />
+                            Remove
                           </Button>
                         </div>
                         <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
                         <div className="mt-3">
                           <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
-                          <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
+                          <Input value={adjustment.notes} disabled />
                         </div>
                       </div>
                     );
@@ -1901,6 +1914,7 @@ export function EmployeeForm() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Contractor Information — only shown for 1099 contractors */}
         {form.employment_type === 'contractor' && (

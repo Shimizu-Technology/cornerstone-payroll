@@ -351,7 +351,11 @@ module Api
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
                 override_val = params[:salary_overrides][employee_id.to_s].to_f
-                payroll_item.salary_override = override_val > 0 ? override_val : nil
+                next_override = override_val > 0 ? override_val : nil
+                if payroll_item.salary_override.to_d != next_override.to_d
+                  payroll_item.clear_imported_period_pay_evidence!
+                end
+                payroll_item.salary_override = next_override
               end
 
               # An omitted bonus preserves this paycheck; explicit zero clears it.
@@ -1138,6 +1142,7 @@ module Api
             contractor_pay_type: item.employee&.contractor_pay_type,
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
+            period_pay_evidence: item.custom_columns_data.to_h["period_pay_evidence"],
             non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
             scheduled_hours: item.scheduled_hours,
@@ -1241,7 +1246,8 @@ module Api
             employee_paid: entry.employee_paid,
             employer_paid: entry.employer_paid,
             active: entry.active,
-            notes: entry.notes
+            notes: entry.notes,
+            metadata: entry.metadata
           }
         end
 
