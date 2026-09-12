@@ -1036,6 +1036,14 @@ export const payPeriodsApi = {
     api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
   comparison: (id: number) =>
     api.get<PayPeriodComparisonResponse>(`/admin/pay_periods/${id}/comparison`),
+  clientReview: (id: number) =>
+    api.get<{
+      payroll_review: import('@/types').PayrollReviewPackage | null;
+      client_approval_required: boolean;
+      authorized_client_approvers: Array<{ id: number; name: string; email: string }>;
+    }>(`/admin/pay_periods/${id}/client_review`),
+  recordClientApproval: (id: number, data: { client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
+    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/admin/pay_periods/${id}/record_client_approval`, data),
   liabilities: (id: number) =>
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`
@@ -1177,6 +1185,8 @@ export const clientPayPeriodsApi = {
     api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
+  approveReview: (id: number, companyId: number, data: { acknowledgement: string; notes?: string }) =>
+    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/approve_review`, data, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
@@ -2887,6 +2897,7 @@ export interface CompanyListItem {
   total_employees: number;
   pay_frequency: string;
   historical_payroll_enabled: boolean;
+  client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
@@ -2955,6 +2966,7 @@ export interface CompanyFormData {
   next_check_number?: number;
   simple_payroll_register_enabled?: boolean;
   historical_payroll_enabled?: boolean;
+  client_payroll_approval_required?: boolean;
 }
 
 interface CompanyListResponse {
