@@ -151,48 +151,50 @@ module PayrollImport
           employee = employees_by_id[employee_id]
           next unless employee
 
+          payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+
+          # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
+          if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
+            results[:errors] << {
+              employee_id: employee.id,
+              name: employee.full_name,
+              error: "Payroll item already exists (manual/non-import). Pass force_overwrite to replace."
+            }
+            next
+          end
+
           begin
-            payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+            PayrollItem.transaction(requires_new: true) do
+              # Set employment info
+              payroll_item.employment_type = employee.employment_type
+              payroll_item.pay_rate = employee.pay_rate
+              payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
+              apply_period_pay!(payroll_item, employee, row)
 
-            # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
-            if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
-              results[:errors] << {
-                employee_id: employee.id,
-                name: employee.full_name,
-                error: "Payroll item already exists (manual/non-import). Pass force_overwrite to replace."
-              }
-              next
+              # Set hours from PDF
+              payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
+              payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
+
+              # Set tips from Excel — reported_tips is the taxable tip source of truth.
+              # Legacy `tips` is cleared to prevent historical double counting.
+              payroll_item.reported_tips = row[:total_tips].to_f
+              row_tips_paid_out = if row[:tips_already_paid].nil?
+                tips_paid_out_from_tips
+              else
+                row[:tips_already_paid]
+              end
+              payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
+              payroll_item.tips = 0.0  # Reset to avoid double-counting
+              payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
+              payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
+              PayrollBonusInput.import!(payroll_item, row[:bonus])
+              payroll_item.import_source = "mosa_revel"
+              payroll_item.sync_default_payroll_adjustments!(employee)
+              apply_imported_components!(payroll_item, row[:payroll_components])
+
+              # Calculate payroll (taxes, deductions, net pay)
+              payroll_item.calculate!
             end
-
-            # Set employment info
-            payroll_item.employment_type = employee.employment_type
-            payroll_item.pay_rate = employee.pay_rate
-            payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
-            apply_period_pay!(payroll_item, employee, row)
-
-            # Set hours from PDF
-            payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
-            payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
-
-            # Set tips from Excel — reported_tips is the taxable tip source of truth.
-            # Legacy `tips` is cleared to prevent historical double counting.
-            payroll_item.reported_tips = row[:total_tips].to_f
-            row_tips_paid_out = if row[:tips_already_paid].nil?
-              tips_paid_out_from_tips
-            else
-              row[:tips_already_paid]
-            end
-            payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
-            payroll_item.tips = 0.0  # Reset to avoid double-counting
-            payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
-            payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
-            PayrollBonusInput.import!(payroll_item, row[:bonus])
-            payroll_item.import_source = "mosa_revel"
-            payroll_item.sync_default_payroll_adjustments!(employee)
-            apply_imported_components!(payroll_item, row[:payroll_components])
-
-            # Calculate payroll (taxes, deductions, net pay)
-            payroll_item.calculate!
 
             results[:success] << { employee_id: employee.id, name: employee.full_name }
           rescue ActiveRecord::Rollback
@@ -402,7 +404,14 @@ module PayrollImport
 
     def apply_period_pay!(payroll_item, employee, row)
       amount = decimal_or_zero(row[:period_pay])
-      return if amount.zero?
+      if amount.zero?
+        evidence = payroll_item.custom_columns_data.to_h["period_pay_evidence"].to_h
+        if evidence["source_type"] == "mosa_change_workbook"
+          payroll_item.salary_override = nil
+          payroll_item.clear_imported_period_pay_evidence!
+        end
+        return
+      end
       raise ArgumentError, "Pay this employee must be a positive amount." unless amount.positive?
       raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.variable_salary?
 
@@ -425,8 +434,8 @@ module PayrollImport
     end
 
     def apply_imported_components!(payroll_item, components)
-      payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy)
       normalized = Array(components).map { |component| validate_component!(component) }
+      payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy!)
       normalized.each do |component|
         payroll_item.payroll_item_field_entries.build(
           label: component.fetch(:label),

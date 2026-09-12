@@ -25,7 +25,7 @@ RSpec.describe PayrollGoLiveReadiness do
       :employee,
       company: company,
       default_payroll_adjustments: [
-        { "label" => "Legacy reimbursement", "amount" => 25, "treatment" => "non_taxable_addition", "active" => true }
+        { "label" => "Legacy reimbursement", "amount" => BigDecimal("25.00"), "treatment" => "non_taxable_addition", "active" => true }
       ]
     )
 

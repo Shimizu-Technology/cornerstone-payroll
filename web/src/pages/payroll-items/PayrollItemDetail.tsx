@@ -202,19 +202,19 @@ export function PayrollItemDetail(): ReactElement {
         {importedComponents.length > 0 && (
           <Card>
             <CardHeader><CardTitle>Typed one-time items</CardTitle><p className="mt-2 text-sm text-neutral-500">Period-only components retained from the reviewed MoSa change workbook.</p></CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
+            <CardContent className="grid gap-4 md:grid-cols-2">
               {importedComponents.map((entry, index) => (
                 <div key={`${entry.id || entry.label}-${index}`} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-semibold text-neutral-950">{entry.label}</p>
-                      <p className="mt-1 text-xs capitalize text-neutral-500">{entry.tax_treatment.replaceAll('_', ' ')} · {entry.category.replaceAll('_', ' ')}</p>
+                      <p className="mt-2 text-xs capitalize text-neutral-500">{entry.tax_treatment.replaceAll('_', ' ')} · {entry.category.replaceAll('_', ' ')}</p>
                     </div>
                     <p className={entry.kind === 'deduction' ? 'font-bold text-rose-700' : 'font-bold text-emerald-700'}>{formatCurrency(Number(entry.amount || 0))}</p>
                   </div>
-                  <p className="mt-3 text-sm text-neutral-700">Source: {String(entry.metadata?.source || 'Reviewed change workbook')}</p>
-                  {Boolean(entry.metadata?.payee_name) && <p className="mt-1 text-sm text-neutral-700">Payee: {String(entry.metadata?.payee_name)}</p>}
-                  {entry.notes && <p className="mt-1 text-sm text-neutral-500">{entry.notes}</p>}
+                  <p className="mt-4 text-sm text-neutral-700">Source: {String(entry.metadata?.source || 'Reviewed change workbook')}</p>
+                  {Boolean(entry.metadata?.payee_name) && <p className="mt-2 text-sm text-neutral-700">Payee: {String(entry.metadata?.payee_name)}</p>}
+                  {entry.notes && <p className="mt-2 text-sm text-neutral-500">{entry.notes}</p>}
                 </div>
               ))}
             </CardContent>

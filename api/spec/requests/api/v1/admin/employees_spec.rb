@@ -366,6 +366,20 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"]["email"]).to eq("john.doe@example.com")
       end
 
+      it "routes recurring components to typed payroll fields during creation" do
+        params_with_legacy_component = valid_params.deep_dup
+        params_with_legacy_component[:employee][:default_custom_earnings] = [
+          { label: "Chief Stipend", amount: "125.55" }
+        ]
+
+        expect {
+          post "/api/v1/admin/employees", params: params_with_legacy_component
+        }.not_to change(Employee, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "payroll_components", 0)).to include("Assigned Payroll Fields")
+      end
+
       it "encrypts SSN and returns only last 4" do
         post "/api/v1/admin/employees", params: valid_params
 

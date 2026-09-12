@@ -477,6 +477,7 @@ export function EmployeeForm() {
     setDepartments([]);
     setWageRates([defaultHourlyWageRate()]);
     setDefaultPayrollAdjustments([]);
+    setLegacyCustomEarnings([]);
     setW4CurrencyDrafts({
       additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
       w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
@@ -1751,7 +1752,7 @@ export function EmployeeForm() {
         )}
 
         {(defaultPayrollAdjustments.length > 0 || legacyCustomEarnings.length > 0) && (
-        <Card className="mb-6 border-amber-200 bg-amber-50/40">
+        <Card className="mb-4 border-amber-200 bg-amber-50/40">
           <CardHeader>
             <CardTitle>Legacy recurring items</CardTitle>
             <CardDescription>
@@ -1776,7 +1777,7 @@ export function EmployeeForm() {
 
             <div className="grid gap-5 2xl:grid-cols-2">
               <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h3 className="text-base font-semibold text-emerald-950">Recurring additions</h3>
                     <p className="mt-1 text-sm leading-6 text-emerald-800">
@@ -1785,9 +1786,9 @@ export function EmployeeForm() {
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>Manage typed fields</Button>
                 </div>
-                <div className="mb-4 grid gap-3 md:grid-cols-2">
+                <div className="mb-4 grid gap-4 md:grid-cols-2">
                   {additionAdjustmentOptions.map((option) => (
-                    <div key={option.value} className="rounded-xl border border-emerald-100 bg-white p-3 shadow-sm">
+                    <div key={option.value} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
                       <div className="text-sm font-semibold text-slate-900">{option.label}</div>
                       <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
                       {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
@@ -1797,20 +1798,20 @@ export function EmployeeForm() {
                 <div className="space-y-3">
                   {legacyCustomEarnings.map((earning) => (
                     <div key={earning.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-                      <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
+                      <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
                           <Input value={earning.label} disabled />
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(earning.amount)}</div>
+                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(earning.amount)}</div>
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-gray-600">Legacy type</label>
-                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">Taxable earning</div>
+                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">Taxable earning</div>
                         </div>
-                        <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${earning.label}`} onClick={() => removeLegacyCustomEarning(earning.temp_id)}>
+                        <Button type="button" variant="outline" size="sm" className="justify-self-start gap-2 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${earning.label}`} onClick={() => removeLegacyCustomEarning(earning.temp_id)}>
                           <X className="h-4 w-4" aria-hidden="true" />
                           Remove
                         </Button>
@@ -1821,14 +1822,14 @@ export function EmployeeForm() {
                     const treatment = adjustmentTreatmentCopy(adjustment.treatment);
                     return (
                       <div key={adjustment.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
+                        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
                             <Input value={adjustment.label} disabled />
                           </div>
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
+                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
                           </div>
                           <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Addition type</label>
@@ -1836,7 +1837,7 @@ export function EmployeeForm() {
                               {additionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-2 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
                             <X className="h-4 w-4" aria-hidden="true" />
                             Remove
                           </Button>
@@ -1856,7 +1857,7 @@ export function EmployeeForm() {
               </section>
 
               <section className="rounded-2xl border border-rose-100 bg-rose-50/50 p-4">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h3 className="text-base font-semibold text-rose-950">Recurring deductions</h3>
                     <p className="mt-1 text-sm leading-6 text-rose-800">
@@ -1864,9 +1865,9 @@ export function EmployeeForm() {
                     </p>
                   </div>
                 </div>
-                <div className="mb-4 grid gap-3 md:grid-cols-2">
+                <div className="mb-4 grid gap-4 md:grid-cols-2">
                   {deductionAdjustmentOptions.map((option) => (
-                    <div key={option.value} className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm">
+                    <div key={option.value} className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
                       <div className="text-sm font-semibold text-slate-900">{option.label}</div>
                       <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
                       {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
@@ -1878,14 +1879,14 @@ export function EmployeeForm() {
                     const treatment = adjustmentTreatmentCopy(adjustment.treatment);
                     return (
                       <div key={adjustment.temp_id} className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
+                        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
                             <Input value={adjustment.label} disabled />
                           </div>
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
+                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
                           </div>
                           <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Deduction type</label>
@@ -1893,7 +1894,7 @@ export function EmployeeForm() {
                               {deductionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-1.5 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start gap-2 md:justify-self-end md:self-end" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
                             <X className="h-4 w-4" aria-hidden="true" />
                             Remove
                           </Button>

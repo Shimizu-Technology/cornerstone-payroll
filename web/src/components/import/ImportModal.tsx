@@ -555,16 +555,16 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                         </TableCell>
                         <TableCell>
                           {(row.payroll_components || []).length > 0 || (row.effective_bonus || 0) > 0 ? (
-                            <div className="space-y-1.5">
+                            <div className="space-y-2">
                               {(row.payroll_components || []).map((component, index) => (
-                                <div key={`${row.source_row_id}-${component.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
-                                  <div className="flex items-center justify-between gap-3">
+                                <div key={`${row.source_row_id}-${component.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs">
+                                  <div className="flex items-center justify-between gap-2">
                                     <span className="font-medium text-slate-900">{component.label}</span>
                                     <span className={component.kind === 'deduction' ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}>
                                       {formatCurrency(component.amount)}
                                     </span>
                                   </div>
-                                  <p className="mt-0.5 text-[11px] text-slate-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p>
+                                  <p className="mt-2 text-[11px] text-slate-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p>
                                 </div>
                               ))}
                               {(row.effective_bonus || 0) > 0 && (
