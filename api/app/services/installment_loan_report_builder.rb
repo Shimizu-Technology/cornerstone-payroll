@@ -10,6 +10,7 @@ class InstallmentLoanReportBuilder
 
   def loans
     company.employee_loans
+      .where(tracking_mode: "balance_tracked")
       .includes(:employee, loan_transactions: :pay_period)
       .order("employees.last_name ASC, employees.first_name ASC, employee_loans.name ASC")
       .map { |loan| loan_snapshot(loan) }

@@ -416,6 +416,27 @@ class E2eReleaseFixture
         pay_date: Date.new(2026, 9, 18),
         notes: "Gate 0 safe MoSa import scenario"
       )
+      import_loan_type = DeductionType.create!(
+        company: company,
+        name: "Rosie recurring repayment",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeLoan.create!(
+        company: company,
+        employee: import_typo_employee,
+        deduction_type: import_loan_type,
+        name: "Rosie recurring repayment",
+        tracking_mode: "recurring_no_balance",
+        payment_amount: 123.50,
+        first_deduction_date: safe_import_period.pay_date
+      )
+      import_typo_employee.employee_deductions.create!(
+        deduction_type: import_loan_type,
+        amount: 123.50,
+        active: true
+      )
       blocked_import_period = create_pay_period!(
         company: company,
         pay_schedule: pay_schedule,

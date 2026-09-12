@@ -1172,6 +1172,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(safeDialog.getByText(/Petrius, Rosie.*Rosie Petirus/)).toBeVisible();
     await expect(safeDialog.getByText(/Tips were already paid daily and will offset employee checks/)).toBeVisible();
     await expect(safeDialog.getByText('$19.25')).toBeVisible();
+    await expect(safeDialog.getByText('$123.50', { exact: true })).toBeVisible();
+    await expect(safeDialog.getByText('Matched to Rosie recurring repayment')).toBeVisible();
     await expect(safeDialog.getByText('$8,888.88')).toHaveCount(0);
     let applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
     await expect(applySafeImport).toBeDisabled();
@@ -1192,7 +1194,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(Number(typoEmployeeItem?.hours_worked)).toBe(37.5);
     expect(Number(typoEmployeeItem?.reported_tips)).toBe(117.5);
     expect(Number(typoEmployeeItem?.tips_paid_out)).toBe(117.5);
-    expect(Number(typoEmployeeItem?.loan_deduction)).toBe(123.5);
+    expect(Number(typoEmployeeItem?.loan_deduction)).toBe(0);
+    expect(Number(typoEmployeeItem?.loan_payment)).toBe(123.5);
     expect(Number(typoEmployeeItem?.gross_pay)).not.toBe(8_888.88);
 
     await page.goto(`/pay-periods/${fixture.blocked_payroll_import_period_id}`);
@@ -2083,9 +2086,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
       await page.goto('/employee-loans');
-      await page.getByRole('button', { name: 'Set up loan', exact: true }).click();
+      await page.getByRole('button', { name: 'Set up deduction', exact: true }).click();
       await page.getByRole('combobox', { name: 'Employee *', exact: true }).selectOption(String(fixture.employee_id));
-      await page.getByLabel('Loan name *', { exact: true }).fill(loanName);
+      await page.getByLabel('Deduction name *', { exact: true }).fill(loanName);
       await page.getByRole('combobox', { name: 'Payroll deduction schedule', exact: true }).selectOption('new');
       await page.getByLabel('Payment per payroll', { exact: true }).fill('250');
       await page.getByLabel('Confirmed opening balance *', { exact: true }).fill('650');
@@ -2120,6 +2123,59 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       const schedule = (await schedules.json()).loan_schedules.find((row: { employee_id: number; deduction_type_id?: number }) => row.employee_id === fixture.employee_id && row.deduction_type_id === savedLoan.deduction_type_id);
       expect(Number(schedule.amount)).toBe(200);
       expect(schedule.tracked).toBe(true);
+    } finally {
+      if (loanId) await adminApi.delete(`admin/employee_loans/${loanId}`);
+      await context.close();
+    }
+  });
+
+  test('runs an open-ended deduction through pause, resume, and permanent stop', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({ extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const deductionName = `Verified recurring deduction ${randomUUID()}`;
+    let loanId: number | undefined;
+    try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(10_000);
+      page.on('dialog', async (dialog) => dialog.accept());
+      await page.goto('/employee-loans');
+      await page.getByRole('button', { name: 'Set up deduction', exact: true }).click();
+      await page.getByRole('button', { name: /Recurring deduction — no balance/ }).click();
+      await page.getByRole('combobox', { name: 'Employee *', exact: true }).selectOption(String(fixture.employee_id));
+      await page.getByLabel('Deduction name *', { exact: true }).fill(deductionName);
+      await page.getByLabel('Payment per payroll', { exact: true }).fill('125');
+      await page.getByLabel('First deduction payday', { exact: false }).fill('2026-09-10');
+      const createdResponse = page.waitForResponse(response => response.url().endsWith('/admin/employee_loans') && response.request().method() === 'POST');
+      await page.getByRole('button', { name: 'Create Deduction', exact: true }).click();
+      const created = await createdResponse;
+      expect(created.status()).toBe(201);
+      const createdLoan = (await created.json()).loan;
+      loanId = createdLoan.id;
+      expect(createdLoan.tracking_mode).toBe('recurring_no_balance');
+      expect(createdLoan.original_amount).toBeNull();
+      expect(createdLoan.current_balance).toBeNull();
+      expect(createdLoan.scheduled).toBe(true);
+
+      await page.getByRole('button', { name: new RegExp(deductionName) }).click();
+      await expect(page.getByText('Recurring deduction without a known balance')).toBeVisible();
+      await page.getByRole('button', { name: 'Pause', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Resume', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+      await page.getByLabel('Reason to stop permanently', { exact: true }).fill('Synthetic client authorization');
+      await page.getByRole('button', { name: 'Stop Permanently', exact: true }).click();
+      await expect(page.getByRole('combobox').nth(1)).toHaveValue('stopped');
+      await expect(page.getByRole('button', { name: new RegExp(`${deductionName}.*Stopped`) })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Pause', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0);
+
+      const saved = await adminApi.get(`admin/employee_loans/${loanId}`);
+      const savedLoan = (await saved.json()).loan;
+      expect(savedLoan.status).toBe('stopped');
+      expect(savedLoan.stopped_at).toBeTruthy();
+      expect(savedLoan.stopped_by_name).toBeTruthy();
+      expect(savedLoan.notes).toContain('Synthetic client authorization');
     } finally {
       if (loanId) await adminApi.delete(`admin/employee_loans/${loanId}`);
       await context.close();

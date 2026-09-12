@@ -182,6 +182,12 @@ module PayrollIntake
         if low_confidence_ids.include?(raw_row[:employee_id].to_i)
           warnings << warning("low_confidence_match", "Review the suggested source-name match before applying.")
         end
+        Array(raw_row[:loan_reconciliation_errors]).each do |message|
+          errors << error("loan_reconciliation_required", message)
+        end
+        Array(raw_row[:loan_reconciliation_warnings]).each do |message|
+          warnings << warning("loan_reconciliation_notice", message)
+        end
 
         regular_hours = round(raw_row[:regular_hours])
         overtime_hours = round(raw_row[:overtime_hours])

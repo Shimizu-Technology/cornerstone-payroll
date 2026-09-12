@@ -204,6 +204,52 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.loan_transactions.additions.count).to eq(1)
     end
 
+    it "creates a recurring deduction without inventing a loan balance" do
+      expect {
+        post "/api/v1/admin/employee_loans", params: {
+          employee_loan: {
+            employee_id: employee.id,
+            name: "Loan until client stops",
+            tracking_mode: "recurring_no_balance",
+            payment_amount: 50,
+            first_deduction_date: "2026-09-15",
+            schedule_kind: "new"
+          }
+        }, as: :json
+      }.to change(EmployeeLoan, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(LoanTransaction.count).to eq(0)
+      loan = EmployeeLoan.last
+      expect(loan).to have_attributes(
+        tracking_mode: "recurring_no_balance",
+        original_amount: nil,
+        opening_balance: nil,
+        current_balance: nil,
+        balance_as_of: nil,
+        balance_source: nil,
+        principal_amount_known: false,
+        payment_amount: 50
+      )
+      expect(employee.employee_deductions.find_by!(deduction_type: loan.deduction_type).amount).to eq(50)
+      expect(response.parsed_body.dig("loan", "tracking_mode")).to eq("recurring_no_balance")
+    end
+
+    it "requires a recurring deduction schedule and first payday" do
+      post "/api/v1/admin/employee_loans", params: {
+        employee_loan: {
+          employee_id: employee.id,
+          name: "Incomplete recurring deduction",
+          tracking_mode: "recurring_no_balance",
+          payment_amount: 50
+        }
+      }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Choose or create a payroll deduction schedule")
+      expect(EmployeeLoan).not_to exist(name: "Incomplete recurring deduction")
+    end
+
     it "rolls back the loan if the initial transaction write fails" do
       invalid_transaction = LoanTransaction.new
       invalid_transaction.validate
@@ -493,6 +539,48 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to eq("Loan is already active")
       expect(loan.reload.status).to eq("active")
+    end
+  end
+
+  describe "POST /api/v1/admin/employee_loans/:id/stop" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        deduction_type: deduction_type,
+        name: "Recurring employee deduction",
+        tracking_mode: "recurring_no_balance",
+        payment_amount: 25,
+        first_deduction_date: Date.new(2026, 9, 15)
+      )
+    end
+    let!(:schedule) do
+      employee.employee_deductions.create!(
+        deduction_type: deduction_type,
+        amount: 25,
+        is_percentage: false,
+        active: true
+      )
+    end
+
+    it "requires a reason, then permanently stops the schedule with actor evidence" do
+      post "/api/v1/admin/employee_loans/#{loan.id}/stop", params: { reason: "" }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(loan.reload).to be_active
+      expect(schedule.reload).to be_active
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/stop",
+        params: { reason: "Client confirmed the August check was final" }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload).to have_attributes(status: "stopped", stopped_by_id: admin_user.id)
+      expect(loan.stopped_at).to be_present
+      expect(loan.notes).to include("Client confirmed the August check was final")
+      expect(schedule.reload).not_to be_active
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Try again" }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("create a new authorized schedule")
     end
   end
 end

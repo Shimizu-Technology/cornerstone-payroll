@@ -1494,18 +1494,20 @@ export interface W2GuMarkReadyResponse {
 // Employee Loans
 // ----------------
 
-export type LoanStatus = 'active' | 'paid_off' | 'suspended';
+export type LoanStatus = 'active' | 'paid_off' | 'suspended' | 'stopped';
+export type LoanTrackingMode = 'balance_tracked' | 'recurring_no_balance';
 
 export interface EmployeeLoan {
   id: number;
   employee_id: number;
   employee_name: string;
   name: string;
-  original_amount: number;
-  opening_balance: number;
-  current_balance: number;
-  balance_as_of: string;
-  balance_source: 'new_loan' | 'quickbooks' | 'statement' | 'employee_confirmation' | 'other_verified';
+  tracking_mode: LoanTrackingMode;
+  original_amount?: number | null;
+  opening_balance?: number | null;
+  current_balance?: number | null;
+  balance_as_of?: string | null;
+  balance_source?: 'new_loan' | 'quickbooks' | 'statement' | 'employee_confirmation' | 'other_verified' | null;
   principal_amount_known: boolean;
   created_by_name?: string | null;
   payment_amount?: number;
@@ -1516,6 +1518,8 @@ export interface EmployeeLoan {
   last_deduction_date?: string;
   start_date?: string;
   paid_off_date?: string;
+  stopped_at?: string;
+  stopped_by_name?: string | null;
   status: LoanStatus;
   deduction_type_id?: number;
   notes?: string;
@@ -1528,8 +1532,8 @@ export interface LoanTransaction {
   id: number;
   transaction_type: 'payment' | 'addition' | 'adjustment';
   amount: number;
-  balance_before: number;
-  balance_after: number;
+  balance_before?: number | null;
+  balance_after?: number | null;
   transaction_date: string;
   notes?: string;
   source: 'opening_balance' | 'payroll' | 'manual';
