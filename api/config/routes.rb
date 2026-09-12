@@ -238,6 +238,7 @@ Rails.application.routes.draw do
             get  :supplemental_pay_periods
             # Payroll import (MoSa Revel PDF + Excel)
             get :supplemental_template, to: "payroll_imports#supplemental_template"
+            get :current_import, to: "payroll_imports#current"
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"
             # Timecard OCR CSV import

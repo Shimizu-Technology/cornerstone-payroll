@@ -22,6 +22,7 @@ class PayPeriod < ApplicationRecord
   belongs_to :company
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
+  belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
@@ -101,6 +102,7 @@ class PayPeriod < ApplicationRecord
   validate :purpose_fields_change_only_in_draft
   validate :parallel_run_marker_cannot_be_cleared
   validate :parallel_run_cannot_be_committed
+  validate :intake_stale_session_matches_period
   validate :migration_rehearsal_cannot_be_committed
   validate :starts_after_historical_ytd_boundary,
            if: lambda {
@@ -173,6 +175,29 @@ class PayPeriod < ApplicationRecord
     !committed? && !voided?
   end
 
+  def intake_stale?
+    intake_stale_at.present?
+  end
+
+  def mark_intake_stale!(session:, reason:, at: Time.current)
+    update!(
+      status: "draft",
+      calculated_at: nil,
+      calculated_by_id: nil,
+      approved_at: nil,
+      approved_by_id: nil,
+      unapproved_at: nil,
+      unapproved_by_id: nil,
+      intake_stale_at: at,
+      intake_stale_reason: reason,
+      intake_stale_session: session
+    )
+  end
+
+  def clear_intake_stale!
+    update!(intake_stale_at: nil, intake_stale_reason: nil, intake_stale_session: nil)
+  end
+
   def supplemental?
     cycle == "supplemental"
   end
@@ -242,6 +267,13 @@ class PayPeriod < ApplicationRecord
 
   def period_description
     "#{start_date.strftime('%m/%d/%Y')} - #{end_date.strftime('%m/%d/%Y')}"
+  end
+
+  def intake_stale_session_matches_period
+    return if intake_stale_session.blank?
+    return if intake_stale_session.pay_period_id == id && intake_stale_session.company_id == company_id
+
+    errors.add(:intake_stale_session, "must belong to this pay period and company")
   end
 
   # Tax sync lifecycle

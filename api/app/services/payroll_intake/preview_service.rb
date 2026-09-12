@@ -5,13 +5,23 @@ require "securerandom"
 
 module PayrollIntake
   class PreviewService
+    class ReplacementRequiredError < ArgumentError
+      attr_reader :current_session
+
+      def initialize(message, current_session:)
+        @current_session = current_session
+        super(message)
+      end
+    end
+
     SOURCE_ADAPTERS = {
       "spike_email" => PayrollIntake::Adapters::SpikeEmail,
       "mosa_revel" => PayrollIntake::Adapters::MosaRevel
     }.freeze
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
-    def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil)
+    def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil,
+                   supersedes_package_id: nil, supersession_reason: nil)
       @pay_period = pay_period
       @company = pay_period.company
       @source_type = source_type.to_s
@@ -19,6 +29,8 @@ module PayrollIntake
       @files = Array(files).compact
       @actor = actor
       @storage = storage
+      @supersedes_package_id = supersedes_package_id.to_s.strip.presence
+      @supersession_reason = supersession_reason.to_s.strip.presence
       @file_snapshots = []
       @stored_references = []
       @retention_committed = false
@@ -39,6 +51,8 @@ module PayrollIntake
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
 
+      replacement_predecessor!
+
       extraction = extract_rows
       normalized = normalize_extraction(extraction)
       document_attributes = build_document_attributes
@@ -49,6 +63,8 @@ module PayrollIntake
         pay_period.lock!
         concurrent_duplicate = existing_duplicate_session
         unless concurrent_duplicate
+          predecessor = replacement_predecessor!
+          predecessor&.mark_superseded!(actor: actor)
           session = PayrollIntakeSession.create!(
             company: company,
             pay_period: pay_period,
@@ -59,6 +75,8 @@ module PayrollIntake
             package_id: SecureRandom.uuid,
             package_revision: next_package_revision,
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
+            supersedes: predecessor,
+            supersession_reason: supersession_reason,
             evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence),
             status: "draft",
             created_by: actor
@@ -71,6 +89,7 @@ module PayrollIntake
           end
 
           session.mark_previewed!(warnings: normalized[:warnings], totals: normalized[:totals])
+          invalidate_prior_calculation!(session, predecessor)
         end
       end
 
@@ -96,7 +115,8 @@ module PayrollIntake
 
     private
 
-    attr_reader :pay_period, :company, :source_type, :pasted_text, :files, :actor, :storage, :file_snapshots
+    attr_reader :pay_period, :company, :source_type, :pasted_text, :files, :actor, :storage, :file_snapshots,
+                :supersedes_package_id, :supersession_reason
 
     def adapter_class
       SOURCE_ADAPTERS[source_type]
@@ -147,12 +167,63 @@ module PayrollIntake
     def duplicate_session_result(session)
       duplicate_warning = {
         code: "duplicate_source",
-        message: "This exact payroll source has already been previewed for this pay period.",
-        severity: session.applied_at.present? ? "error" : "warning"
+        message: session.superseded? ?
+          "This exact payroll source is retained as superseded revision #{session.package_revision}. Use the current corrected source." :
+          "This exact payroll source has already been previewed for this pay period.",
+        severity: session.applied_at.present? || session.superseded? ? "error" : "warning"
       }
       current_warnings = Array(session.warnings)
       session.update!(warnings: [ duplicate_warning, *current_warnings ].uniq { |warning| warning["code"] || warning[:code] })
       { session: session.reload, duplicate: true }
+    end
+
+    def replacement_predecessor!
+      current = PayrollIntakeSession.current
+                                    .where(pay_period: pay_period, source_type: source_type)
+                                    .order(package_revision: :desc, id: :desc)
+                                    .first
+      if current.blank?
+        if supersedes_package_id.present?
+          raise ArgumentError, "The source package selected for replacement is no longer current. Refresh and review the latest package."
+        end
+        return nil
+      end
+
+      unless supersedes_package_id.present?
+        raise ReplacementRequiredError.new(
+          "A current source package already exists. Confirm that this corrected source replaces revision #{current.package_revision} and enter the reason for the change.",
+          current_session: current
+        )
+      end
+      unless supersedes_package_id.in?([ current.id.to_s, current.package_id ])
+        raise ReplacementRequiredError.new(
+          "Revision #{current.package_revision} is now the current source. Refresh and confirm that your corrected source replaces it.",
+          current_session: current
+        )
+      end
+      if supersession_reason.blank?
+        raise ReplacementRequiredError.new(
+          "Enter why this corrected source replaces revision #{current.package_revision}.",
+          current_session: current
+        )
+      end
+
+      current
+    end
+
+    def invalidate_prior_calculation!(session, predecessor)
+      return if pay_period.draft? && !pay_period.intake_stale? && predecessor&.applied_at.blank?
+
+      reason = if predecessor.present?
+        "Source revision #{session.package_revision} replaced revision #{predecessor.package_revision}: #{supersession_reason}"
+      else
+        "Source revision #{session.package_revision} was received after payroll calculation began."
+      end
+
+      pay_period.mark_intake_stale!(
+        session: session,
+        reason: reason
+      )
     end
 
     def normalize_extraction(extraction)

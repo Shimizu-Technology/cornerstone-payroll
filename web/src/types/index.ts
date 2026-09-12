@@ -561,6 +561,9 @@ export interface PayPeriod {
   notes?: string;
   period_description?: string;
   payroll_intake_source_types?: string[];
+  intake_stale_at?: string | null;
+  intake_stale_reason?: string | null;
+  intake_stale_session_id?: number | null;
   time_tracking?: {
     active_source_types: string[];
     linked_aire_records: AirePayrollRecord[];

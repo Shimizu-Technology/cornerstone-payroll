@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1723,6 +1723,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.date "end_date", null: false
     t.boolean "includes_base_salary", default: true, null: false
     t.boolean "includes_recurring_items", default: true, null: false
+    t.datetime "intake_stale_at"
+    t.text "intake_stale_reason"
+    t.bigint "intake_stale_session_id"
     t.text "notes"
     t.boolean "parallel_run", default: false, null: false
     t.date "pay_date", null: false
@@ -1756,6 +1759,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
     t.index ["corrects_pay_period_id"], name: "index_pay_periods_on_corrects_pay_period_id"
     t.index ["cycle"], name: "index_pay_periods_on_cycle"
+    t.index ["intake_stale_session_id"], name: "idx_pay_periods_intake_stale_session"
     t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
@@ -1764,6 +1768,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
+    t.check_constraint "intake_stale_at IS NULL AND intake_stale_reason IS NULL AND intake_stale_session_id IS NULL OR intake_stale_at IS NOT NULL AND NULLIF(btrim(intake_stale_reason), ''::text) IS NOT NULL AND intake_stale_session_id IS NOT NULL", name: "pay_periods_intake_stale_complete"
     t.check_constraint "parallel_run = false OR status::text <> 'committed'::text", name: "pay_periods_parallel_runs_not_committed"
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
@@ -1914,6 +1919,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.bigint "applied_payroll_item_id"
     t.decimal "confidence", precision: 5, scale: 4
     t.datetime "created_at", null: false
+    t.string "disposition", default: "pending", null: false
+    t.text "disposition_reason"
+    t.datetime "dispositioned_at"
+    t.bigint "dispositioned_by_id"
     t.bigint "employee_id"
     t.boolean "excluded", default: false, null: false
     t.decimal "loan_deduction", precision: 10, scale: 2, default: "0.0", null: false
@@ -1928,6 +1937,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.jsonb "source_payload", default: {}, null: false
     t.jsonb "staff_overrides", default: {}, null: false
     t.string "status", default: "pending", null: false
+    t.bigint "target_pay_period_id"
     t.decimal "tips_paid_out", precision: 10, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
     t.jsonb "validation_errors", default: [], null: false
@@ -1937,11 +1947,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.decimal "week2_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "week2_tips", precision: 10, scale: 2, default: "0.0", null: false
     t.index ["applied_payroll_item_id"], name: "index_payroll_intake_rows_on_applied_payroll_item_id"
+    t.index ["dispositioned_by_id"], name: "idx_payroll_intake_rows_dispositioned_by"
     t.index ["employee_id"], name: "index_payroll_intake_rows_on_employee_id"
+    t.index ["payroll_intake_session_id", "disposition"], name: "idx_payroll_intake_rows_session_disposition"
     t.index ["payroll_intake_session_id", "employee_id"], name: "idx_payroll_intake_rows_session_employee"
     t.index ["payroll_intake_session_id", "position"], name: "idx_payroll_intake_rows_session_position"
     t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_rows_session"
     t.index ["status", "excluded"], name: "idx_payroll_intake_rows_status_excluded"
+    t.index ["target_pay_period_id"], name: "idx_payroll_intake_rows_target_period"
+    t.check_constraint "(disposition::text = ANY (ARRAY['pending'::character varying, 'included'::character varying]::text[])) OR NULLIF(btrim(disposition_reason), ''::text) IS NOT NULL", name: "payroll_intake_rows_reason_required"
+    t.check_constraint "disposition::text = 'deferred'::text AND target_pay_period_id IS NOT NULL OR disposition::text <> 'deferred'::text AND target_pay_period_id IS NULL", name: "payroll_intake_rows_deferred_target"
+    t.check_constraint "disposition::text = 'pending'::text OR dispositioned_at IS NOT NULL", name: "payroll_intake_rows_dispositioned_at"
+    t.check_constraint "disposition::text = ANY (ARRAY['pending'::character varying, 'included'::character varying, 'excluded'::character varying, 'deferred'::character varying, 'informational'::character varying]::text[])", name: "payroll_intake_rows_disposition"
   end
 
   create_table "payroll_intake_sessions", force: :cascade do |t|
@@ -1963,6 +1980,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.string "source_label"
     t.string "source_type", null: false
     t.string "status", default: "draft", null: false
+    t.datetime "superseded_at"
+    t.bigint "superseded_by_user_id"
+    t.bigint "supersedes_id"
+    t.text "supersession_reason"
     t.jsonb "totals", default: {}, null: false
     t.datetime "updated_at", null: false
     t.jsonb "warnings", default: [], null: false
@@ -1973,10 +1994,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
     t.index ["package_id"], name: "index_payroll_intake_sessions_on_package_id", unique: true
     t.index ["pay_period_id", "package_revision"], name: "idx_payroll_intake_sessions_period_revision", unique: true
     t.index ["pay_period_id", "source_type", "import_hash"], name: "idx_payroll_intake_sessions_idempotency", unique: true
+    t.index ["pay_period_id", "source_type"], name: "idx_payroll_intake_sessions_current_source", unique: true, where: "(superseded_at IS NULL)"
     t.index ["pay_period_id"], name: "index_payroll_intake_sessions_on_pay_period_id"
     t.index ["reviewed_by_id"], name: "index_payroll_intake_sessions_on_reviewed_by_id"
     t.index ["source_type", "status"], name: "idx_payroll_intake_sessions_source_status"
+    t.index ["superseded_by_user_id"], name: "idx_payroll_intake_sessions_superseded_user"
+    t.index ["supersedes_id"], name: "idx_payroll_intake_sessions_one_successor", unique: true, where: "(supersedes_id IS NOT NULL)"
     t.check_constraint "package_revision > 0", name: "payroll_intake_sessions_revision_positive"
+    t.check_constraint "supersedes_id IS NULL AND supersession_reason IS NULL OR supersedes_id IS NOT NULL AND NULLIF(btrim(supersession_reason), ''::text) IS NOT NULL", name: "payroll_intake_sessions_supersession_complete"
   end
 
   create_table "payroll_item_deductions", force: :cascade do |t|
@@ -3030,6 +3055,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
+  add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_filing_responsibilities", "companies"
@@ -3046,13 +3072,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_020100) do
   add_foreign_key "payroll_imports", "payroll_intake_sessions", on_delete: :restrict
   add_foreign_key "payroll_intake_documents", "payroll_intake_sessions"
   add_foreign_key "payroll_intake_rows", "employees"
+  add_foreign_key "payroll_intake_rows", "pay_periods", column: "target_pay_period_id", on_delete: :restrict
   add_foreign_key "payroll_intake_rows", "payroll_intake_sessions"
   add_foreign_key "payroll_intake_rows", "payroll_items", column: "applied_payroll_item_id", on_delete: :nullify
+  add_foreign_key "payroll_intake_rows", "users", column: "dispositioned_by_id", on_delete: :nullify
   add_foreign_key "payroll_intake_sessions", "companies"
   add_foreign_key "payroll_intake_sessions", "pay_periods"
+  add_foreign_key "payroll_intake_sessions", "payroll_intake_sessions", column: "supersedes_id", on_delete: :restrict
   add_foreign_key "payroll_intake_sessions", "users", column: "applied_by_id", on_delete: :nullify
   add_foreign_key "payroll_intake_sessions", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "payroll_intake_sessions", "users", column: "reviewed_by_id", on_delete: :nullify
+  add_foreign_key "payroll_intake_sessions", "users", column: "superseded_by_user_id", on_delete: :nullify
   add_foreign_key "payroll_item_deductions", "deduction_types"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"

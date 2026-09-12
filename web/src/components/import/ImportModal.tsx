@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { CheckCircle2, Download } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -18,33 +18,40 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { payPeriodsApi } from '@/services/api';
-import type { ImportPreviewResponse } from '@/services/api';
+import { payrollIntakeImportsApi, payPeriodsApi } from '@/services/api';
+import type { ImportPreviewResponse, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
 interface ImportModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
 }
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
+type EditableSourceRow = MosaSourceRow;
 
-export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete }: ImportModalProps) {
+export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
   const [step, setStep] = useState<Step>('upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(null);
-  const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
+  const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>([]);
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const [templateDownloading, setTemplateDownloading] = useState(false);
+  const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [replacementReason, setReplacementReason] = useState('');
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
@@ -55,13 +62,29 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     setLoading(false);
     setError(null);
     setPreviewData(null);
-    setExcludedIds(new Set());
+    setSourceRows([]);
     setTipsPaidOutFromTips(false);
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
     setResults(null);
     setTemplateDownloading(false);
+    setCurrentPackage(null);
+    setReplacementConfirmed(false);
+    setReplacementReason('');
   };
+
+  useEffect(() => {
+    if (!open) return;
+
+    let active = true;
+    payrollIntakeImportsApi.list(payPeriodId).then((response) => {
+      if (!active) return;
+      setCurrentPackage(response.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
+    }).catch((err) => {
+      if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
+    });
+    return () => { active = false; };
+  }, [open, payPeriodId]);
 
   const handleDownloadTemplate = async () => {
     try {
@@ -83,6 +106,30 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     }
   };
 
+  const openPreview = (data: ImportPreviewResponse) => {
+    setPreviewData(data);
+    setSourceRows(data.preview.source_rows.map((row) => ({
+      ...row,
+      disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending',
+    })));
+    setTipsPaidOutFromTips(data.preview.tips_paid_out_from_tips);
+    setReviewedSuggestedMatches(false);
+    setReviewedOverwrite(false);
+    setStep('preview');
+  };
+
+  const handleResumeCurrent = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      openPreview(await payPeriodsApi.currentImport(payPeriodId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reopen the current MoSa import');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClose = () => {
     if (loading || step === 'applying') return;
     reset();
@@ -96,15 +143,20 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
       setError(null);
       setReviewedSuggestedMatches(false);
       setReviewedOverwrite(false);
-      setExcludedIds(new Set());
       const data = await payPeriodsApi.previewImport(
         payPeriodId,
         pdfFile,
         excelFile || undefined,
         tipsPaidOutFromTips,
+        currentPackage && replacementConfirmed
+          ? { supersedesPackageId: currentPackage.package_id, reason: replacementReason.trim() }
+          : undefined,
       );
-      setPreviewData(data);
-      setStep('preview');
+      openPreview(data);
+      onSourcePreviewed?.();
+      void payrollIntakeImportsApi.list(payPeriodId).then((history) => {
+        setCurrentPackage(history.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
+      }).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse files');
     } finally {
@@ -119,7 +171,12 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
       setError(null);
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
-        excluded_employee_ids: Array.from(excludedIds),
+        rows: sourceRows.map((row) => ({
+          id: row.id,
+          disposition: row.disposition,
+          disposition_reason: row.disposition_reason,
+          target_pay_period_id: row.target_pay_period_id,
+        })),
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
         force_overwrite: reviewedOverwrite,
       });
@@ -135,35 +192,81 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     }
   };
 
-  const toggleExclude = (employeeId: number) => {
+  const updateSourceRow = (rowId: number, patch: Partial<EditableSourceRow>) => {
     setReviewedOverwrite(false);
-    setExcludedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(employeeId)) {
-        next.delete(employeeId);
-      } else {
-        next.add(employeeId);
-      }
-      return next;
-    });
+    setSourceRows((current) => current.map((row) => row.id === rowId ? { ...row, ...patch } : row));
   };
 
   const matched = previewData?.preview.matched || [];
-  const included = matched.filter((r) => !excludedIds.has(r.employee_id));
+  const includedSourceRows = sourceRows.filter((row) => row.disposition === 'included');
+  const includedSourceRowIds = new Set(includedSourceRows.map((row) => row.id));
+  const included = matched.filter((row) => includedSourceRowIds.has(row.source_row_id));
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
   const overwriteRows = included.filter((row) => row.overwrite_required);
-  const unresolvedCount = previewData
-    ? previewData.preview.unmatched_pdf_names.length
-      + previewData.preview.unmatched_excel_names.length
-      + previewData.preview.duplicate_employee_matches.length
-    : 0;
-  const suggestedMatchCount = previewData?.preview.low_confidence_matches.length || 0;
+  const incompleteSourceRows = sourceRows.filter((row) => (
+    row.disposition === 'pending'
+      || (['excluded', 'deferred', 'informational'].includes(row.disposition) && !row.disposition_reason?.trim())
+      || (row.disposition === 'deferred' && !row.target_pay_period_id)
+  ));
+  const duplicateIncludedEmployeeIds = new Set(includedSourceRows.map((row) => row.employee_id).filter(Boolean).filter((id, index, ids) => ids.indexOf(id) !== index));
+  const includedBlockingRows = includedSourceRows.filter((row) => row.errors.some((entry) => entry.code !== 'duplicate_employee' || duplicateIncludedEmployeeIds.has(row.employee_id)));
+  const unresolvedCount = incompleteSourceRows.length + includedBlockingRows.length;
+  const suggestedMatchCount = previewData?.preview.low_confidence_matches.filter((match) => includedSourceRows.some((row) => row.employee_id === match.employee_id)).length || 0;
+  const suggestedMatches = previewData?.preview.low_confidence_matches.filter((match) => includedSourceRows.some((row) => row.employee_id === match.employee_id)) || [];
+  const nonMatchedSourceRows = sourceRows.filter((row) => row.row_kind !== 'matched');
   const canApply = Boolean(
-    previewData?.preview.can_apply
-      && included.length > 0
+    previewData
+      && sourceRows.length > 0
+      && incompleteSourceRows.length === 0
+      && includedBlockingRows.length === 0
+      && duplicateIncludedEmployeeIds.size === 0
       && missingPeriodPay.length === 0
       && (overwriteRows.length === 0 || reviewedOverwrite)
       && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
+  );
+  const replacementReady = !replacementConfirmed || replacementReason.trim().length > 0;
+
+  const dispositionControls = (row: EditableSourceRow) => (
+    <div className="space-y-2">
+      <Select
+        aria-label={`Outcome for ${row.source_employee_name}`}
+        value={row.disposition}
+        onChange={(event) => {
+          const disposition = event.target.value as EditableSourceRow['disposition'];
+          updateSourceRow(row.id, {
+            disposition,
+            disposition_reason: disposition === 'included' ? null : row.disposition_reason,
+            target_pay_period_id: disposition === 'deferred' ? row.target_pay_period_id : null,
+          });
+        }}
+      >
+        <option value="pending">Choose outcome</option>
+        {row.row_kind === 'matched' && <option value="included">Include in this payroll</option>}
+        <option value="excluded">Exclude from payroll</option>
+        <option value="deferred">Move to a future payroll</option>
+        <option value="informational">Informational only</option>
+      </Select>
+      {['excluded', 'deferred', 'informational'].includes(row.disposition) && (
+        <>
+          <Input
+            aria-label={`Reason for ${row.source_employee_name}`}
+            value={row.disposition_reason || ''}
+            onChange={(event) => updateSourceRow(row.id, { disposition_reason: event.target.value })}
+            placeholder="Required reason"
+          />
+          {row.disposition === 'deferred' && (
+            <Select
+              aria-label={`Future payroll for ${row.source_employee_name}`}
+              value={row.target_pay_period_id ? String(row.target_pay_period_id) : ''}
+              onChange={(event) => updateSourceRow(row.id, { target_pay_period_id: event.target.value ? Number(event.target.value) : null })}
+            >
+              <option value="">Choose future payroll</option>
+              {previewData?.source_package.disposition_targets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+            </Select>
+          )}
+        </>
+      )}
+    </div>
   );
 
   return (
@@ -192,6 +295,39 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
         {/* Upload Step */}
         {step === 'upload' && (
           <div className="space-y-4 py-2">
+            {currentPackage && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                <div className="flex items-start gap-3">
+                  <RefreshCw className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+                  <div className="flex-1">
+                    <p className="font-semibold">Revision {currentPackage.package_revision} is the current retained source</p>
+                    <p className="mt-1 text-sm text-amber-800">
+                      {['previewed', 'reviewed'].includes(currentPackage.status)
+                        ? 'Continue the saved review, or upload corrected files and document what changed.'
+                        : 'This source was already applied. Upload again only when MoSa sent a correction.'}
+                    </p>
+                    {['previewed', 'reviewed'].includes(currentPackage.status) && (
+                      <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300 bg-white" onClick={() => void handleResumeCurrent()} disabled={loading}>
+                        Continue revision {currentPackage.package_revision}
+                      </Button>
+                    )}
+                    <label className="mt-3 flex items-start gap-2 text-sm font-medium">
+                      <input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} className="mt-0.5 rounded border-amber-300" />
+                      <span>This corrected Revel package replaces revision {currentPackage.package_revision}.</span>
+                    </label>
+                    {replacementConfirmed && (
+                      <Input
+                        label="What changed?"
+                        value={replacementReason}
+                        onChange={(event) => setReplacementReason(event.target.value)}
+                        placeholder="Example: MoSa corrected Mo’s regular hours."
+                        className="mt-3 bg-white"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -276,7 +412,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
             {missingPeriodPay.length > 0 && (
               <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
-                <p className="mt-2">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. You can also uncheck these employees to import the other rows first.</p>
+                <p className="mt-2">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. If an employee should not be paid in this run, choose a different outcome and record why.</p>
                 <Button variant="outline" className="mt-4" onClick={handleClose}>Return to payroll worksheet</Button>
               </div>
             )}
@@ -288,36 +424,27 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
             )}
             {unresolvedCount > 0 && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-                <p className="font-medium">Nothing has been imported. Resolve these source rows first.</p>
-                <p className="mt-1 text-red-800">
-                  Correct the employee name in Cornerstone or the source file, then go back and preview again.
-                </p>
-                {previewData.preview.unmatched_pdf_names.length > 0 && (
-                  <div className="mt-3">
-                    <p className="font-medium">Unmatched Revel hours</p>
-                    <ul className="mt-1 list-disc pl-5">
-                      {previewData.preview.unmatched_pdf_names.map((name) => <li key={`pdf-${name}`}>{name}</li>)}
-                    </ul>
+                <p className="font-medium">Choose a documented outcome for every source row.</p>
+                <p className="mt-1 text-red-800">Included rows must be valid and unique. Anything not paid now needs a reason and, when deferred, a named future payroll.</p>
+              </div>
+            )}
+
+            {nonMatchedSourceRows.length > 0 && (
+              <div className="space-y-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                <div>
+                  <p className="font-semibold text-neutral-950">Source rows not matched for payment</p>
+                  <p className="mt-1 text-sm text-neutral-600">Correct the source and upload a replacement, or record why each row is excluded, deferred, or informational.</p>
+                </div>
+                {nonMatchedSourceRows.map((row) => (
+                  <div key={row.id} className="grid gap-3 rounded-2xl border border-neutral-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_300px]">
+                    <div>
+                      <p className="font-medium text-neutral-950">{row.source_employee_name}</p>
+                      <p className="mt-1 text-xs uppercase tracking-wide text-neutral-500">{row.row_kind === 'unmatched_revel' ? 'Revel hours' : 'Change workbook'}</p>
+                      {row.errors.map((entry) => <p key={entry.code} className="mt-2 text-sm text-danger-700">{entry.message}</p>)}
+                    </div>
+                    {dispositionControls(row)}
                   </div>
-                )}
-                {previewData.preview.unmatched_excel_names.length > 0 && (
-                  <div className="mt-3">
-                    <p className="font-medium">Unmatched tips or deductions</p>
-                    <ul className="mt-1 list-disc pl-5">
-                      {previewData.preview.unmatched_excel_names.map((name) => <li key={`excel-${name}`}>{name}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {previewData.preview.duplicate_employee_matches.length > 0 && (
-                  <div className="mt-3">
-                    <p className="font-medium">Duplicate Revel employee matches</p>
-                    <ul className="mt-1 list-disc pl-5">
-                      {previewData.preview.duplicate_employee_matches.map((match) => (
-                        <li key={match.employee_id}>{match.employee_name}: {match.source_names.join(', ')}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                ))}
               </div>
             )}
 
@@ -325,7 +452,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                 <p className="font-medium">Review {suggestedMatchCount} suggested name match{suggestedMatchCount === 1 ? '' : 'es'}</p>
                 <ul className="mt-2 space-y-1">
-                  {previewData.preview.low_confidence_matches.map((match, index) => (
+                  {suggestedMatches.map((match, index) => (
                     <li key={`${match.source}-${match.source_name}-${match.employee_id}-${index}`}>
                       {match.source}: “{match.source_name}” → {match.employee_name} ({Math.round(match.confidence * 100)}%)
                     </li>
@@ -344,12 +471,10 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
             )}
 
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[1120px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8">
-                      <span className="sr-only">Include</span>
-                    </TableHead>
+                    <TableHead className="min-w-[180px]">Outcome</TableHead>
                     <TableHead>Employee</TableHead>
                     <TableHead className="text-right">Hours</TableHead>
                     <TableHead className="text-right">Payroll rate</TableHead>
@@ -361,16 +486,13 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                 </TableHeader>
                 <TableBody>
                   {matched.map((row) => {
-                    const excluded = excludedIds.has(row.employee_id);
+                    const sourceRow = sourceRows.find((candidate) => candidate.id === row.source_row_id);
+                    if (!sourceRow) return null;
+                    const excluded = sourceRow.disposition !== 'included';
                     return (
-                      <TableRow key={row.employee_id} className={excluded ? 'opacity-40' : ''}>
+                      <TableRow key={row.source_row_id} className={excluded ? 'bg-neutral-50/70' : ''}>
                         <TableCell>
-                          <input
-                            type="checkbox"
-                            checked={!excluded}
-                            onChange={() => toggleExclude(row.employee_id)}
-                            className="rounded border-gray-300"
-                          />
+                          {dispositionControls(sourceRow)}
                         </TableCell>
                         <TableCell>
                           <div>
@@ -489,7 +611,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
           {step === 'upload' && (
             <>
               <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={!pdfFile || loading}>
+              <Button onClick={handlePreview} disabled={!pdfFile || loading || !replacementReady}>
                 {loading ? 'Parsing...' : 'Preview Import'}
               </Button>
             </>
@@ -499,9 +621,9 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               <Button variant="outline" onClick={() => {
                 setStep('upload');
                 setPreviewData(null);
+                setSourceRows([]);
                 setReviewedSuggestedMatches(false);
                 setReviewedOverwrite(false);
-                setExcludedIds(new Set());
               }}>
                 Back
               </Button>

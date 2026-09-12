@@ -10,12 +10,15 @@ module Api
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports
         def index
           sessions = @pay_period.payroll_intake_sessions.includes(:documents, rows: :employee).recent_first
-          render json: { imports: sessions.map { |session| session_json(session) } }
+          render json: {
+            imports: sessions.map { |session| session_json(session) },
+            disposition_targets: disposition_targets_json
+          }
         end
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/:id
         def show
-          render json: { import: session_json(@session) }
+          render json: { import: session_json(@session), disposition_targets: disposition_targets_json }
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/preview
@@ -25,11 +28,30 @@ module Api
             source_type: params[:source_type].presence || "spike_email",
             pasted_text: params[:pasted_text],
             files: uploaded_files,
-            actor: current_user
+            actor: current_user,
+            supersedes_package_id: params[:supersedes_package_id],
+            supersession_reason: params[:supersession_reason]
           )
 
           result = service.call
-          render json: { import: session_json(result[:session]), duplicate: result[:duplicate] }
+          if result[:duplicate] && !result[:session].applyable?
+            message = if result[:session].superseded?
+              "This exact source belongs to a superseded revision. Continue with the current corrected package."
+            else
+              "This exact source package was already applied. Upload again only when the source changed."
+            end
+            return render json: { error: message }, status: :unprocessable_entity
+          end
+          render json: {
+            import: session_json(result[:session]),
+            duplicate: result[:duplicate],
+            disposition_targets: disposition_targets_json
+          }
+        rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
+          render json: {
+            error: e.message,
+            details: { replacement_required: true, current_package: replacement_package_json(e.current_session) }
+          }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -117,6 +139,7 @@ module Api
             :acknowledge_warnings,
             rows: [
               :id, :row_id, :position, :include, :employee_id,
+              :disposition, :disposition_reason, :target_pay_period_id,
               :week1_hours, :week2_hours, :regular_hours, :overtime_hours,
               :week1_tips, :week2_tips, :reported_tips, :tips_paid_out,
               :loan_deduction, :acknowledge_warnings
@@ -137,6 +160,14 @@ module Api
             package_id: session.package_id,
             package_revision: session.package_revision,
             package_schema_version: session.package_schema_version,
+            current: session.current?,
+            superseded_at: session.superseded_at,
+            supersedes_id: session.supersedes_id,
+            supersedes_package_id: session.supersedes&.package_id,
+            supersedes_revision: session.supersedes&.package_revision,
+            supersession_reason: session.supersession_reason,
+            replacement_package_id: session.replacement_session&.package_id,
+            replacement_revision: session.replacement_session&.package_revision,
             evidence_snapshot: session.evidence_snapshot || {},
             warnings: session.warnings || [],
             totals: session.totals || {},
@@ -175,6 +206,11 @@ module Api
             position: row.position,
             status: row.status,
             excluded: row.excluded,
+            disposition: row.disposition,
+            disposition_reason: row.disposition_reason,
+            dispositioned_at: row.dispositioned_at,
+            dispositioned_by_id: row.dispositioned_by_id,
+            target_pay_period_id: row.target_pay_period_id,
             source_employee_name: row.source_employee_name,
             employee_id: row.employee_id,
             employee_name: row.employee&.full_name,
@@ -199,6 +235,34 @@ module Api
           }
         end
 
+        def disposition_targets_json
+          PayPeriod.where(company_id: @pay_period.company_id, cycle: "regular", correction_status: nil)
+                   .where.not(id: @pay_period.id)
+                   .where("start_date > ?", @pay_period.end_date)
+                   .where.not(status: "committed")
+                   .period_chronological
+                   .map do |period|
+            {
+              id: period.id,
+              label: "#{period.period_description} · pay #{period.pay_date.strftime('%m/%d/%Y')}",
+              start_date: period.start_date,
+              end_date: period.end_date,
+              pay_date: period.pay_date
+            }
+          end
+        end
+
+        def replacement_package_json(session)
+          {
+            id: session.id,
+            package_id: session.package_id,
+            package_revision: session.package_revision,
+            status: session.status,
+            applied_at: session.applied_at,
+            created_at: session.created_at
+          }
+        end
+
         def pay_period_json(pay_period)
           {
             id: pay_period.id,
@@ -209,6 +273,9 @@ module Api
             status: pay_period.status,
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
+            intake_stale_at: pay_period.intake_stale_at,
+            intake_stale_reason: pay_period.intake_stale_reason,
+            intake_stale_session_id: pay_period.intake_stale_session_id,
             employee_count: pay_period.payroll_items.count,
             total_gross: pay_period.payroll_items.not_voided.sum(:gross_pay),
             total_net: pay_period.payroll_items.not_voided.sum(:net_pay),

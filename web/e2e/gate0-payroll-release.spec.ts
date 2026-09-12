@@ -1193,10 +1193,19 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await blockedDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.blocked_payroll_import_workbook_path);
     await blockedDialog.getByRole('button', { name: 'Preview Import' }).click();
 
-    await expect(blockedDialog.getByText('Nothing has been imported. Resolve these source rows first.')).toBeVisible();
-    await expect(blockedDialog.getByText('Unmatched Revel hours')).toBeVisible();
-    await expect(blockedDialog.getByText('Unmatched tips or deductions')).toBeVisible();
-    await expect(blockedDialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
+    await expect(blockedDialog.getByText('2 source rows need attention before this import can be applied.')).toBeVisible();
+    await expect(blockedDialog.getByText('Revel hours', { exact: true })).toBeVisible();
+    await expect(blockedDialog.getByText('Change workbook', { exact: true })).toBeVisible();
+    const applyNonpaySource = blockedDialog.getByRole('button', { name: /Apply Import/ });
+    await expect(applyNonpaySource).toBeDisabled();
+
+    await blockedDialog.getByRole('combobox', { name: 'Outcome for Unknown, Worker' }).selectOption('informational');
+    await blockedDialog.getByRole('textbox', { name: 'Reason for Unknown, Worker' }).fill('Revel reference row; no payroll payment is due.');
+    await blockedDialog.getByRole('combobox', { name: 'Outcome for Worker Unknown' }).selectOption('informational');
+    await blockedDialog.getByRole('textbox', { name: 'Reason for Worker Unknown' }).fill('Workbook reference row; no payroll payment is due.');
+    await expect(applyNonpaySource).toBeEnabled();
+    await applyNonpaySource.click();
+    await expect(blockedDialog.getByText('Successfully imported 0 employees.')).toBeVisible();
 
     await context.close();
   });
