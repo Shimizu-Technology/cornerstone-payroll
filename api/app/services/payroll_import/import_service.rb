@@ -172,7 +172,12 @@ module PayrollImport
             # Set tips from Excel — reported_tips is the taxable tip source of truth.
             # Legacy `tips` is cleared to prevent historical double counting.
             payroll_item.reported_tips = row[:total_tips].to_f
-            payroll_item.tips_paid_out = tips_paid_out_from_tips ? row[:total_tips].to_f : 0.0
+            row_tips_paid_out = if row[:tips_already_paid].nil?
+              tips_paid_out_from_tips
+            else
+              row[:tips_already_paid]
+            end
+            payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
             payroll_item.tips = 0.0  # Reset to avoid double-counting
             payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
             payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
@@ -217,8 +222,14 @@ module PayrollImport
       low_confidence_matches = []
 
       excel_records.each do |row|
-        match = matcher.match_excel_name(row[:last_name], row[:first_name])
+        match = if row[:employee_id].present?
+          employee = employees_by_id[row[:employee_id].to_i]
+          employee && { employee_id: employee.id, confidence: 1.0, matched_name: employee.full_name, method: "employee_id" }
+        else
+          matcher.match_excel_name(row[:last_name], row[:first_name])
+        end
         source_name = [ row[:first_name], row[:last_name] ].compact.join(" ").strip
+        source_name = row[:employee_name].presence || source_name
 
         unless match
           unmatched_names << source_name
@@ -259,8 +270,16 @@ module PayrollImport
         installment_new_amount: existing[:installment_new_amount].to_f + incoming[:installment_new_amount].to_f,
         installment_payment: existing[:installment_payment].to_f + incoming[:installment_payment].to_f,
         installment_estimated_ending_balance: [ existing[:installment_estimated_ending_balance].to_f, incoming[:installment_estimated_ending_balance].to_f ].max,
+        tips_already_paid: merge_optional_boolean(existing[:tips_already_paid], incoming[:tips_already_paid]),
         tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
       }
+    end
+
+    def merge_optional_boolean(existing_value, incoming_value)
+      values = [ existing_value, incoming_value ].compact.uniq
+      raise ArgumentError, "Conflicting tip payout answers matched the same employee." if values.many?
+
+      values.first
     end
 
     def merge_tip_pool(existing_pool, incoming_pool)
@@ -298,6 +317,7 @@ module PayrollImport
         total_tips: excel_data&.dig(:total_tips) || 0.0,
         tips_boh: excel_data&.dig(:tips_boh) || 0.0,
         tips_foh: excel_data&.dig(:tips_foh) || 0.0,
+        tips_already_paid: excel_data&.dig(:tips_already_paid),
         tip_pool: excel_data&.dig(:tip_pool),
         loan_deduction: excel_data&.dig(:loan_deduction) || 0.0,
         recurring_loan_deduction: excel_data&.dig(:recurring_loan_deduction) || 0.0,
