@@ -48,6 +48,9 @@ class ClientEmployeeUpdateService
     default_payroll_adjustments
     wage_rates
   ].freeze
+  LEGACY_RETIREMENT_FIELDS = %i[
+    retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
+  ].freeze
   PROTECTED_IDENTIFIER_FIELDS = %i[ssn_encrypted contractor_ein].freeze
 
   Result = Struct.new(
@@ -119,6 +122,7 @@ class ClientEmployeeUpdateService
       employee.lock!
       direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
       approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
+      prevent_legacy_retirement_change!(approval_attrs)
       if attrs.key?(WAGE_RATES_KEY)
         normalized_wage_rates = normalized_wage_rates_payload(attrs[WAGE_RATES_KEY])
         approval_attrs[WAGE_RATES_KEY] = normalized_wage_rates if wage_rates_changed?(normalized_wage_rates)
@@ -160,6 +164,14 @@ class ClientEmployeeUpdateService
   private
 
   attr_reader :employee, :attrs, :requested_by, :company
+
+  def prevent_legacy_retirement_change!(approval_attrs)
+    return if (approval_attrs.keys & LEGACY_RETIREMENT_FIELDS).empty?
+    return unless employee.employee_retirement_elections.exists?
+
+    employee.errors.add(:retirement_rate, "is managed in the dated retirement election; ask payroll staff to record the signed change")
+    raise ActiveRecord::RecordInvalid, employee
+  end
 
   def changed_attributes_subset(subset)
     subset.each_with_object({}) do |(key, value), changed|

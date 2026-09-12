@@ -43,6 +43,24 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(data.map { |row| row.fetch("id") }).to contain_exactly(employee.id)
       expect(data.first.fetch("job_title")).to eq("Payroll Clerk")
     end
+
+
+    it "shows the effective retirement election without exposing its staff actor" do
+      election = employee.employee_retirement_elections.create!(
+        company: company,
+        effective_on: Date.current,
+        participating: true,
+        traditional_rate: 0.05,
+        source: "staff",
+        reason: "Signed election"
+      )
+
+      get "/api/v1/client/employees/#{employee.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "current_retirement_election", "id")).to eq(election.id)
+      expect(response.parsed_body.dig("data", "current_retirement_election")).not_to have_key("created_by_id")
+    end
   end
 
   describe "POST /api/v1/client/employees" do
@@ -152,6 +170,25 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/client/employees/:id" do
+    it "directs retirement changes to the dated staff workflow once an election exists" do
+      employee.employee_retirement_elections.create!(
+        company: company,
+        effective_on: Date.current,
+        participating: true,
+        traditional_rate: 0.05,
+        source: "staff",
+        reason: "Signed election"
+      )
+
+      expect do
+        patch "/api/v1/client/employees/#{employee.id}", params: { employee: { retirement_rate: 0.07 } }
+      end.not_to change(EmployeeChangeRequest, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.to_s).to include("dated retirement election")
+      expect(employee.reload.retirement_rate).not_to eq(0.07)
+    end
+
     it "redacts identifiers even if a legacy request reaches the employee action serializer" do
       legacy_request = create(:employee_change_request,
         company: company,

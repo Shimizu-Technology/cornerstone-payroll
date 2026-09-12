@@ -48,12 +48,13 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil)
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, retirement_election: nil)
       {
         "version" => VERSION,
         "employee" => employee_snapshot(employee, w4_election: w4_election),
         "employee_deductions" => deduction_snapshots(employee_deductions),
-        "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments)
+        "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
+        "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
       }
     end
 
@@ -102,6 +103,10 @@ class PayrollCalculationContext
           payroll_field_definition: definition
         )
       end
+    end
+
+    def retirement_election(snapshot)
+      snapshot.to_h.deep_stringify_keys["retirement_election"]
     end
 
     private

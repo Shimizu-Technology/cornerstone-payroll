@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -2198,7 +2198,14 @@ export function EmployeeForm() {
               {/* Retirement Contributions */}
               <div className="mt-6 pt-4 border-t border-gray-200">
                 <h4 className="text-sm font-semibold text-gray-800 mb-1">Retirement Contributions</h4>
-                <p className="mb-3 text-xs leading-5 text-gray-500">Employee deductions reduce the check. Employer matches are company-paid and do not reduce take-home pay.</p>
+                {isEditing && loadedEmployee?.current_retirement_election ? (
+                  <div className="rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
+                    <p className="text-sm font-semibold text-neutral-900">Managed as a dated retirement election</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-600">Use the employee Pay setup workspace to change contribution amounts, annual limits, eligible pay, or employer match. This keeps prior elections intact.</p>
+                    <Link className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={employeePath(companyId, Number(id), 'pay-setup', { returnTo })}>Open retirement setup</Link>
+                  </div>
+                ) : <>
+                <p className="mb-3 text-xs leading-5 text-gray-500">Basic percentage setup for a new employee. After saving, use Pay setup for fixed amounts, catch-up rules, caps, and employer match formulas.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2261,6 +2268,7 @@ export function EmployeeForm() {
                     {getFieldError('employer_roth_match_rate') && <p className="mt-1 text-sm text-red-600">{getFieldError('employer_roth_match_rate')}</p>}
                   </div>
                 </div>
+                </>}
               </div>
             </CardContent>
           </Card>

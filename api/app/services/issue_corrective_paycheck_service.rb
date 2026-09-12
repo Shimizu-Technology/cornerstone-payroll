@@ -359,6 +359,7 @@ class IssueCorrectivePaycheckService
     temp.pay_period = @original_pay_period
     temp.payroll_adjustments = original_item.payroll_adjustments.deep_dup
     temp.tax_rule_snapshot = original_item.tax_rule_snapshot.deep_dup
+    temp.retirement_rule_snapshot = original_item.retirement_rule_snapshot.deep_dup
     clone_original_payroll_field_entries!(temp)
 
     # Stub YTD context to "as it was when the original was first calculated":
@@ -604,6 +605,7 @@ class IssueCorrectivePaycheckService
       qualified_overtime_compensation: deltas[:qualified_overtime_compensation],
       annual_tax_config_id:            corrected_item.annual_tax_config_id,
       tax_rule_snapshot:               corrected_item.tax_rule_snapshot,
+      retirement_rule_snapshot:        corrected_item.retirement_rule_snapshot,
 
       # No deductions on the corrective row — the original period already
       # captured the period's deductions; the corrective covers only the

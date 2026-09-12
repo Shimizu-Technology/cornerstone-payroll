@@ -7,6 +7,15 @@
 load Rails.root.join("db/seeds/tax_configs.rb")
 load Rails.root.join("db/seeds/information_return_thresholds.rb")
 
+AnnualRetirementLimit.find_or_create_by!(tax_year: 2026) do |limit|
+  limit.elective_deferral_limit = 24_500
+  limit.catch_up_limit = 8_000
+  limit.enhanced_catch_up_limit = 11_250
+  limit.roth_catch_up_wage_threshold = 150_000
+  limit.source_name = "IRS Notice 2025-67 and Retirement Topics: Catch-up Contributions"
+  limit.source_url = "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-catch-up-contributions"
+end
+
 puts "\nSeeding legacy tax tables (for backward compatibility)..."
 
 # =============================================================================
@@ -110,7 +119,12 @@ puts "Created #{TaxTable.count} tax tables for 2026"
 if Rails.env.development?
   puts "\nSeeding Cornerstone Tax Services..."
 
-  company = Company.find_or_create_by!(name: "Cornerstone Tax Services") do |c|
+  organization = Organization.find_or_create_by!(slug: "cornerstone-tax-services") do |org|
+    org.name = "Cornerstone Tax Services"
+    org.status = "active"
+  end
+
+  company = organization.companies.find_or_create_by!(name: "Cornerstone Tax Services") do |c|
     c.address_line1 = "123 Pale San Vitores Road"
     c.city = "Tamuning"
     c.state = "GU"
@@ -170,7 +184,7 @@ if Rails.env.development?
     }
   ]
 
-  employees_data.each do |emp_data|
+  employees_data.each_with_index do |emp_data, index|
     Employee.find_or_create_by!(
       company: company,
       first_name: emp_data[:first_name],
@@ -185,6 +199,11 @@ if Rails.env.development?
       e.allowances = emp_data[:allowances]
       e.status = "active"
       e.hire_date = emp_data[:hire_date]
+      e.address_line1 = "#{index + 1} Development Seed Lane"
+      e.city = "Tamuning"
+      e.state = "GU"
+      e.zip = "96913"
+      e.ssn_encrypted = format("900-00-%04d", index + 1)
     end
   end
 
@@ -217,7 +236,7 @@ if Rails.env.development?
   ]
 
   client_companies.each do |client_data|
-    Company.find_or_create_by!(name: client_data[:name]) do |c|
+    organization.companies.find_or_create_by!(name: client_data[:name]) do |c|
       c.city = client_data[:city]
       c.state = "GU"
       c.pay_frequency = client_data[:pay_frequency]

@@ -212,6 +212,32 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(json["data"]["department"]).to include("id" => department.id, "name" => department.name)
     end
 
+    it "includes the current, upcoming, and immutable retirement election history" do
+      current = employee.employee_retirement_elections.create!(
+        company: company,
+        effective_on: Date.current - 30,
+        participating: true,
+        traditional_rate: 0.05,
+        source: "staff",
+        reason: "Initial signed election"
+      )
+      upcoming = employee.employee_retirement_elections.create!(
+        company: company,
+        effective_on: Date.current + 15,
+        participating: true,
+        traditional_rate: 0.07,
+        source: "staff",
+        reason: "Signed increase"
+      )
+
+      get "/api/v1/admin/employees/#{employee.id}"
+
+      data = response.parsed_body.fetch("data")
+      expect(data.dig("current_retirement_election", "id")).to eq(current.id)
+      expect(data.dig("upcoming_retirement_election", "id")).to eq(upcoming.id)
+      expect(data.fetch("retirement_elections").map { |row| row.fetch("id") }).to eq([ upcoming.id, current.id ])
+    end
+
     it "returns 404 for non-existent employee" do
       get "/api/v1/admin/employees/99999"
 

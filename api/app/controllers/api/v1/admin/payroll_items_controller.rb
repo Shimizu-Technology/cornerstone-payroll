@@ -330,6 +330,7 @@ module Api
             medicare_taxable_wages: item.medicare_taxable_wages,
             additional_medicare_taxable_wages: item.additional_medicare_taxable_wages,
             tax_rule_snapshot: item.tax_rule_snapshot,
+            retirement_rule_snapshot: item.retirement_rule_snapshot,
             retirement_payment: item.retirement_payment,
             additional_withholding: item.additional_withholding,
             additional_withholding_override: item.additional_withholding_override,

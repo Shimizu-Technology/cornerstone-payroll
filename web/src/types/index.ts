@@ -235,6 +235,9 @@ export interface Employee {
   current_w4_election?: EmployeeW4Election | null;
   upcoming_w4_election?: EmployeeW4Election | null;
   w4_elections?: EmployeeW4Election[];
+  current_retirement_election?: EmployeeRetirementElection | null;
+  upcoming_retirement_election?: EmployeeRetirementElection | null;
+  retirement_elections?: EmployeeRetirementElection[];
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -297,6 +300,46 @@ export interface EmployeeW4Election {
   created_by_name?: string | null;
   created_at: string;
 }
+
+export type RetirementContributionType = 'percentage' | 'fixed';
+export type RetirementEligibleCompensation = 'gross_wages' | 'gross_excluding_tips' | 'base_pay';
+export type RetirementLimitPriority = 'proportional' | 'traditional_first' | 'roth_first';
+export type RetirementMatchMode = 'none' | 'compensation_percentage' | 'employee_deferral_percentage';
+
+export interface EmployeeRetirementElection {
+  id: number;
+  employee_id: number;
+  company_id: number;
+  effective_on: string;
+  plan_name: string;
+  eligible: boolean;
+  participating: boolean;
+  traditional_contribution_type: RetirementContributionType;
+  traditional_rate: number;
+  traditional_amount: number;
+  roth_contribution_type: RetirementContributionType;
+  roth_rate: number;
+  roth_amount: number;
+  eligible_compensation: RetirementEligibleCompensation;
+  catch_up_enabled: boolean;
+  limit_priority: RetirementLimitPriority;
+  plan_annual_employee_limit?: number | null;
+  employer_match_mode: RetirementMatchMode;
+  employer_match_rate: number;
+  employer_match_deferral_cap_rate?: number | null;
+  employer_match_period_cap?: number | null;
+  employer_match_annual_cap?: number | null;
+  employer_match_ytd_before_system: number;
+  employer_match_destination: 'traditional' | 'roth';
+  true_up_policy: 'none' | 'year_to_date';
+  source: 'staff' | 'employee_creation' | 'quickbooks_history';
+  reason: string;
+  created_by_name?: string | null;
+  created_at: string;
+}
+
+export type EmployeeRetirementElectionInput = Omit<EmployeeRetirementElection,
+  'id' | 'employee_id' | 'company_id' | 'source' | 'created_by_name' | 'created_at'>;
 
 export type EmployeeOvertimeStatus = 'exempt' | 'nonexempt' | 'needs_review';
 export type EmployeeTimekeepingMode = 'imported' | 'manual' | 'schedule_with_exceptions';
@@ -818,6 +861,7 @@ export interface PayrollItem {
   additional_medicare_taxable_wages?: number | null;
   annual_tax_config_id?: number | null;
   tax_rule_snapshot?: Record<string, unknown>;
+  retirement_rule_snapshot?: Record<string, unknown>;
   state_withheld?: number | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;
