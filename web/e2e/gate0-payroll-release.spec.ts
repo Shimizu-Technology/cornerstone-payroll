@@ -1283,6 +1283,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByText('This run cannot be committed while cutover approval is open.')).toBeVisible();
     await expect(page.getByLabel('Starting Check Number (optional)')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Create Comparison Run' })).toBeVisible();
+
+    await page.getByLabel('Pay Date').fill('2026-08-31');
+    await expect(page.getByRole('heading', { name: 'New Pay Period' })).toBeVisible();
+    await expect(page.getByLabel('Starting Check Number (optional)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create Pay Period' })).toBeVisible();
+
+    await page.getByLabel('Pay Date').fill('2026-09-18');
+    await expect(page.getByRole('heading', { name: 'New Comparison Run' })).toBeVisible();
+    await expect(page.getByLabel('Starting Check Number (optional)')).toHaveCount(0);
   });
 
   test('keeps company, queue, and relationship context across canonical payroll records', async ({ browser }): Promise<void> => {
