@@ -1323,8 +1323,15 @@ export interface PayrollIntakeWarning {
 export interface PayrollIntakeDocumentData {
   id: number;
   document_type: 'pasted_text' | 'image' | 'pdf' | 'other';
+  source_role: 'pasted_email' | 'email_attachment' | 'revel_hours' | 'supplemental_workbook' | 'supporting_document' | 'legacy_source';
+  position: number;
   filename?: string | null;
   content_type?: string | null;
+  byte_size?: number | null;
+  sha256?: string | null;
+  verification_status: 'verified' | 'failed' | 'legacy_unverified';
+  verified_at?: string | null;
+  download_path?: string | null;
   metadata?: Record<string, unknown>;
   text_preview?: string | null;
 }
@@ -1366,6 +1373,9 @@ export interface PayrollIntakeImportData {
   status: 'draft' | 'previewed' | 'reviewed' | 'applied' | 'failed';
   import_hash: string;
   parser_version: string;
+  package_id: string;
+  package_revision: number;
+  package_schema_version: string;
   evidence_snapshot?: Record<string, unknown>;
   warnings: PayrollIntakeWarning[];
   totals: Record<string, number>;

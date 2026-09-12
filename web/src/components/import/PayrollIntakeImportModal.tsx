@@ -532,10 +532,19 @@ export function PayrollIntakeImportModal({
 
         {step === 'preview' && importData && (
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="Source package" value={`Revision ${importData.package_revision}`} />
               <SummaryCard label="Included rows" value={String(includedRows.length)} />
               <SummaryCard label="Hours" value={`${totals.regular.toFixed(2)} regular / ${totals.overtime.toFixed(2)} OT`} />
               <SummaryCard label="Paid-out tips" value={formatCurrency(totals.tips)} />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
+              <span className="inline-flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                {importData.documents.filter((document) => document.verification_status === 'verified').length} source{importData.documents.length === 1 ? '' : 's'} retained and verified
+              </span>
+              <span className="text-success-800">Package {importData.package_id.slice(0, 8)} · schema {importData.package_schema_version}</span>
             </div>
 
             {(importData.warnings || []).length > 0 && (

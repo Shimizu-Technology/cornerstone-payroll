@@ -69,6 +69,16 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         "start_date" => "2026-06-14",
         "end_date" => "2026-06-27"
       )
+      expect(json.dig("import", "package_id")).to be_present
+      expect(json.dig("import", "package_revision")).to eq(1)
+      expect(json.dig("import", "package_schema_version")).to eq(PayrollIntakeSession::PACKAGE_SCHEMA_VERSION)
+      expect(json.dig("import", "documents", 0)).to include(
+        "source_role" => "pasted_email",
+        "position" => 0,
+        "verification_status" => "verified",
+        "byte_size" => spike_text.bytesize,
+        "sha256" => Digest::SHA256.hexdigest(spike_text)
+      )
     end
 
     it "rejects intake before extraction when the legal workweek is not confirmed" do
@@ -173,17 +183,31 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("import", "id")).not_to eq(first_id)
       expect(json["duplicate"]).to eq(false)
       expect(json.dig("import", "parser_version")).to eq("spike_email:test-v2")
+      expect(json.dig("import", "package_revision")).to eq(2)
     end
 
     it "uploads source files outside the database transaction" do
       baseline_transactions = ActiveRecord::Base.connection.open_transactions
       upload_transactions = []
       storage = Class.new do
-        define_method(:initialize) { |transactions| @transactions = transactions }
+        define_method(:initialize) do |transactions|
+          @transactions = transactions
+          @objects = {}
+        end
 
-        def upload(_key, _data, content_type:)
+        def upload(key, data, content_type:)
           @transactions << ActiveRecord::Base.connection.open_transactions
+          @objects[key] = data
           "https://storage.example/#{content_type}"
+        end
+
+        def download_with_limit(key, max_bytes:)
+          value = @objects[key]
+          value if value&.bytesize.to_i <= max_bytes
+        end
+
+        def delete(key)
+          @objects.delete(key)
         end
       end.new(upload_transactions)
 
@@ -203,9 +227,68 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       ).call
 
       expect(upload_transactions).to eq([ baseline_transactions ])
-      expect(result[:session].documents.where(document_type: "image").count).to eq(1)
+      document = result[:session].documents.find_by!(document_type: "image")
+      expect(document).to have_attributes(
+        source_role: "email_attachment",
+        verification_status: "verified",
+        byte_size: 11,
+        sha256: Digest::SHA256.hexdigest("image-bytes")
+      )
     ensure
       tempfile&.close!
+    end
+
+    it "removes an upload and creates no package when retained bytes cannot be verified" do
+      storage = instance_double(R2StorageService)
+      allow(storage).to receive(:upload).and_return("local-r2://retained-source")
+      allow(storage).to receive(:download_with_limit).and_return("corrupt")
+      expect(storage).to receive(:delete).with(a_string_including("payroll-intake/#{company.id}/#{pay_period.id}/"))
+
+      tempfile = Tempfile.new([ "spike-intake", ".png" ])
+      tempfile.binmode
+      tempfile.write("image-bytes")
+      tempfile.rewind
+      upload = double("upload", tempfile: tempfile, original_filename: "spike.png", content_type: "image/png")
+
+      expect {
+        PayrollIntake::PreviewService.new(
+          pay_period: pay_period,
+          source_type: "spike_email",
+          pasted_text: spike_text,
+          files: [ upload ],
+          actor: admin_user,
+          storage: storage
+        ).call
+      }.to raise_error(R2StorageService::UploadError, /could not be verified/)
+      expect(PayrollIntakeSession.where(pay_period: pay_period)).to be_empty
+    ensure
+      tempfile&.close!
+    end
+  end
+
+
+  describe "GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/:id/documents/:document_id/download" do
+    it "returns fingerprint-verified source evidence and records the access" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      document = PayrollIntakeSession.last.documents.first
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_intake_imports/#{document.payroll_intake_session_id}/documents/#{document.id}/download"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to eq(spike_text)
+      expect(response.headers.fetch("Content-Disposition")).to include("attachment")
+      expect(AuditLog.where(action: "payroll_intake_imports#download_source_document", record_id: document.payroll_intake_session_id)).to exist
+    end
+
+    it "does not expose a source package through another company" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      document = PayrollIntakeSession.last.documents.first
+      other_company = create(:company, organization: organization)
+      allow_any_instance_of(Api::V1::Admin::PayrollIntakeImportsController).to receive(:current_company_id).and_return(other_company.id)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_intake_imports/#{document.payroll_intake_session_id}/documents/#{document.id}/download"
+
+      expect(response).to have_http_status(:forbidden)
     end
   end
 

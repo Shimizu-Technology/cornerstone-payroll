@@ -9,6 +9,9 @@ FactoryBot.define do
     status { "previewed" }
     sequence(:import_hash) { |n| Digest::SHA256.hexdigest("payroll-intake-#{n}") }
     parser_version { PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION }
+    package_id { SecureRandom.uuid }
+    sequence(:package_revision)
+    package_schema_version { PayrollIntakeSession::PACKAGE_SCHEMA_VERSION }
     warnings { [] }
     totals { {} }
   end
