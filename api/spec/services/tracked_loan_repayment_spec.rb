@@ -154,7 +154,7 @@ RSpec.describe "Tracked payroll loan repayment" do
     item.loan_deduction = 40
     applier = PayrollFieldInputApplier.new(pay_period: period, company_id: company.id)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "default" } }) }.not_to raise_error
-    expect { calculate }.to raise_error(ArgumentError, /direct amount does not update a tracked loan balance/)
+    expect { calculate }.to raise_error(ArgumentError, /direct amount is not recorded in that ledger/i)
     expect(loan.reload.current_balance).to eq(75)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 30 } }) }.to raise_error(ArgumentError, /only one loan deduction source/)
     item.loan_deduction = 0
@@ -183,17 +183,73 @@ RSpec.describe "Tracked payroll loan repayment" do
     loan.update!(deduction_type: deduction_type)
     employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
     item.loan_deduction = 40
-    expect { calculate }.to raise_error(ArgumentError, /named loan repayment/)
+    expect { calculate }.to raise_error(ArgumentError, /named deduction/)
   end
 
   it "also blocks committing an older saved direct payment that bypassed the tracked schedule" do
     item.update!(loan_deduction: 40, loan_payment: 40)
     period.update!(status: "approved")
-    expect { PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit! }.to raise_error(ArgumentError, /named loan repayment/)
+    expect { PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit! }.to raise_error(ArgumentError, /named deduction/)
     expect(period.reload).to be_approved
     expect(loan.reload.current_balance).to eq(75)
     expect(loan.loan_transactions).to be_empty
   end
+
+  context "with a recurring deduction that has no known balance" do
+    let(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Recurring deduction until stopped",
+        tracking_mode: "recurring_no_balance",
+        payment_amount: 50,
+        first_deduction_date: period.pay_date,
+        status: "active"
+      )
+    end
+
+    it "deducts the full scheduled amount without inventing or reducing a balance" do
+      calculate
+
+      deduction = item.payroll_item_deductions.first
+      expect(deduction.amount).to eq(50)
+      expect(deduction.employee_loan).to eq(loan)
+      expect(loan.reload.current_balance).to be_nil
+
+      period.update!(status: "approved")
+      PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+      transaction = loan.loan_transactions.payments.find_by!(payroll_item: item)
+      expect(transaction).to have_attributes(amount: 50, balance_before: nil, balance_after: nil, source: "payroll")
+      expect(loan.reload).to have_attributes(status: "active", current_balance: nil)
+    end
+
+    it "records a committed deduction once and reverses it without creating a fake balance" do
+      calculate
+      calculator = PayrollCalculator.for(employee, item)
+      2.times { calculator.apply_loan_payments! }
+      expect(loan.loan_transactions.payments.count).to eq(1)
+
+      payment = loan.loan_transactions.payments.first
+      2.times { loan.reverse_payroll_payment!(payment, actor: nil, reason: "Voided payroll") }
+      expect(loan.loan_transactions.where(transaction_type: "adjustment").count).to eq(1)
+      expect(loan.loan_transactions.order(:id).pluck(:balance_before, :balance_after)).to eq([ [ nil, nil ], [ nil, nil ] ])
+      expect(loan.reload.current_balance).to be_nil
+    end
+
+    it "rejects an unidentified direct import amount that would bypass its ledger" do
+      item.loan_deduction = 40
+
+      expect { calculate }.to raise_error(ArgumentError, /named deduction/)
+      expect(loan.loan_transactions).to be_empty
+    end
+
+    it "never allows payoff or balance additions for the no-balance mode" do
+      expect { loan.mark_paid_off! }.to raise_error(ArgumentError, /should be stopped/)
+      expect { loan.record_addition!(amount: 25) }.to raise_error(ArgumentError, /cannot receive a loan advance/)
+      expect(loan.reload).to be_active
+    end
+  end
+
   [ :inactive, :expired ].each do |field_state|
     context "when an #{field_state} field exists alongside an active legacy schedule" do
       before do
@@ -205,7 +261,7 @@ RSpec.describe "Tracked payroll loan repayment" do
 
       it "rejects a direct deduction that would bypass the active legacy repayment" do
         item.loan_deduction = 40
-        expect { calculate }.to raise_error(ArgumentError, /named loan repayment/)
+        expect { calculate }.to raise_error(ArgumentError, /named deduction/)
         expect(loan.reload.current_balance).to eq(75)
         expect(loan.loan_transactions).to be_empty
       end

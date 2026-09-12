@@ -489,6 +489,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                     const sourceRow = sourceRows.find((candidate) => candidate.id === row.source_row_id);
                     if (!sourceRow) return null;
                     const excluded = sourceRow.disposition !== 'included';
+                    const classifiedLoanAmount = (row.one_payroll_deduction || 0) + (row.recurring_loan_deduction || 0) + (row.installment_payment || 0);
+                    const sourceLoanAmount = Math.max(row.loan_deduction || 0, classifiedLoanAmount);
                     return (
                       <TableRow key={row.source_row_id} className={excluded ? 'bg-neutral-50/70' : ''}>
                         <TableCell>
@@ -527,14 +529,19 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {row.loan_deduction > 0 ? (
+                          {sourceLoanAmount > 0 ? (
                             <div>
-                              <p>{formatCurrency(row.loan_deduction)}</p>
+                              <p>{formatCurrency(sourceLoanAmount)}</p>
                               {((row.recurring_loan_deduction || 0) > 0 || (row.installment_payment || 0) > 0) && (
                                 <p className="mt-0.5 text-[11px] text-gray-500">
                                   {(row.recurring_loan_deduction || 0) > 0 && `This payroll ${formatCurrency(row.recurring_loan_deduction || 0)}`}
                                   {(row.recurring_loan_deduction || 0) > 0 && (row.installment_payment || 0) > 0 && ' · '}
                                   {(row.installment_payment || 0) > 0 && `Installment ${formatCurrency(row.installment_payment || 0)}`}
+                                </p>
+                              )}
+                              {(row.loan_reconciliation_matches || []).length > 0 && (
+                                <p className="mt-0.5 text-[11px] font-medium text-green-700">
+                                  Matched to {(row.loan_reconciliation_matches || []).map((match) => match.name).join(', ')}
                                 </p>
                               )}
                             </div>
@@ -575,7 +582,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                 Gross pay and taxes will be calculated from employee profiles, imported hours, and this payroll’s tips, deductions and bonus. A manually entered bonus is retained during reimport.
               </p>
               <p>
-                Excel loan deductions are applied to this payroll run only. They do not create or update Employee Loans balances yet.
+                Named recurring deductions and installment payments must match a configured ledger before import. The ledger records them only when payroll is committed. A separately labeled one-payroll deduction applies only to this run.
               </p>
             </div>
           </div>

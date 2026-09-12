@@ -958,7 +958,7 @@ module Api
           ]
 
           # Add installment loans if company has any active loans
-          if company.employee_loans.active.any?
+          if company.employee_loans.active.where(tracking_mode: "balance_tracked").any?
             generators << InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
           end
 

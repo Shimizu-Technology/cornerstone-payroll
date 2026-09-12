@@ -90,7 +90,8 @@ module PayrollImport
         pdf_count: pdf_records.length,
         excel_count: excel_records.length,
         matched_count: matched.length,
-        can_apply: unmatched_pdf_names.empty? && unmatched_excel_names.empty? && duplicate_employee_matches.empty?
+        can_apply: unmatched_pdf_names.empty? && unmatched_excel_names.empty? && duplicate_employee_matches.empty? &&
+          matched.none? { |row| Array(row[:loan_reconciliation_errors]).any? }
       }
     end
 
@@ -269,6 +270,7 @@ module PayrollImport
         tips_boh: existing[:tips_boh].to_f + incoming[:tips_boh].to_f,
         tips_foh: existing[:tips_foh].to_f + incoming[:tips_foh].to_f,
         loan_deduction: existing[:loan_deduction].to_f + incoming[:loan_deduction].to_f,
+        one_payroll_deduction: existing[:one_payroll_deduction].to_f + incoming[:one_payroll_deduction].to_f,
         recurring_loan_deduction: existing[:recurring_loan_deduction].to_f + incoming[:recurring_loan_deduction].to_f,
         installment_beginning_balance: [ existing[:installment_beginning_balance].to_f, incoming[:installment_beginning_balance].to_f ].max,
         installment_new_amount: existing[:installment_new_amount].to_f + incoming[:installment_new_amount].to_f,
@@ -295,6 +297,11 @@ module PayrollImport
 
     def build_preview_row(pdf_row, employee, match, excel_data)
       existing_item = pay_period.payroll_items.find_by(employee_id: employee.id)
+      loan_reconciliation = LoanReconciliation.new(
+        employee: employee,
+        pay_date: pay_period.pay_date,
+        source_row: excel_data || {}
+      ).call
       source_bonus = excel_data&.dig(:bonus)
       retained_bonus = existing_item && PayrollBonusInput.manual?(existing_item)
       row = {
@@ -323,12 +330,16 @@ module PayrollImport
         tips_foh: excel_data&.dig(:tips_foh) || 0.0,
         tips_already_paid: excel_data&.dig(:tips_already_paid),
         tip_pool: excel_data&.dig(:tip_pool),
-        loan_deduction: excel_data&.dig(:loan_deduction) || 0.0,
+        loan_deduction: loan_reconciliation.fetch(:direct_loan_deduction).to_f,
+        one_payroll_deduction: excel_data&.dig(:one_payroll_deduction) || 0.0,
         recurring_loan_deduction: excel_data&.dig(:recurring_loan_deduction) || 0.0,
         installment_beginning_balance: excel_data&.dig(:installment_beginning_balance) || 0.0,
         installment_new_amount: excel_data&.dig(:installment_new_amount) || 0.0,
         installment_payment: excel_data&.dig(:installment_payment) || 0.0,
-        installment_estimated_ending_balance: excel_data&.dig(:installment_estimated_ending_balance) || 0.0
+        installment_estimated_ending_balance: excel_data&.dig(:installment_estimated_ending_balance) || 0.0,
+        loan_reconciliation_matches: loan_reconciliation.fetch(:matches),
+        loan_reconciliation_errors: loan_reconciliation.fetch(:errors),
+        loan_reconciliation_warnings: loan_reconciliation.fetch(:warnings)
       }
 
       row
