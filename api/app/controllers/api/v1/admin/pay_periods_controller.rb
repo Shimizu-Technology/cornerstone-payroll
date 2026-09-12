@@ -84,10 +84,11 @@ module Api
         def create
           attrs = pay_period_params.to_h
           starting_check_number = attrs.delete("starting_check_number")
-          intent_was_submitted = attrs["run_purpose"].present? || attrs.key?("includes_base_salary")
+          intent_was_submitted = attrs["run_purpose"].present? || attrs.key?("includes_base_salary") || attrs.key?("includes_recurring_items")
           attrs["run_purpose"] ||= "regular"
           attrs["run_purpose_source"] = "operator_selected" if intent_was_submitted
           attrs["includes_base_salary"] = attrs["run_purpose"] == "regular" unless attrs.key?("includes_base_salary")
+          attrs["includes_recurring_items"] = attrs["run_purpose"] == "regular" unless attrs.key?("includes_recurring_items")
           gate = PayrollGoLiveGate.new(company: current_company, pay_date: attrs["pay_date"])
           if gate.comparison_only? && starting_check_number.present?
             raise ArgumentError, "Starting check number is not used for comparison runs"
@@ -129,7 +130,7 @@ module Api
           pay_date_was = @pay_period.pay_date
 
           if !@pay_period.draft? && purpose_fields_submitted?
-            return render json: { error: "Run purpose and base-salary treatment can only change while the pay period is a draft" }, status: :unprocessable_entity
+            return render json: { error: "Run purpose, base salary, and recurring employee setup can only change while the pay period is a draft" }, status: :unprocessable_entity
           end
 
           begin
@@ -140,6 +141,7 @@ module Api
               end
               if update_attributes["run_purpose"].present?
                 update_attributes["includes_base_salary"] = update_attributes["run_purpose"] == "regular" unless update_attributes.key?("includes_base_salary")
+                update_attributes["includes_recurring_items"] = update_attributes["run_purpose"] == "regular" unless update_attributes.key?("includes_recurring_items")
               end
               @pay_period.update!(update_attributes)
               dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
@@ -329,12 +331,10 @@ module Api
               if payroll_item.new_record?
                 payroll_item.company_id = current_company_id
                 payroll_item.hours_worked = 0
-                payroll_item.additional_withholding = employee.additional_withholding.to_f
-                payroll_item.custom_earnings = employee.default_custom_earnings
-                payroll_item.payroll_adjustments = employee.default_payroll_adjustments
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
+              payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
 
               # Use hours from params if provided
@@ -391,7 +391,8 @@ module Api
               end
 
               if params[:custom_earnings] && params[:custom_earnings][employee_id.to_s]
-                payroll_item.custom_earnings = normalize_custom_earnings(params[:custom_earnings][employee_id.to_s])
+                payroll_item.custom_earnings = PayrollItem.normalize_custom_earning_entries(params[:custom_earnings][employee_id.to_s])
+                payroll_item.mark_custom_earnings_overridden!
               end
 
               if params[:custom_deductions] && params[:custom_deductions][employee_id.to_s]
@@ -959,14 +960,15 @@ module Api
         def pay_period_params
           params.require(:pay_period).permit(
             :start_date, :end_date, :pay_date, :notes, :starting_check_number,
-            :run_purpose, :includes_base_salary
+            :run_purpose, :includes_base_salary, :includes_recurring_items
           )
         end
 
         def purpose_fields_submitted?
           submitted = params.fetch(:pay_period, {})
           submitted.key?(:run_purpose) || submitted.key?("run_purpose") ||
-            submitted.key?(:includes_base_salary) || submitted.key?("includes_base_salary")
+            submitted.key?(:includes_base_salary) || submitted.key?("includes_base_salary") ||
+            submitted.key?(:includes_recurring_items) || submitted.key?("includes_recurring_items")
         end
 
         def apply_starting_check_number!(value, company:)
@@ -998,6 +1000,7 @@ module Api
             notes: pay_period.notes,
             run_purpose: pay_period.run_purpose,
             includes_base_salary: pay_period.includes_base_salary,
+            includes_recurring_items: pay_period.includes_recurring_items,
             run_purpose_source: pay_period.run_purpose_source,
             parallel_run: pay_period.parallel_run,
             company_pay_schedule_id: pay_period.company_pay_schedule_id,

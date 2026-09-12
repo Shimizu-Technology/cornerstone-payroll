@@ -69,6 +69,7 @@ class ImportedPayPeriodQuery
       status: "locked",
       run_purpose: "regular",
       includes_base_salary: true,
+      includes_recurring_items: true,
       correction_status: nil,
       notes: nil,
       compliance_warnings: [],

@@ -229,7 +229,7 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo 
           </CardContent>
         </Card>
         <div className="space-y-6">
-          <Card><CardHeader><CardTitle>Run context</CardTitle></CardHeader><CardContent className="space-y-4"><ContextRow label="Pay date" value={formatDate(payRun.pay_date)} /><ContextRow label="Run purpose" value={runPurposeLabels[payRun.run_purpose] || payRun.run_purpose} /><ContextRow label="Base salary" value={payRun.includes_base_salary ? 'Included' : 'Excluded'} /><ContextRow label="Cycle" value={payRun.cycle || 'regular'} /></CardContent></Card>
+          <Card><CardHeader><CardTitle>Run context</CardTitle></CardHeader><CardContent className="space-y-4"><ContextRow label="Pay date" value={formatDate(payRun.pay_date)} /><ContextRow label="Run purpose" value={runPurposeLabels[payRun.run_purpose] || payRun.run_purpose} /><ContextRow label="Base salary" value={payRun.includes_base_salary ? 'Included' : 'Excluded'} /><ContextRow label="Recurring employee setup" value={payRun.includes_recurring_items ? 'Included' : 'Excluded'} /><ContextRow label="Cycle" value={payRun.cycle || 'regular'} /></CardContent></Card>
           {payRun.notes && <Card className="border-blue-100 bg-blue-50/60"><CardContent className="p-4"><p className="text-xs font-bold uppercase tracking-wide text-blue-700">Pay-run notes</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-blue-950">{payRun.notes}</p></CardContent></Card>}
         </div>
       </div>

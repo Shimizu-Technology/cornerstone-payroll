@@ -361,6 +361,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]["status"]).to eq("draft")
       expect(json["pay_period"]["run_purpose"]).to eq("regular")
       expect(json["pay_period"]["includes_base_salary"]).to be(true)
+      expect(json["pay_period"]["includes_recurring_items"]).to be(true)
     end
 
     it "creates only a parallel comparison when the successor cutover is not approved" do
@@ -429,7 +430,27 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       period = PayPeriod.order(:id).last
       expect(period.run_purpose).to eq("bonus")
       expect(period.includes_base_salary).to be(false)
+      expect(period.includes_recurring_items).to be(false)
       expect(period.run_purpose_source).to eq("operator_selected")
+    end
+
+    it "allows an operator to explicitly include recurring setup on a special run" do
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.today,
+          end_date: Date.today + 14.days,
+          pay_date: Date.today + 17.days,
+          run_purpose: "bonus",
+          includes_recurring_items: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(PayPeriod.order(:id).last).to have_attributes(
+        run_purpose: "bonus",
+        includes_base_salary: false,
+        includes_recurring_items: true
+      )
     end
 
     it "rejects base salary on an off-cycle tips run" do
@@ -455,6 +476,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload.run_purpose).to eq("commission")
       expect(pay_period.includes_base_salary).to be(false)
+      expect(pay_period.includes_recurring_items).to be(false)
       expect(pay_period.run_purpose_source).to eq("operator_selected")
     end
 
