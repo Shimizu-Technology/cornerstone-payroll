@@ -44,6 +44,22 @@ RSpec.describe PayrollRetirementConfigurationGuard do
     expect { guard.validate! }.to raise_error(ArgumentError, /payroll field "401\(k\) Fixed"/)
   end
 
+  it "rejects a dated fixed election and a flexible contribution for the same retirement bucket" do
+    employee.update!(retirement_rate: 0)
+    employee.employee_retirement_elections.create!(
+      company: company,
+      effective_on: pay_period.pay_date,
+      participating: true,
+      traditional_contribution_type: "fixed",
+      traditional_amount: 125,
+      source: "staff",
+      reason: "Signed election"
+    )
+    field_assignment
+
+    expect { guard.validate! }.to raise_error(ArgumentError, /payroll field "401\(k\) Fixed"/)
+  end
+
   it "rejects a built-in rate and a flexible percentage contribution before gross has been calculated" do
     field_assignment(amount: nil, amount_type: "percentage", percentage: 5)
 

@@ -408,6 +408,10 @@ export const employeesApi = {
     api.get<{ data: import('@/types').EmployeeWorkProfile[] }>(`/admin/employees/${id}/work_profiles`),
   createWorkProfile: (id: number, work_profile: import('@/types').EmployeeWorkProfileInput) =>
     api.post<{ data: import('@/types').EmployeeWorkProfile }>(`/admin/employees/${id}/work_profiles`, { work_profile }),
+  retirementElections: (id: number) =>
+    api.get<{ data: import('@/types').EmployeeRetirementElection[] }>(`/admin/employees/${id}/retirement_elections`),
+  createRetirementElection: (id: number, retirement_election: import('@/types').EmployeeRetirementElectionInput) =>
+    api.post<{ data: import('@/types').EmployeeRetirementElection }>(`/admin/employees/${id}/retirement_elections`, { retirement_election }),
   timeRecords: (id: number, params?: { start_date?: string; end_date?: string }) =>
     api.get<{ data: import('@/types').DailyTimeRecord[] }>(`/admin/employees/${id}/time_records`, params),
   createTimeRecord: (id: number, time_record: import('@/types').DailyTimeRecordInput) =>

@@ -48,6 +48,7 @@ import {
 import { employeesApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
+import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
 
@@ -285,6 +286,7 @@ export function EmployeeWorkspace(): ReactElement {
             reviewBusyCode={reviewBusyCode}
             onReviewNoteChange={(code, value) => setReviewNotes((current) => ({ ...current, [code]: value }))}
             onResolveReview={(code) => void resolveConfigurationReview(code)}
+            onEmployeeReload={load}
           />
         )}
         {activeTab === 'pay-history' && (
@@ -366,9 +368,10 @@ interface PaySetupProps {
   reviewBusyCode: string | null;
   onReviewNoteChange: (code: string, value: string) => void;
   onResolveReview: (code: string) => void;
+  onEmployeeReload: () => Promise<void>;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNoteChange, onResolveReview }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNoteChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -429,8 +432,8 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
           <ContextRow label="Salary treatment" value={employee.salary_type?.replace('_', ' ') || 'Not applicable'} />
           <ContextRow label="Active wage rates" value={String(wageRateCount || 1)} />
           <ContextRow label="Recurring adjustments" value={String(adjustmentCount)} />
-          <ContextRow label="Traditional retirement" value={`${(Number(employee.retirement_rate || 0) * 100).toFixed(2)}%`} />
-          <ContextRow label="Roth retirement" value={`${(Number(employee.roth_retirement_rate || 0) * 100).toFixed(2)}%`} />
+          <ContextRow label="Traditional retirement" value={retirementContributionSummary(employee.current_retirement_election, 'traditional', employee.retirement_rate)} />
+          <ContextRow label="Roth retirement" value={retirementContributionSummary(employee.current_retirement_election, 'roth', employee.roth_retirement_rate)} />
         </CardContent>
       </Card>
       <Card className="border-primary-100 bg-primary-50/50">
@@ -442,6 +445,8 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
         </CardContent>
       </Card>
       </div>
+
+      {employee.employment_type !== 'contractor' && <EmployeeRetirementElectionPanel employee={employee} onSaved={onEmployeeReload} />}
 
       {employee.employment_type !== 'contractor' && (
         <Card>
@@ -487,6 +492,15 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
       )}
     </div>
   );
+}
+
+function retirementContributionSummary(election: Employee['current_retirement_election'], bucket: 'traditional' | 'roth', legacyRate: number): string {
+  if (!election) return `${(Number(legacyRate || 0) * 100).toFixed(2)}% · legacy setup`;
+  if (!election.eligible || !election.participating) return 'Not participating';
+  const type = election[`${bucket}_contribution_type`];
+  return type === 'fixed'
+    ? `${formatCurrency(Number(election[`${bucket}_amount`]))} per payroll`
+    : `${(Number(election[`${bucket}_rate`]) * 100).toFixed(2)}% of eligible pay`;
 }
 
 interface PayHistoryProps {

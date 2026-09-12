@@ -639,6 +639,34 @@ RSpec.describe PayrollCalculator do
       expect(restored.metadata).not_to have_key("uncapped_amount")
     end
 
+    it "updates retirement evidence when insufficient pay reduces the calculated election" do
+      AnnualRetirementLimit.create!(
+        tax_year: pay_period.pay_date.year,
+        elective_deferral_limit: 23_000,
+        catch_up_limit: 7_500,
+        enhanced_catch_up_limit: 11_250,
+        roth_catch_up_wage_threshold: 145_000,
+        source_name: "Historical IRS limit",
+        source_url: "https://www.irs.gov/retirement-plans"
+      )
+      employee.employee_retirement_elections.create!(
+        company: company,
+        effective_on: pay_period.pay_date,
+        participating: true,
+        traditional_contribution_type: "fixed",
+        traditional_amount: 2_000,
+        source: "staff",
+        reason: "Signed election"
+      )
+
+      described_class.for(employee, payroll_item).calculate
+
+      applied = payroll_item.retirement_rule_snapshot.dig("applied", "traditional").to_d
+      expect(applied).to eq(payroll_item.retirement_payment)
+      expect(applied).to be < 2_000
+      expect(payroll_item.retirement_rule_snapshot.fetch("explanations")).to include(/enough available pay/)
+    end
+
     it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,

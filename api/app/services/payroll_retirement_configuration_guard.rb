@@ -16,7 +16,7 @@ class PayrollRetirementConfigurationGuard
   end
 
   def validate!
-    configured_rates = RATE_LABELS.keys.select { |attribute| @employee.public_send(attribute).to_d.positive? }
+    configured_rates = configured_built_in_sources
     conflicts = recurring_deductions + payroll_fields
     messages = conflicts.filter_map do |source|
       overlap = configured_rates & source.fetch(:rates)
@@ -31,6 +31,22 @@ class PayrollRetirementConfigurationGuard
   end
 
   private
+
+  def configured_built_in_sources
+    election = @employee.retirement_election_on(@payroll_item.pay_period.pay_date)
+    return RATE_LABELS.keys.select { |attribute| @employee.public_send(attribute).to_d.positive? } unless election
+    return [] unless election.eligible? && election.participating?
+
+    sources = []
+    traditional_value = election.traditional_contribution_type == "fixed" ? election.traditional_amount : election.traditional_rate
+    roth_value = election.roth_contribution_type == "fixed" ? election.roth_amount : election.roth_rate
+    sources << :retirement_rate if traditional_value.to_d.positive?
+    sources << :roth_retirement_rate if roth_value.to_d.positive?
+    if election.employer_match_mode != "none" && election.employer_match_rate.to_d.positive?
+      sources << (election.employer_match_destination == "roth" ? :employer_roth_match_rate : :employer_retirement_match_rate)
+    end
+    sources
+  end
 
   def recurring_deductions
     @employee.employee_deductions.select(&:active?).filter_map do |assignment|
