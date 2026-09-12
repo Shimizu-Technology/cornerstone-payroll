@@ -504,6 +504,30 @@ class E2eReleaseFixture
         total_payroll_cost: 1937.70
       )
 
+      cutover_batch = HistoricalImportBatch.create!(
+        company: other_company,
+        source_label: "Synthetic cutover evidence",
+        bundle_digest: "gate0-cutover-evidence",
+        importer_version: "gate0-cutover-v1",
+        status: "locked",
+        created_by: admin,
+        locked_by: admin,
+        locked_at: Time.utc(2026, 8, 30, 0, 0, 0),
+        preview_summary: {},
+        reconciliation_summary: { "passed" => true }
+      )
+      PayrollGoLiveReview.create!(
+        company: other_company,
+        source_company: company,
+        historical_import_batch: cutover_batch,
+        created_by: admin,
+        effective_on: Date.new(2026, 9, 1),
+        plan_digest: "gate0-cutover-plan",
+        status: "setup_applied",
+        setup_applied_at: Time.utc(2026, 8, 30, 0, 0, 0),
+        setup_applied_by: admin
+      )
+
       AuditLog.record!(
         user: accountant,
         organization_id: organization.id,

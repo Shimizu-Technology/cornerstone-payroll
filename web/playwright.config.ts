@@ -14,7 +14,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // The release lane mutates one shared, production-shaped fixture across a
+  // deliberate lifecycle sequence. Keep it single-worker locally as well as in
+  // CI so the standalone owner scenario cannot race the serial workflow suite.
+  workers: process.env.CI || releaseLane ? 1 : undefined,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['github']] : 'list',
   use: {
     baseURL: externalBaseUrl || localBaseUrl,

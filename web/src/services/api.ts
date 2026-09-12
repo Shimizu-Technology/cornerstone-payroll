@@ -4398,6 +4398,15 @@ export interface PayrollHistoryCapabilities {
   commit: boolean;
 }
 
+export interface PayrollGoLiveGateState {
+  required: boolean;
+  approved: boolean;
+  comparison_only: boolean;
+  effective_on: string | null;
+  review_status: 'draft' | 'setup_applied' | 'approved' | null;
+  blockers: string[];
+}
+
 export interface PayrollHistoryRecord {
   key: string;
   record_type: 'native' | 'imported';
@@ -4442,6 +4451,7 @@ export interface ClientPayrollHistoryResponse {
     statuses: Record<string, number>;
     sources: Record<string, number>;
     years: number[];
+    payroll_go_live?: PayrollGoLiveGateState;
   };
 }
 
@@ -4449,8 +4459,8 @@ export const payrollHistoryApi = {
   list: (
     params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[] } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[] } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
