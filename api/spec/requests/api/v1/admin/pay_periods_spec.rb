@@ -986,6 +986,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.payroll_items.count).to eq(1)
     end
 
+    it "rejects a post-cutover live calculation without changing payroll state" do
+      existing_item = pay_period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: employee.employment_type,
+        pay_rate: employee.pay_rate,
+        hours_worked: 7,
+        gross_pay: 105,
+        net_pay: 90
+      )
+      source_company = create(:company, organization: organization)
+      batch = create(:historical_import_batch, company: company, status: "locked")
+      PayrollGoLiveReview.create!(
+        company: company,
+        source_company: source_company,
+        historical_import_batch: batch,
+        effective_on: pay_period.pay_date,
+        plan_digest: "d" * 64,
+        status: "setup_applied"
+      )
+      original_attributes = existing_item.attributes
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 4 } }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Live payroll is blocked")
+      expect(pay_period.reload.status).to eq("draft")
+      expect(pay_period.payroll_items.pluck(:id)).to eq([ existing_item.id ])
+      expect(existing_item.reload.attributes).to eq(original_attributes)
+    end
+
     it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
       pay_period.update!(
         status: "calculated",

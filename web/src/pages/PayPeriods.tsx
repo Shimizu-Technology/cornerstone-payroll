@@ -171,6 +171,7 @@ export function PayPeriods() {
   const payPeriodViewKeyRef = useRef(payPeriodViewKey);
   const payPeriodCompanyIdRef = useRef<number | null>(null);
   const defaultDatesRequestIdRef = useRef(0);
+  const createDatesEditedRef = useRef(false);
   const checkSettingsRequestIdRef = useRef(0);
   const mutationGenerationRef = useRef(0);
   const loadPayPeriodsRef = useRef<(silent?: boolean) => Promise<void>>(async (): Promise<void> => undefined);
@@ -517,6 +518,11 @@ export function PayPeriods() {
   };
 
   const toDateInput = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const isComparisonOnlyPayDate = (payDate: string): boolean => Boolean(
+    goLiveGate?.comparison_only
+    && (!payDate || !goLiveGate.effective_on || payDate >= goLiveGate.effective_on)
+  );
+  const comparisonOnlyForSelectedPayDate = isComparisonOnlyPayDate(formData.pay_date);
 
   // Suggest dates only when the client has an explicit boundary rule. Manual
   // schedules intentionally start blank so a legacy assumption is never
@@ -536,12 +542,16 @@ export function PayPeriods() {
       const confirmation = schedule.confirmation_status === 'confirmed' ? 'Confirmed' : 'Needs confirmation';
 
       if (schedule.period_rule === 'manual') {
-        setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        if (!createDatesEditedRef.current) {
+          setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        }
         setScheduleContext(`${confirmation}: period and pay dates are manual for this client.`);
         return;
       }
       if (schedule.period_rule === 'biweekly' && !schedule.period_anchor_date) {
-        setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        if (!createDatesEditedRef.current) {
+          setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        }
         setScheduleContext(`${confirmation}: this biweekly schedule has no anchor date. Enter and verify all dates manually, then confirm the schedule in Settings.`);
         return;
       }
@@ -577,16 +587,22 @@ export function PayPeriods() {
         : null;
       if (payDate) payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
 
-      setFormData((current) => ({
-        ...current,
-        start_date: toDateInput(startDate),
-        end_date: toDateInput(endDate),
-        pay_date: payDate ? toDateInput(payDate) : '',
-      }));
+      const selectedPayDate = payDate ? toDateInput(payDate) : '';
+      if (!createDatesEditedRef.current) {
+        setFormData((current) => ({
+          ...current,
+          start_date: toDateInput(startDate),
+          end_date: toDateInput(endDate),
+          pay_date: selectedPayDate,
+        }));
+        if (!isComparisonOnlyPayDate(selectedPayDate)) void loadCurrentNextCheckNumber();
+      }
       setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
     } catch {
       if (!isCurrentRequest()) return;
-      setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+      if (!createDatesEditedRef.current) {
+        setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+      }
       setScheduleContext('Schedule settings could not be loaded. Enter and verify all dates manually.');
     }
   };
@@ -623,6 +639,7 @@ export function PayPeriods() {
   };
 
   const openCreateModal = () => {
+    createDatesEditedRef.current = false;
     setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
     void setDefaultDates();
     setCreateError(null);
@@ -630,7 +647,7 @@ export function PayPeriods() {
     setCurrentNextCheckNumber(null);
     setCheckSettingsError(null);
     setIsCreateOpen(true);
-    if (!goLiveGate?.comparison_only) void loadCurrentNextCheckNumber();
+    if (!comparisonOnlyForSelectedPayDate) void loadCurrentNextCheckNumber();
   };
 
   const handleCreateOpenChange = (open: boolean) => {
@@ -1038,9 +1055,9 @@ export function PayPeriods() {
         <DialogContent>
           <form onSubmit={handleCreate}>
             <DialogHeader>
-              <DialogTitle>{goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}</DialogTitle>
+              <DialogTitle>{comparisonOnlyForSelectedPayDate ? 'New Comparison Run' : 'New Pay Period'}</DialogTitle>
               <DialogDescription>
-                {goLiveGate?.comparison_only
+                {comparisonOnlyForSelectedPayDate
                   ? 'Build and reconcile payroll safely. This run cannot be committed while cutover approval is open.'
                   : 'Create a payroll run with an explicit purpose and verified dates.'}
               </DialogDescription>
@@ -1091,7 +1108,10 @@ export function PayPeriods() {
                     id="start_date"
                     type="date"
                     value={formData.start_date}
-                    onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                    onChange={(e) => {
+                      createDatesEditedRef.current = true;
+                      setFormData({ ...formData, start_date: e.target.value });
+                    }}
                     required
                   />
                 </div>
@@ -1101,7 +1121,10 @@ export function PayPeriods() {
                     id="end_date"
                     type="date"
                     value={formData.end_date}
-                    onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                    onChange={(e) => {
+                      createDatesEditedRef.current = true;
+                      setFormData({ ...formData, end_date: e.target.value });
+                    }}
                     required
                   />
                 </div>
@@ -1112,11 +1135,23 @@ export function PayPeriods() {
                   id="pay_date"
                   type="date"
                   value={formData.pay_date}
-                  onChange={(e) => setFormData({ ...formData, pay_date: e.target.value })}
+                  onChange={(e) => {
+                    createDatesEditedRef.current = true;
+                    const payDate = e.target.value;
+                    const comparisonOnly = isComparisonOnlyPayDate(payDate);
+                    setFormData({
+                      ...formData,
+                      pay_date: payDate,
+                      starting_check_number: comparisonOnly ? '' : formData.starting_check_number,
+                    });
+                    if (!comparisonOnly && currentNextCheckNumber == null && !loadingCheckSettings) {
+                      void loadCurrentNextCheckNumber();
+                    }
+                  }}
                   required
                 />
               </div>
-              {!goLiveGate?.comparison_only && <div className="space-y-2">
+              {!comparisonOnlyForSelectedPayDate && <div className="space-y-2">
                 <Label htmlFor="starting_check_number">Starting Check Number (optional)</Label>
                 <Input
                   id="starting_check_number"
@@ -1175,7 +1210,7 @@ export function PayPeriods() {
                 Cancel
               </Button>
               <Button className="flex-1 sm:flex-none" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating...' : goLiveGate?.comparison_only ? 'Create Comparison Run' : 'Create Pay Period'}
+                {isSubmitting ? 'Creating...' : comparisonOnlyForSelectedPayDate ? 'Create Comparison Run' : 'Create Pay Period'}
               </Button>
             </DialogFooter>
           </form>
