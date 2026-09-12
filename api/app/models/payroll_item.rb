@@ -3,6 +3,7 @@
 class PayrollItem < ApplicationRecord
   include PayrollAdjustable
   PAYROLL_ADJUSTMENTS_SOURCE_KEY = "payroll_adjustments_source"
+  CUSTOM_EARNINGS_SOURCE_KEY = "custom_earnings_source"
   EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE = "employee_default"
   MANUAL_ADJUSTMENTS_SOURCE = "manual"
 
@@ -276,12 +277,40 @@ class PayrollItem < ApplicationRecord
     return if payroll_adjustments_overridden?
     return if pay_period && !pay_period.draft? && !pay_period.calculated?
 
-    defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    employee_defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    defaults = pay_period&.recurring_items_enabled? ? employee_defaults : []
     current = self.class.normalize_payroll_adjustments(payroll_adjustments)
-    return unless new_record? || current.empty? || payroll_adjustments_default_snapshot? || legacy_adjustments_subset_of_defaults?(current, defaults)
+    return unless new_record? || current.empty? || payroll_adjustments_default_snapshot? || legacy_adjustments_subset_of_defaults?(current, employee_defaults)
 
     self.payroll_adjustments = defaults
     mark_payroll_adjustments_default_snapshot!
+  end
+
+  def custom_earnings_overridden?
+    return false unless custom_columns_data.is_a?(Hash)
+
+    custom_columns_data[CUSTOM_EARNINGS_SOURCE_KEY] == MANUAL_ADJUSTMENTS_SOURCE
+  end
+
+  def mark_custom_earnings_overridden!
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data[CUSTOM_EARNINGS_SOURCE_KEY] = MANUAL_ADJUSTMENTS_SOURCE
+    self.custom_columns_data = data
+  end
+
+  def sync_default_custom_earnings!(source_employee = employee)
+    return if custom_earnings_overridden?
+    return if pay_period && !pay_period.draft? && !pay_period.calculated?
+
+    employee_defaults = self.class.normalize_custom_earning_entries(source_employee&.default_custom_earnings)
+    current = self.class.normalize_custom_earning_entries(custom_earnings)
+    source = custom_columns_data.is_a?(Hash) ? custom_columns_data[CUSTOM_EARNINGS_SOURCE_KEY] : nil
+    return unless new_record? || current.empty? || source == EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE || legacy_adjustments_subset_of_defaults?(current, employee_defaults)
+
+    self.custom_earnings = pay_period&.recurring_items_enabled? ? employee_defaults : []
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data[CUSTOM_EARNINGS_SOURCE_KEY] = EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE
+    self.custom_columns_data = data
   end
 
   def apply_default_payroll_field_entries_if_unset!(source_employee = employee, assignments: nil)
@@ -397,6 +426,10 @@ class PayrollItem < ApplicationRecord
     rescue ArgumentError, FloatDomainError
       nil
     end
+  end
+
+  def self.normalize_custom_earning_entries(entries)
+    normalize_custom_deduction_entries(entries)
   end
 
   def self.normalize_json_entry(entry)

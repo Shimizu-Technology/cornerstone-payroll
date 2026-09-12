@@ -339,6 +339,48 @@ RSpec.describe Employee, type: :model do
       expect(item).not_to be_payroll_adjustments_default_snapshot
     end
 
+    it "removes recurring additions from a special run while preserving explicit one-time entries" do
+      employee = create(
+        :employee,
+        default_custom_earnings: [ { "label" => "Recurring allowance", "amount" => 80.0 } ],
+        default_payroll_adjustments: [
+          { "label" => "Recurring reimbursement", "amount" => 40.0, "treatment" => "non_taxable_addition", "active" => true }
+        ]
+      )
+      pay_period = create(
+        :pay_period,
+        company: employee.company,
+        run_purpose: "bonus",
+        includes_base_salary: false,
+        includes_recurring_items: false
+      )
+      item = build(
+        :payroll_item,
+        employee: employee,
+        company: employee.company,
+        pay_period: pay_period,
+        custom_earnings: employee.default_custom_earnings,
+        payroll_adjustments: employee.default_payroll_adjustments
+      )
+
+      item.sync_default_custom_earnings!(employee)
+      item.sync_default_payroll_adjustments!(employee)
+      expect(item.custom_earnings).to be_empty
+      expect(item.payroll_adjustments).to be_empty
+
+      one_time_earning = { "label" => "One-time award", "amount" => 125.0 }
+      one_time_adjustment = { "label" => "One-time repayment", "amount" => 25.0, "treatment" => "post_tax_deduction", "active" => true }
+      item.custom_earnings = [ one_time_earning ]
+      item.mark_custom_earnings_overridden!
+      item.payroll_adjustments = [ one_time_adjustment ]
+      item.mark_payroll_adjustments_overridden!
+
+      item.sync_default_custom_earnings!(employee)
+      item.sync_default_payroll_adjustments!(employee)
+      expect(item.custom_earnings).to eq([ one_time_earning ])
+      expect(item.payroll_adjustments).to eq([ one_time_adjustment ])
+    end
+
     it "refreshes a non-overridden payroll item when employee defaults change" do
       employee = create(
         :employee,

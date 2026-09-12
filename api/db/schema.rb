@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_001000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1722,6 +1722,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_094000) do
     t.string "cycle", default: "regular", null: false
     t.date "end_date", null: false
     t.boolean "includes_base_salary", default: true, null: false
+    t.boolean "includes_recurring_items", default: true, null: false
     t.text "notes"
     t.boolean "parallel_run", default: false, null: false
     t.date "pay_date", null: false

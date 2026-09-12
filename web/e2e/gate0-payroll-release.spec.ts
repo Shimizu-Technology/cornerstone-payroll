@@ -1294,6 +1294,28 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByLabel('Starting Check Number (optional)')).toHaveCount(0);
   });
 
+  test('keeps recurring employee setup out of special runs unless the operator opts in', async ({ page }): Promise<void> => {
+    await page.goto(`/companies/${fixture.company_id}/pay-runs`);
+    await page.getByRole('button', { name: 'New Pay Period' }).click();
+
+    const recurringSetup = page.getByRole('checkbox', { name: /Include recurring employee setup/ });
+    const baseSalary = page.getByRole('checkbox', { name: /Include ordinary base salary/ });
+    await expect(recurringSetup).toBeChecked();
+    await expect(baseSalary).toBeChecked();
+
+    await page.getByLabel('Run purpose').selectOption('bonus');
+    await expect(recurringSetup).not.toBeChecked();
+    await expect(baseSalary).not.toBeChecked();
+    await expect(page.getByText(/Special runs leave these out unless you choose this/)).toBeVisible();
+
+    await recurringSetup.check();
+    await expect(page.getByText('You deliberately enabled recurring employee setup for a special run. Review every recurring item before calculating payroll.')).toBeVisible();
+
+    await page.getByLabel('Run purpose').selectOption('regular');
+    await expect(recurringSetup).toBeChecked();
+    await expect(baseSalary).toBeChecked();
+  });
+
   test('keeps company, queue, and relationship context across canonical payroll records', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {

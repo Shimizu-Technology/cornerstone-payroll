@@ -541,6 +541,7 @@ export interface PayPeriod {
   parallel_run?: boolean;
   run_purpose: PayRunPurpose;
   includes_base_salary: boolean;
+  includes_recurring_items: boolean;
   run_purpose_source?: 'operator_selected' | 'system_correction' | 'production_migration' | 'legacy_system_default';
   company_pay_schedule_id?: number | null;
   company_workweek_id?: number | null;
