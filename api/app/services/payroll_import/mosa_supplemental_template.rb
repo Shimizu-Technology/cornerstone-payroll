@@ -4,10 +4,15 @@ require "caxlsx"
 
 module PayrollImport
   class MosaSupplementalTemplate
-    SCHEMA_VERSION = "cornerstone-mosa-supplemental/v1"
+    SCHEMA_VERSION = "cornerstone-mosa-supplemental/v2"
+    LEGACY_SCHEMA_VERSION = "cornerstone-mosa-supplemental/v1"
+    SUPPORTED_SCHEMA_VERSIONS = [ LEGACY_SCHEMA_VERSION, SCHEMA_VERSION ].freeze
     EMPLOYEE_CHANGES_SHEET = "EMPLOYEE CHANGES"
+    OWNER_PERIOD_PAY_SHEET = "OWNER PERIOD PAY"
+    ONE_TIME_COMPONENTS_SHEET = "ONE-TIME COMPONENTS"
     DEDUCTIONS_LOANS_SHEET = "DEDUCTIONS & LOANS"
     HOUR_CORRECTIONS_SHEET = "HOUR CORRECTIONS"
+    ONE_TIME_ROWS_PER_EMPLOYEE = 2
 
     def initialize(pay_period)
       @pay_period = pay_period
@@ -21,6 +26,8 @@ module PayrollImport
 
       add_start_sheet(workbook, styles)
       add_employee_changes_sheet(workbook, styles)
+      add_owner_period_pay_sheet(workbook, styles)
+      add_one_time_components_sheet(workbook, styles)
       add_deductions_and_loans_sheet(workbook, styles)
 
       package.to_stream.read
@@ -76,14 +83,16 @@ module PayrollImport
         ]
         metadata.each_with_index do |(label, value), index|
           value_style = index.in?([ 3, 4, 5 ]) ? styles[:date] : (index >= 7 ? styles[:input] : nil)
-          sheet.add_row([ label, value ], style: [ styles[:section], value_style ])
+          sheet.add_row([ label, value ], style: [ styles[:section], value_style ], escape_formulas: true)
         end
+        add_list_validation(sheet, "B15", %w[YES NO], prompt: "Choose YES only when there are no tips, loans, or one-time items to report.")
         sheet.add_row([])
         sheet.add_row([ "How to use this workbook" ], style: styles[:section])
         sheet.add_row([ "1", "Do not re-enter Revel hours. Upload the original Revel PDF with this workbook." ])
         sheet.add_row([ "2", "Use the stable Employee ID already filled in. Leave unchanged employees blank." ])
-        sheet.add_row([ "3", "Tips and deductions are proposals until Cornerstone reviews and applies them." ])
-        sheet.add_row([ "4", "For recurring setup, loan advances, or hour corrections, contact Cornerstone before payroll is imported." ])
+        sheet.add_row([ "3", "Enter Mo and Sara's pay separately on OWNER PERIOD PAY. Never enter a combined owner amount." ])
+        sheet.add_row([ "4", "Use ONE-TIME COMPONENTS for period-only pay or deductions. Every row needs a type, source, and effective pay date." ])
+        sheet.add_row([ "5", "For recurring setup, loan advances, retirement changes, or hour corrections, contact Cornerstone before payroll is imported." ])
         sheet.column_widths(34, 68, 16, 16)
       end
     end
@@ -92,19 +101,91 @@ module PayrollImport
       workbook.add_worksheet(name: EMPLOYEE_CHANGES_SHEET) do |sheet|
         headers = [
           "Employee ID", "Employee", "Department", "BOH tips", "FOH tips",
-          "Tips already paid? (YES/NO)", "One-time bonus", "One-payroll deduction",
-          "Effective date", "Recipient / payee", "Source / reason", "Notes"
+          "Tips already paid? (YES/NO)", "Source / reason", "Notes"
         ]
         sheet.add_row(headers, style: styles[:header])
         employees.each do |employee|
           sheet.add_row(
-            [ employee.id, employee.full_name, employee.department&.name, nil, nil, nil, nil, nil, nil, nil, nil, nil ],
-            style: [ nil, nil, nil, styles[:money], styles[:money], styles[:input], styles[:money], styles[:money], styles[:date], styles[:input], styles[:input], styles[:input] ]
+            [ employee.id, employee.full_name, employee.department&.name, nil, nil, nil, nil, nil ],
+            style: [ nil, nil, nil, styles[:money], styles[:money], styles[:input], styles[:input], styles[:input] ],
+            escape_formulas: true
           )
         end
-        sheet.auto_filter = "A1:L#{[ employees.length + 1, 2 ].max}"
+        add_list_validation(sheet, "F2:F#{employees.length + 1}", %w[YES NO], prompt: "Choose whether these tips were already paid outside payroll.") if employees.any?
+        sheet.auto_filter = "A1:H#{[ employees.length + 1, 2 ].max}"
         freeze_header!(sheet)
-        sheet.column_widths(14, 28, 20, 14, 14, 22, 16, 20, 16, 22, 30, 36)
+        sheet.column_widths(14, 28, 20, 14, 14, 22, 30, 36)
+      end
+    end
+
+    def add_owner_period_pay_sheet(workbook, styles)
+      workbook.add_worksheet(name: OWNER_PERIOD_PAY_SHEET) do |sheet|
+        sheet.add_row(
+          [ "Employee ID", "Employee", "Pay this employee", "Scope confirmation", "Effective pay date", "Source / reason", "Notes" ],
+          style: styles[:header]
+        )
+        variable_salary_employees.each do |employee|
+          sheet.add_row(
+            [ employee.id, employee.full_name, nil, "THIS EMPLOYEE ONLY", pay_period.pay_date, nil, nil ],
+            style: [ nil, nil, styles[:money], styles[:input], styles[:date], styles[:input], styles[:input] ],
+            escape_formulas: true
+          )
+        end
+        if variable_salary_employees.any?
+          add_list_validation(
+            sheet,
+            "D2:D#{variable_salary_employees.length + 1}",
+            [ "THIS EMPLOYEE ONLY" ],
+            prompt: "Cornerstone requires one separate pay amount per person."
+          )
+        end
+        if variable_salary_employees.empty?
+          sheet.add_row([ "Reference only", "No variable-pay employees are active for this payroll." ], style: styles[:note])
+        end
+        sheet.add_row([ "Important", "Enter a separate amount for each person. A combined owner amount is rejected." ], style: styles[:note])
+        freeze_header!(sheet)
+        sheet.column_widths(14, 28, 20, 24, 18, 32, 38)
+      end
+    end
+
+    def add_one_time_components_sheet(workbook, styles)
+      workbook.add_worksheet(name: ONE_TIME_COMPONENTS_SHEET) do |sheet|
+        sheet.add_row(
+          [ "Employee ID", "Employee", "Type", "Label", "Amount", "Category", "Recipient / payee", "Effective pay date", "Source / reason", "Notes" ],
+          style: styles[:header]
+        )
+        employees.each do |employee|
+          ONE_TIME_ROWS_PER_EMPLOYEE.times do
+            sheet.add_row(
+              [ employee.id, employee.full_name, nil, nil, nil, nil, nil, pay_period.pay_date, nil, nil ],
+              style: [ nil, nil, styles[:input], styles[:input], styles[:money], styles[:input], styles[:input], styles[:date], styles[:input], styles[:input] ],
+              escape_formulas: true
+            )
+          end
+        end
+        component_last_row = employees.length * ONE_TIME_ROWS_PER_EMPLOYEE + 1
+        if employees.any?
+          add_list_validation(
+            sheet,
+            "C2:C#{component_last_row}",
+            PayrollImport::LoanTipExcelParser::GENERATED_COMPONENT_TYPES.keys,
+            prompt: "Choose the item type; Cornerstone derives the correct tax treatment."
+          )
+          add_list_validation(
+            sheet,
+            "F2:F#{component_last_row}",
+            PayrollFieldDefinition::CATEGORIES - %w[loan retirement],
+            prompt: "Choose a category. Manage loans and retirement directly in Cornerstone."
+          )
+        end
+        sheet.add_row(
+          [ "Allowed types", "BONUS · REIMBURSEMENT · OTHER TAXABLE EARNING · POST-TAX DEDUCTION" ],
+          style: styles[:note]
+        )
+        sheet.add_row([ "More than two items", "Copy one of the employee's rows when that person has more than two one-time items." ], style: styles[:note])
+        sheet.add_row([ "Recurring items", "Change recurring deductions, additions, loans, or retirement setup in Cornerstone—not in this sheet." ], style: styles[:note])
+        freeze_header!(sheet)
+        sheet.column_widths(14, 28, 26, 26, 14, 18, 24, 18, 32, 38)
       end
     end
 
@@ -121,7 +202,8 @@ module PayrollImport
           sheet.add_row(
             row,
             style: [ nil, nil, nil, nil, nil, nil, styles[:input], styles[:money], styles[:date], styles[:input],
-                    styles[:money], styles[:money], styles[:money], styles[:money], styles[:input], styles[:input], styles[:input] ]
+                    styles[:money], styles[:money], styles[:money], styles[:money], styles[:input], styles[:input], styles[:input] ],
+            escape_formulas: true
           )
         end
         sheet.add_row([ "Reference only", "Recurring setup changes and new loan advances must be reviewed in Cornerstone before import." ], style: styles[:note])
@@ -177,6 +259,10 @@ module PayrollImport
       [ [ nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil ] ]
     end
 
+    def variable_salary_employees
+      @variable_salary_employees ||= employees.select(&:variable_salary?)
+    end
+
     def freeze_header!(sheet)
       sheet.sheet_view.pane do |pane|
         pane.top_left_cell = "A2"
@@ -184,6 +270,22 @@ module PayrollImport
         pane.y_split = 1
         pane.active_pane = :bottom_left
       end
+    end
+
+    def add_list_validation(sheet, range, values, prompt:)
+      sheet.add_data_validation(
+        range,
+        type: :list,
+        formula1: %("#{values.join(',')}"),
+        allowBlank: true,
+        showErrorMessage: true,
+        errorStyle: :stop,
+        errorTitle: "Choose a listed value",
+        error: "Use the dropdown so Cornerstone can validate this payroll safely.",
+        showInputMessage: true,
+        promptTitle: "Cornerstone payroll",
+        prompt: prompt
+      )
     end
   end
 end

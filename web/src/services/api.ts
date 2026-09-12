@@ -1539,6 +1539,7 @@ export interface ImportPreviewRow {
   source_row_id: number;
   period_pay_required?: boolean;
   current_period_pay?: string | null;
+  period_pay_source?: 'change_workbook' | 'payroll_worksheet' | null;
   period_pay_missing?: boolean;
   overwrite_required?: boolean;
   bonus?: number | null;
@@ -1575,6 +1576,19 @@ export interface ImportPreviewRow {
   loan_reconciliation_errors?: string[];
   loan_reconciliation_warnings?: string[];
   tips_already_paid?: boolean | null;
+  payroll_components?: Array<{
+    component_type: string;
+    label: string;
+    amount: number;
+    kind: 'addition' | 'deduction' | 'employer_contribution';
+    tax_treatment: 'taxable_addition' | 'non_taxable_addition' | 'pre_tax_deduction' | 'post_tax_deduction' | 'employer_contribution';
+    category: string;
+    reporting_group?: string | null;
+    payee_name?: string | null;
+    effective_pay_date: string;
+    source: string;
+    notes?: string | null;
+  }>;
 }
 
 export interface MosaSourceRow {

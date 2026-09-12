@@ -332,7 +332,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-semibold text-primary-950">Start with this payroll's change-only workbook</p>
-                  <p className="mt-1 text-sm text-primary-800">It is prefilled with Cornerstone employee IDs and the exact payroll dates. MoSa only enters tips, one-time bonuses, one-payroll deductions, or other approved changes.</p>
+                  <p className="mt-1 text-sm text-primary-800">It is prefilled with Cornerstone employee IDs and the exact payroll dates. MoSa enters Mo and Sara’s pay separately, plus tips and approved period-only items. Recurring loans and 401(k) setup stay in Cornerstone.</p>
                 </div>
                 <Button type="button" variant="outline" onClick={handleDownloadTemplate} disabled={templateDownloading} className="shrink-0">
                   <Download className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -392,7 +392,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
 
         {/* Preview Step */}
         {step === 'upload' && (
-          <p className="text-sm text-gray-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The generated workbook already includes a one-time bonus column.</p>
+          <p className="text-sm text-gray-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The current workbook uses dedicated OWNER PERIOD PAY and ONE-TIME COMPONENTS sheets.</p>
         )}
 
         {step === 'preview' && previewData && (
@@ -412,7 +412,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
             {missingPeriodPay.length > 0 && (
               <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
-                <p className="mt-2">Enter Pay this period in the payroll worksheet, then preview these files again. Recurring bonuses are separate and do not replace period pay. If an employee should not be paid in this run, choose a different outcome and record why.</p>
+                <p className="mt-2">Enter a separate amount for each person on the workbook’s OWNER PERIOD PAY sheet, or in the payroll worksheet, then preview again. Combined owner amounts are not accepted. If an employee should not be paid in this run, choose a different outcome and record why.</p>
                 <Button variant="outline" className="mt-4" onClick={handleClose}>Return to payroll worksheet</Button>
               </div>
             )}
@@ -471,7 +471,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
             )}
 
             <div className="overflow-x-auto">
-              <Table className="min-w-[1120px]">
+              <Table className="min-w-[1240px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[180px]">Outcome</TableHead>
@@ -480,7 +480,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                     <TableHead className="text-right">Payroll rate</TableHead>
                     <TableHead className="text-right">Tips</TableHead>
                     <TableHead className="text-right">Loan Ded.</TableHead>
-                    <TableHead className="text-right">Bonus this payroll</TableHead>
+                    <TableHead className="min-w-[190px]">One-time items</TableHead>
                     <TableHead className="text-center">Match</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -512,7 +512,11 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                         </TableCell>
                         <TableCell className="text-right">
                           <p>{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</p>
-                          <p className="text-[11px] text-gray-500">{row.period_pay_required ? 'Pay this period · retained' : 'from employee profile'}</p>
+                          <p className="text-[11px] text-gray-500">
+                            {row.period_pay_required
+                              ? (row.period_pay_source === 'change_workbook' ? 'Pay this person · change workbook' : 'Pay this person · payroll worksheet')
+                              : 'from employee profile'}
+                          </p>
                         </TableCell>
                         <TableCell className="text-right">
                           {row.total_tips > 0 ? (
@@ -549,12 +553,29 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                             <span className="text-gray-400">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <p>{formatCurrency(row.effective_bonus || 0)}</p>
-                          <p className="text-[11px] text-gray-500">
-                            {row.bonus == null ? 'No bonus supplied · current value kept' : `Workbook: ${formatCurrency(row.bonus)}`}
-                          </p>
-                          {row.bonus_keeps_manual && <p className="text-[11px] text-amber-700">Manual bonus retained</p>}
+                        <TableCell>
+                          {(row.payroll_components || []).length > 0 || (row.effective_bonus || 0) > 0 ? (
+                            <div className="space-y-1.5">
+                              {(row.payroll_components || []).map((component, index) => (
+                                <div key={`${row.source_row_id}-${component.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="font-medium text-slate-900">{component.label}</span>
+                                    <span className={component.kind === 'deduction' ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}>
+                                      {formatCurrency(component.amount)}
+                                    </span>
+                                  </div>
+                                  <p className="mt-0.5 text-[11px] text-slate-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p>
+                                </div>
+                              ))}
+                              {(row.effective_bonus || 0) > 0 && (
+                                <div className="text-xs text-slate-700">
+                                  Legacy bonus {formatCurrency(row.effective_bonus || 0)}{row.bonus_keeps_manual ? ' · retained manual value' : ''}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant={row.confidence >= 1.0 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>
@@ -579,7 +600,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
               </p>
               <p>
-                Gross pay and taxes will be calculated from employee profiles, imported hours, and this payroll’s tips, deductions and bonus. A manually entered bonus is retained during reimport.
+                Gross pay and taxes will be calculated from employee profiles, imported hours, separate per-person period pay, tips, and typed one-time components. A manually entered legacy bonus is retained during reimport.
               </p>
               <p>
                 Named recurring deductions and installment payments must match a configured ledger before import. The ledger records them only when payroll is committed. A separately labeled one-payroll deduction applies only to this run.

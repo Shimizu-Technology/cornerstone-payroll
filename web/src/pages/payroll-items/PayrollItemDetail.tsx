@@ -137,7 +137,10 @@ export function PayrollItemDetail(): ReactElement {
   const employeeName = `${employee.first_name} ${employee.last_name}`;
   const taxes = payrollTaxSummary(payrollItem).total;
   const disclosure = (payrollItem as PayrollItem & { component_disclosure?: PayrollComponentDisclosure }).component_disclosure;
-  const inputSource = payrollItem.import_source || payrollItem.timekeeping_source || 'manual';
+  const inputSource = payrollItem.period_pay_evidence?.source_type === 'mosa_change_workbook'
+    ? 'MoSa Revel + change workbook'
+    : (payrollItem.import_source || payrollItem.timekeeping_source || 'manual').replaceAll('_', ' ');
+  const importedComponents = (payrollItem.payroll_field_entries || []).filter((entry) => entry.source === 'import' && entry.active !== false);
 
   return (
     <div>
@@ -172,12 +175,14 @@ export function PayrollItemDetail(): ReactElement {
           <Card>
             <CardHeader><CardTitle>Input and calculation context</CardTitle><p className="mt-2 text-sm text-neutral-500">The source signals behind this exact payroll result.</p></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <ContextRow icon={FileInput} label="Input source" value={inputSource.replaceAll('_', ' ')} />
+              <ContextRow icon={FileInput} label="Input source" value={inputSource} />
               <ContextRow icon={Clock3} label="Regular hours" value={Number(payrollItem.hours_worked || 0).toFixed(2)} />
               <ContextRow icon={Clock3} label="Overtime hours" value={Number(payrollItem.overtime_hours || 0).toFixed(2)} />
               <ContextRow icon={Banknote} label="Applied pay rate" value={formatCurrency(Number(payrollItem.pay_rate || 0))} />
+              {payrollItem.period_pay_evidence && <ContextRow icon={Banknote} label="Pay this person" value={formatCurrency(Number(payrollItem.period_pay_evidence.amount || 0))} />}
               <ContextRow icon={Banknote} label="One-time bonus" value={formatCurrency(Number(payrollItem.bonus || 0))} />
               <ContextRow icon={ReceiptText} label="Reported tips" value={formatCurrency(Number(payrollItem.reported_tips || 0))} />
+              {payrollItem.period_pay_evidence && <ContextRow icon={FileInput} label="Period-pay source" value={payrollItem.period_pay_evidence.source} />}
             </CardContent>
           </Card>
 
@@ -193,6 +198,28 @@ export function PayrollItemDetail(): ReactElement {
             </CardContent>
           </Card>
         </div>
+
+        {importedComponents.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle>Typed one-time items</CardTitle><p className="mt-2 text-sm text-neutral-500">Period-only components retained from the reviewed MoSa change workbook.</p></CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              {importedComponents.map((entry, index) => (
+                <div key={`${entry.id || entry.label}-${index}`} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-semibold text-neutral-950">{entry.label}</p>
+                      <p className="mt-1 text-xs capitalize text-neutral-500">{entry.tax_treatment.replaceAll('_', ' ')} · {entry.category.replaceAll('_', ' ')}</p>
+                    </div>
+                    <p className={entry.kind === 'deduction' ? 'font-bold text-rose-700' : 'font-bold text-emerald-700'}>{formatCurrency(Number(entry.amount || 0))}</p>
+                  </div>
+                  <p className="mt-3 text-sm text-neutral-700">Source: {String(entry.metadata?.source || 'Reviewed change workbook')}</p>
+                  {Boolean(entry.metadata?.payee_name) && <p className="mt-1 text-sm text-neutral-700">Payee: {String(entry.metadata?.payee_name)}</p>}
+                  {entry.notes && <p className="mt-1 text-sm text-neutral-500">{entry.notes}</p>}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
         {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} />}

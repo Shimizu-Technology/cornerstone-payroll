@@ -47,6 +47,7 @@ module Api
         # POST /api/v1/admin/employees
         def create
           attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
+          validate_legacy_recurring_components!(nil, attributes)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
 
@@ -69,11 +70,14 @@ module Api
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e
           render json: { error: "Validation failed", details: { w4_effective_on: [ e.message ] } }, status: :unprocessable_entity
+        rescue LegacyRecurringComponentGuard::Error => e
+          render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/employees/:id
         def update
           attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
+          validate_legacy_recurring_components!(@employee, attributes)
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
 
           Employee.transaction do
@@ -95,6 +99,8 @@ module Api
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e
           render json: { error: "Validation failed", details: { w4_change_reason: [ e.message ] } }, status: :unprocessable_entity
+        rescue LegacyRecurringComponentGuard::Error => e
+          render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/employees/:id
@@ -261,6 +267,13 @@ module Api
               permitted.delete(:ssn)
             end
           end
+        end
+
+        def validate_legacy_recurring_components!(employee, attributes)
+          options = {}
+          options[:payroll_adjustments] = attributes[:default_payroll_adjustments] if attributes.key?(:default_payroll_adjustments)
+          options[:custom_earnings] = attributes[:default_custom_earnings] if attributes.key?(:default_custom_earnings)
+          LegacyRecurringComponentGuard.validate!(employee: employee, **options)
         end
 
         def split_w4_attributes(permitted)
