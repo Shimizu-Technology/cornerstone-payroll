@@ -56,4 +56,51 @@ RSpec.describe "Payroll intake source package evidence" do
       verification_error: "Stored source failed integrity verification"
     )
   end
+
+  it "keeps an auditable correction chain and makes only the replacement applyable" do
+    session.mark_superseded!(actor: session.created_by)
+    successor = create(
+      :payroll_intake_session,
+      company: session.company,
+      pay_period: session.pay_period,
+      source_type: session.source_type,
+      source_label: session.source_label,
+      package_revision: session.package_revision + 1,
+      supersedes: session,
+      supersession_reason: "Client corrected the hours attachment."
+    )
+
+    expect(session.reload).to be_superseded
+    expect(session).not_to be_applyable
+    expect(successor.reload).to be_current
+    expect(successor).to be_applyable
+    expect(successor.supersession_reason).to eq("Client corrected the hours attachment.")
+    expect(session.replacement_session).to eq(successor)
+  end
+
+  it "rejects a replacement that does not point to the current package for the same source" do
+    other_period = create(:pay_period, company: session.company)
+    invalid = build(
+      :payroll_intake_session,
+      company: session.company,
+      pay_period: other_period,
+      source_type: session.source_type,
+      package_revision: session.package_revision + 1,
+      supersedes: session,
+      supersession_reason: "Wrong period"
+    )
+
+    expect(invalid).not_to be_valid
+    expect(invalid.errors.full_messages).to include(
+      "Supersedes must be the newly superseded earlier package for this pay period and source"
+    )
+  end
+
+  it "requires complete, attributed row outcomes" do
+    row = build(:payroll_intake_row, payroll_intake_session: session, disposition: "excluded")
+
+    expect(row).not_to be_valid
+    expect(row.errors[:dispositioned_at]).to include("must be recorded")
+    expect(row.errors[:disposition_reason]).to include("is required for this outcome")
+  end
 end

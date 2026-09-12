@@ -433,7 +433,7 @@ module Api
 
           # Update pay period status
           if results[:errors].empty?
-            @pay_period.update!(
+            calculation_attributes = {
               status: "calculated",
               calculated_at: Time.current,
               calculated_by_id: current_user_id,
@@ -441,7 +441,15 @@ module Api
               approved_by_id: nil,
               unapproved_at: nil,
               unapproved_by_id: nil
-            )
+            }
+            if @pay_period.intake_stale_session&.status == "applied"
+              calculation_attributes.merge!(
+                intake_stale_at: nil,
+                intake_stale_reason: nil,
+                intake_stale_session: nil
+              )
+            end
+            @pay_period.update!(calculation_attributes)
           end
 
           render json: {
@@ -1008,6 +1016,9 @@ module Api
             compliance_warnings: pay_period.compliance_warnings,
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
+            intake_stale_at: pay_period.intake_stale_at,
+            intake_stale_reason: pay_period.intake_stale_reason,
+            intake_stale_session_id: pay_period.intake_stale_session_id,
             employee_count: agg[:count],
             total_gross: agg[:gross],
             total_net: agg[:net],

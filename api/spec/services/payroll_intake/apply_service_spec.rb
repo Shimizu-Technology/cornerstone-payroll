@@ -61,8 +61,12 @@ RSpec.describe PayrollIntake::ApplyService do
     end
   end
 
+  def included_override(row, employee, attributes = {})
+    { id: row.id, employee_id: employee.id, disposition: "included" }.merge(attributes)
+  end
+
   it "persists source tip components for CEO payroll register exports" do
-    result = described_class.new(session: session).call
+    result = described_class.new(session: session, row_overrides: [ included_override(row, employee) ]).call
 
     expect(result[:errors]).to be_empty
     payroll_item = row.reload.applied_payroll_item
@@ -75,7 +79,11 @@ RSpec.describe PayrollIntake::ApplyService do
   it "blocks stored validation errors even when warnings are acknowledged" do
     row.update!(validation_errors: [ { code: "source_total_mismatch", message: "Source totals conflict", severity: "error" } ])
 
-    result = described_class.new(session: session, acknowledge_warnings: true).call
+    result = described_class.new(
+      session: session,
+      row_overrides: [ included_override(row, employee) ],
+      acknowledge_warnings: true
+    ).call
 
     expect(result[:errors].first.fetch(:error)).to eq("Source totals conflict")
     expect(pay_period.payroll_items.reload).to be_empty
@@ -98,6 +106,7 @@ RSpec.describe PayrollIntake::ApplyService do
         {
           id: row.id,
           employee_id: employee.id,
+          disposition: "included",
           week1_hours: 41,
           week2_hours: 21,
           regular_hours: 61,
@@ -126,6 +135,7 @@ RSpec.describe PayrollIntake::ApplyService do
         {
           id: row.id,
           employee_id: employee.id,
+          disposition: "included",
           week1_hours: 40,
           week2_hours: 40,
           regular_hours: 80,
@@ -145,6 +155,7 @@ RSpec.describe PayrollIntake::ApplyService do
         {
           id: row.id,
           employee_id: employee.id,
+          disposition: "included",
           week1_hours: 41,
           week2_hours: 21,
           regular_hours: 62,
@@ -155,6 +166,92 @@ RSpec.describe PayrollIntake::ApplyService do
 
     expect(result[:errors].first.fetch(:error)).to include("legal weekly calculation")
     expect(pay_period.payroll_items.reload).to be_empty
+  end
+
+  it "requires an explicit outcome for every retained source row" do
+    expect { described_class.new(session: session).call }
+      .to raise_error(ArgumentError, /Choose an outcome/)
+
+    expect(row.reload.disposition).to eq("pending")
+    expect(session.reload.status).to eq("previewed")
+  end
+
+  it "rejects outcomes for rows outside the retained package" do
+    expect {
+      described_class.new(
+        session: session,
+        row_overrides: [ included_override(row, employee), { id: row.id + 10_000, disposition: "excluded", disposition_reason: "Wrong package" } ]
+      ).call
+    }.to raise_error(ArgumentError, /does not belong to this payroll package/)
+  end
+
+  it "records a reasoned non-payroll outcome without letting its source errors block included rows" do
+    unmatched_row = create(
+      :payroll_intake_row,
+      payroll_intake_session: session,
+      employee: nil,
+      position: 1,
+      source_employee_name: "Former Worker",
+      validation_errors: [ { code: "unmatched_employee", message: "No employee match", severity: "error" } ]
+    )
+
+    result = described_class.new(
+      session: session,
+      actor: actor,
+      row_overrides: [
+        included_override(row, employee),
+        { id: unmatched_row.id, disposition: "informational", disposition_reason: "Former employee; no pay due this period." }
+      ]
+    ).call
+
+    expect(result[:errors]).to be_empty
+    expect(result[:applied].length).to eq(1)
+    expect(unmatched_row.reload).to have_attributes(
+      disposition: "informational",
+      disposition_reason: "Former employee; no pay due this period.",
+      dispositioned_by: actor,
+      status: "skipped",
+      excluded: true
+    )
+  end
+
+  it "requires a reason and a named future regular period when hours are deferred" do
+    future_period = create(
+      :pay_period,
+      company: company,
+      company_workweek: workweek,
+      start_date: Date.new(2024, 1, 21),
+      end_date: Date.new(2024, 2, 3),
+      pay_date: Date.new(2024, 2, 9)
+    )
+
+    expect {
+      described_class.new(
+        session: session,
+        row_overrides: [ { id: row.id, disposition: "deferred", target_pay_period_id: future_period.id } ]
+      ).call
+    }.to raise_error(ArgumentError, /Enter a reason/)
+
+    result = described_class.new(
+      session: session,
+      actor: actor,
+      row_overrides: [
+        {
+          id: row.id,
+          disposition: "deferred",
+          disposition_reason: "Approved after cutoff; pay next period.",
+          target_pay_period_id: future_period.id
+        }
+      ]
+    ).call
+
+    expect(result[:errors]).to be_empty
+    expect(row.reload).to have_attributes(
+      disposition: "deferred",
+      target_pay_period: future_period,
+      dispositioned_by: actor,
+      status: "skipped"
+    )
   end
 
   it "blocks a preview after its confirmed workweek evidence changes" do

@@ -9,6 +9,18 @@ interface HeldRejection {
 }
 
 async function mountHarness(page: Page, exportName: string): Promise<void> {
+  await page.route('**/admin/pay_periods/*/payroll_intake_imports', async (route): Promise<void> => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ imports: [], disposition_targets: [] }),
+    });
+  });
   await page.goto('/');
   await page.addScriptTag({
     type: 'module',
@@ -68,6 +80,7 @@ function intakeImport(row: Record<string, unknown>): Record<string, unknown> {
     package_id: '11111111-2222-4333-8444-555555555555',
     package_revision: 1,
     package_schema_version: 'payroll-intake/v1',
+    current: true,
     warnings: [],
     totals: {},
     created_at: '2026-09-07T00:00:00Z',
@@ -81,6 +94,10 @@ const matchedIntakeRow = {
   position: 1,
   status: 'ready',
   excluded: false,
+  row_kind: 'matched',
+  disposition: 'pending',
+  disposition_reason: null,
+  target_pay_period_id: null,
   source_employee_name: 'Existing Employee',
   employee_id: 801,
   employee_name: 'Existing Employee',
@@ -105,6 +122,7 @@ const unmatchedIntakeRow = {
   ...matchedIntakeRow,
   id: 903,
   status: 'needs_review',
+  row_kind: 'unmatched_revel',
   source_employee_name: 'New Person',
   employee_id: null,
   employee_name: null,
@@ -153,9 +171,10 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
       contentType: 'application/json',
       body: JSON.stringify({
         import_id: 904,
-        source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', verified_source_count: 1, source_count: 1 },
+        source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', current: true, verified_source_count: 1, source_count: 1, disposition_targets: [] },
         preview: {
           matched: [{
+            source_row_id: 906,
             employee_id: 801,
             employee_name: 'Existing Employee',
             employment_type: 'hourly',
@@ -179,6 +198,19 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
           matched_count: 1,
           can_apply: true,
           tips_paid_out_from_tips: false,
+          source_rows: [{
+            id: 906,
+            position: 1,
+            source_employee_name: 'Existing Employee',
+            employee_id: 801,
+            employee_name: 'Existing Employee',
+            row_kind: 'matched',
+            disposition: 'pending',
+            disposition_reason: null,
+            target_pay_period_id: null,
+            errors: [],
+            warnings: [],
+          }],
         },
       }),
     });
@@ -254,6 +286,7 @@ test('PayrollIntakeImportModal guards preview, apply, and nested employee creati
   await page.getByRole('button', { name: 'Open payroll intake' }).click();
   await sourceInput.fill('New Person 40 40');
   await dialog.getByRole('button', { name: 'Preview Intake' }).click();
+  await dialog.getByRole('combobox', { name: 'Outcome for New Person' }).selectOption('included');
   await dialog.getByRole('button', { name: 'New' }).click();
   const createDialog = page.getByRole('dialog', { name: 'Create employee' });
   await createDialog.getByLabel('Rate').fill('12.50');
@@ -279,15 +312,18 @@ test('MoSa import routes missing period pay to the worksheet and requires review
   await page.route('**/admin/pay_periods/701/preview_import', async (route): Promise<void> => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       import_id: 904,
-      source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', verified_source_count: 2, source_count: 2 },
+      source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [] },
       preview: {
-        matched: [{ employee_id: 801, employee_name: 'Variable Salary', employment_type: 'salary', pay_rate: 200000,
+        matched: [{ source_row_id: 906, employee_id: 801, employee_name: 'Variable Salary', employment_type: 'salary', pay_rate: 200000,
           confidence: 1, matched_name: 'Variable Salary', regular_hours: 0, overtime_hours: 0, total_hours: 0,
           pdf_employee_name: 'Variable Salary', total_tips: 0, tip_pool: null, loan_deduction: 0,
           period_pay_required: true, period_pay_missing: !periodPayEntered,
           current_period_pay: periodPayEntered ? '9000.0' : '0.0', overwrite_required: periodPayEntered }],
         unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [],
         pdf_count: 1, excel_count: 0, matched_count: 1, can_apply: true, tips_paid_out_from_tips: false,
+        source_rows: [{ id: 906, position: 1, source_employee_name: 'Variable Salary', employee_id: 801,
+          employee_name: 'Variable Salary', row_kind: 'matched', disposition: 'pending', disposition_reason: null,
+          target_pay_period_id: null, errors: [], warnings: [] }],
       },
     }) });
   });
