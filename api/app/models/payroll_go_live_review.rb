@@ -3,7 +3,7 @@
 class PayrollGoLiveReview < ApplicationRecord
   STATUSES = %w[draft setup_applied approved].freeze
   ATTESTATIONS = {
-    "employee_setup" => "Every active employee profile and recurring payroll item was reviewed.",
+    "employee_setup" => "Every active employee profile and typed recurring payroll field was reviewed; no free-text legacy recurring item remains.",
     "w4_history" => "W-4 effective dates and current elections were reviewed for every W-2 employee.",
     "loan_balances" => "Every recurring loan deduction has a verified opening balance or a documented resolution.",
     "pay_schedule" => "The pay schedule and legal overtime workweek were confirmed with the employer.",

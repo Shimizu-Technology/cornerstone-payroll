@@ -54,6 +54,8 @@ module Api
             error: "Validation failed",
             details: e.record.errors.messages
           }, status: :unprocessable_entity
+        rescue LegacyRecurringComponentGuard::Error => e
+          render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
 
         def update
@@ -84,6 +86,8 @@ module Api
             error: "Validation failed",
             details: e.record.errors.messages
           }, status: :unprocessable_entity
+        rescue LegacyRecurringComponentGuard::Error => e
+          render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
 
         private

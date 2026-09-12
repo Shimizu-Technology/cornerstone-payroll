@@ -366,6 +366,20 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"]["email"]).to eq("john.doe@example.com")
       end
 
+      it "routes recurring components to typed payroll fields during creation" do
+        params_with_legacy_component = valid_params.deep_dup
+        params_with_legacy_component[:employee][:default_custom_earnings] = [
+          { label: "Chief Stipend", amount: "125.55" }
+        ]
+
+        expect {
+          post "/api/v1/admin/employees", params: params_with_legacy_component
+        }.not_to change(Employee, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "payroll_components", 0)).to include("Assigned Payroll Fields")
+      end
+
       it "encrypts SSN and returns only last 4" do
         post "/api/v1/admin/employees", params: valid_params
 
@@ -622,23 +636,18 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload).to have_attributes(employment_type: "salary", pay_rate: 52_000.to_d)
       end
 
-      it "updates recurring custom earnings" do
+      it "routes new recurring earnings to typed payroll fields" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {
             default_custom_earnings: [
-              { label: "Chief Stipend", amount: "125.555" },
-              { label: "Bad Infinity", amount: "Infinity" },
-              { label: "Bad NaN", amount: "NaN" },
-              { label: "Ignored", amount: "0" },
-              { label: "", amount: "50" }
+              { label: "Chief Stipend", amount: "125.55" }
             ]
           }
         }
 
-        expect(response).to have_http_status(:ok)
-        expect(employee.reload.default_custom_earnings).to eq([
-          { "label" => "Chief Stipend", "amount" => 125.56 }
-        ])
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "payroll_components", 0)).to include("Assigned Payroll Fields")
+        expect(employee.reload.default_custom_earnings).to be_empty
       end
 
       it "saves a verified hire date with unchanged unformatted imported SSN and preserves address review" do
@@ -873,6 +882,41 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       expect(response).to have_http_status(:forbidden)
       expect(employee.reload).to be_active
+    end
+  end
+
+  describe "PATCH /api/v1/admin/employees/:id legacy recurring components" do
+    let!(:employee) do
+      create(
+        :employee,
+        company: company,
+        default_payroll_adjustments: [
+          { "label" => "Legacy rent", "amount" => 25.0, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+    end
+
+    it "blocks new free-text recurring payroll behavior" do
+      patch "/api/v1/admin/employees/#{employee.id}", params: {
+        employee: {
+          default_payroll_adjustments: [
+            { label: "Legacy rent", amount: 50, treatment: "post_tax_deduction", active: true }
+          ]
+        }
+      }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.dig("details", "payroll_components", 0)).to include("Assigned Payroll Fields")
+      expect(employee.reload.default_payroll_adjustments.first.fetch("amount")).to eq(25.0)
+    end
+
+    it "allows an old row to be removed after its typed replacement is verified" do
+      patch "/api/v1/admin/employees/#{employee.id}", params: {
+        employee: { default_payroll_adjustments: [] }
+      }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.default_payroll_adjustments).to be_empty
     end
   end
 end

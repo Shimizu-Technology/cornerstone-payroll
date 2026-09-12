@@ -85,6 +85,9 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
+          if attrs.key?(:salary_override) && @payroll_item.salary_override.to_d != attrs[:salary_override].to_d
+            @payroll_item.clear_imported_period_pay_evidence!
+          end
 
           PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
 
@@ -289,7 +292,8 @@ module Api
             employee_paid: entry.employee_paid,
             employer_paid: entry.employer_paid,
             active: entry.active,
-            notes: entry.notes
+            notes: entry.notes,
+            metadata: entry.metadata
           }
         end
 
@@ -302,6 +306,7 @@ module Api
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
+            period_pay_evidence: item.custom_columns_data.to_h["period_pay_evidence"],
             non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
             scheduled_hours: item.scheduled_hours,

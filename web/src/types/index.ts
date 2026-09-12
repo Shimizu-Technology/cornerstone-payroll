@@ -179,6 +179,7 @@ export interface PayrollItemFieldEntry {
   employer_paid?: boolean;
   active?: boolean;
   notes?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PayrollAdjustment {
@@ -843,6 +844,16 @@ export interface PayrollItem {
   bonus_source?: 'manual' | 'mosa_revel' | null;
   imported_bonus?: number | null;
   salary_override?: number | null;
+  period_pay_evidence?: {
+    amount: string;
+    employee_id?: number;
+    employee_name?: string;
+    scope?: string;
+    effective_pay_date?: string;
+    source: string;
+    source_type: string;
+    notes?: string | null;
+  } | null;
   non_taxable_pay?: number;
   // Calculated pay
   gross_pay?: number;
