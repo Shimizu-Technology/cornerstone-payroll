@@ -28,8 +28,7 @@ class SalaryPayrollCalculator < PayrollCalculator
     sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
     capture_payroll_reporting_components!
-    calculate_retirement
-    calculate_roth_retirement
+    calculate_retirement_contributions
 
     pre_tax_ded = pre_tax_employee_deductions_total
     taxable_for_withholding = [
@@ -37,7 +36,6 @@ class SalaryPayrollCalculator < PayrollCalculator
       0.0
     ].max
 
-    calculate_employer_retirement_match
     calculate_taxes(withholding_gross: taxable_for_withholding)
     apply_employee_deductions
     calculate_totals

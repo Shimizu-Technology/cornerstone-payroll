@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -55,6 +55,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
     t.index ["source_event_key"], name: "idx_aire_entry_ack_unique_source_event", unique: true
     t.index ["time_tracking_import_id"], name: "idx_on_time_tracking_import_id_95ff82b3b6"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying::text, 'committed'::character varying::text, 'payment_prepared'::character varying::text, 'payment_issued'::character varying::text, 'payment_failed'::character varying::text, 'payment_voided'::character varying::text])", name: "aire_payroll_entry_ack_status_check"
+  end
+
+  create_table "annual_retirement_limits", force: :cascade do |t|
+    t.decimal "catch_up_limit", precision: 14, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.decimal "elective_deferral_limit", precision: 14, scale: 2, null: false
+    t.decimal "enhanced_catch_up_limit", precision: 14, scale: 2, null: false
+    t.decimal "roth_catch_up_wage_threshold", precision: 14, scale: 2, null: false
+    t.string "source_name", null: false
+    t.string "source_url", null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.index ["tax_year"], name: "index_annual_retirement_limits_on_tax_year", unique: true
   end
 
   create_table "annual_tax_configs", force: :cascade do |t|
@@ -566,6 +579,51 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
     t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index ["employee_loan_id"], name: "index_employee_payroll_fields_on_employee_loan_id"
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
+  end
+
+  create_table "employee_retirement_elections", force: :cascade do |t|
+    t.boolean "catch_up_enabled", default: false, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.date "effective_on", null: false
+    t.boolean "eligible", default: true, null: false
+    t.string "eligible_compensation", default: "gross_wages", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "employer_match_annual_cap", precision: 14, scale: 2
+    t.decimal "employer_match_deferral_cap_rate", precision: 8, scale: 6
+    t.string "employer_match_destination", default: "traditional", null: false
+    t.string "employer_match_mode", default: "none", null: false
+    t.decimal "employer_match_period_cap", precision: 14, scale: 2
+    t.decimal "employer_match_rate", precision: 8, scale: 6, default: "0.0", null: false
+    t.decimal "employer_match_ytd_before_system", precision: 14, scale: 2, default: "0.0", null: false
+    t.string "limit_priority", default: "proportional", null: false
+    t.boolean "participating", default: false, null: false
+    t.decimal "plan_annual_employee_limit", precision: 14, scale: 2
+    t.string "plan_name", default: "401(k)", null: false
+    t.text "reason", null: false
+    t.decimal "roth_amount", precision: 14, scale: 2, default: "0.0", null: false
+    t.string "roth_contribution_type", default: "percentage", null: false
+    t.decimal "roth_rate", precision: 8, scale: 6, default: "0.0", null: false
+    t.string "source", null: false
+    t.decimal "traditional_amount", precision: 14, scale: 2, default: "0.0", null: false
+    t.string "traditional_contribution_type", default: "percentage", null: false
+    t.decimal "traditional_rate", precision: 8, scale: 6, default: "0.0", null: false
+    t.string "true_up_policy", default: "none", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_employee_retirement_elections_on_company_id"
+    t.index ["created_by_id"], name: "index_employee_retirement_elections_on_created_by_id"
+    t.index ["employee_id", "effective_on"], name: "idx_employee_retirement_elections_effective", unique: true
+    t.index ["employee_id"], name: "index_employee_retirement_elections_on_employee_id"
+    t.check_constraint "(employer_match_destination::text = ANY (ARRAY['traditional'::character varying, 'roth'::character varying]::text[])) AND (true_up_policy::text = ANY (ARRAY['none'::character varying, 'year_to_date'::character varying]::text[]))", name: "retirement_elections_match_policy"
+    t.check_constraint "(traditional_contribution_type::text = ANY (ARRAY['percentage'::character varying, 'fixed'::character varying]::text[])) AND (roth_contribution_type::text = ANY (ARRAY['percentage'::character varying, 'fixed'::character varying]::text[]))", name: "retirement_elections_contribution_types"
+    t.check_constraint "eligible_compensation::text = ANY (ARRAY['gross_wages'::character varying, 'gross_excluding_tips'::character varying, 'base_pay'::character varying]::text[])", name: "retirement_elections_compensation"
+    t.check_constraint "employer_match_mode::text = ANY (ARRAY['none'::character varying, 'compensation_percentage'::character varying, 'employee_deferral_percentage'::character varying]::text[])", name: "retirement_elections_match_mode"
+    t.check_constraint "limit_priority::text = ANY (ARRAY['proportional'::character varying, 'traditional_first'::character varying, 'roth_first'::character varying]::text[])", name: "retirement_elections_limit_priority"
+    t.check_constraint "participating = false OR eligible = true", name: "retirement_elections_participation_eligibility"
+    t.check_constraint "traditional_amount >= 0::numeric AND roth_amount >= 0::numeric AND employer_match_ytd_before_system >= 0::numeric AND (plan_annual_employee_limit IS NULL OR plan_annual_employee_limit >= 0::numeric) AND (employer_match_period_cap IS NULL OR employer_match_period_cap >= 0::numeric) AND (employer_match_annual_cap IS NULL OR employer_match_annual_cap >= 0::numeric)", name: "retirement_elections_amount_ranges"
+    t.check_constraint "traditional_rate >= 0::numeric AND traditional_rate <= 1::numeric AND roth_rate >= 0::numeric AND roth_rate <= 1::numeric AND employer_match_rate >= 0::numeric AND employer_match_rate <= 1::numeric AND (employer_match_deferral_cap_rate IS NULL OR employer_match_deferral_cap_rate >= 0::numeric AND employer_match_deferral_cap_rate <= 1::numeric)", name: "retirement_elections_rate_ranges"
+    t.check_constraint "true_up_policy::text <> 'year_to_date'::text OR employer_match_mode::text <> 'compensation_percentage'::text OR eligible_compensation::text = 'gross_wages'::text", name: "retirement_elections_true_up_compensation"
   end
 
   create_table "employee_status_events", force: :cascade do |t|
@@ -2121,6 +2179,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
     t.string "reprint_of_check_number"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
+    t.jsonb "retirement_rule_snapshot", default: {}, null: false
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "salary_override", precision: 12, scale: 2
     t.decimal "scheduled_hours", precision: 8, scale: 2, default: "0.0", null: false
@@ -2161,6 +2220,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
     t.index ["replaced_check_number"], name: "index_payroll_items_on_replaced_check_number", where: "(replaced_check_number IS NOT NULL)"
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
+    t.index ["retirement_rule_snapshot"], name: "index_payroll_items_on_retirement_rule_snapshot", using: :gin
     t.index ["tax_rule_snapshot"], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index ["voided"], name: "index_payroll_items_on_voided"
     t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying::text, 'mosa_revel'::character varying::text]))", name: "payroll_items_bonus_source_check"
@@ -2960,6 +3020,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_060000) do
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
+  add_foreign_key "employee_retirement_elections", "companies"
+  add_foreign_key "employee_retirement_elections", "employees"
+  add_foreign_key "employee_retirement_elections", "users", column: "created_by_id"
   add_foreign_key "employee_status_events", "companies"
   add_foreign_key "employee_status_events", "employees"
   add_foreign_key "employee_status_events", "users", column: "actor_id"

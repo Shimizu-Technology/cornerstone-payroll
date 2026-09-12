@@ -85,6 +85,7 @@ class Employee < ApplicationRecord
   has_many :employee_ytd_totals, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
   has_many :employee_w4_elections, dependent: :restrict_with_error
+  has_many :employee_retirement_elections, dependent: :restrict_with_error
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
   has_many :employee_work_profiles, dependent: :restrict_with_error
@@ -183,6 +184,16 @@ class Employee < ApplicationRecord
       employee_wage_rates.select(&:active?).sort_by { |rate| [ rate.is_primary ? 0 : 1, rate.label.to_s ] }
     else
       employee_wage_rates.active.order(is_primary: :desc, label: :asc)
+    end
+  end
+
+  def retirement_election_on(date)
+    if association(:employee_retirement_elections).loaded?
+      employee_retirement_elections
+        .select { |election| election.effective_on <= date.to_date }
+        .max_by { |election| [ election.effective_on, election.created_at, election.id ] }
+    else
+      employee_retirement_elections.effective_on(date).first
     end
   end
 
