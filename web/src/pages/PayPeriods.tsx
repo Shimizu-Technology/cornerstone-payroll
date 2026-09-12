@@ -26,11 +26,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
-import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollHistoryRecord } from '@/services/api';
+import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
@@ -152,6 +152,7 @@ export function PayPeriods() {
   const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
   const [totalPages, setTotalPages] = useState(0);
   const [years, setYears] = useState<number[]>([]);
+  const [goLiveGate, setGoLiveGate] = useState<PayrollGoLiveGateState | null>(null);
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status' | 'source';
@@ -182,6 +183,7 @@ export function PayPeriods() {
     setStatusCounts({});
     setTotalPages(0);
     setYears([]);
+    setGoLiveGate(null);
     setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
 
@@ -287,6 +289,7 @@ export function PayPeriods() {
       setStatusCounts(response.meta.statuses);
       setTotalPages(response.meta.total_pages);
       setYears(response.meta.years);
+      setGoLiveGate(response.meta.payroll_go_live ?? null);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
@@ -296,6 +299,7 @@ export function PayPeriods() {
         setStatusCounts({});
         setTotalPages(0);
         setYears([]);
+        setGoLiveGate(null);
       }
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -626,7 +630,7 @@ export function PayPeriods() {
     setCurrentNextCheckNumber(null);
     setCheckSettingsError(null);
     setIsCreateOpen(true);
-    void loadCurrentNextCheckNumber();
+    if (!goLiveGate?.comparison_only) void loadCurrentNextCheckNumber();
   };
 
   const handleCreateOpenChange = (open: boolean) => {
@@ -667,12 +671,25 @@ export function PayPeriods() {
         description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
         actions={
           <Button onClick={openCreateModal}>
-            New Pay Period
+            {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
           </Button>
         }
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        {goLiveGate?.comparison_only && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+            <div className="flex items-start gap-3">
+              <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div>
+                <p className="font-semibold">Live payroll stays locked during cutover review</p>
+                <p className="mt-1 text-sm leading-6 text-amber-900">
+                  Payrolls dated {goLiveGate.effective_on ? formatDate(goLiveGate.effective_on) : 'after the cutover'} or later are created as comparison runs and cannot be committed until technical and operations approval is complete.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Error display */}
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
@@ -1021,9 +1038,11 @@ export function PayPeriods() {
         <DialogContent>
           <form onSubmit={handleCreate}>
             <DialogHeader>
-              <DialogTitle>New Pay Period</DialogTitle>
+              <DialogTitle>{goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}</DialogTitle>
               <DialogDescription>
-                Create a payroll run with an explicit purpose and verified dates.
+                {goLiveGate?.comparison_only
+                  ? 'Build and reconcile payroll safely. This run cannot be committed while cutover approval is open.'
+                  : 'Create a payroll run with an explicit purpose and verified dates.'}
               </DialogDescription>
             </DialogHeader>
             {createError && (
@@ -1097,7 +1116,7 @@ export function PayPeriods() {
                   required
                 />
               </div>
-              <div className="space-y-2">
+              {!goLiveGate?.comparison_only && <div className="space-y-2">
                 <Label htmlFor="starting_check_number">Starting Check Number (optional)</Label>
                 <Input
                   id="starting_check_number"
@@ -1140,7 +1159,7 @@ export function PayPeriods() {
                       This will move the sequence to a lower check number. That is allowed, but the number must not already be used.
                     </p>
                   )}
-              </div>
+              </div>}
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes (optional)</Label>
                 <Textarea
@@ -1156,7 +1175,7 @@ export function PayPeriods() {
                 Cancel
               </Button>
               <Button className="flex-1 sm:flex-none" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating...' : 'Create Pay Period'}
+                {isSubmitting ? 'Creating...' : goLiveGate?.comparison_only ? 'Create Comparison Run' : 'Create Pay Period'}
               </Button>
             </DialogFooter>
           </form>
