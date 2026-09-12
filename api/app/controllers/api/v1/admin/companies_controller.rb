@@ -12,6 +12,7 @@ module Api
             name ein pay_frequency active address_line1 address_line2 city state zip
             phone email bank_name bank_address check_stock_type check_offset_x check_offset_y
             next_check_number simple_payroll_register_enabled historical_payroll_enabled
+            client_payroll_approval_required
           ] + [ "check_layout_config" ]
         ).freeze
 
@@ -155,6 +156,7 @@ module Api
             :bank_name, :bank_address,
             :check_stock_type, :check_offset_x, :check_offset_y,
             :next_check_number, :simple_payroll_register_enabled, :historical_payroll_enabled,
+            :client_payroll_approval_required,
             check_layout_config: {}
           )
         end
@@ -195,6 +197,7 @@ module Api
             total_employees: total_employee_counts&.fetch(company.id, 0) || company.employees.count,
             pay_frequency: company.pay_frequency,
             historical_payroll_enabled: company.historical_payroll_enabled,
+            client_payroll_approval_required: company.client_payroll_approval_required,
             payroll_environment: company.payroll_environment,
             migration_rehearsal_status: company.migration_rehearsal_status,
             migration_source_company_id: company.migration_source_company_id,
@@ -222,7 +225,8 @@ module Api
               check_layout_config: company.check_layout_config || {},
               next_check_number: company.next_check_number,
               simple_payroll_register_enabled: company.simple_payroll_register_enabled,
-              historical_payroll_enabled: company.historical_payroll_enabled
+              historical_payroll_enabled: company.historical_payroll_enabled,
+              client_payroll_approval_required: company.client_payroll_approval_required
             )
           end
 

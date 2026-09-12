@@ -24,6 +24,7 @@ class PayPeriodLifecycleService
 
       validate_go_live_gate!
       validate_variable_period_pay!
+      validate_client_approval!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -68,6 +69,7 @@ class PayPeriodLifecycleService
 
       validate_go_live_gate!
       validate_variable_period_pay!
+      validate_client_approval!
       pay_period.update!(
         status: "committed",
         committed_at: Time.current,
@@ -125,6 +127,12 @@ class PayPeriodLifecycleService
 
     raise InvalidTransitionError,
           "Payroll source revision changed after calculation. Apply the current source package and recalculate before approval or commit."
+  end
+
+  def validate_client_approval!
+    PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).verify_required_approval!
+  rescue PayrollReview::RevisionService::Error => e
+    raise InvalidTransitionError, e.message
   end
 
   def validate_go_live_gate!

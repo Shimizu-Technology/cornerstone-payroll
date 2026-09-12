@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -251,6 +251,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_030000) do
     t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
     t.string "check_stock_type", default: "bottom_check", null: false
     t.string "city"
+    t.boolean "client_payroll_approval_required", default: false, null: false
     t.datetime "created_at", null: false
     t.string "ein"
     t.string "email"
@@ -2339,6 +2340,43 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_030000) do
     t.index ["pay_period_id"], name: "index_payroll_reminder_logs_on_pay_period_id"
   end
 
+  create_table "payroll_review_packages", force: :cascade do |t|
+    t.text "approval_acknowledgement"
+    t.string "approval_evidence_reference"
+    t.string "approval_method"
+    t.text "approval_notes"
+    t.bigint "approval_recorded_by_id"
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.string "calculation_checksum", null: false
+    t.jsonb "calculation_snapshot", default: {}, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "generated_at", null: false
+    t.bigint "generated_by_id"
+    t.bigint "pay_period_id", null: false
+    t.integer "revision", null: false
+    t.string "schema_version", default: "v1", null: false
+    t.jsonb "source_manifest", default: {}, null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "superseded_at"
+    t.text "supersession_reason"
+    t.datetime "updated_at", null: false
+    t.index ["approval_recorded_by_id"], name: "index_payroll_review_packages_on_approval_recorded_by_id"
+    t.index ["approved_by_id"], name: "index_payroll_review_packages_on_approved_by_id"
+    t.index ["calculation_checksum"], name: "idx_payroll_review_packages_checksum"
+    t.index ["company_id"], name: "index_payroll_review_packages_on_company_id"
+    t.index ["generated_by_id"], name: "index_payroll_review_packages_on_generated_by_id"
+    t.index ["pay_period_id", "revision"], name: "idx_payroll_review_packages_period_revision", unique: true
+    t.index ["pay_period_id"], name: "idx_payroll_review_packages_current", unique: true, where: "(superseded_at IS NULL)"
+    t.index ["pay_period_id"], name: "index_payroll_review_packages_on_pay_period_id"
+    t.check_constraint "approval_method IS NULL OR (approval_method::text = ANY (ARRAY['client_portal'::character varying, 'email_attestation'::character varying]::text[]))", name: "payroll_review_packages_approval_method_check"
+    t.check_constraint "revision > 0", name: "payroll_review_packages_revision_positive"
+    t.check_constraint "status::text = 'approved'::text AND approved_at IS NOT NULL AND approved_by_id IS NOT NULL AND approval_recorded_by_id IS NOT NULL AND approval_method IS NOT NULL AND approval_acknowledgement::text = 'I approve this exact payroll review revision for processing.'::text AND (approval_method::text <> 'email_attestation'::text OR NULLIF(btrim(approval_evidence_reference::text), ''::text) IS NOT NULL) AND (approval_method::text <> 'client_portal'::text OR approved_by_id = approval_recorded_by_id) OR status::text = 'pending'::text AND approved_at IS NULL AND approved_by_id IS NULL AND approval_recorded_by_id IS NULL AND approval_method IS NULL AND approval_acknowledgement IS NULL OR status::text = 'superseded'::text", name: "payroll_review_packages_approval_shape"
+    t.check_constraint "status::text = 'superseded'::text AND superseded_at IS NOT NULL AND NULLIF(btrim(supersession_reason), ''::text) IS NOT NULL OR status::text <> 'superseded'::text AND superseded_at IS NULL AND supersession_reason IS NULL", name: "payroll_review_packages_supersession_shape"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'superseded'::character varying]::text[])", name: "payroll_review_packages_status_check"
+  end
+
   create_table "payroll_time_allocations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3122,6 +3160,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_030000) do
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"
+  add_foreign_key "payroll_review_packages", "companies", on_delete: :restrict
+  add_foreign_key "payroll_review_packages", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_review_packages", "users", column: "approval_recorded_by_id", on_delete: :nullify
+  add_foreign_key "payroll_review_packages", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "payroll_review_packages", "users", column: "generated_by_id", on_delete: :nullify
   add_foreign_key "payroll_time_allocations", "companies"
   add_foreign_key "payroll_time_allocations", "daily_time_records"
   add_foreign_key "payroll_time_allocations", "employees"

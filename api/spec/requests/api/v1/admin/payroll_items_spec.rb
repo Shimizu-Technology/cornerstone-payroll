@@ -44,6 +44,19 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(JSON.parse(response.body).dig("payroll_item", "bonus_source")).to eq("manual")
     end
 
+    it "invalidates a generated client review revision when an employee payroll row changes" do
+      company.update!(client_payroll_approval_required: true)
+      pay_period.update!(calculated_at: Time.current)
+      review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+        params: { payroll_item: { hours_worked: 12 } }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.reload).to have_attributes(status: "draft", calculated_at: nil)
+      expect(review_package.reload).to have_attributes(status: "superseded", superseded_at: be_present)
+    end
+
     it "does not reveal a payroll item through another company's pay run" do
       other_company = create(:company, organization: organization)
       other_employee = create(:employee, company: other_company)

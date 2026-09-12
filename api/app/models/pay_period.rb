@@ -28,6 +28,7 @@ class PayPeriod < ApplicationRecord
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
   has_many :payroll_intake_sessions, dependent: :destroy
+  has_many :payroll_review_packages, dependent: :restrict_with_error
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
   has_many :loan_transactions, dependent: :nullify
@@ -180,18 +181,44 @@ class PayPeriod < ApplicationRecord
   end
 
   def mark_intake_stale!(session:, reason:, at: Time.current)
-    update!(
-      status: "draft",
-      calculated_at: nil,
-      calculated_by_id: nil,
-      approved_at: nil,
-      approved_by_id: nil,
-      unapproved_at: nil,
-      unapproved_by_id: nil,
-      intake_stale_at: at,
-      intake_stale_reason: reason,
-      intake_stale_session: session
-    )
+    transaction do
+      supersede_current_review_package!(reason: reason, at: at)
+      update!(
+        status: "draft",
+        calculated_at: nil,
+        calculated_by_id: nil,
+        approved_at: nil,
+        approved_by_id: nil,
+        unapproved_at: nil,
+        unapproved_by_id: nil,
+        intake_stale_at: at,
+        intake_stale_reason: reason,
+        intake_stale_session: session
+      )
+    end
+  end
+
+  def invalidate_calculation!(reason:, at: Time.current)
+    return if draft? && calculated_at.blank? && payroll_review_packages.current.none?
+
+    transaction do
+      supersede_current_review_package!(reason: reason, at: at)
+      update!(
+        status: "draft",
+        calculated_at: nil,
+        calculated_by_id: nil,
+        approved_at: nil,
+        approved_by_id: nil,
+        unapproved_at: nil,
+        unapproved_by_id: nil
+      )
+    end
+  end
+
+  def supersede_current_review_package!(reason:, at: Time.current)
+    payroll_review_packages.current.find_each do |review_package|
+      review_package.update!(status: "superseded", superseded_at: at, supersession_reason: reason)
+    end
   end
 
   def clear_intake_stale!

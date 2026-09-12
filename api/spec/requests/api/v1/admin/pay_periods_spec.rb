@@ -1491,6 +1491,59 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
     end
+
+    it "requires the current client-approved review revision when the client setting is enabled" do
+      company.update!(client_payroll_approval_required: true)
+      payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      pay_period.update!(status: "calculated", calculated_at: Time.current)
+      review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Client approval is still required")
+
+      client_approver = create(:user, company: company, organization: organization, role: "client", active: true)
+      CompanyAssignment.create!(user: client_approver, company: company)
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).approve!(
+        approver: client_approver,
+        recorded_by: client_approver,
+        method: "client_portal",
+        acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+      )
+      payroll_item.reload
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:ok), response.body
+      expect(review_package.reload).to be_approved
+      expect(pay_period.reload).to be_approved
+    end
+  end
+
+  describe "POST /api/v1/admin/pay_periods/:id/record_client_approval" do
+    it "records a retained email approval against an assigned client user and exact revision" do
+      company.update!(client_payroll_approval_required: true)
+      create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      pay_period.update!(status: "calculated", calculated_at: Time.current)
+      review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
+      client_approver = create(:user, company: company, organization: organization, role: "client", active: true)
+      CompanyAssignment.create!(user: client_approver, company: company)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/record_client_approval", params: {
+        client_approver_id: client_approver.id,
+        acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
+        evidence_reference: "gmail-message-456",
+        notes: "Client approved by email."
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include(
+        "status" => "approved",
+        "approval_method" => "email_attestation",
+        "approved_by_name" => client_approver.name,
+        "approval_evidence_reference" => "gmail-message-456"
+      )
+      expect(review_package.reload.approval_recorded_by).to eq(admin_user)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/unapprove" do
