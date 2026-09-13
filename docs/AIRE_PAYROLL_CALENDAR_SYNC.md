@@ -10,7 +10,8 @@
 ## Implementation authority
 
 - **Status:** Implemented on `codex/aire-pay-calendar-contract`; not yet merged, deployed, or operationally verified in production.
-- **Pull request / final merge commit:** Pending PR creation and merge. This field must be replaced with the final references before production promotion.
+- **Pull request:** [#190](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/190)
+- **Final merge commit:** Pending merge. This field must be replaced before production promotion.
 - **Code-complete scope:** Effective-dated T-7 settings, versioned calendar publication and retry, authenticated and idempotent finalization-event receipt, authoritative Batch v2 verification, durable evidence, role-aware UI state, and automated dispatchers.
 - **Evidence still required:** Hosted review on the final commit, merge to `main`, deployment migration evidence, and a dated production operator test with Cornerstone and AIRE.
 - **Changed risks:** The two applications now share versioned period identity, cutoff, and batch evidence. Clock skew, stale publications, tenant mismatch, payload drift, or an unavailable peer must fail visibly without changing payroll.
