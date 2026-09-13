@@ -828,6 +828,7 @@ export interface TimeTrackingSource {
   base_url: string;
   active: boolean;
   shared_secret_configured: boolean;
+  delegation_token_configured: boolean;
   last_synced_at: string | null;
 }
 
@@ -836,6 +837,7 @@ export interface TimeTrackingSourceCreatePayload {
   source_type: TimeTrackingSourceType;
   base_url: string;
   shared_secret: string;
+  delegation_token?: string;
   active: boolean;
 }
 
@@ -846,6 +848,8 @@ export interface TimeTrackingSourceTestResponse {
   generated_at?: string;
   employee_count?: number;
   summary?: Record<string, unknown>;
+  cockpit_ready?: boolean;
+  delegation_token_configured?: boolean;
   error?: string;
 }
 
@@ -853,6 +857,7 @@ export interface TimeTrackingSourceUpdatePayload {
   name: string;
   base_url: string;
   shared_secret?: string;
+  delegation_token?: string;
   active: boolean;
 }
 
@@ -982,6 +987,12 @@ export const timeTrackingSourcesApi = {
   deactivate: (id: number) => api.delete<void>(`/admin/time_tracking_sources/${id}`),
   testConnection: (id: number) =>
     api.post<TimeTrackingSourceTestResponse>(`/admin/time_tracking_sources/${id}/test_connection`),
+  saveDelegation: (id: number, delegationToken: string) =>
+    api.put<{ time_tracking_source: TimeTrackingSource }>(`/admin/time_tracking_sources/${id}/delegation`, {
+      delegation_token: delegationToken,
+    }),
+  removeDelegation: (id: number) =>
+    api.delete<{ time_tracking_source: TimeTrackingSource }>(`/admin/time_tracking_sources/${id}/delegation`),
 };
 
 // Pay Periods (Admin API)
@@ -1044,6 +1055,36 @@ export const payPeriodsApi = {
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/retry_delivery`
     ),
+  airePayrollCockpit: (id: number, params?: { employee_page?: number }) =>
+    api.get<{ aire_payroll_cockpit: import('@/types').AirePayrollCockpitOverview }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit`,
+      { ...params, employee_per_page: 100 }
+    ),
+  airePayrollTimeEntries: (id: number, params?: { employee_id?: string; approval_status?: string; page?: number }) =>
+    api.get<import('@/types').AirePayrollTimeEntriesResponse>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/time_entries`,
+      { ...params, per_page: 250 }
+    ),
+  airePayrollExceptions: (id: number, params?: { page?: number; leave_page?: number }) =>
+    api.get<import('@/types').AirePayrollExceptionsResponse>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/exceptions`,
+      { ...params, per_page: 250, leave_per_page: 100 }
+    ),
+  reviewAireTimeEntry: (
+    payPeriodId: number,
+    timeEntryId: string,
+    data: { command_id: string; expected_version: number; decision: 'approve' | 'deny'; reason: string }
+  ) => api.post<import('@/types').AirePayrollCommandResponse>(
+    `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/time_entries/${encodeURIComponent(timeEntryId)}/approval`,
+    data
+  ),
+  finalizeAirePayrollPeriod: (
+    payPeriodId: number,
+    data: { command_id: string; expected_version: number; reason: string }
+  ) => api.post<import('@/types').AirePayrollCommandResponse>(
+    `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/finalize`,
+    data
+  ),
   payrollFieldInputs: (id: number) =>
     api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
   comparison: (id: number) =>

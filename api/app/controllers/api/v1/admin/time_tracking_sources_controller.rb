@@ -4,12 +4,12 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourcesController < BaseController
-        before_action :require_admin!, except: [ :index, :show ]
-        before_action :set_source, only: [ :show, :update, :destroy, :test_connection ]
+        before_action :require_admin!, except: [ :index, :show, :save_delegation, :destroy_delegation ]
+        before_action :set_source, only: [ :show, :update, :destroy, :test_connection, :save_delegation, :destroy_delegation ]
         before_action :disable_http_caching
 
         def index
-          sources = TimeTrackingSource.where(company_id: current_company_id).order(:name)
+          sources = TimeTrackingSource.where(company_id: current_company_id).includes(:time_tracking_delegations).order(:name)
           render json: { time_tracking_sources: sources.map { |source| source_json(source) } }
         end
 
@@ -18,11 +18,7 @@ module Api
         end
 
         def create
-          source = TimeTrackingSource.new(source_params.merge(company_id: current_company_id))
-          TimeTrackingSource.transaction do
-            deactivate_other_sources! if source.active?
-            source.save!
-          end
+          source = source_configuration.save!(source_params)
           render json: { time_tracking_source: source_json(source) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -31,11 +27,7 @@ module Api
         end
 
         def update
-          TimeTrackingSource.transaction do
-            @source.assign_attributes(source_params)
-            deactivate_other_sources!(except: @source) if @source.active?
-            @source.save!
-          end
+          source_configuration(@source).save!(source_params)
           render json: { time_tracking_source: source_json(@source) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -56,6 +48,15 @@ module Api
             start_date: test_connection_date,
             end_date: test_connection_date
           )
+          cockpit_ready = if @source.source_type == "aire_services"
+            begin
+              TimeTracking::Client.new(@source).payroll_cockpit_employees(per_page: 1).key?("employees")
+            rescue TimeTracking::Client::Error
+              false
+            end
+          else
+            false
+          end
 
           render json: {
             ok: true,
@@ -63,11 +64,26 @@ module Api
             source: payload["source"],
             generated_at: payload["generated_at"],
             employee_count: Array(payload["employees"]).size,
-            summary: payload["summary"] || {}
+            summary: payload["summary"] || {},
+            cockpit_ready: cockpit_ready,
+            delegation_token_configured: @source.delegation_for(current_user).present?
           }
         rescue TimeTracking::Client::Error, ArgumentError, SocketError, SystemCallError, Timeout::Error,
                Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
           render json: { ok: false, error: "Connection test failed: #{e.message}" }, status: :unprocessable_entity
+        end
+
+        def save_delegation
+          token = params.permit(:delegation_token)[:delegation_token].to_s.strip
+          source_configuration(@source).save_delegation!(token)
+          render json: { time_tracking_source: source_json(@source) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+        end
+
+        def destroy_delegation
+          source_configuration(@source).remove_delegation!
+          render json: { time_tracking_source: source_json(@source) }
         end
 
         def destroy
@@ -87,15 +103,17 @@ module Api
         end
 
         def source_params
-          permitted = [ :name, :base_url, :shared_secret, :active ]
+          permitted = [ :name, :base_url, :shared_secret, :delegation_token, :active ]
           permitted << :source_type if action_name == "create"
           params.require(:time_tracking_source).permit(*permitted)
         end
 
-        def deactivate_other_sources!(except: nil)
-          scope = TimeTrackingSource.where(company_id: current_company_id, active: true)
-          scope = scope.where.not(id: except.id) if except&.persisted?
-          scope.update_all(active: false, updated_at: Time.current)
+        def source_configuration(source = nil)
+          TimeTracking::SourceConfigurationService.new(
+            company_id: current_company_id,
+            actor: current_user,
+            source: source
+          )
         end
 
         def test_connection_date
@@ -115,6 +133,7 @@ module Api
             base_url: source.base_url,
             active: source.active,
             shared_secret_configured: source.shared_secret_configured?,
+            delegation_token_configured: source.delegation_for(current_user).present?,
             last_synced_at: source.last_synced_at,
             created_at: source.created_at,
             updated_at: source.updated_at

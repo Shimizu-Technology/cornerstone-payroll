@@ -11,14 +11,247 @@ RSpec.describe TimeTracking::Client do
     )
   end
 
-  def client_for(source, policy: destination_policy, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+  def client_for(source, delegation: nil, policy: destination_policy, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
     described_class.new(
       source,
+      delegation: delegation,
       destination_policy: policy,
       http_factory: http_factory,
       monotonic_clock: monotonic_clock,
       timeout_runner: timeout_runner
     )
+  end
+
+  describe "AIRE payroll cockpit" do
+    let(:source) do
+      create(
+        :time_tracking_source,
+        source_type: "aire_services",
+        base_url: "https://time.example.com/client-a",
+        shared_secret: "secret"
+      )
+    end
+    let(:external_id) { SecureRandom.uuid }
+
+    it "reads a period and literal time entries with bounded query parameters" do
+      period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
+        .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
+        .to_return(status: 200, body: { payroll_period: { external_pay_period_id: external_id } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+      entries_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries")
+        .with(
+          query: hash_including(
+            "external_pay_period_id" => external_id,
+            "page" => "2",
+            "per_page" => "25",
+            "approval_status" => "pending"
+          ),
+          headers: { "X-Payroll-Shared-Secret" => "secret" }
+        )
+        .to_return(status: 200, body: { time_entries: [] }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      expect(client_for(source).payroll_cockpit_period(external_pay_period_id: external_id))
+        .to include("payroll_period")
+      expect(client_for(source).payroll_cockpit_time_entries(
+        external_pay_period_id: external_id,
+        page: 2,
+        per_page: 25,
+        approval_status: "pending"
+      )).to eq("time_entries" => [])
+      expect(period_stub).to have_been_requested.once
+      expect(entries_stub).to have_been_requested.once
+    end
+
+    it "clamps cockpit pagination at the supported boundaries" do
+      lower_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries")
+        .with(query: hash_including("external_pay_period_id" => external_id, "page" => "1", "per_page" => "1"))
+        .to_return(status: 200, body: { time_entries: [] }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+      upper_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries")
+        .with(query: hash_including("external_pay_period_id" => external_id, "page" => "3", "per_page" => "250"))
+        .to_return(status: 200, body: { time_entries: [] }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      client_for(source).payroll_cockpit_time_entries(
+        external_pay_period_id: external_id,
+        page: 0,
+        per_page: 0
+      )
+      client_for(source).payroll_cockpit_time_entries(
+        external_pay_period_id: external_id,
+        page: 3,
+        per_page: 10_000
+      )
+
+      expect(lower_stub).to have_been_requested.once
+      expect(upper_stub).to have_been_requested.once
+    end
+
+    it "sends delegated approval commands with both authentication layers" do
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+      command_id = SecureRandom.uuid
+      stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries/42/approval")
+        .with(
+          headers: {
+            "X-Payroll-Shared-Secret" => "secret",
+            "X-Aire-Delegation-Token" => "operator-grant"
+          },
+          body: hash_including(
+            "command_id" => command_id,
+            "expected_version" => 3,
+            "decision" => "approve",
+            "reason" => "Verified by payroll"
+          )
+        )
+        .to_return(status: 200, body: { time_entry: { id: "42" } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      result = client_for(source, delegation: delegation).approve_payroll_time_entry(
+        entry_id: 42,
+        command_id: command_id,
+        expected_version: 3,
+        decision: "approve",
+        reason: "Verified by payroll"
+      )
+
+      expect(result.dig("time_entry", "id")).to eq("42")
+      expect(stub).to have_been_requested.once
+    end
+
+    it "refuses to send a delegation token over non-loopback HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+
+      expect do
+        client_for(source, delegation: delegation).approve_payroll_time_entry(
+          entry_id: 42,
+          command_id: SecureRandom.uuid,
+          expected_version: 3,
+          decision: "approve",
+          reason: "Verified by payroll"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+    end
+
+    it "permits loopback HTTP for local cockpit development" do
+      source.update!(base_url: "http://localhost:4101")
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+      stub = stub_request(:post, "http://localhost:4101/api/v1/payroll/cockpit/time_entries/42/approval")
+        .to_return(status: 200, body: { command: { replayed: false } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      response = client_for(source, delegation: delegation).approve_payroll_time_entry(
+        entry_id: 42,
+        command_id: SecureRandom.uuid,
+        expected_version: 3,
+        decision: "approve",
+        reason: "Verified by payroll"
+      )
+
+      expect(response.dig("command", "replayed")).to be(false)
+      expect(stub).to have_been_requested.once
+    end
+
+    it "refuses delegated commands when the current operator has no token" do
+      expect do
+        client_for(source).finalize_payroll_cockpit_period(
+          external_pay_period_id: external_id,
+          command_id: SecureRandom.uuid,
+          expected_version: 1,
+          reason: "Cutoff review complete"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /delegation is not configured/)
+    end
+
+    it "surfaces only bounded JSON operator errors from cockpit endpoints" do
+      stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
+        .to_return(
+          status: 409,
+          body: { error: "The period changed in AIRE" }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect do
+        client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.response_status).to eq(409)
+        expect(error.message).to eq("#{source.name}: The period changed in AIRE")
+      }
+    end
+
+    it "does not surface non-object or non-JSON remote response bodies" do
+      stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
+        .to_return(status: 500, body: [ "internal-token" ].to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      expect do
+        client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.message).to include("HTTP 500")
+        expect(error.message).not_to include("internal-token")
+      }
+    end
+
+    it "rejects unsafe period and time entry identifiers before a request" do
+      request = stub_request(:any, %r{time\.example\.com})
+
+      expect do
+        client_for(source).payroll_cockpit_period(external_pay_period_id: "../period")
+      end.to raise_error(TimeTracking::Client::Error, /Invalid payroll calendar period ID/)
+      expect do
+        client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
+          .approve_payroll_time_entry(
+            entry_id: "../42",
+            command_id: SecureRandom.uuid,
+            expected_version: 1,
+            decision: "approve",
+            reason: "Verified"
+          )
+      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE time entry ID/)
+      expect(request).not_to have_been_requested
+    end
+
+    it "suppresses oversized JSON and HTML error details" do
+      period_url = "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}"
+      oversized_secret = "s" * (described_class::MAX_REMOTE_ERROR_BYTES + 1)
+      stub_request(:get, period_url)
+        .to_return(
+          { status: 500, body: { error: oversized_secret }.to_json, headers: { "Content-Type" => "application/json" } },
+          { status: 502, body: "<html>private upstream detail</html>", headers: { "Content-Type" => "text/html" } }
+        )
+
+      expect do
+        client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.message).to eq("#{source.name} returned HTTP 500")
+        expect(error.message).not_to include(oversized_secret)
+      }
+      expect do
+        client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.message).to eq("#{source.name} returned HTTP 502")
+        expect(error.message).not_to include("private upstream detail")
+      }
+    end
   end
 
   def configure_http_double(http, pinned_ip:, start_error: nil, response: nil)

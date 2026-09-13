@@ -224,6 +224,8 @@ Rails.application.routes.draw do
         resources :time_tracking_sources, except: [:new, :edit] do
           member do
             post :test_connection
+            put :delegation, action: :save_delegation
+            delete :delegation, action: :destroy_delegation
           end
         end
 
@@ -231,6 +233,12 @@ Rails.application.routes.draw do
           resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
             post :retry_delivery
+          end
+          resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
+            get :time_entries
+            get :exceptions
+            post :finalize
+            post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
           end
           resources :payroll_liabilities, only: [ :index ]
           member do
