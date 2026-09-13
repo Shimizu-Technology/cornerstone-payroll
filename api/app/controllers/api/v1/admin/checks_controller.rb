@@ -30,6 +30,7 @@ module Api
           bank_address
           check_memo_template
           auto_create_fit_check
+          require_distinct_check_print_confirmer
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
@@ -62,7 +63,8 @@ module Api
               printed: loaded_items.count { |i| i.check_status == "printed" },
               unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
               voided: loaded_items.count(&:voided),
-              check_stock_type: @pay_period.company.check_stock_type
+              check_stock_type: @pay_period.company.check_stock_type,
+              requires_verified_print_package: @pay_period.company.require_distinct_check_print_confirmer?
             }
           }
         end
@@ -74,6 +76,9 @@ module Api
         def batch_pdf
           unless @pay_period.committed?
             return render json: { error: "Can only generate check PDF for committed pay periods" }, status: :unprocessable_entity
+          end
+          if @pay_period.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
 
           items = @pay_period.payroll_items
@@ -115,6 +120,8 @@ module Api
               event_type: "batch_downloaded",
               check_number: item.check_number,
               ip_address: request.remote_ip,
+              effective_on: PayrollBusinessClock.today,
+              details: {},
               created_at: now,
               updated_at: now
             }
@@ -147,6 +154,9 @@ module Api
           unless @pay_period.committed?
             return render json: { error: "Pay period is not committed" }, status: :unprocessable_entity
           end
+          if @pay_period.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use a verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
 
           user = User.find(current_user_id)
           items = @pay_period.payroll_items.unprinted.with_check_number
@@ -175,6 +185,9 @@ module Api
         def show
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+          if @payroll_item.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
 
           if @payroll_item.check_number.blank?
@@ -210,6 +223,9 @@ module Api
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
           end
+          if @payroll_item.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use a verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
 
           user = User.find(current_user_id)
           result = @payroll_item.mark_printed!(user: user, ip_address: request.remote_ip)
@@ -234,7 +250,15 @@ module Api
           end
 
           user = User.find(current_user_id)
-          result = @payroll_item.mark_delivered!(user: user, ip_address: request.remote_ip)
+          result = @payroll_item.mark_delivered!(
+            user: user,
+            delivered_on: params.require(:delivered_on),
+            delivery_method: params.require(:delivery_method),
+            attestation: params[:attestation],
+            evidence_reference: params[:evidence_reference],
+            note: params[:note],
+            ip_address: request.remote_ip
+          )
 
           render json: {
             data: { payroll_item: check_item_json(@payroll_item.reload) },
@@ -242,7 +266,7 @@ module Api
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "User not found", details: { user: [ "not found" ] } }, status: :unprocessable_entity
-        rescue ArgumentError => e
+        rescue ActionController::ParameterMissing, ArgumentError => e
           render json: { error: e.message, details: { base: [ e.message ] } }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           message = "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}"
@@ -308,6 +332,9 @@ module Api
           ActiveRecord::Base.transaction do
             @payroll_item.lock!
             raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            if CheckReconciliationStatus.for(@payroll_item) == "cleared"
+              raise ArgumentError, "Reverse the clearing evidence before reissuing this check"
+            end
             raise ArgumentError, "Cannot reissue: no check number assigned" if @payroll_item.check_number.blank?
 
             original_check_number = @payroll_item.check_number
@@ -734,6 +761,10 @@ module Api
             user_id: event.user_id,
             user_name: event.user&.name,
             ip_address: event.ip_address,
+            effective_on: event.effective_on,
+            evidence_type: event.evidence_type,
+            evidence_reference: event.evidence_reference,
+            details: event.details,
             created_at: event.created_at
           }
         end
@@ -748,6 +779,7 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
+            require_distinct_check_print_confirmer: company.require_distinct_check_print_confirmer,
             check_layout_config: sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {}),
             active_printer_profile_id: company.active_printer_profile_id,
             active_printer_profile_name: company.active_printer_profile&.name

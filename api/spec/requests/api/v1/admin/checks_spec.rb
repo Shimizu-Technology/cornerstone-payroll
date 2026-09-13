@@ -121,6 +121,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
       }.to change { CheckEvent.where(event_type: "batch_downloaded").count }.by(2)
     end
+
+    it "blocks the legacy batch PDF when the verified package workflow is required" do
+      company.update!(require_distinct_check_print_confirmer: true)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+      expect(CheckEvent.where(event_type: "batch_downloaded")).to be_empty
+    end
   end
 
   # -----------------------------------------------------------------------
@@ -144,6 +153,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/mark_all_printed"
       expect(response.parsed_body["marked_printed"]).to eq(1)
     end
+
+    it "requires the verified package workflow when second-person confirmation is enabled" do
+      company.update!(require_distinct_check_print_confirmer: true)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/mark_all_printed"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+      expect(item_a.reload.check_printed_at).to be_nil
+    end
   end
 
   # -----------------------------------------------------------------------
@@ -166,6 +184,14 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       get "/api/v1/admin/payroll_items/#{draft_item.id}/check"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/committed pay periods/)
+    end
+
+    it "blocks direct PDF generation when the verified package workflow is required" do
+      company.update!(require_distinct_check_print_confirmer: true)
+      get "/api/v1/admin/payroll_items/#{item_a.id}/check"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
     end
   end
 
@@ -201,21 +227,43 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/committed pay periods/)
     end
+
+    it "requires the verified package workflow when second-person confirmation is enabled" do
+      company.update!(require_distinct_check_print_confirmer: true)
+
+      post "/api/v1/admin/payroll_items/#{item_a.id}/check/mark_printed"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+      expect(item_a.reload.check_printed_at).to be_nil
+    end
   end
 
   describe "POST /api/v1/admin/payroll_items/:payroll_item_id/check/mark_delivered" do
     it "returns the delivered item in the standard data and meta envelope" do
       item_a.mark_printed!(user: admin_user)
 
-      post "/api/v1/admin/payroll_items/#{item_a.id}/check/mark_delivered"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/check/mark_delivered", params: {
+        delivered_on: "2026-03-19",
+        delivery_method: "hand_delivery",
+        attestation: true,
+        evidence_reference: "Front desk log 18"
+      }
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("data", "payroll_item", "check_status")).to eq("delivered")
       expect(response.parsed_body.dig("meta", "already_delivered")).to be(false)
+      expect(item_a.check_events.deliveries.last).to have_attributes(
+        effective_on: Date.new(2026, 3, 19),
+        evidence_type: "hand_delivery",
+        evidence_reference: "Front desk log 18"
+      )
     end
 
     it "returns the standard error envelope when delivery is not allowed" do
-      post "/api/v1/admin/payroll_items/#{draft_item.id}/check/mark_delivered"
+      post "/api/v1/admin/payroll_items/#{draft_item.id}/check/mark_delivered", params: {
+        delivered_on: "2026-03-19", delivery_method: "hand_delivery", attestation: true
+      }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body).to include("error" => match(/committed/), "details" => include("base"))
@@ -385,6 +433,17 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(item_a.reload.check_number).to eq("3010")
+    end
+
+    it "requires the reissue workflow once a check has been prepared" do
+      item_a.mark_printed!(user: admin_user)
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Wrong stock was loaded" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Reissue a prepared or issued check")
+      expect(item_a.reload.check_number).to eq("3000")
     end
 
     it "records a renumbered audit event" do

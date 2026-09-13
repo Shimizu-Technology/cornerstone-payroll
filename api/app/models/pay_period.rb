@@ -32,6 +32,7 @@ class PayPeriod < ApplicationRecord
   has_many :payroll_review_packages, dependent: :restrict_with_error
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
+  has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :loan_transactions, dependent: :nullify
   has_one :transmittal, dependent: :destroy
   has_one :general_transmittal, dependent: :restrict_with_error

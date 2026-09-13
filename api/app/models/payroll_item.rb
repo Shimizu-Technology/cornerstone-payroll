@@ -13,6 +13,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
+  has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
   has_many :payroll_item_earnings, dependent: :destroy
   has_many :payroll_item_field_entries, dependent: :destroy
@@ -127,10 +128,17 @@ class PayrollItem < ApplicationRecord
     end
   end
 
-  def mark_delivered!(user:, ip_address: nil)
+  def mark_delivered!(user:, delivered_on:, delivery_method:, attestation:, evidence_reference: nil, note: nil, ip_address: nil)
     raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
     raise ArgumentError, "Print the check before marking it delivered" if check_printed_at.blank?
     raise ArgumentError, "Check actions are only available for committed pay periods" unless pay_period.committed?
+    raise ArgumentError, "Confirm the delivery attestation" unless ActiveModel::Type::Boolean.new.cast(attestation)
+    unless CheckEvent::DELIVERY_EVIDENCE_TYPES.include?(delivery_method.to_s)
+      raise ArgumentError, "Select how the check was delivered"
+    end
+
+    effective_on = Date.iso8601(delivered_on.to_s)
+    raise ArgumentError, "Issue date cannot be in the future" if effective_on > PayrollBusinessClock.today
 
     ApplicationRecord.transaction do
       lock!
@@ -144,10 +152,17 @@ class PayrollItem < ApplicationRecord
         user: user,
         event_type: "delivered",
         check_number: check_number,
+        effective_on: effective_on,
+        evidence_type: delivery_method,
+        evidence_reference: evidence_reference.to_s.strip.presence,
+        reason: note.to_s.strip.presence,
+        details: { attested: true },
         ip_address: ip_address
       )
       { already_delivered: false, event: event }
     end
+  rescue Date::Error
+    raise ArgumentError, "Delivery date is invalid"
   end
 
   # Void this check.  Does NOT delete the record.
@@ -157,12 +172,14 @@ class PayrollItem < ApplicationRecord
   # @return [CheckEvent]
   def void!(user:, reason:, ip_address: nil)
     raise ArgumentError, "Already voided" if voided?
+    raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
     raise ArgumentError, "No check number assigned" if check_number.blank?
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
       raise ArgumentError, "Already voided" if voided? # re-check under lock
+      raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
       update!(
         voided: true,

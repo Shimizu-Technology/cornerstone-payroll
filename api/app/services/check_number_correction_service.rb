@@ -23,6 +23,7 @@ class CheckNumberCorrectionService
       company.lock!
       payroll_item.lock!
 
+      validate_state!
       validate_uniqueness!
 
       payroll_item.update!(check_number: new_check_number)
@@ -55,6 +56,7 @@ class CheckNumberCorrectionService
     raise Error, "Check number cannot exceed 9,999,999" if new_check_number.to_i > 9_999_999
     raise Error, "Check number corrections are only available for committed pay periods" unless pay_period.committed?
     raise Error, "Cannot change the number on a voided check" if payroll_item.voided?
+    raise Error, "Reissue a prepared or issued check instead of changing its number" if payroll_item.check_printed_at.present?
     raise Error, "No check number assigned to this payroll item" if payroll_item.check_number.blank?
   end
 

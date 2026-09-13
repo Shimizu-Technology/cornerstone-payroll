@@ -402,6 +402,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
               </div>
             )}
             {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+            {run?.requires_distinct_confirmer && !run.can_current_user_confirm && run.status !== 'confirmed' && (
+              <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-5 text-warning-900">
+                This client requires a second person to confirm printing. Ask another authorized payroll operator to open this package and confirm it.
+              </div>
+            )}
             {action && <div className="mt-4 text-sm font-medium text-blue-700">{action}</div>}
           </aside>
         </div>
@@ -409,7 +414,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
           <Button variant="outline" onClick={requestClose}>Close</Button>
           {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action) || savingNumbers || hasUnsavedNumbers}>Generate print package</Button>}
-          {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
+          {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified || !run.can_current_user_confirm}>Confirm printed correctly</Button>}
           </DialogFooter>
         </DialogContent>
       </Dialog>

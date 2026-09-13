@@ -357,6 +357,8 @@ import type {
   CheckItem,
   CheckLayoutResponse,
   CheckSettings,
+  CheckRegister,
+  CheckRegisterSourceType,
   CheckStockType,
   W2GuReportResponse,
   W2GuPreflightResponse,
@@ -2892,8 +2894,14 @@ export const checksApi = {
   markPrinted: (payrollItemId: number) =>
     api.post<{ payroll_item: CheckItem; already_printed: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_printed`),
 
-  markDelivered: (payrollItemId: number): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
-    api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`),
+  markDelivered: (payrollItemId: number, data: {
+    delivered_on: string;
+    delivery_method: 'hand_delivery' | 'mail' | 'courier' | 'other';
+    attestation: boolean;
+    evidence_reference?: string;
+    note?: string;
+  }): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
+    api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`, data),
 
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>
@@ -2968,6 +2976,23 @@ export const checksApi = {
     };
   }) =>
     api.postBlob('/admin/companies/test_check_pdf', data),
+};
+
+export const checkRegisterApi = {
+  get: (params: { from: string; to: string; status?: string }) =>
+    api.get<{ check_register: CheckRegister }>('/admin/check_register', params),
+  recordEvent: (event: {
+    source_type: CheckRegisterSourceType;
+    source_id: number;
+    event_type: 'cleared' | 'clearing_reversed' | 'replacement_required';
+    effective_on: string;
+    evidence_type?: string;
+    evidence_reference?: string;
+    reason?: string;
+    idempotency_key: string;
+  }) => api.post<{ event: unknown }>('/admin/check_register/events', { event }),
+  exportCsv: (params: { from: string; to: string; status?: string }) =>
+    api.getBlobWithParams('/admin/check_register/export', params),
 };
 
 // ============================================================
@@ -3064,6 +3089,7 @@ export interface CompanyDetail extends CompanyListItem {
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
   simple_payroll_register_enabled?: boolean;
+  require_distinct_check_print_confirmer?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
 }
