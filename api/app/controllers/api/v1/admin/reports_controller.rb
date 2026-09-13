@@ -441,7 +441,21 @@ module Api
           task_payload = params[:task] || {}
           requested_status = task_payload[:status].to_s
           typed_outcome = EXTERNAL_FILING_OUTCOME_FIELDS.any? { |field| task_payload.key?(field) }
-          if typed_outcome || (requested_status.present? && !requested_status.in?(QuarterlyComplianceTask::PREPARATION_STATUSES))
+          if !task.status.in?(QuarterlyComplianceTask::PREPARATION_STATUSES) &&
+              requested_status.present? && requested_status != task.status
+            return render json: {
+              error: "Legacy status #{task.status.humanize.downcase} is retained read-only; use the filing evidence history"
+            }, status: :unprocessable_entity
+          end
+          if requested_status.present? && !requested_status.in?(QuarterlyComplianceTask::PREPARATION_STATUSES)
+            message = if requested_status.in?(QuarterlyComplianceTask::STATUSES)
+              "Status #{requested_status.humanize.downcase} is read-only; filing and payment outcomes require retained agency evidence"
+            else
+              "Unsupported quarterly task status: #{requested_status}"
+            end
+            return render json: { error: message }, status: :unprocessable_entity
+          end
+          if typed_outcome
             return render json: {
               error: "Filing and payment outcomes must be recorded with retained agency evidence"
             }, status: :unprocessable_entity

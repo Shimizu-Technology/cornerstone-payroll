@@ -33,6 +33,8 @@ import type {
 } from '@/types';
 import type { PayrollHistoryRecord } from '@/services/api';
 
+const QUARTERLY_PREPARATION_STATUSES = ['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'not_required', 'exception'];
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
@@ -932,9 +934,9 @@ function W2GuPanel() {
                 <TotalBox label="Reported Tips (Uncapped)" value={report.totals.reported_tips_total} />
               </div>
 
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                <p className="text-sm font-semibold text-blue-950">W-3SS transmittal control totals</p>
-                <p className="mt-1 text-xs text-blue-800">Use these totals to reconcile the territorial wage submission before BSO delivery. The BSO receipt and later processing result belong in the evidence record above.</p>
+              <div className="rounded-xl border border-primary-200 bg-primary-50 p-4">
+                <p className="text-sm font-semibold text-primary-950">W-3SS transmittal control totals</p>
+                <p className="mt-1 text-xs text-primary-800">Use these totals to reconcile the territorial wage submission before BSO delivery. The BSO receipt and later processing result belong in the evidence record above.</p>
                 <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                   <span>W-2GU count: <strong>{report.meta.employee_count}</strong></span>
                   <span>Wages: <strong>{fmt(report.totals.box1_wages_tips_other_comp)}</strong></span>
@@ -2257,14 +2259,14 @@ function QuarterlyCompliancePacketPanel() {
                           Status
                           <select
                             value={task.status}
-                            disabled={savingTaskId === task.id}
+                            disabled={savingTaskId === task.id || !QUARTERLY_PREPARATION_STATUSES.includes(task.status)}
                             onChange={(e) => updateTask(task, { status: e.target.value })}
                             className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
                           >
-                            {!['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'not_required', 'exception'].includes(task.status) && (
+                            {!QUARTERLY_PREPARATION_STATUSES.includes(task.status) && (
                               <option value={task.status}>Legacy: {task.status.replaceAll('_', ' ')}</option>
                             )}
-                            {['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'not_required', 'exception'].map((status) => (
+                            {QUARTERLY_PREPARATION_STATUSES.map((status) => (
                               <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>
                             ))}
                           </select>
@@ -2282,7 +2284,7 @@ function QuarterlyCompliancePacketPanel() {
                         />
                       )}
                       {task.task_type === 'schedule_b' && (
-                        <p className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+                        <p className="mt-4 rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-xs leading-5 text-primary-900">
                           Schedule B is an attachment to Form 941, not a separate agency filing. Its submission evidence is retained with the Form 941 record.
                         </p>
                       )}
@@ -3282,9 +3284,9 @@ function Form1099NecPanel() {
               </div>
             </div>
 
-            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-              <p className="text-sm font-semibold text-blue-950">1096 transmittal control totals</p>
-              <p className="mt-1 text-xs text-blue-800">Reconcile these totals to the IRIS submission before delivery; retain both the receipt and later acknowledgement above.</p>
+            <div className="mb-6 rounded-xl border border-primary-200 bg-primary-50 p-4">
+              <p className="text-sm font-semibold text-primary-950">1096 transmittal control totals</p>
+              <p className="mt-1 text-xs text-primary-800">Reconcile these totals to the IRIS submission before delivery; retain both the receipt and later acknowledgement above.</p>
               <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
                 <span>Reportable returns: <strong>{report.meta.reportable_count}</strong></span>
                 <span>Nonemployee compensation: <strong>{fmt(report.totals.reportable_compensation)}</strong></span>

@@ -61,6 +61,45 @@ RSpec.describe "Payroll filing records", type: :request do
     expect(AuditLog.where(action: "payroll_filing_records#submitted", record_id: PayrollFilingRecord.last.id)).to exist
   end
 
+  it "reports when committed payroll changes after submission using the real source snapshot" do
+    allow(PayrollFilingSourceSnapshot).to receive(:new).and_call_original
+    packet = QuarterlyCompliancePacket.find_or_create_for!(company: company, year: 2026, quarter: 2, user: admin)
+    packet.quarterly_compliance_tasks.find_by!(task_type: "w1").update!(status: "ready_to_file")
+
+    post "/api/v1/admin/payroll_filing_records/events", params: {
+      filing_type: "w1", tax_year: 2026, quarter: 2, event_type: "submitted",
+      reference_number: "W1-SOURCE-1", preparer_name: "Dana Accountant",
+      signer_name: "Client Owner", idempotency_key: SecureRandom.uuid, file: upload
+    }
+    expect(response).to have_http_status(:created), response.body
+    expect(response.parsed_body.dig("filing", "source_changed")).to eq(false)
+
+    employee = create(:employee, company: company)
+    period = create(
+      :pay_period,
+      :committed,
+      company: company,
+      start_date: Date.new(2026, 4, 1),
+      end_date: Date.new(2026, 4, 15),
+      pay_date: Date.new(2026, 4, 20),
+      committed_by_id: admin.id
+    )
+    create(
+      :payroll_item,
+      company: company,
+      pay_period: period,
+      employee: employee,
+      gross_pay: 1_000,
+      total_deductions: 200,
+      net_pay: 800
+    )
+
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w1", tax_year: 2026, quarter: 2 }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("filing", "source_changed")).to eq(true)
+  end
+
   it "returns the original result when an identical transport request is replayed" do
     packet = QuarterlyCompliancePacket.find_or_create_for!(company: company, year: 2026, quarter: 2, user: admin)
     packet.quarterly_compliance_tasks.find_by!(task_type: "w1").update!(status: "ready_to_file")

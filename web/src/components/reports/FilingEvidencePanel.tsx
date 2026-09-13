@@ -179,13 +179,13 @@ export function FilingEvidencePanel({
       </div>
 
       {filing?.source_changed && (
-        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <div className="mt-3 rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-900">
           Payroll source records changed after the last submission. Review the changes before relying on this evidence or resubmitting.
         </div>
       )}
 
       {!preparationReady && !filing && (
-        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{readinessMessage}</p>
+        <p className="mt-3 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-900">{readinessMessage}</p>
       )}
 
       {!loading && availableEvents.length > 0 && (
@@ -218,35 +218,35 @@ export function FilingEvidencePanel({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold text-neutral-600">
               {isPayment ? 'Payment confirmation number' : 'Agency reference number'}
-              <input name="reference_number" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" />
+              <input name="reference_number" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" />
             </label>
             <label className="text-xs font-semibold text-neutral-600">
               Event date and time (Guam)
-              <input name="occurred_at" type="datetime-local" required defaultValue={guamDateTimeLocalValue()} className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" />
+              <input name="occurred_at" type="datetime-local" required defaultValue={guamDateTimeLocalValue()} className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" />
             </label>
             <label className="text-xs font-semibold text-neutral-600">
               Prepared / recorded by
-              <input name="preparer_name" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" />
+              <input name="preparer_name" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" />
             </label>
             {needsSigner && (
               <label className="text-xs font-semibold text-neutral-600">
                 Authorized signer
-                <input name="signer_name" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" />
+                <input name="signer_name" required className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" />
               </label>
             )}
             {needsSigner && (
               <label className="text-xs font-semibold text-neutral-600">
                 Signer title (optional)
-                <input name="signer_title" className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" />
+                <input name="signer_title" className="mt-1 h-11 w-full rounded-md border border-neutral-300 px-3 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" />
               </label>
             )}
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">
               Receipt or agency response
-              <input name="file" type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-xs file:font-semibold" />
+              <input name="file" type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-xs file:font-semibold" />
             </label>
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">
               Notes {needsNotes ? '(required)' : '(optional)'}
-              <textarea name="notes" required={needsNotes} className="mt-1 min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" placeholder={needsNotes ? 'Describe the errors, rejection, and next action.' : 'Add context that will help the next reviewer.'} />
+              <textarea name="notes" required={needsNotes} className="mt-1 min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1" placeholder={needsNotes ? 'Describe the errors, rejection, and next action.' : 'Add context that will help the next reviewer.'} />
             </label>
           </div>
           <div className="flex flex-wrap gap-2">
