@@ -272,6 +272,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
       expect(fit_check).to have_attributes(check_number: "8100", check_status: "unprinted")
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(43.13)
       expect(company.reload.next_check_number).to eq(8101)
       expect(response.parsed_body).to include(
         "check_number" => "8100",
@@ -281,9 +282,20 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "repairs an existing unnumbered FIT check when generation is requested again" do
+      create(:payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        withholding_tax: 43.13,
+        additional_withholding: 0,
+        voided: false)
+      PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: admin_user)
       fit_check = create(:non_employee_check,
         company: company,
         pay_period: pay_period,
+        amount: 43.13,
+        payable_to: "Treasurer of Guam",
         payment_period_type: "pay_period",
         tax_year: nil,
         tax_month: nil,
@@ -295,6 +307,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(fit_check.reload.check_number).to eq("8100")
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(fit_check.amount)
       expect(response.parsed_body).to include(
         "check_number" => "8100",
         "created" => false,
@@ -1788,6 +1801,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
       expect(fit_check.amount).to eq(125.00)
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(125.00)
     end
 
     it "rolls back the payroll commit when liability posting fails" do

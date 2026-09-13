@@ -24,6 +24,9 @@ class PayrollLiabilityEntry < ApplicationRecord
   belongs_to :company
   belongs_to :payroll_item, optional: true
   belongs_to :pay_component_tax_rule, optional: true
+  has_many :payroll_liability_check_allocations,
+           inverse_of: :payroll_liability_entry,
+           dependent: :restrict_with_error
 
   validates :component_key, :category, :authority, presence: true
   validates :category, inclusion: { in: CATEGORIES }

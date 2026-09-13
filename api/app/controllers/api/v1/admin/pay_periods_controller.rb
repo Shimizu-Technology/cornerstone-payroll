@@ -792,6 +792,11 @@ module Api
 
           existing = NonEmployeeCheck.find_by(fit_query)
           if existing
+            PayrollLiabilityFitPaymentConnector.connect!(
+              non_employee_check: existing,
+              pay_period: @pay_period,
+              actor: current_user
+            )
             number_assigned = assign_check_number_if_missing!(existing)
             return render json: {
               message: number_assigned ? "FIT tax deposit check numbered and ready to print" : "FIT tax deposit check already exists",
@@ -817,6 +822,9 @@ module Api
           else
             render json: { error: "No FIT withholding to create a check for (total is $0)" }, status: :unprocessable_entity
           end
+        rescue PayrollLiabilityCheckAllocationService::Error, PayrollLiabilityPostingService::Error => e
+          render json: { error: "FIT payment could not be connected to payroll liabilities: #{e.message}" },
+                 status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
@@ -910,7 +918,7 @@ module Api
           return if total_fit <= 0
 
           NonEmployeeCheck.transaction do
-            NonEmployeeCheck.create!(
+            check = NonEmployeeCheck.create!(
               pay_period: @pay_period,
               company_id: @pay_period.company_id,
               payable_to: "Treasurer of Guam",
@@ -923,6 +931,11 @@ module Api
               memo: "FIT Withholding · PPE #{@pay_period.end_date.strftime('%m/%d/%Y')} · Form 500",
               description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
               created_by: current_user
+            )
+            PayrollLiabilityFitPaymentConnector.connect!(
+              non_employee_check: check,
+              pay_period: @pay_period,
+              actor: current_user
             )
           end
         rescue ActiveRecord::RecordNotUnique
