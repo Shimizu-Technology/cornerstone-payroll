@@ -28,7 +28,7 @@ export function isCurrentEmployeeDocumentScope(requestEmployeeId: number, active
 export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
   documentsResult: PromiseSettledResult<Documents>,
   readinessResult: PromiseSettledResult<Readiness>,
-): { documents?: Documents; readiness?: Readiness; error: string | null } {
+): { documents?: Documents; readiness: Readiness | null; error: string | null } {
   const loadErrors: string[] = [];
   if (documentsResult.status === 'rejected') {
     loadErrors.push(documentsResult.reason instanceof Error ? documentsResult.reason.message : 'Employee documents could not be loaded');
@@ -44,7 +44,7 @@ export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
 
   return {
     documents: documentsResult.status === 'fulfilled' ? documentsResult.value : undefined,
-    readiness: readinessResult.status === 'fulfilled' ? readinessResult.value : undefined,
+    readiness: readinessResult.status === 'fulfilled' ? readinessResult.value : null,
     error: loadErrors.join(' ') || null,
   };
 }

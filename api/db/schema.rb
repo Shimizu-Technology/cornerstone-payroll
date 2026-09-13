@@ -545,6 +545,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["employee_id"], name: "index_employee_document_requirement_events_on_employee_id"
   end
 
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_employee_document_requirement_event_mutation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      RAISE EXCEPTION 'employee_document_requirement_events are append-only'
+        USING ERRCODE = 'integrity_constraint_violation';
+    END;
+    $function$;
+
+    CREATE TRIGGER employee_document_requirement_events_append_only
+    BEFORE UPDATE OR DELETE ON employee_document_requirement_events
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_employee_document_requirement_event_mutation();
+  SQL
+
   create_table "employee_document_requirements", force: :cascade do |t|
     t.bigint "client_document_id"
     t.bigint "company_id", null: false
