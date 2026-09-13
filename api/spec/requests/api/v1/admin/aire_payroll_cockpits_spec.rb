@@ -272,6 +272,47 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed this was entered in error")
   end
 
+  it "uses the current operator's delegation for overtime decisions and records an audit event" do
+    delegation = create(
+      :time_tracking_delegation,
+      company: company,
+      time_tracking_source: source,
+      user: admin,
+      token: "admin-grant"
+    )
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:approve_payroll_overtime).and_return(
+      "time_entry" => { "id" => "42", "version" => 4, "state" => { "overtime_status" => "approved" } },
+      "command" => { "replayed" => false }
+    )
+    command_id = SecureRandom.uuid
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/time_entries/42/overtime_approval", params: {
+      command_id: command_id,
+      expected_version: 3,
+      decision: "APPROVE",
+      reason: "Verified against the approved schedule"
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(delegated_client).to have_received(:approve_payroll_overtime).with(
+      entry_id: "42",
+      command_id: command_id,
+      expected_version: "3",
+      decision: "approve",
+      reason: "Verified against the approved schedule"
+    )
+    expect(AuditLog.order(:id).last).to have_attributes(
+      user_id: admin.id,
+      company_id: company.id,
+      action: "aire_payroll_cockpit#overtime_approved",
+      record_type: "AireTimeEntry",
+      record_id: 42
+    )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Verified against the approved schedule")
+  end
+
   it "corrects time through the current delegation and records the command audit" do
     delegation = create(
       :time_tracking_delegation,

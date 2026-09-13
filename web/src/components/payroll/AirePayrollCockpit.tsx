@@ -46,7 +46,8 @@ type Props = {
 };
 
 type View = 'timecards' | 'exceptions' | 'held_time' | 'team' | 'history';
-type Review = { entry: AirePayrollTimeEntry; decision: 'approve' | 'deny'; commandId: string };
+type ReviewKind = 'time' | 'overtime';
+type Review = { entry: AirePayrollTimeEntry; decision: 'approve' | 'deny'; kind: ReviewKind; commandId: string };
 type ReviewTarget = Omit<Review, 'commandId'>;
 type FinalizeCommand = { commandId: string; version: number };
 type CorrectionBreak = { start_time: string; end_time: string };
@@ -86,7 +87,7 @@ const approvalTone = (entry: AirePayrollTimeEntry) => {
 
 const dispositionLabel = (entry: AirePayrollTimeEntry) => {
   const disposition = entry.state.payroll_disposition;
-  if (entry.state.approval_status === 'approved' && entry.state.overtime_status === 'pending') return 'Overtime approval needed';
+  if (!['pending', 'denied'].includes(entry.state.approval_status) && entry.state.overtime_status === 'pending') return 'Overtime approval needed';
   if (entry.state.overtime_status === 'denied') return 'Overtime denied';
   if (disposition === 'missing_category') return 'Missing category';
   if (disposition === 'partially_included') return 'Partially included at cutoff';
@@ -197,8 +198,13 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   onCorrect: (entry: AirePayrollTimeEntry) => void;
 }) {
   const pending = entry.state.approval_status === 'pending';
-  const needsReview = pending && !entry.capture.ordinary;
+  const needsTimeReview = pending && !entry.capture.ordinary;
+  const needsOvertimeReview = entry.state.overtime_status === 'pending'
+    && !['pending', 'denied'].includes(entry.state.approval_status);
   const statusLabel = dispositionLabel(entry);
+  const captureSource = entry.capture.ordinary
+    ? `${entry.capture.entry_method || 'clock'} entry${entry.capture.clock_source ? ` via ${entry.capture.clock_source}` : ''}`
+    : `${entry.capture.entry_method || 'manual'} entry · administrator approval required`;
   const showLifecycle = entry.lifecycle
     && !(entry.lifecycle.status === 'awaiting_approval' && statusLabel.toLowerCase().includes('approval'))
     && entry.lifecycle.label.toLowerCase() !== statusLabel.toLowerCase();
@@ -213,7 +219,8 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
       </div>
       <div className="text-sm text-neutral-700">
         <p className="font-medium text-neutral-950">{entry.start_time || 'Missing'} – {entry.end_time || 'Missing'}</p>
-        <p className="mt-1 text-xs text-neutral-500">{entry.break_minutes} min break · {entry.capture.entry_method || 'unknown'} entry</p>
+        <p className="mt-2 text-xs text-neutral-500">{entry.break_minutes} min break · {captureSource}</p>
+        {entry.description && <p className="mt-2 text-xs text-neutral-500">{entry.description}</p>}
       </div>
       <div>
         <p className="font-display text-lg font-bold text-neutral-950">{Number(entry.hours).toFixed(2)} hrs</p>
@@ -223,20 +230,42 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         <Badge variant={approvalTone(entry)}>{statusLabel}</Badge>
         {showLifecycle && entry.lifecycle && <Badge variant={lifecycleTone(entry.lifecycle.status)}>{entry.lifecycle.label}</Badge>}
         {entry.state.missing_punch && <Badge variant="danger">Missing punch</Badge>}
+        {entry.approval?.occurred_at && (
+          <p className="basis-full text-xs leading-5 text-neutral-500">
+            Time {entry.state.approval_status} by {entry.approval.actor?.name || 'AIRE administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
+            {entry.approval.note ? ` · ${entry.approval.note}` : ''}
+          </p>
+        )}
+        {entry.overtime_approval?.occurred_at && (
+          <p className="basis-full text-xs leading-5 text-neutral-500">
+            Overtime {entry.state.overtime_status} by {entry.overtime_approval.actor?.name || 'AIRE administrator'} · {formatGuamDateTime(entry.overtime_approval.occurred_at)}
+            {entry.overtime_approval.note ? ` · ${entry.overtime_approval.note}` : ''}
+          </p>
+        )}
       </div>
-      <div className="flex gap-2 lg:justify-end">
+      <div className="flex flex-wrap gap-2 lg:justify-end">
         {(entry.state.missing_punch || !entry.capture.ordinary) && (
           <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onCorrect(entry)}>
             <FilePenLine className="mr-1 h-3.5 w-3.5" /> Correct
           </Button>
         )}
-        {needsReview && (
+        {needsTimeReview && (
           <>
-            <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny' })}>
-              <X className="mr-1 h-3.5 w-3.5" /> Deny
+            <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny', kind: 'time' })}>
+              <X className="mr-2 h-3.5 w-3.5" /> Deny time
             </Button>
-            <Button type="button" size="sm" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'approve' })}>
-              <Check className="mr-1 h-3.5 w-3.5" /> Approve
+            <Button type="button" size="sm" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'approve', kind: 'time' })}>
+              <Check className="mr-2 h-3.5 w-3.5" /> Approve time
+            </Button>
+          </>
+        )}
+        {needsOvertimeReview && (
+          <>
+            <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny', kind: 'overtime' })}>
+              <X className="mr-2 h-3.5 w-3.5" /> Deny overtime
+            </Button>
+            <Button type="button" size="sm" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'approve', kind: 'overtime' })}>
+              <Check className="mr-2 h-3.5 w-3.5" /> Approve overtime
             </Button>
           </>
         )}
@@ -332,7 +361,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
       ...(exceptions?.time_exceptions || []),
     ].find((entry) => entry.id === review.entry.id);
     if (latest && latest.version !== review.entry.version) {
-      setReview({ entry: latest, decision: review.decision, commandId: commandId() });
+      setReview({ ...review, entry: latest, commandId: commandId() });
     }
   }, [exceptions?.time_exceptions, review, timeEntries?.time_entries]);
 
@@ -358,13 +387,21 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
     if (!review || reason.trim().length < 3) return;
     setBusy(true);
     setCommandError(null);
+    setCommandSuccess(null);
     try {
-      await payPeriodsApi.reviewAireTimeEntry(payPeriodId, review.entry.id, {
+      const request = {
         command_id: review.commandId,
         expected_version: review.entry.version,
         decision: review.decision,
         reason: reason.trim(),
-      });
+      } as const;
+      if (review.kind === 'overtime') {
+        await payPeriodsApi.reviewAireOvertime(payPeriodId, review.entry.id, request);
+      } else {
+        await payPeriodsApi.reviewAireTimeEntry(payPeriodId, review.entry.id, request);
+      }
+      const subject = review.kind === 'overtime' ? 'Overtime' : 'Time';
+      setCommandSuccess(`${subject} ${review.decision === 'approve' ? 'approved' : 'denied'} in AIRE and saved in both audit histories.`);
       setReview(null);
       setReason('');
     } catch (caught) {
@@ -555,7 +592,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                   <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in AIRE`} />
                   <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
                   <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecards · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
-                  <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
                   <Metric
                     label="Visible mapping"
                     value={`${employeesRequiringMapping.length - unmappedCount}/${employeesRequiringMapping.length}`}
@@ -818,16 +855,17 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">
-                {review.decision === 'approve' ? 'Approve' : 'Deny'} manual time
+                {review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'manual time'}
               </DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
                 {review.entry.employee.name} · {formatDate(review.entry.work_date)} · {Number(review.entry.hours).toFixed(2)} hours
+                {review.kind === 'overtime' && ' · Cornerstone will still calculate the legally required regular and overtime split.'}
               </DialogDescription>
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve time' : 'Deny time'}</Button></DialogFooter>
+            <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

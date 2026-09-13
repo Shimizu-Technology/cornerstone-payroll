@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -18,6 +18,7 @@ const apiMocks = vi.hoisted(() => ({
   exceptions: vi.fn(),
   settlements: vi.fn(),
   review: vi.fn(),
+  reviewOvertime: vi.fn(),
   correct: vi.fn(),
   routeSettlement: vi.fn(),
   finalize: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/services/api', () => ({
     airePayrollExceptions: apiMocks.exceptions,
     airePayrollSettlementCases: apiMocks.settlements,
     reviewAireTimeEntry: apiMocks.review,
+    reviewAireOvertime: apiMocks.reviewOvertime,
     correctAireTimeEntry: apiMocks.correct,
     routeAireSettlementCase: apiMocks.routeSettlement,
     finalizeAirePayrollPeriod: apiMocks.finalize,
@@ -216,6 +218,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoads();
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
+  apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
   apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
   apiMocks.routeSettlement.mockResolvedValue({ settlement_case: { ...fixtures().settlements.settlement_cases[0], status: 'scheduled', version: 3 } });
   apiMocks.finalize.mockResolvedValue({ result: { status: 'finalized', payroll_batch_id: 'AIRE-PAY-1' } });
@@ -241,8 +244,8 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: 'Approve' }));
-    const submit = screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    await user.click(screen.getByRole('button', { name: 'Approve time' }));
+    const submit = within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     await user.type(screen.getByRole('textbox', { name: /reason/i }), 'Verified against manager note');
     await user.click(submit);
@@ -254,6 +257,75 @@ describe('AirePayrollCockpit', () => {
       command_id: expect.any(String),
     })));
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+  });
+
+  it('reviews ordinary clock-entry overtime in AIRE without requiring a base-time approval', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    const overtimeEntry = {
+      ...timeEntry,
+      description: 'Customer installation',
+      capture: { entry_method: 'clock', clock_source: 'kiosk', ordinary: true, admin_override: false },
+      state: {
+        ...timeEntry.state,
+        approval_status: 'not_required',
+        overtime_status: 'pending',
+        payroll_disposition: 'pending_overtime',
+        payroll_exclusion_reasons: ['pending_overtime'],
+      },
+    };
+    data.overview.readiness.pending_approvals = 0;
+    data.overview.readiness.pending_overtime = 1;
+    data.entries.time_entries = [overtimeEntry];
+    data.exceptions.time_exceptions = [overtimeEntry];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries.mockResolvedValue(data.entries);
+    apiMocks.exceptions.mockResolvedValue(data.exceptions);
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Overtime approval needed');
+
+    expect(screen.getByText('60 min break · clock entry via kiosk')).toBeTruthy();
+    expect(screen.getByText('Customer installation')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Approve overtime' }));
+    expect(screen.getByText(/Cornerstone will still calculate the legally required regular and overtime split/i)).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), {
+      target: { value: 'Confirmed scheduled overtime' },
+    });
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve overtime' }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve overtime' }));
+
+    await waitFor(() => expect(apiMocks.reviewOvertime).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 3,
+      decision: 'approve',
+      reason: 'Confirmed scheduled overtime',
+      command_id: expect.any(String),
+    })));
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(await screen.findByText('Overtime approved in AIRE and saved in both audit histories.')).toBeTruthy();
+  });
+
+  it('shows who approved time and overtime, when, and why', async () => {
+    const data = fixtures();
+    const reviewedEntry = {
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, approval_status: 'approved', overtime_status: 'approved', payable_now: true },
+      approval: { actor: { name: 'AIRE Admin' }, occurred_at: '2026-10-15T08:00:00+10:00', note: 'Matched the schedule' },
+      overtime_approval: { actor: { name: 'Chels Shimizu' }, occurred_at: '2026-10-15T08:05:00+10:00', note: 'Authorized overtime' },
+    };
+    data.entries.time_entries = [reviewedEntry];
+    apiMocks.entries.mockResolvedValue(data.entries);
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    expect(await screen.findByText(/Time approved by AIRE Admin/)).toBeTruthy();
+    expect(screen.getByText(/Oct 15, 2026, 8:00:00 AM/)).toBeTruthy();
+    expect(screen.getByText(/Matched the schedule/)).toBeTruthy();
+    expect(screen.getByText(/Overtime approved by Chels Shimizu/)).toBeTruthy();
+    expect(screen.getByText(/Oct 15, 2026, 8:05:00 AM/)).toBeTruthy();
+    expect(screen.getByText(/Authorized overtime/)).toBeTruthy();
   });
 
   it('corrects a manual timecard in AIRE and makes the new approval requirement explicit', async () => {
@@ -395,7 +467,7 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText(/actions need your AIRE delegation/i);
 
-    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock AIRE cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -469,8 +541,8 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: 'Approve' }));
-    const submit = screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    await user.click(screen.getByRole('button', { name: 'Approve time' }));
+    const submit = within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), {
       target: { value: 'Verified against manager note' },
     });
@@ -484,7 +556,7 @@ describe('AirePayrollCockpit', () => {
     ))).toBe(true);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
 
-    await user.click(screen.getByRole('button', { name: 'Approve time' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledTimes(2));
     expect(apiMocks.review.mock.calls[1][2].command_id).toBe(apiMocks.review.mock.calls[0][2].command_id);
   });
