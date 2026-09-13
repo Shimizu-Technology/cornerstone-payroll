@@ -1063,7 +1063,7 @@ export interface PayrollLiabilityReconciliation {
   totals_by_authority: Record<string, number>;
   postings: PayrollLiabilityPosting[];
   unclassified_components: PayrollLiabilityUnclassifiedComponent[];
-  payment_tracking_status: 'not_in_this_phase';
+  payment_tracking_status: 'tracked_in_liability_center';
   historical_backfill_required: boolean;
 }
 

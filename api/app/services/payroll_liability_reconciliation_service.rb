@@ -22,7 +22,7 @@ class PayrollLiabilityReconciliationService
       totals_by_authority: grouped_totals(entries, &:authority),
       postings: postings.map { |posting| posting_json(posting) },
       unclassified_components: unclassified_components,
-      payment_tracking_status: "not_in_this_phase",
+      payment_tracking_status: "tracked_in_liability_center",
       historical_backfill_required: pay_period.committed? && postings.empty?
     }
   end

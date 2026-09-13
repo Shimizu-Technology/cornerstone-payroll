@@ -315,6 +315,10 @@ Rails.application.routes.draw do
         get "check_register/export", to: "check_register#export"
         post "check_register/events", to: "check_register#create_event"
 
+        get "pay_periods/:pay_period_id/final_record.xlsx", to: "payroll_final_records#xlsx"
+        get "pay_periods/:pay_period_id/final_record.pdf", to: "payroll_final_records#pdf"
+        get "pay_periods/:pay_period_id/final_record", to: "payroll_final_records#show"
+
         # CPR-66: Per-item check actions (payroll_item_id param)
         get  "payroll_items/:payroll_item_id/check",             to: "checks#show",           as: :payroll_item_check
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
