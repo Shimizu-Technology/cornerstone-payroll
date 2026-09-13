@@ -118,6 +118,19 @@ RSpec.describe "Payroll report filing responsibility gates", type: :request do
       .to be(true)
   end
 
+  it "does not allow a typed status to impersonate external filing evidence" do
+    post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
+    task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row.fetch("task_type") == "w1" }
+
+    patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task.fetch('id')}", params: {
+      task: { status: "filed", filing_confirmation_number: "typed-only" }
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to match(/retained agency evidence/)
+    expect(QuarterlyComplianceTask.find(task.fetch("id"))).to have_attributes(status: "not_started", filing_confirmation_number: nil)
+  end
+
   it "blocks an official quarterly download but leaves the inline preview available" do
     create_native_payroll(pay_date: Date.new(2026, 5, 8))
     create_historical_period(pay_date: Date.new(2026, 5, 22))

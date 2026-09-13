@@ -389,6 +389,8 @@ Rails.application.routes.draw do
 
         get "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#index"
         put "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#upsert"
+        get "payroll_filing_records", to: "payroll_filing_records#index"
+        post "payroll_filing_records/events", to: "payroll_filing_records#create_event"
 
         # New payroll parity reports
         get "reports/payroll_summary_by_employee_pdf", to: "reports#payroll_summary_by_employee_pdf"

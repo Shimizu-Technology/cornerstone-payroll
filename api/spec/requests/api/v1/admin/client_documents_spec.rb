@@ -115,6 +115,38 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     expect_readiness_storage_to_exist(document)
   end
 
+  it "retains agency evidence after it is linked to a filing event" do
+    filing = PayrollFilingRecord.create!(
+      company: company,
+      filing_type: "w1",
+      tax_year: 2026,
+      quarter: 2,
+      status: "submitted",
+      submitted_at: Time.current,
+      confirmation_number: "W1-123",
+      source_fingerprint: "d" * 64
+    )
+    PayrollFilingEvent.create!(
+      payroll_filing_record: filing,
+      company: company,
+      recorded_by: admin_user,
+      evidence_document: document,
+      event_type: "submitted",
+      to_status: "submitted",
+      occurred_at: Time.current,
+      reference_number: "W1-123",
+      preparer_name: admin_user.name,
+      source_fingerprint: "d" * 64,
+      idempotency_key: SecureRandom.uuid
+    )
+
+    expect { delete "/api/v1/admin/client_documents/#{document.id}" }.not_to change(ClientDocument, :count)
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body.fetch("error")).to include("retained compliance evidence")
+    expect(R2StorageService.new.download(document.file_key)).to be_present
+  end
+
   it "writes an audit log only after a successful delete" do
     destroy_audit_count = AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
 

@@ -2490,6 +2490,47 @@ export interface QuarterlyComplianceTask {
   data: Record<string, unknown>;
 }
 
+export type PayrollFilingEvidenceType = 'form_500_payment' | 'w1' | 'swica' | 'federal_941' | 'w2_gu_w3_ss' | 'form_1099_nec';
+export type PayrollFilingStatus = 'submitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'needs_correction';
+export type PayrollFilingEventType = 'submitted' | 'resubmitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'correction_needed';
+
+export interface PayrollFilingEvent {
+  id: number;
+  event_type: PayrollFilingEventType;
+  from_status: PayrollFilingStatus | null;
+  to_status: PayrollFilingStatus;
+  occurred_at: string;
+  reference_number: string;
+  preparer_name: string;
+  signer_name: string | null;
+  signer_title: string | null;
+  notes: string | null;
+  source_fingerprint: string;
+  recorded_by: string;
+  evidence_document: {
+    id: number;
+    file_name: string;
+    content_type: string;
+    preview_available: boolean;
+  };
+}
+
+export interface PayrollFilingRecord {
+  id: number;
+  filing_type: PayrollFilingEvidenceType;
+  display_name: string;
+  tax_year: number;
+  quarter: number | null;
+  status: PayrollFilingStatus;
+  submitted_at: string;
+  resolved_at: string | null;
+  confirmation_number: string;
+  source_fingerprint: string;
+  current_source_fingerprint: string;
+  source_changed: boolean;
+  events: PayrollFilingEvent[];
+}
+
 export type QuarterlyOfficialFormType = 'form_941' | 'schedule_b' | 'w1' | 'swica';
 
 export interface QuarterlyOfficialFormFields {
@@ -2687,6 +2728,14 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_ascii', { year, quarter }),
   updateQuarterlyComplianceTask: (id: number, task: Partial<QuarterlyComplianceTask>) =>
     api.patch<{ task: QuarterlyComplianceTask }>(`/admin/reports/quarterly_compliance_packet_task/${id}`, { task }),
+  payrollFilingRecord: (filingType: PayrollFilingEvidenceType, taxYear: number, quarter?: number) =>
+    api.get<{ filing: PayrollFilingRecord | null }>('/admin/payroll_filing_records', {
+      filing_type: filingType,
+      tax_year: taxYear,
+      ...(quarter ? { quarter } : {}),
+    }),
+  recordPayrollFilingEvent: (formData: FormData) =>
+    api.postForm<{ filing: PayrollFilingRecord }>('/admin/payroll_filing_records/events', formData),
   quarterlyCompliancePacketOfficialFormDefaults: (year: number, quarter: number, formType: QuarterlyOfficialFormType) =>
     api.get<{ data: QuarterlyOfficialFormFields }>('/admin/reports/quarterly_compliance_packet_official_form_defaults', { year, quarter, form_type: formType }),
   quarterlyCompliancePacketOfficialFormPreview: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
