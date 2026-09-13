@@ -636,6 +636,187 @@ export interface AirePayrollCalendarState {
   } | null;
 }
 
+export interface AirePayrollCockpitMapping {
+  status: 'mapped' | 'unmapped' | 'inactive' | 'not_required';
+  employee_id?: number;
+  employee_name?: string;
+}
+
+export interface AirePayrollCockpitEmployee {
+  id: string;
+  payroll_integration_id?: string | null;
+  first_name?: string;
+  last_name?: string;
+  full_name: string;
+  email?: string;
+  active: boolean;
+  role?: string;
+  time_tracking_enabled?: boolean;
+  approval_groups?: Array<{ key: string; label: string }>;
+  time_categories?: Array<{ id: string; key: string; name: string }>;
+  cornerstone: AirePayrollCockpitMapping;
+}
+
+export interface AirePayrollCockpitPeriod {
+  external_pay_period_id: string;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  cutoff_at: string;
+  time_zone: string;
+  cutoff_days_before: number;
+  version: number;
+  schedule_version: number;
+  publication_id: string;
+  status: 'scheduled' | 'failed' | 'finalized';
+  cutoff_state: 'upcoming' | 'due' | 'attention_required' | 'finalized';
+  payroll_batch_id?: string;
+  finalized_at?: string;
+  finalization_attempts?: number;
+  last_finalization_error?: string;
+}
+
+export interface AirePayrollReadiness {
+  total_entries: number;
+  total_hours: number;
+  eligible_entries: number;
+  eligible_hours: number;
+  held_entries?: number;
+  held_hours?: number;
+  pending_approvals: number;
+  denied_entries: number;
+  missing_punches: number;
+  pending_overtime: number;
+  missing_categories?: number;
+  lifecycle_counts: Record<string, number>;
+}
+
+export interface AirePayrollTimeEntry {
+  id: string;
+  version: number;
+  work_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  clock_in_at?: string | null;
+  clock_out_at?: string | null;
+  hours: number;
+  break_minutes: number;
+  breaks?: Array<{ id: string; start_time: string; end_time?: string | null; duration_minutes?: number; active: boolean }>;
+  category?: { id: string; key: string; name: string } | null;
+  capture: { entry_method?: string | null; clock_source?: string | null; ordinary: boolean; admin_override: boolean };
+  state: {
+    status: string;
+    missing_punch: boolean;
+    approval_status: string;
+    overtime_status: string;
+    payable_now: boolean;
+    payroll_disposition?: string | null;
+    payroll_exclusion_reasons?: string[];
+    included_hours?: number;
+  };
+  approval?: { actor?: { payroll_integration_id?: string; name: string } | null; occurred_at?: string | null; note?: string | null };
+  employee: {
+    id?: string | null;
+    payroll_integration_id?: string | null;
+    name?: string | null;
+    cornerstone: AirePayrollCockpitMapping;
+  };
+  description?: string | null;
+  lifecycle?: {
+    status: string;
+    label: string;
+    payment_method?: string;
+    payment_reference?: string;
+    occurred_at?: string;
+    settlements?: Array<Record<string, unknown>>;
+  } | null;
+}
+
+export interface AirePayrollCarryover {
+  source_time_entry_id: string;
+  display_name: string;
+  original_work_date: string;
+  exclusion_reason: string;
+  held_total_hours: number;
+  current_total_hours?: number | null;
+  status: string;
+  latest_excluded_batch_id: string;
+}
+
+export interface AirePayrollBatch {
+  id: string;
+  checksum: string;
+  schema_version: string;
+  finalized_at?: string;
+  summary?: Record<string, number>;
+  issues?: Record<string, number>;
+  processing?: Record<string, unknown> | null;
+}
+
+export interface AirePayrollCockpitOverview {
+  payroll_period: AirePayrollCockpitPeriod;
+  readiness: AirePayrollReadiness;
+  finalized_batch?: AirePayrollBatch | null;
+  processing_history: Array<{
+    event_id: string;
+    status: string;
+    occurred_at: string;
+    external_system?: string;
+    external_pay_period_id?: string;
+  }>;
+  carryovers: Record<string, number>;
+  employees: AirePayrollCockpitEmployee[];
+  employee_pagination: AirePayrollPagination;
+  command_access: { can_read: boolean; can_command: boolean; delegation_configured: boolean };
+}
+
+export interface AirePayrollPagination {
+  current_page: number;
+  per_page: number;
+  total_count: number;
+  total_pages: number;
+  truncated: boolean;
+}
+
+export interface AirePayrollTimeEntriesResponse {
+  payroll_period: AirePayrollCockpitPeriod;
+  time_entries: AirePayrollTimeEntry[];
+  pagination: AirePayrollPagination;
+}
+
+export interface AirePayrollLeaveException {
+  id: string;
+  employee: { payroll_integration_id?: string; name: string; cornerstone: AirePayrollCockpitMapping };
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  total_days: number;
+  status: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export interface AirePayrollExceptionsResponse {
+  payroll_period: AirePayrollCockpitPeriod;
+  time_exceptions: AirePayrollTimeEntry[];
+  time_exception_pagination: AirePayrollPagination;
+  leave_exceptions: AirePayrollLeaveException[];
+  leave_exception_pagination: AirePayrollPagination;
+  carryovers: {
+    items?: AirePayrollCarryover[];
+    summary?: Record<string, number>;
+    truncated?: boolean;
+  };
+}
+
+export interface AirePayrollCommandResponse {
+  time_entry?: AirePayrollTimeEntry;
+  payroll_period?: AirePayrollCockpitPeriod;
+  result?: { status: string; payroll_batch_id?: string };
+  command?: { replayed?: boolean };
+  command_result?: Record<string, unknown>;
+}
+
 export interface PayPeriod {
   id: number;
   company_id?: number;

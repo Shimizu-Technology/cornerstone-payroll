@@ -12,9 +12,13 @@ module TimeTracking
     READ_TIMEOUT_SECONDS = 15
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
+    MAX_REMOTE_ERROR_BYTES = 300
+    MAX_COCKPIT_EMPLOYEES_PER_PAGE = 100
+    MAX_COCKPIT_ENTRIES_PER_PAGE = 250
 
-    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+    def initialize(source, delegation: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
+      @delegation = delegation
       @destination_policy = destination_policy
       @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
       @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
@@ -48,6 +52,59 @@ module TimeTracking
 
     def payroll_calendar_period(external_pay_period_id:)
       request_json(payroll_calendar_period_uri(external_pay_period_id), validate_source: false)
+    end
+
+    def payroll_cockpit_period(external_pay_period_id:)
+      request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
+    end
+
+    def payroll_cockpit_employees(page: 1, per_page: 100, active: nil)
+      query = bounded_pagination(page, per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
+      query[:active] = active unless active.nil?
+      request_json(payroll_cockpit_uri("/employees", query), validate_source: false, surface_remote_error: true)
+    end
+
+    def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
+      query = {
+        external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
+      }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
+      query[:employee_id] = employee_id if employee_id.present?
+      query[:approval_status] = approval_status if approval_status.present?
+      request_json(payroll_cockpit_uri("/time_entries", query), validate_source: false, surface_remote_error: true)
+    end
+
+    def payroll_cockpit_exceptions(external_pay_period_id:, page: 1, per_page: 250, leave_page: 1, leave_per_page: 100)
+      query = {
+        external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
+      }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
+        .merge(
+          bounded_pagination(leave_page, leave_per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
+            .transform_keys { |key| "leave_#{key}".to_sym }
+        )
+      request_json(payroll_cockpit_uri("/exceptions", query), validate_source: false, surface_remote_error: true)
+    end
+
+    def approve_payroll_time_entry(entry_id:, command_id:, expected_version:, decision:, reason:)
+      delegated_request_json(
+        payroll_cockpit_time_entry_approval_uri(entry_id),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          decision: decision,
+          reason: reason
+        }
+      )
+    end
+
+    def finalize_payroll_cockpit_period(external_pay_period_id:, command_id:, expected_version:, reason:)
+      delegated_request_json(
+        payroll_cockpit_finalize_uri(external_pay_period_id),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          reason: reason
+        }
+      )
     end
 
     def record_payroll_batch_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, metadata: {})
@@ -98,7 +155,7 @@ module TimeTracking
 
     private
 
-    def request_json(uri, validate_source:, method: :get, body: nil, headers: {})
+    def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false)
       request = case method
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
@@ -120,7 +177,8 @@ module TimeTracking
       response, body = perform_request(uri, request, pinned_ips, connection_deadline)
 
       unless response.is_a?(Net::HTTPSuccess)
-        raise Error.new("#{@source.name} returned HTTP #{response.code}", response_status: response.code.to_i)
+        message = surface_remote_error ? remote_error_message(response, body) : nil
+        raise Error.new(message || "#{@source.name} returned HTTP #{response.code}", response_status: response.code.to_i)
       end
       content_type = response["Content-Type"].to_s.downcase
       raise Error, "#{@source.name} returned a non-JSON response" unless content_type.start_with?("application/json")
@@ -167,12 +225,60 @@ module TimeTracking
     end
 
     def payroll_calendar_period_uri(external_pay_period_id)
-      normalized_id = external_pay_period_id.to_s.downcase
+      source_uri("/api/v1/payroll/calendar_periods/#{normalize_external_pay_period_id(external_pay_period_id)}")
+    end
+
+    def payroll_cockpit_period_uri(external_pay_period_id)
+      source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}")
+    end
+
+    def payroll_cockpit_finalize_uri(external_pay_period_id)
+      uri = payroll_cockpit_period_uri(external_pay_period_id)
+      uri.path = "#{uri.path}/finalize"
+      uri
+    end
+
+    def payroll_cockpit_time_entry_approval_uri(entry_id)
+      normalized_id = entry_id.to_s
+      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+
+      source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/approval")
+    end
+
+    def payroll_cockpit_uri(path, query = nil)
+      uri = source_uri("/api/v1/payroll/cockpit#{path}")
+      uri.query = URI.encode_www_form(query) if query.present?
+      uri
+    end
+
+    def bounded_pagination(page, per_page, maximum:)
+      {
+        page: [ page.to_i, 1 ].max,
+        per_page: per_page.to_i.clamp(1, maximum)
+      }
+    end
+
+    def normalize_external_pay_period_id(value)
+      normalized_id = value.to_s.downcase
       unless normalized_id.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
         raise Error, "Invalid payroll calendar period ID"
       end
 
-      source_uri("/api/v1/payroll/calendar_periods/#{normalized_id}")
+      normalized_id
+    end
+
+    def delegated_request_json(uri, body:)
+      token = @delegation&.token.to_s
+      raise Error, "Your AIRE payroll delegation is not configured" if token.blank?
+
+      request_json(
+        uri,
+        validate_source: false,
+        method: :post,
+        body: body,
+        headers: { "X-Aire-Delegation-Token" => token },
+        surface_remote_error: true
+      )
     end
 
     def source_uri(suffix)
@@ -261,6 +367,23 @@ module TimeTracking
       end
 
       [ response, body ]
+    end
+
+    def remote_error_message(response, body)
+      return unless response["Content-Type"].to_s.downcase.start_with?("application/json")
+
+      payload = JSON.parse(body)
+      return unless payload.is_a?(Hash)
+
+      message = payload["error"]
+      return unless message.is_a?(String) && message.present?
+
+      normalized = message.encode("UTF-8", invalid: :replace, undef: :replace, replace: "").strip
+      return if normalized.bytesize > MAX_REMOTE_ERROR_BYTES
+
+      "#{@source.name}: #{normalized}"
+    rescue JSON::ParserError
+      nil
     end
 
     def validate_source_identity!(payload)

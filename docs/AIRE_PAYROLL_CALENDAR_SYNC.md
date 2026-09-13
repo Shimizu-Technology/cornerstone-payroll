@@ -9,13 +9,13 @@
 
 ## Implementation authority
 
-- **Status:** Implemented on `codex/aire-pay-calendar-contract`; not yet merged, deployed, or operationally verified in production.
+- **Status:** Merged to `main`; production deployment and operator verification remain release gates.
 - **Pull request:** [#190](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/190)
-- **Final merge commit:** Pending merge. This field must be replaced before production promotion.
+- **Final merge commit:** `3ffb8f7475f0e34f73ed31980ed2007f33c20c33`
 - **Code-complete scope:** Effective-dated T-7 settings, versioned calendar publication and retry, authenticated and idempotent finalization-event receipt, authoritative Batch v2 verification, durable evidence, role-aware UI state, and automated dispatchers.
-- **Evidence still required:** Hosted review on the final commit, merge to `main`, deployment migration evidence, and a dated production operator test with Cornerstone and AIRE.
+- **Evidence still required:** Deployment migration evidence and a dated production operator test with Cornerstone and AIRE.
 - **Changed risks:** The two applications now share versioned period identity, cutoff, and batch evidence. Clock skew, stale publications, tenant mismatch, payload drift, or an unavailable peer must fail visibly without changing payroll.
-- **Next release gate:** Merge this contract phase, deploy both compatible sides, verify one synthetic future period end to end, then build the Cornerstone AIRE payroll cockpit on verified Batch v2 data.
+- **Next release gate:** Deploy both compatible sides, verify one synthetic future period end to end, then promote the Cornerstone AIRE payroll cockpit described in `AIRE_PAYROLL_COCKPIT.md`.
 
 This contract lets Chels schedule AIRE payroll from Cornerstone without making either system depend on the other at the cutoff instant. Cornerstone publishes the approved pay-period dates. AIRE locks the eligible time autonomously, retains everything that was held, and sends Cornerstone an immutable finalization event.
 
@@ -37,7 +37,7 @@ This contract lets Chels schedule AIRE payroll from Cornerstone without making e
 4. At cutoff, AIRE creates one immutable Batch v2 and one durable `payroll_batch.finalized` outbox event in the same transaction.
 5. Cornerstone receives the event idempotently, checks that it belongs to the latest delivered calendar revision, and fetches the authoritative Batch v2 from AIRE.
 6. Cornerstone validates the full batch, checksum, totals, issues, period dates, and source identity before showing **Batch verified**.
-7. A later phase will use the verified batch in the Cornerstone AIRE payroll cockpit. Verification alone never changes payroll.
+7. Cornerstone's AIRE payroll cockpit shows the verified batch and payment history. Verification alone never changes payroll.
 
 ## Cornerstone endpoints
 
