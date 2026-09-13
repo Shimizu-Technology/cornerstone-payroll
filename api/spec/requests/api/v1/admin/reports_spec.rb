@@ -474,16 +474,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       task = workflow["tasks"].find { |row| row["task_type"] == "w1" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
         task: {
-          status: "filed",
-          filing_confirmation_number: "W1-ABC-123",
-          proof_attached: true
+          status: "in_progress",
+          notes: "Preparing the Guam W-1"
         }
       }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("filed")
-      expect(response.parsed_body.dig("task", "filing_confirmation_number")).to eq("W1-ABC-123")
-      expect(response.parsed_body.dig("task", "proof_attached")).to eq(true)
+      expect(response.parsed_body.dig("task", "status")).to eq("in_progress")
+      expect(response.parsed_body.dig("task", "notes")).to eq("Preparing the Guam W-1")
 
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
         task: { status: "not_started" }
@@ -493,7 +491,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.dig("task", "status")).to eq("not_started")
     end
 
-    it "downgrades filed_and_paid status when one completion date is cleared" do
+    it "rejects typed filing and payment outcomes without retained evidence" do
       post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "form_500" }
@@ -505,85 +503,43 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         }
       }
 
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("filed_and_paid")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { paid_at: nil }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("filed")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: {
-          filed_at: nil,
-          paid_at: "2026-04-30T10:05:00Z",
-          status: "filed_and_paid"
-        }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/retained agency evidence/)
+      expect(QuarterlyComplianceTask.find(task.fetch("id"))).to have_attributes(
+        status: "not_started",
+        filed_at: nil,
+        paid_at: nil
+      )
     end
 
-    it "downgrades filed and paid terminal statuses when their completion date is cleared" do
+    it "rejects outcome evidence fields even when no terminal status is supplied" do
       post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "w1" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { status: "filed", filed_at: "2026-04-30T10:00:00Z" }
+        task: { filing_confirmation_number: "W1-ABC-123", proof_attached: true }
       }
 
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("filed")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { filed_at: nil }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("ready_to_file")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { status: "paid", paid_at: "2026-04-30T10:05:00Z" }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("paid")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { paid_at: nil }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("ready_to_file")
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/retained agency evidence/)
+      expect(QuarterlyComplianceTask.find(task.fetch("id"))).to have_attributes(
+        status: "not_started",
+        filing_confirmation_number: nil,
+        proof_attached: false
+      )
     end
 
-    it "promotes needs_review tasks when filing or payment dates are recorded" do
+    it "keeps Schedule B in the preparation workflow instead of treating it as a separate filing" do
       post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "schedule_b" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { status: "needs_review" }
+        task: { status: "not_required", notes: "Monthly depositor; Schedule B is not required." }
       }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("needs_review")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { filed_at: "2026-04-30T10:00:00Z" }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("filed")
-
-      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
-        task: { status: "needs_review", filed_at: nil, paid_at: "2026-04-30T10:05:00Z" }
-      }
-
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+      expect(response.parsed_body.dig("task", "status")).to eq("not_required")
+      expect(response.parsed_body.dig("task", "notes")).to match(/Schedule B is not required/)
     end
 
     it "recovers from a concurrent packet provisioning uniqueness race" do

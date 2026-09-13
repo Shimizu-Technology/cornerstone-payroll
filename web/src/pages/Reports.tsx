@@ -20,6 +20,7 @@ import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegis
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
+import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -855,6 +856,21 @@ function W2GuPanel() {
         </Card>
       )}
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Wage submission evidence</CardTitle>
+          <CardDescription>Keep the BSO receipt and later processing result together. A receipt confirms delivery; it does not prove acceptance.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FilingEvidencePanel
+            filingType="w2_gu_w3_ss"
+            taxYear={year}
+            preparationReady={filing?.status === 'filing_ready'}
+            readinessMessage="Run preflight and mark the W-2GU / W-3SS wage submission ready before recording delivery to the agency."
+          />
+        </CardContent>
+      </Card>
+
       {preflight && preflight.findings.length > 0 && (
         <Card>
           <CardHeader>
@@ -914,6 +930,17 @@ function W2GuPanel() {
                 <TotalBox label="Box 6 — Medicare Tax Withheld" value={report.totals.box6_medicare_tax_withheld} />
                 <TotalBox label="Box 7 — Social Security Tips" value={report.totals.box7_social_security_tips} />
                 <TotalBox label="Reported Tips (Uncapped)" value={report.totals.reported_tips_total} />
+              </div>
+
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm font-semibold text-blue-950">W-3SS transmittal control totals</p>
+                <p className="mt-1 text-xs text-blue-800">Use these totals to reconcile the territorial wage submission before BSO delivery. The BSO receipt and later processing result belong in the evidence record above.</p>
+                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <span>W-2GU count: <strong>{report.meta.employee_count}</strong></span>
+                  <span>Wages: <strong>{fmt(report.totals.box1_wages_tips_other_comp)}</strong></span>
+                  <span>SS wages: <strong>{fmt(report.totals.box3_social_security_wages)}</strong></span>
+                  <span>Medicare wages: <strong>{fmt(report.totals.box5_medicare_wages_tips)}</strong></span>
+                </div>
               </div>
 
               {/* Caveats */}
@@ -2202,7 +2229,17 @@ function QuarterlyCompliancePacketPanel() {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-3 lg:grid-cols-2">
-                  {report.workflow.tasks.map((task) => (
+                  {report.workflow.tasks.map((task) => {
+                    const filingType = task.task_type === 'form_500'
+                      ? 'form_500_payment'
+                      : task.task_type === 'w1' || task.task_type === 'swica' || task.task_type === 'federal_941'
+                        ? task.task_type
+                        : null;
+                    const scheduleB = report.workflow?.tasks.find((candidate) => candidate.task_type === 'schedule_b');
+                    const preparationReady = task.status === 'ready_to_file' && (
+                      task.task_type !== 'federal_941' || scheduleB?.status === 'ready_to_file' || scheduleB?.status === 'not_required'
+                    );
+                    return (
                     <div key={task.id} className="rounded-2xl border border-neutral-200 bg-white p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -2215,7 +2252,7 @@ function QuarterlyCompliancePacketPanel() {
                           {task.status.replaceAll('_', ' ')}
                         </Badge>
                       </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="mt-4 grid gap-3">
                         <label className="text-xs font-semibold text-neutral-500">
                           Status
                           <select
@@ -2224,23 +2261,34 @@ function QuarterlyCompliancePacketPanel() {
                             onChange={(e) => updateTask(task, { status: e.target.value })}
                             className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
                           >
-                            {['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'filed', 'paid', 'filed_and_paid', 'not_required', 'exception'].map((status) => (
+                            {!['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'not_required', 'exception'].includes(task.status) && (
+                              <option value={task.status}>Legacy: {task.status.replaceAll('_', ' ')}</option>
+                            )}
+                            {['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'not_required', 'exception'].map((status) => (
                               <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>
                             ))}
                           </select>
                         </label>
-                        <label className="text-xs font-semibold text-neutral-500">
-                          Confirmation #
-                          <input
-                            defaultValue={task.filing_confirmation_number || ''}
-                            disabled={savingTaskId === task.id}
-                            onBlur={(e) => updateTask(task, { filing_confirmation_number: e.target.value })}
-                            className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
-                          />
-                        </label>
                       </div>
+                      {filingType && (
+                        <FilingEvidencePanel
+                          filingType={filingType}
+                          taxYear={year}
+                          quarter={quarter}
+                          preparationReady={preparationReady}
+                          readinessMessage={task.task_type === 'federal_941' && !preparationReady
+                            ? 'Mark both Form 941 and its Schedule B attachment ready before recording submission.'
+                            : `Mark ${task.title} ready before recording external evidence.`}
+                        />
+                      )}
+                      {task.task_type === 'schedule_b' && (
+                        <p className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+                          Schedule B is an attachment to Form 941, not a separate agency filing. Its submission evidence is retained with the Form 941 record.
+                        </p>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -3194,6 +3242,21 @@ function Form1099NecPanel() {
       )}
 
       {report && (
+        <>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Information return submission evidence</CardTitle>
+            <CardDescription>Retain the IRIS receipt and the later accepted or rejected acknowledgement.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FilingEvidencePanel
+              filingType="form_1099_nec"
+              taxYear={year}
+              preparationReady={report.meta.reportable_count > 0 && report.reportable_contractors.every((contractor) => contractor.compliance_issues.length === 0)}
+              readinessMessage="Resolve all reportable contractor filing issues before recording the 1099-NEC submission."
+            />
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>{report.meta.company_name} — {report.meta.year} 1099-NEC Summary</CardTitle>
@@ -3216,6 +3279,16 @@ function Form1099NecPanel() {
               <div className="rounded-md border p-3">
                 <p className="text-xs text-gray-500">Federal Tax Withheld</p>
                 <p className="mt-1 text-lg font-semibold">{fmt(report.totals.total_federal_withheld)}</p>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <p className="text-sm font-semibold text-blue-950">1096 transmittal control totals</p>
+              <p className="mt-1 text-xs text-blue-800">Reconcile these totals to the IRIS submission before delivery; retain both the receipt and later acknowledgement above.</p>
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                <span>Reportable returns: <strong>{report.meta.reportable_count}</strong></span>
+                <span>Nonemployee compensation: <strong>{fmt(report.totals.reportable_compensation)}</strong></span>
+                <span>Federal withholding: <strong>{fmt(report.totals.total_federal_withheld)}</strong></span>
               </div>
             </div>
 
@@ -3283,6 +3356,7 @@ function Form1099NecPanel() {
             )}
           </CardContent>
         </Card>
+        </>
       )}
     </div>
   );

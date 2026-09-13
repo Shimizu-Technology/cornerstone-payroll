@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class QuarterlyComplianceTask < ApplicationRecord
+  PREPARATION_STATUSES = %w[not_started in_progress needs_review ready_to_file not_required exception].freeze
   STATUSES = %w[not_started in_progress needs_review ready_to_file filed paid filed_and_paid not_required exception].freeze
   TASK_TYPES = QuarterlyCompliancePacket::TASK_TYPES
 
