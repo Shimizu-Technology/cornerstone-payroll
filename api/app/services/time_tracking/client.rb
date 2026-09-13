@@ -104,6 +104,18 @@ module TimeTracking
       )
     end
 
+    def approve_payroll_overtime(entry_id:, command_id:, expected_version:, decision:, reason:)
+      delegated_request_json(
+        payroll_cockpit_time_entry_approval_uri(entry_id, overtime: true),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          decision: decision,
+          reason: reason
+        }
+      )
+    end
+
     def correct_payroll_time_entry(entry_id:, command_id:, expected_version:, reason:, attributes:)
       delegated_request_json(
         payroll_cockpit_time_entry_correction_uri(entry_id),
@@ -272,11 +284,12 @@ module TimeTracking
       uri
     end
 
-    def payroll_cockpit_time_entry_approval_uri(entry_id)
+    def payroll_cockpit_time_entry_approval_uri(entry_id, overtime: false)
       normalized_id = entry_id.to_s
       raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
 
-      source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/approval")
+      action = overtime ? "overtime_approval" : "approval"
+      source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/#{action}")
     end
 
     def payroll_cockpit_time_entry_correction_uri(entry_id)

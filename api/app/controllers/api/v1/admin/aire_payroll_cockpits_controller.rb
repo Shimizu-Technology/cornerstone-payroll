@@ -96,6 +96,34 @@ module Api
           render_source_error(e)
         end
 
+        def approve_time_entry_overtime
+          decision = command_params.fetch(:decision).to_s.downcase
+          unless %w[approve deny].include?(decision)
+            return render json: { error: "Decision must be approve or deny" }, status: :unprocessable_entity
+          end
+
+          result = cockpit_client(with_delegation: true).approve_payroll_overtime(
+            entry_id: params[:time_entry_id],
+            command_id: command_params.fetch(:command_id),
+            expected_version: command_params.fetch(:expected_version),
+            decision: decision,
+            reason: command_params.fetch(:reason)
+          )
+          record_command_audit!(
+            action: "aire_payroll_cockpit##{decision == 'deny' ? 'overtime_denied' : 'overtime_approved'}",
+            record_type: "AireTimeEntry",
+            record_id: params[:time_entry_id],
+            command_id: command_params[:command_id],
+            reason: command_params[:reason],
+            result: result
+          )
+          render json: result
+        rescue ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def correct_time_entry
           attributes = correction_params.except(:command_id, :expected_version, :reason).to_h
           result = cockpit_client(with_delegation: true).correct_payroll_time_entry(

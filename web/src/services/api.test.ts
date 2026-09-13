@@ -146,6 +146,26 @@ describe('ApiClient company identity', (): void => {
     );
   });
 
+  it('keeps an AIRE time-entry identifier inside one overtime-approval path segment', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ command: { id: 'test', replayed: false } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await payPeriodsApi.reviewAireOvertime(17, '42/../../entries?all=true', {
+      command_id: '0f5c1e56-2831-4b3f-b991-3dfaa3c51c24',
+      expected_version: 2,
+      decision: 'approve',
+      reason: 'Confirmed scheduled overtime',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/pay_periods/17/aire_payroll_cockpit/time_entries/42%2F..%2F..%2Fentries%3Fall%3Dtrue/overtime_approval',
+    );
+  });
+
   it('sends source settings and delegated AIRE access in one update request', async (): Promise<void> => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ time_tracking_source: { id: 4 } }), {
