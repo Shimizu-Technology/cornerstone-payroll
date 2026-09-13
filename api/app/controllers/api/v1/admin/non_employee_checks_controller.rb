@@ -11,10 +11,17 @@ module Api
           payable_to amount check_type memo description
           reference_number check_number payment_period_type
           tax_year tax_quarter tax_month due_date payment_date
-          confirmation_number line_items
+          confirmation_number payment_method line_items
         ].freeze
+        LIABILITY_LOCKED_FIELDS = %w[
+          amount payable_to check_type payment_method pay_period_id
+          payment_period_type tax_year tax_quarter tax_month
+        ].freeze
+        PAID_LOCKED_FIELDS = (
+          LIABILITY_LOCKED_FIELDS + %w[payment_date confirmation_number check_number]
+        ).freeze
 
-        before_action :set_check, only: [ :show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :voucher_pdf, :history ]
+        before_action :set_check, only: [ :show, :update, :destroy, :mark_printed, :mark_paid, :void_check, :check_pdf, :voucher_pdf, :history ]
 
         # GET /api/v1/admin/non_employee_checks
         def index
@@ -25,7 +32,7 @@ module Api
           # only an `id → count` map in a single grouped query, then pass
           # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by, :line_items)
+            .includes(:pay_period, :created_by, :paid_by, :line_items, :payroll_liability_check_allocations)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.standalone if params[:standalone] == "true"
@@ -62,6 +69,7 @@ module Api
         # POST /api/v1/admin/non_employee_checks
         def create
           attrs = check_params.to_h
+          liability_entry_ids = liability_entry_ids_param
           pay_period_id = attrs["pay_period_id"] || attrs[:pay_period_id]
           pay_period = resolve_pay_period(pay_period_id) if pay_period_id.present?
           return if pay_period_id.present? && pay_period.nil?
@@ -77,9 +85,19 @@ module Api
           created = false
           ActiveRecord::Base.transaction do
             check.company.lock!
-            check.check_number = check.company.next_check_number! if check.check_number.blank?
-            validate_check_number_assignment!(check_number_value(attrs), excluding_non_employee_check_id: nil)
+            if check.payment_method == "check"
+              check.check_number = check.company.next_check_number! if check.check_number.blank?
+            else
+              check.check_number = nil
+            end
+            validate_check_number_assignment!(check.check_number, excluding_non_employee_check_id: nil)
             created = check.save
+            if created && liability_entry_ids.any?
+              PayrollLiabilityCheckAllocationService.allocate!(
+                non_employee_check: check,
+                entry_ids: liability_entry_ids
+              )
+            end
             advance_next_check_number!(check.company, check.check_number) if created
             raise ActiveRecord::Rollback unless created
           end
@@ -93,6 +111,8 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
           render json: { error: "Check number is already in use for this company" }, status: :unprocessable_entity
+        rescue PayrollLiabilityCheckAllocationService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/non_employee_checks/:id
@@ -102,6 +122,16 @@ module Api
           end
 
           attrs = check_params.to_h
+          if @check.paid_at.present? && locked_field_change?(attrs, PAID_LOCKED_FIELDS)
+            return render json: {
+              error: "Void and recreate a paid payment to change its financial or payment details"
+            }, status: :unprocessable_entity
+          end
+          if @check.payroll_liability_check_allocations.exists? && locked_field_change?(attrs, LIABILITY_LOCKED_FIELDS)
+            return render json: {
+              error: "Void and recreate a liability payment to change its recipient, amount, method, or reporting period"
+            }, status: :unprocessable_entity
+          end
           if attrs.key?("pay_period_id") || attrs.key?(:pay_period_id)
             pay_period_id = attrs["pay_period_id"] || attrs[:pay_period_id]
             pay_period = resolve_pay_period(pay_period_id) if pay_period_id.present?
@@ -197,6 +227,9 @@ module Api
 
         # DELETE /api/v1/admin/non_employee_checks/:id
         def destroy
+          if @check.payroll_liability_check_allocations.exists? && @check.paid_at.present?
+            return render json: { error: "Void a paid liability payment instead of deleting it" }, status: :unprocessable_entity
+          end
           if @check.printed?
             return render json: { error: "Cannot delete a printed check; void it instead" }, status: :unprocessable_entity
           end
@@ -210,6 +243,39 @@ module Api
           @check.mark_printed!
           render json: { non_employee_check: check_payload(@check.reload) }
         rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/non_employee_checks/:id/mark_paid
+        def mark_paid
+          changed = @check.mark_paid!(
+            actor: current_user,
+            payment_date: params.require(:payment_date),
+            confirmation_number: params[:confirmation_number]
+          )
+          AuditLog.record!(
+            user: current_user,
+            organization_id: @check.company.organization_id,
+            company_id: @check.company_id,
+            action: "non_employee_checks#paid",
+            record_type: "non_employee_checks",
+            record_id: @check.id,
+            subject_name: @check.payable_to,
+            metadata: {
+              amount: @check.amount.to_s,
+              payment_method: @check.payment_method,
+              payment_date: @check.payment_date,
+              confirmation_number: @check.confirmation_number,
+              liability_allocation_ids: @check.payroll_liability_check_allocations.pluck(:id)
+            }.compact,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id,
+            event_category: "activity"
+          ) if changed
+          skip_default_audit_log!
+          render json: { non_employee_check: check_payload(@check.reload) }
+        rescue ActionController::ParameterMissing, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -279,6 +345,9 @@ module Api
 
         # GET /api/v1/admin/non_employee_checks/:id/check_pdf
         def check_pdf
+          unless @check.payment_method == "check"
+            return render json: { error: "Only check payments have a printable check" }, status: :unprocessable_entity
+          end
           if @check.company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
               company: @check.company,
@@ -314,6 +383,7 @@ module Api
           scope = NonEmployeeCheck
             .where(company_id: current_company_id)
             .active
+            .where(payment_method: "check")
             .where.not(check_number: [ nil, "" ])
             .includes(:company, :pay_period, :line_items)
 
@@ -365,7 +435,7 @@ module Api
           # Preload :edits so check_payload's `edit_count: check.edits.size`
           # uses the loaded association instead of issuing a per-request COUNT.
           @check = NonEmployeeCheck
-            .includes(:edits, :line_items, :pay_period, :created_by)
+            .includes(:edits, :line_items, :pay_period, :created_by, :paid_by, :payroll_liability_check_allocations)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
@@ -377,7 +447,7 @@ module Api
             :pay_period_id, :payable_to, :amount, :check_type,
             :memo, :description, :reference_number, :check_number,
             :payment_period_type, :tax_year, :tax_quarter, :tax_month,
-            :due_date, :payment_date, :confirmation_number,
+            :due_date, :payment_date, :confirmation_number, :payment_method,
             line_items_attributes: [
               :id, :description, :reference_number, :service_period,
               :amount, :position, :_destroy
@@ -406,6 +476,22 @@ module Api
           end
 
           permitted
+        end
+
+        def liability_entry_ids_param
+          Array(params.dig(:non_employee_check, :liability_entry_ids)).map { |id| Integer(id) }.uniq
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "Liability selections are invalid"
+        end
+
+        def locked_field_change?(attrs, fields)
+          fields.any? do |field|
+            next false unless attrs.key?(field) || attrs.key?(field.to_sym)
+
+            incoming = attrs[field] || attrs[field.to_sym]
+            cast = NonEmployeeCheck.type_for_attribute(field).cast(incoming)
+            cast != @check.public_send(field)
+          end
         end
 
         # Optional text fields whose blank ("" or whitespace-only) values
@@ -450,6 +536,12 @@ module Api
             payment_date: check.payment_date,
             effective_payment_date: check.effective_payment_date,
             confirmation_number: check.confirmation_number,
+            payment_method: check.payment_method,
+            paid_at: check.paid_at,
+            paid_by_id: check.paid_by_id,
+            paid_by_name: check.paid_by&.name,
+            liability_payment: check.payroll_liability_check_allocations.any?,
+            liability_allocated_amount: check.payroll_liability_check_allocations.sum(&:amount).to_f,
             line_items: check.line_items.map { |line_item| line_item_payload(line_item) },
             print_count: check.print_count,
             printed_at: check.printed_at,

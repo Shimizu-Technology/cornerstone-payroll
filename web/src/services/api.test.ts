@@ -11,7 +11,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, employeesApi, payPeriodsApi, payrollItemsApi, reportsApi, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
+import { apiClient, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
@@ -259,5 +259,65 @@ describe('ApiClient company identity', (): void => {
     expect(calls[7].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/settlement_cases/9a708e48-f04e-47e8-8e0c-7b727def25d4/route');
     expect(calls[8]).toMatchObject({ method: 'POST', body: command });
     expect(calls[8].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/finalize');
+  });
+
+  it('prepares and confirms a payroll liability payment through the payment register', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({ non_employee_check: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+
+    await nonEmployeeChecksApi.create({
+      payable_to: 'United States Treasury',
+      amount: 124,
+      check_type: 'tax_deposit',
+      payment_method: 'eftps',
+      liability_entry_ids: [11, 12],
+    });
+    await nonEmployeeChecksApi.markPaid(9, {
+      payment_date: '2026-09-14',
+      confirmation_number: 'EFTPS-123',
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      non_employee_check: expect.objectContaining({
+        payment_method: 'eftps',
+        liability_entry_ids: [11, 12],
+      }),
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/admin/non_employee_checks/9/mark_paid');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      payment_date: '2026-09-14',
+      confirmation_number: 'EFTPS-123',
+    });
+  });
+
+  it('loads the liability center and saves reviewed due dates through company-scoped endpoints', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({ payroll_liability_center: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+
+    apiClient.setActiveCompanyId(7);
+    await payrollLiabilityCenterApi.get();
+    await payrollLiabilityCenterApi.updateDueDate({
+      pay_period_id: 18,
+      authority: 'Guam Department of Revenue and Taxation',
+      due_date: '2026-09-20',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/admin/payroll_liability_center');
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Company-Id')).toBe('7');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      payroll_liability_obligation: {
+        pay_period_id: 18,
+        authority: 'Guam Department of Revenue and Taxation',
+        due_date: '2026-09-20',
+      },
+    });
   });
 });

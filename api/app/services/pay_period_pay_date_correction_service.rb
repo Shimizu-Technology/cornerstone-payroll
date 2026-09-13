@@ -50,6 +50,12 @@ class PayPeriodPayDateCorrectionService
         next
       end
 
+      PayrollLiabilityPaymentGuard.ensure_clear!(
+        pay_period: locked,
+        error_class: Error,
+        action: "correcting its pay date"
+      )
+
       locked.update!(
         pay_date: new_pay_date,
         **locked.tax_sync_refresh_attributes

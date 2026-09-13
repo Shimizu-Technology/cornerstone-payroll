@@ -6,6 +6,7 @@ class NonEmployeeCheck < ApplicationRecord
     child_support garnishment vendor reimbursement other
   ].freeze
   PAYMENT_PERIOD_TYPES = %w[none pay_period month quarter year].freeze
+  PAYMENT_METHODS = %w[check ach eftps wire card cash other].freeze
 
   # Stable identifiers for auto-generated checks. Survives user-driven renames
   # of `payable_to`. Used by the unique index that prevents duplicate
@@ -17,6 +18,7 @@ class NonEmployeeCheck < ApplicationRecord
   belongs_to :pay_period, optional: true
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
+  belongs_to :paid_by, class_name: "User", optional: true
   # Use :delete_all (not :destroy) because NonEmployeeCheckEdit#readonly? is
   # true once persisted (audit records are immutable). :destroy would call
   # `destroy` on each edit which raises ActiveRecord::ReadOnlyRecord. The DB
@@ -29,6 +31,9 @@ class NonEmployeeCheck < ApplicationRecord
            class_name: "NonEmployeeCheckLineItem",
            dependent: :destroy,
            inverse_of: :non_employee_check
+  has_many :payroll_liability_check_allocations,
+           inverse_of: :non_employee_check,
+           dependent: :delete_all
 
   accepts_nested_attributes_for :line_items, allow_destroy: true
 
@@ -39,6 +44,7 @@ class NonEmployeeCheck < ApplicationRecord
   validates :amount, presence: true, numericality: { greater_than: 0 }
   validates :check_type, presence: true, inclusion: { in: CHECK_TYPES }
   validates :payment_period_type, presence: true, inclusion: { in: PAYMENT_PERIOD_TYPES }
+  validates :payment_method, presence: true, inclusion: { in: PAYMENT_METHODS }
   validates :tax_year,
             numericality: { only_integer: true, greater_than_or_equal_to: 2000, less_than_or_equal_to: 2100 },
             allow_nil: true
@@ -46,6 +52,8 @@ class NonEmployeeCheck < ApplicationRecord
   validates :tax_month, numericality: { only_integer: true, in: 1..12 }, allow_nil: true
   validate :payment_period_fields_match_type
   validate :line_item_total_matches_amount
+  validate :paid_by_matches_company
+  validate :paid_state_is_complete
   # Mirrors the DB-level partial unique index `idx_ne_checks_on_company_check_num`
   # so that a duplicate `check_number` (now editable through the Edit modal)
   # surfaces as a clean 422 with a field error instead of bubbling
@@ -73,12 +81,34 @@ class NonEmployeeCheck < ApplicationRecord
   def mark_printed!
     with_lock do
       raise ArgumentError, "Cannot print a voided check" if voided?
+      raise ArgumentError, "Only check payments can be printed" unless payment_method == "check"
 
       update!(
         printed_at: printed_at || Time.current,
         print_count: print_count + 1
       )
     end
+  end
+
+  def mark_paid!(actor:, payment_date:, confirmation_number: nil)
+    with_lock do
+      raise ArgumentError, "Cannot mark a voided payment as paid" if voided?
+      return false if paid_at.present?
+      raise ArgumentError, "Print the check before marking it paid" if payment_method == "check" && !printed?
+      if payment_method.in?(%w[ach eftps wire card]) && confirmation_number.to_s.strip.blank?
+        raise ArgumentError, "Confirmation number is required for electronic payments"
+      end
+
+      update!(
+        payment_date: Date.iso8601(payment_date.to_s),
+        confirmation_number: confirmation_number.to_s.strip.presence || self.confirmation_number,
+        paid_at: Time.current,
+        paid_by: actor
+      )
+      true
+    end
+  rescue Date::Error
+    raise ArgumentError, "Payment date is invalid"
   end
 
   def void!(reason:)
@@ -94,9 +124,15 @@ class NonEmployeeCheck < ApplicationRecord
 
   def check_status
     return "voided" if voided?
+    return "paid" if paid_at.present?
     return "printed" if printed?
     return "unprinted" if check_number.present?
     "pending"
+  end
+
+
+  def liability_payment?
+    payroll_liability_check_allocations.exists?
   end
 
   def standalone?
@@ -190,6 +226,27 @@ class NonEmployeeCheck < ApplicationRecord
     when "pay_period"
       return nil unless pay_period
       "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}"
+    end
+  end
+
+  def paid_by_matches_company
+    return if paid_by.blank? || company.blank? || paid_by.organization_id == company.organization_id
+
+    errors.add(:paid_by, "must belong to the payment company's organization")
+  end
+
+  def paid_state_is_complete
+    if paid_at.present?
+      errors.add(:payment_date, "is required for a paid payment") if payment_date.blank?
+      errors.add(:paid_by, "is required for a paid payment") if paid_by.blank?
+      if payment_method == "check" && printed_at.blank?
+        errors.add(:printed_at, "is required before a check can be paid")
+      end
+      if payment_method.in?(%w[ach eftps wire card]) && confirmation_number.to_s.strip.blank?
+        errors.add(:confirmation_number, "is required for a paid electronic payment")
+      end
+    elsif paid_by.present?
+      errors.add(:paid_at, "is required when a paid-by user is recorded")
     end
   end
 end

@@ -4144,6 +4144,8 @@ export const nonEmployeeChecksApi = {
     payment_period_type?: string; tax_year?: number | null; tax_quarter?: number | null;
     tax_month?: number | null; due_date?: string | null; payment_date?: string | null;
     confirmation_number?: string | null;
+    payment_method?: import('@/types').OutgoingPaymentMethod;
+    liability_entry_ids?: number[];
     line_items_attributes?: Array<{
       description: string; reference_number?: string | null; service_period?: string | null;
       amount: number; position: number;
@@ -4155,7 +4157,7 @@ export const nonEmployeeChecksApi = {
     memo: string; description: string; reference_number: string;
     payment_period_type: string; tax_year: number | null; tax_quarter: number | null;
     tax_month: number | null; due_date: string | null; payment_date: string | null;
-    confirmation_number: string | null;
+    confirmation_number: string | null; payment_method: import('@/types').OutgoingPaymentMethod;
     line_items_attributes: Array<{
       id?: number; description?: string; reference_number?: string | null;
       service_period?: string | null; amount?: number; position?: number; _destroy?: boolean;
@@ -4184,6 +4186,8 @@ export const nonEmployeeChecksApi = {
     api.delete<{ message: string }>(`/admin/non_employee_checks/${id}`),
   markPrinted: (id: number) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
+  markPaid: (id: number, data: { payment_date: string; confirmation_number?: string }) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_paid`, data),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
   checkPdf: (id: number, options?: { startingSlot?: number }) =>
@@ -4203,6 +4207,17 @@ export const nonEmployeeChecksApi = {
     }),
   voucherPdf: (id: number) =>
     api.getBlob(`/admin/non_employee_checks/${id}/voucher_pdf`),
+};
+
+export const payrollLiabilityCenterApi = {
+  get: () => api.get<{ payroll_liability_center: import('@/types').PayrollLiabilityCenter }>(
+    '/admin/payroll_liability_center'
+  ),
+  updateDueDate: (data: { pay_period_id: number; authority: string; due_date: string }) =>
+    api.post<{ payroll_liability_center: import('@/types').PayrollLiabilityCenter }>(
+      '/admin/payroll_liability_center/due_date',
+      { payroll_liability_obligation: data }
+    ),
 };
 
 // ============================================================

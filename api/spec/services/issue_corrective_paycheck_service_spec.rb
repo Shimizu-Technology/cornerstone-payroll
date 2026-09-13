@@ -471,6 +471,28 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(fit_check.auto_generated_type).to eq("fit_deposit")
     end
 
+    it "reports a clean correction error and rolls back when the FIT payment cannot be connected" do
+      company.update!(auto_create_fit_check: true)
+      allow(PayrollLiabilityFitPaymentConnector).to receive(:connect!)
+        .and_raise(PayrollLiabilityCheckAllocationService::Error, "selected liability is unavailable")
+      period_count = PayPeriod.count
+      payment_count = NonEmployeeCheck.count
+
+      expect {
+        described_class.issue!(
+          original_pay_period: original_period,
+          employee:            employee,
+          corrected_inputs:    { hours_worked: 80 },
+          pay_date:            Date.new(2024, 1, 26),
+          reason:              "missed hours",
+          actor:               actor
+        )
+      }.to raise_error(IssueCorrectivePaycheckService::CorrectionError,
+                       /FIT payment could not be connected.*selected liability is unavailable/)
+      expect(PayPeriod.count).to eq(period_count)
+      expect(NonEmployeeCheck.count).to eq(payment_count)
+    end
+
     it "raises if the original period is voided" do
       voided_period = create(:pay_period, :voided, company: company)
       original_period.payroll_items.first.update!(pay_period: voided_period)

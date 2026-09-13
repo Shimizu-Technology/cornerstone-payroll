@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1813,9 +1813,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
     t.text "description"
     t.date "due_date"
     t.string "memo"
+    t.datetime "paid_at"
+    t.bigint "paid_by_id"
     t.bigint "pay_period_id"
     t.string "payable_to", null: false
     t.date "payment_date"
+    t.string "payment_method", default: "check", null: false
     t.string "payment_period_type", default: "none", null: false
     t.integer "print_count", default: 0, null: false
     t.datetime "printed_at"
@@ -1835,8 +1838,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
     t.index ["company_id", "payment_period_type", "tax_year", "tax_quarter"], name: "idx_ne_checks_on_company_quarter"
     t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
+    t.index ["paid_by_id"], name: "index_non_employee_checks_on_paid_by_id"
     t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
+    t.check_constraint "paid_at IS NULL OR payment_date IS NOT NULL", name: "non_employee_checks_paid_date_check"
+    t.check_constraint "paid_at IS NULL OR payment_method::text <> 'check'::text OR printed_at IS NOT NULL", name: "non_employee_checks_paid_paper_printed_check"
+    t.check_constraint "paid_at IS NULL OR NOT (payment_method::text = ANY (ARRAY['ach'::character varying, 'eftps'::character varying, 'wire'::character varying, 'card'::character varying]::text[])) OR NULLIF(btrim(confirmation_number::text), ''::text) IS NOT NULL", name: "non_employee_checks_paid_electronic_confirmation_check"
+    t.check_constraint "paid_at IS NULL AND paid_by_id IS NULL OR paid_at IS NOT NULL AND paid_by_id IS NOT NULL", name: "non_employee_checks_paid_actor_check"
+    t.check_constraint "payment_method::text = ANY (ARRAY['check'::character varying::text, 'ach'::character varying::text, 'eftps'::character varying::text, 'wire'::character varying::text, 'card'::character varying::text, 'cash'::character varying::text, 'other'::character varying::text])", name: "non_employee_checks_payment_method_check"
     t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying::text, 'pay_period'::character varying::text, 'month'::character varying::text, 'quarter'::character varying::text, 'year'::character varying::text])", name: "non_employee_checks_payment_period_type_check"
     t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
     t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
@@ -2377,34 +2386,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
   end
 
-  create_table "payroll_liability_allocations", force: :cascade do |t|
+  create_table "payroll_liability_check_allocations", force: :cascade do |t|
     t.decimal "amount", precision: 14, scale: 2, null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.jsonb "metadata", default: {}, null: false
+    t.bigint "non_employee_check_id", null: false
     t.bigint "payroll_liability_entry_id", null: false
-    t.bigint "payroll_liability_payment_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["company_id"], name: "index_payroll_liability_allocations_on_company_id"
-    t.index ["payroll_liability_entry_id"], name: "idx_liability_allocations_entry"
-    t.index ["payroll_liability_payment_id", "payroll_liability_entry_id"], name: "idx_liability_allocations_unique_entry", unique: true
-    t.check_constraint "amount <> 0::numeric", name: "liability_allocations_nonzero"
-  end
-
-  create_table "payroll_liability_due_dates", force: :cascade do |t|
-    t.string "authority", null: false
-    t.string "category", null: false
-    t.bigint "company_id", null: false
-    t.datetime "created_at", null: false
-    t.date "due_date", null: false
-    t.jsonb "metadata", default: {}, null: false
-    t.bigint "pay_period_id", null: false
-    t.datetime "updated_at", null: false
-    t.bigint "updated_by_id"
-    t.index ["company_id", "due_date"], name: "idx_liability_due_dates_company_due"
-    t.index ["company_id"], name: "index_payroll_liability_due_dates_on_company_id"
-    t.index ["pay_period_id", "category", "authority"], name: "idx_liability_due_dates_unique_obligation", unique: true
-    t.index ["updated_by_id"], name: "index_payroll_liability_due_dates_on_updated_by_id"
+    t.index ["company_id"], name: "index_payroll_liability_check_allocations_on_company_id"
+    t.index ["non_employee_check_id", "payroll_liability_entry_id"], name: "idx_liability_check_allocations_unique_entry", unique: true
+    t.index ["non_employee_check_id"], name: "idx_liability_check_allocations_payment"
+    t.index ["payroll_liability_entry_id"], name: "idx_liability_check_allocations_entry"
+    t.check_constraint "amount > 0::numeric", name: "liability_check_allocations_amount_positive"
   end
 
   create_table "payroll_liability_entries", force: :cascade do |t|
@@ -2428,54 +2422,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
     t.check_constraint "amount <> 0::numeric", name: "liability_entries_nonzero_amount"
   end
 
-  create_table "payroll_liability_evidences", force: :cascade do |t|
-    t.bigint "byte_size", null: false
-    t.bigint "company_id", null: false
-    t.string "content_type", null: false
-    t.datetime "created_at", null: false
-    t.bigint "created_by_id"
-    t.string "filename", null: false
-    t.jsonb "metadata", default: {}, null: false
-    t.bigint "payroll_liability_payment_id", null: false
-    t.string "sha256", null: false
-    t.string "storage_key", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id"], name: "index_payroll_liability_evidences_on_company_id"
-    t.index ["created_by_id"], name: "index_payroll_liability_evidences_on_created_by_id"
-    t.index ["payroll_liability_payment_id"], name: "idx_liability_evidence_payment"
-    t.index ["storage_key"], name: "index_payroll_liability_evidences_on_storage_key", unique: true
-    t.check_constraint "byte_size > 0", name: "liability_evidence_byte_size_positive"
-    t.check_constraint "char_length(sha256::text) = 64", name: "liability_evidence_sha256_length"
-  end
-
-  create_table "payroll_liability_payments", force: :cascade do |t|
-    t.decimal "amount", precision: 14, scale: 2, null: false
+  create_table "payroll_liability_obligation_due_dates", force: :cascade do |t|
     t.string "authority", null: false
-    t.string "category", null: false
     t.bigint "company_id", null: false
-    t.string "confirmation_number"
     t.datetime "created_at", null: false
-    t.string "idempotency_key", null: false
-    t.jsonb "metadata", default: {}, null: false
-    t.text "notes"
+    t.date "due_date", null: false
     t.bigint "pay_period_id", null: false
-    t.date "payment_date", null: false
-    t.string "payment_method", null: false
-    t.string "payment_type", default: "settlement", null: false
-    t.text "reason"
-    t.datetime "recorded_at", null: false
-    t.bigint "recorded_by_id"
-    t.bigint "source_payment_id"
     t.datetime "updated_at", null: false
-    t.index ["company_id", "idempotency_key"], name: "idx_liability_payments_company_idempotency", unique: true
-    t.index ["company_id", "payment_date"], name: "idx_liability_payments_company_date"
-    t.index ["company_id"], name: "index_payroll_liability_payments_on_company_id"
-    t.index ["pay_period_id", "authority", "category"], name: "idx_liability_payments_obligation"
-    t.index ["pay_period_id"], name: "index_payroll_liability_payments_on_pay_period_id"
-    t.index ["recorded_by_id"], name: "index_payroll_liability_payments_on_recorded_by_id"
-    t.index ["source_payment_id"], name: "idx_liability_payments_one_reversal", unique: true, where: "(source_payment_id IS NOT NULL)"
-    t.check_constraint "payment_type::text = 'settlement'::text AND amount > 0::numeric AND source_payment_id IS NULL OR payment_type::text = 'reversal'::text AND amount < 0::numeric AND source_payment_id IS NOT NULL", name: "liability_payments_sign_source_check"
-    t.check_constraint "payment_type::text = ANY (ARRAY['settlement'::character varying::text, 'reversal'::character varying::text])", name: "liability_payments_type_check"
+    t.bigint "updated_by_id"
+    t.index ["company_id", "due_date"], name: "idx_liability_obligation_due_dates_company_due"
+    t.index ["company_id"], name: "index_payroll_liability_obligation_due_dates_on_company_id"
+    t.index ["pay_period_id", "authority"], name: "idx_liability_obligation_due_dates_unique", unique: true
+    t.index ["pay_period_id"], name: "index_payroll_liability_obligation_due_dates_on_pay_period_id"
+    t.index ["updated_by_id"], name: "index_payroll_liability_obligation_due_dates_on_updated_by_id"
   end
 
   create_table "payroll_liability_postings", force: :cascade do |t|
@@ -3338,6 +3297,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
+  add_foreign_key "non_employee_checks", "users", column: "paid_by_id", on_delete: :nullify
   add_foreign_key "organizations", "companies", column: "primary_company_id"
   add_foreign_key "pay_component_tax_rules", "companies", on_delete: :restrict
   add_foreign_key "pay_component_tax_rules", "users", column: "approved_by_id", on_delete: :nullify
@@ -3394,23 +3354,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "payroll_items", column: "correction_for_payroll_item_id"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
-  add_foreign_key "payroll_liability_allocations", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_allocations", "payroll_liability_entries", on_delete: :restrict
-  add_foreign_key "payroll_liability_allocations", "payroll_liability_payments", on_delete: :restrict
-  add_foreign_key "payroll_liability_due_dates", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_due_dates", "pay_periods", on_delete: :restrict
-  add_foreign_key "payroll_liability_due_dates", "users", column: "updated_by_id", on_delete: :nullify
+  add_foreign_key "payroll_liability_check_allocations", "companies", on_delete: :restrict
+  add_foreign_key "payroll_liability_check_allocations", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "payroll_liability_check_allocations", "payroll_liability_entries", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "companies", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "pay_component_tax_rules", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "payroll_items", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "payroll_liability_postings", on_delete: :restrict
-  add_foreign_key "payroll_liability_evidences", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_evidences", "payroll_liability_payments", on_delete: :restrict
-  add_foreign_key "payroll_liability_evidences", "users", column: "created_by_id", on_delete: :nullify
-  add_foreign_key "payroll_liability_payments", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_payments", "pay_periods", on_delete: :restrict
-  add_foreign_key "payroll_liability_payments", "payroll_liability_payments", column: "source_payment_id", on_delete: :restrict
-  add_foreign_key "payroll_liability_payments", "users", column: "recorded_by_id", on_delete: :nullify
+  add_foreign_key "payroll_liability_obligation_due_dates", "companies", on_delete: :restrict
+  add_foreign_key "payroll_liability_obligation_due_dates", "pay_periods", on_delete: :cascade
+  add_foreign_key "payroll_liability_obligation_due_dates", "users", column: "updated_by_id", on_delete: :nullify
   add_foreign_key "payroll_liability_postings", "companies", on_delete: :restrict
   add_foreign_key "payroll_liability_postings", "pay_periods", on_delete: :restrict
   add_foreign_key "payroll_liability_postings", "payroll_liability_postings", column: "source_posting_id", on_delete: :restrict

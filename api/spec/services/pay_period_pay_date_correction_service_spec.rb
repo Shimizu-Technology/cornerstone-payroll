@@ -57,4 +57,25 @@ RSpec.describe PayPeriodPayDateCorrectionService do
       )
     }.not_to change(PayrollLiabilityPosting, :count)
   end
+
+  it "requires linked liability payments to be voided or deleted before restating the journal" do
+    posting = PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
+    entries = posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT)
+    payment = create(:non_employee_check, company: company, pay_period: pay_period,
+      payment_period_type: "pay_period", amount: entries.sum(:amount), payable_to: "Treasurer of Guam",
+      check_type: "tax_deposit")
+    PayrollLiabilityCheckAllocationService.allocate!(non_employee_check: payment, entry_ids: entries.pluck(:id))
+
+    expect {
+      described_class.call(
+        pay_period: pay_period,
+        new_pay_date: Date.new(2026, 7, 3),
+        reason: "Correct quarter-ending pay date",
+        actor: actor
+      )
+    }.to raise_error(described_class::Error, /linked liability payment/)
+
+    expect(pay_period.reload.pay_date).to eq(Date.new(2026, 6, 19))
+    expect(posting.reload.reversal_posting).to be_nil
+  end
 end
