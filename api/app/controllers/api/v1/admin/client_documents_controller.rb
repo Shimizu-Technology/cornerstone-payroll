@@ -98,17 +98,19 @@ module Api
           cleanup_storage_keys(file_keys)
           head :no_content
         rescue ActiveRecord::RecordNotDestroyed
-          raise unless readiness_evidence?(@document)
+          raise unless retained_evidence?(@document)
 
           render json: {
-            error: "This file is linked to retained employee-readiness evidence and cannot be deleted. Attach and verify a replacement when needed."
+            error: "This file is linked to retained compliance evidence and cannot be deleted. Attach and verify a replacement when needed."
           }, status: :unprocessable_entity
         end
 
         private
 
-        def readiness_evidence?(document)
-          document.employee_document_requirements.exists? || document.employee_document_requirement_events.exists?
+        def retained_evidence?(document)
+          document.employee_document_requirements.exists? ||
+            document.employee_document_requirement_events.exists? ||
+            document.payroll_filing_events.exists?
         end
 
         def set_document

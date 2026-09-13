@@ -4,6 +4,15 @@ module Api
   module V1
     module Admin
       class ReportsController < BaseController
+        EXTERNAL_FILING_OUTCOME_FIELDS = %i[
+          filed_at
+          paid_at
+          payment_amount
+          filing_confirmation_number
+          payment_confirmation_number
+          proof_attached
+        ].freeze
+
         REPORT_DESCRIPTIONS = {
           payroll_register: "Full payroll detail for the selected pay period, including hours, earnings, taxes, deductions, employer taxes, net pay, and check numbers.",
           payroll_summary_by_employee: "Employee-by-employee payroll summary for the selected pay period, including earnings, deductions, taxes, employer contributions, and total payroll cost.",
@@ -429,7 +438,29 @@ module Api
           task = QuarterlyComplianceTask.joins(:quarterly_compliance_packet)
             .where(quarterly_compliance_packets: { company_id: current_company_id })
             .find(params[:id])
-          if params.dig(:task, :status).to_s == "ready_to_file"
+          task_payload = params[:task] || {}
+          requested_status = task_payload[:status].to_s
+          typed_outcome = EXTERNAL_FILING_OUTCOME_FIELDS.any? { |field| task_payload.key?(field) }
+          if !task.status.in?(QuarterlyComplianceTask::PREPARATION_STATUSES) &&
+              requested_status.present? && requested_status != task.status
+            return render json: {
+              error: "Legacy status #{task.status.humanize.downcase} is retained read-only; use the filing evidence history"
+            }, status: :unprocessable_entity
+          end
+          if requested_status.present? && !requested_status.in?(QuarterlyComplianceTask::PREPARATION_STATUSES)
+            message = if requested_status.in?(QuarterlyComplianceTask::STATUSES)
+              "Status #{requested_status.humanize.downcase} is read-only; filing and payment outcomes require retained agency evidence"
+            else
+              "Unsupported quarterly task status: #{requested_status}"
+            end
+            return render json: { error: message }, status: :unprocessable_entity
+          end
+          if typed_outcome
+            return render json: {
+              error: "Filing and payment outcomes must be recorded with retained agency evidence"
+            }, status: :unprocessable_entity
+          end
+          if requested_status == "ready_to_file"
             filing_gate = PayrollFilingResponsibilityGate.for_task(task)
             unless filing_gate.dig(:capabilities, :can_mark_filing_ready)
               return render json: {
@@ -1482,12 +1513,6 @@ module Api
             :status,
             :due_date,
             :internal_target_date,
-            :filed_at,
-            :paid_at,
-            :payment_amount,
-            :filing_confirmation_number,
-            :payment_confirmation_number,
-            :proof_attached,
             :notes,
             data: {}
           )

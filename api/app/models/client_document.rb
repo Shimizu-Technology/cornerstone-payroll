@@ -6,6 +6,7 @@ class ClientDocument < ApplicationRecord
     payroll_source
     employee_onboarding
     tax_notice
+    filing_evidence
     direct_deposit
     identity
     insurance
@@ -34,6 +35,7 @@ class ClientDocument < ApplicationRecord
   has_many :client_portal_messages, dependent: :nullify
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
+  has_many :payroll_filing_events, foreign_key: :evidence_document_id, dependent: :restrict_with_error
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
