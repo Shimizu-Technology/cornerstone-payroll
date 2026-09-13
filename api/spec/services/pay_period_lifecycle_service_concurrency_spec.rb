@@ -305,7 +305,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     pay_period_ids = PayPeriod.where(company_id: company_id).pluck(:id)
     payroll_item_ids = PayrollItem.where(pay_period_id: pay_period_ids).pluck(:id)
 
-    CheckEvent.where(payroll_item_id: payroll_item_ids).delete_all
+    delete_check_events_for_cleanup(payroll_item_ids)
     PayrollLiabilityEntry.where(company_id: company_id).delete_all
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all
@@ -334,5 +334,14 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     connection&.execute(
       "ALTER TABLE employee_document_requirement_events ENABLE TRIGGER employee_document_requirement_events_append_only"
     )
+  end
+
+
+  def delete_check_events_for_cleanup(payroll_item_ids)
+    connection = CheckEvent.connection
+    connection.execute("ALTER TABLE check_events DISABLE TRIGGER check_events_append_only")
+    CheckEvent.where(payroll_item_id: payroll_item_ids).delete_all
+  ensure
+    connection&.execute("ALTER TABLE check_events ENABLE TRIGGER check_events_append_only")
   end
 end

@@ -245,6 +245,10 @@ module Api
 
         # POST /api/v1/admin/non_employee_checks/:id/mark_printed
         def mark_printed
+          if @check.pay_period && @check.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
+
           @check.mark_printed!
           render json: { non_employee_check: check_payload(@check.reload) }
         rescue ArgumentError => e
@@ -302,6 +306,10 @@ module Api
           checks = printable_batch_checks
           return if performed?
 
+          if checks.any? { |check| verified_print_package_required?(check) }
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
+          end
+
           if checks.empty?
             return render json: { error: "No printable non-employee checks found" }, status: :unprocessable_entity
           end
@@ -332,6 +340,9 @@ module Api
         def mark_all_printed
           checks = printable_batch_checks(include_printed: false)
           return if performed?
+          if checks.any? { |check| check.pay_period && check.company.require_distinct_check_print_confirmer? }
+            return render json: { error: "Use each pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
 
           marked_count = 0
           NonEmployeeCheck.transaction do
@@ -352,6 +363,9 @@ module Api
         def check_pdf
           unless @check.payment_method == "check"
             return render json: { error: "Only check payments have a printable check" }, status: :unprocessable_entity
+          end
+          if verified_print_package_required?(@check)
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
           if @check.company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
@@ -383,6 +397,10 @@ module Api
         end
 
         private
+
+        def verified_print_package_required?(check)
+          check.pay_period.present? && check.company.require_distinct_check_print_confirmer?
+        end
 
         def printable_batch_checks(include_printed: true)
           scope = NonEmployeeCheck

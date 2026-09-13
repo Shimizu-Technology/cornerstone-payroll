@@ -21,6 +21,9 @@ class CheckPrintRunConfirmationService
 
       locked_period = PayPeriod.lock.find(locked_run.pay_period_id)
       raise StaleSelectionError, "This pay period is no longer committed" unless locked_period.committed?
+      if locked_run.company.require_distinct_check_print_confirmer? && locked_run.created_by_id == actor.id
+        raise ArgumentError, "A different authorized payroll operator must confirm this print package"
+      end
 
       payroll_items, non_employee_checks = load_current_records(locked_run)
       verify_manifest!(locked_run, payroll_items, non_employee_checks)

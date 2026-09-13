@@ -436,10 +436,20 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       state_at = item.check_printed_at
       unless check_status == "printed"
         state_at = Time.zone.parse("2026-09-01 10:00:00")
-        event = item.check_events.create!(event_type: event_type, check_number: item.check_number)
-        event.update_columns(created_at: state_at, updated_at: state_at)
-        unrelated_event = item.check_events.create!(event_type: "renumbered", check_number: "9999")
-        unrelated_event.update_columns(created_at: state_at + 1.hour, updated_at: state_at + 1.hour)
+        item.check_events.create!(
+          event_type: event_type,
+          check_number: item.check_number,
+          effective_on: state_at.to_date,
+          created_at: state_at,
+          updated_at: state_at
+        )
+        item.check_events.create!(
+          event_type: "renumbered",
+          check_number: "9999",
+          effective_on: state_at.to_date,
+          created_at: state_at + 1.hour,
+          updated_at: state_at + 1.hour
+        )
       end
       pay_period.update!(status: "committed", committed_at: Time.zone.parse("2026-09-01 09:00:00"))
 

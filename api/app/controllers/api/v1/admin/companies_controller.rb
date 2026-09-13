@@ -224,6 +224,7 @@ module Api
               check_offset_y: company.check_offset_y,
               check_layout_config: company.check_layout_config || {},
               next_check_number: company.next_check_number,
+              require_distinct_check_print_confirmer: company.require_distinct_check_print_confirmer,
               simple_payroll_register_enabled: company.simple_payroll_register_enabled,
               historical_payroll_enabled: company.historical_payroll_enabled,
               client_payroll_approval_required: company.client_payroll_approval_required

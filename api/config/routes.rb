@@ -311,6 +311,10 @@ Rails.application.routes.draw do
           end
         end
 
+        get "check_register", to: "check_register#index"
+        get "check_register/export", to: "check_register#export"
+        post "check_register/events", to: "check_register#create_event"
+
         # CPR-66: Per-item check actions (payroll_item_id param)
         get  "payroll_items/:payroll_item_id/check",             to: "checks#show",           as: :payroll_item_check
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed

@@ -216,6 +216,8 @@ class PayPeriodLifecycleService
           check_number: check_number,
           reason: "Assigned when pay period was committed",
           ip_address: ip_address,
+          effective_on: PayrollBusinessClock.today,
+          details: {},
           created_at: now,
           updated_at: now
         }

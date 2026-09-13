@@ -19,6 +19,7 @@ import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/component
 import { DRT } from '@/lib/constants';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
+import { CheckRegister } from '@/components/checks/CheckRegister';
 import { formatDateRange } from '@/lib/utils';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
@@ -739,6 +740,8 @@ export function ChecksPayments() {
           onPrepare={handlePrepareLiabilities}
           onUpdated={setLiabilityCenter}
         />
+
+        <CheckRegister companyId={activeCompanyId} />
 
         <Card className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

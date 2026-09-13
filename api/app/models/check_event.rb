@@ -10,9 +10,18 @@ class CheckEvent < ApplicationRecord
   # never given out). The void of the old check # is logged separately as a
   # `voided` event for backwards compatibility with existing reports.
   VALID_EVENT_TYPES = %w[assigned printed delivered voided reprinted batch_downloaded replaced renumbered].freeze
+  DELIVERY_EVIDENCE_TYPES = %w[hand_delivery mail courier other].freeze
 
   validates :event_type, inclusion: { in: VALID_EVENT_TYPES }
   validates :check_number, presence: true
+  validates :effective_on, presence: true
+  validates :evidence_type, inclusion: { in: DELIVERY_EVIDENCE_TYPES }, allow_nil: true
+  validate :effective_date_is_not_in_the_future
+  validate :user_belongs_to_payroll_organization
+
+  before_validation :default_effective_on
+  before_update :prevent_mutation
+  before_destroy :prevent_mutation
 
   scope :for_check,   ->(number) { where(check_number: number) }
   scope :assignments, -> { where(event_type: "assigned") }
@@ -27,6 +36,26 @@ class CheckEvent < ApplicationRecord
   after_create_commit :dispatch_aire_entry_lifecycle
 
   private
+
+  def default_effective_on
+    self.effective_on ||= PayrollBusinessClock.today
+  end
+
+  def prevent_mutation
+    errors.add(:base, "Check event history is append-only")
+    throw :abort
+  end
+
+  def effective_date_is_not_in_the_future
+    errors.add(:effective_on, "cannot be in the future") if effective_on.present? && effective_on > PayrollBusinessClock.today
+  end
+
+  def user_belongs_to_payroll_organization
+    return if user.blank? || payroll_item.blank?
+    return if user.organization_id == payroll_item.company.organization_id
+
+    errors.add(:user, "must belong to the payroll company's organization")
+  end
 
   def record_aire_entry_lifecycle
     status = aire_entry_lifecycle_status

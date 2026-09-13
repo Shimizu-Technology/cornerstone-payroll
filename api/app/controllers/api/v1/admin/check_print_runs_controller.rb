@@ -106,7 +106,13 @@ module Api
             sha256: run.sha256,
             byte_size: run.byte_size,
             generated_at: run.generated_at,
-            confirmed_at: run.confirmed_at
+            confirmed_at: run.confirmed_at,
+            created_by_id: run.created_by_id,
+            created_by_name: run.created_by&.name,
+            confirmed_by_id: run.confirmed_by_id,
+            confirmed_by_name: run.confirmed_by&.name,
+            requires_distinct_confirmer: run.company.require_distinct_check_print_confirmer?,
+            can_current_user_confirm: !run.company.require_distinct_check_print_confirmer? || run.created_by_id != current_user.id
           }
         end
       end

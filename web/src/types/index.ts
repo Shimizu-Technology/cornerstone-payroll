@@ -1533,6 +1533,10 @@ export interface CheckEvent {
   user_id: number | null;
   user_name?: string | null;
   ip_address: string | null;
+  effective_on: string;
+  evidence_type: 'hand_delivery' | 'mail' | 'courier' | 'other' | null;
+  evidence_reference: string | null;
+  details: Record<string, unknown>;
   created_at: string;
 }
 
@@ -1564,6 +1568,7 @@ export interface CheckListMeta {
   unprinted: number;
   voided: number;
   check_stock_type: CheckStockType;
+  requires_verified_print_package: boolean;
 }
 
 export interface CheckListResponse {
@@ -1622,6 +1627,12 @@ export interface CheckPrintRun {
   byte_size: number;
   generated_at: string;
   confirmed_at: string | null;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  confirmed_by_id: number | null;
+  confirmed_by_name: string | null;
+  requires_distinct_confirmer: boolean;
+  can_current_user_confirm: boolean;
 }
 
 export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
@@ -1635,9 +1646,56 @@ export interface CheckSettings {
   bank_address: string | null;
   check_memo_template: string | null;
   auto_create_fit_check: boolean;
+  require_distinct_check_print_confirmer: boolean;
   check_layout_config: Record<string, unknown>;
   active_printer_profile_id: number | null;
   active_printer_profile_name: string | null;
+}
+
+export type CheckRegisterSourceType = 'payroll_item' | 'non_employee_check';
+export type CheckPaymentStatus = 'unprepared' | 'prepared' | 'issued' | 'cleared' | 'replacement_required' | 'voided';
+
+export interface CheckReconciliationEvent {
+  id: number;
+  event_type: 'cleared' | 'clearing_reversed' | 'replacement_required';
+  effective_on: string;
+  evidence_type: 'bank_statement' | 'bank_portal' | 'accountant_review' | 'payee_confirmation' | 'other' | null;
+  evidence_reference: string | null;
+  reason: string | null;
+  recorded_by: string;
+  created_at: string;
+}
+
+export interface CheckRegisterRow {
+  source_type: CheckRegisterSourceType;
+  source_id: number;
+  pay_period_id: number | null;
+  check_number: string;
+  previous_check_numbers: string[];
+  payee: string;
+  amount: string;
+  register_date: string;
+  status: CheckPaymentStatus;
+  reconciliation_status: 'reconciled' | 'outstanding' | 'action_required';
+  issued_on: string | null;
+  issued_by: string | null;
+  issuance_method: string | null;
+  issuance_reference: string | null;
+  latest_reconciliation_event: CheckReconciliationEvent | null;
+}
+
+export interface CheckRegister {
+  from: string;
+  to: string;
+  rows: CheckRegisterRow[];
+  summary: {
+    count: number;
+    amount: string;
+    reconciled_count: number;
+    outstanding_count: number;
+    action_required_count: number;
+    by_status: Record<CheckPaymentStatus, { count: number; amount: string }>;
+  };
 }
 
 export interface CheckLayoutPageMetadata {

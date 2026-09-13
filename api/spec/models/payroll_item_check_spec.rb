@@ -147,8 +147,9 @@ RSpec.describe PayrollItem, type: :model do
         [ "payment_prepared", "1508" ]
       )
 
-      first_delivery = item.mark_delivered!(user: admin_user)
-      repeated_delivery = item.mark_delivered!(user: admin_user)
+      delivery = { delivered_on: Date.current.iso8601, delivery_method: "hand_delivery", attestation: true }
+      first_delivery = item.mark_delivered!(user: admin_user, **delivery)
+      repeated_delivery = item.mark_delivered!(user: admin_user, **delivery)
 
       expect(first_delivery.fetch(:already_delivered)).to be(false)
       expect(repeated_delivery.fetch(:already_delivered)).to be(true)
@@ -163,7 +164,12 @@ RSpec.describe PayrollItem, type: :model do
 
     it "records a void after delivery without erasing the earlier payment history" do
       item.mark_printed!(user: admin_user)
-      item.mark_delivered!(user: admin_user)
+      item.mark_delivered!(
+        user: admin_user,
+        delivered_on: Date.current.iso8601,
+        delivery_method: "hand_delivery",
+        attestation: true
+      )
       item.void!(user: admin_user, reason: "Payment was returned and check was voided")
 
       expect(item.reload.check_status).to eq("voided")
