@@ -9,7 +9,7 @@ class PayPeriodTimeTrackingSummary
                         .where(status: "applied", time_tracking_sources: { company_id: pay_period.company_id, source_type: "aire_services" })
                         .includes(:time_tracking_source)
                         .order(:id)
-    {
+    summary = {
       active_source_types: pay_period.company.time_tracking_sources.active.distinct.pluck(:source_type),
       linked_aire_records: imports.select(&:finalized_batch?).map do |import|
         {
@@ -29,5 +29,8 @@ class PayPeriodTimeTrackingSummary
         }
       end
     }
+    calendar = AirePayrollCalendar::Presenter.call(pay_period)
+    summary[:aire_calendar] = calendar if calendar
+    summary
   end
 end

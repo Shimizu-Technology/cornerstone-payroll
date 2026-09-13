@@ -1983,4 +1983,94 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
     end
   end
+
+  describe "PATCH /api/v1/admin/pay_periods/:id with a published AIRE cutoff" do
+    include ActiveSupport::Testing::TimeHelpers
+
+    it "blocks date drift after the delivered cutoff" do
+      pay_period.update!(
+        start_date: Date.new(2026, 10, 1),
+        end_date: Date.new(2026, 10, 15),
+        pay_date: Date.new(2026, 10, 25)
+      )
+      original_pay_date = pay_period.pay_date
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      calendar = create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period)
+      cutoff = Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+      create(
+        :aire_payroll_calendar_publication,
+        aire_payroll_calendar_period: calendar,
+        delivery_status: "delivered",
+        delivered_at: cutoff - 1.day,
+        payload: {
+          "schema_version" => "1.0",
+          "start_date" => pay_period.start_date.iso8601,
+          "end_date" => pay_period.end_date.iso8601,
+          "pay_date" => pay_period.pay_date.iso8601,
+          "cutoff_at" => cutoff.iso8601,
+          "time_zone" => "Pacific/Guam",
+          "cutoff_days_before" => 7,
+          "schedule_version" => 1,
+          "publication_id" => SecureRandom.uuid
+        }
+      )
+      create(
+        :aire_payroll_calendar_publication,
+        aire_payroll_calendar_period: calendar,
+        schedule_version: 2,
+        delivery_status: "failed",
+        payload: {
+          "schema_version" => "1.0",
+          "start_date" => pay_period.start_date.iso8601,
+          "end_date" => pay_period.end_date.iso8601,
+          "pay_date" => pay_period.pay_date.iso8601,
+          "cutoff_at" => (cutoff + 1.day).iso8601,
+          "time_zone" => "Pacific/Guam",
+          "cutoff_days_before" => 7,
+          "schedule_version" => 2,
+          "publication_id" => SecureRandom.uuid
+        }
+      )
+
+      travel_to(cutoff) do
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+          pay_period: { pay_date: pay_period.pay_date + 1.day }
+        }
+      end
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").join(" ")).to include("published AIRE cutoff has passed")
+      expect(pay_period.reload.pay_date).to eq(original_pay_date)
+    end
+
+    it "also blocks the committed pay-date correction path after cutoff" do
+      pay_period.update!(
+        start_date: Date.new(2026, 10, 1),
+        end_date: Date.new(2026, 10, 15),
+        pay_date: Date.new(2026, 10, 25),
+        status: "committed",
+        committed_at: Time.current
+      )
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      calendar = create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period)
+      cutoff = Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+      create(
+        :aire_payroll_calendar_publication,
+        aire_payroll_calendar_period: calendar,
+        delivery_status: "delivered",
+        delivered_at: cutoff - 1.day
+      )
+
+      travel_to(cutoff) do
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date", params: {
+          pay_date: "2026-10-26",
+          reason: "Clerical correction"
+        }
+      end
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("published AIRE cutoff has passed")
+      expect(pay_period.reload.pay_date).to eq(Date.new(2026, 10, 25))
+    end
+  end
 end

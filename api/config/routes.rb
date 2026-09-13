@@ -10,6 +10,12 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
+      namespace :integrations do
+        namespace :aire do
+          post :events, to: "events#create"
+        end
+      end
+
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
       post "cable_ticket", to: "cable_tickets#create"
@@ -222,6 +228,10 @@ Rails.application.routes.draw do
         end
 
         resources :pay_periods do
+          resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
+            post :publish
+            post :retry_delivery
+          end
           resources :payroll_liabilities, only: [ :index ]
           member do
             get :client_review

@@ -31,7 +31,8 @@ module Api
         def settings_params
           params.require(:pay_schedule_settings).permit(
             :effective_on,
-            pay_schedule: [ :frequency, :period_rule, :period_start_weekday, :period_anchor_date, :pay_date_rule, :pay_date_offset_days, :timezone, :notes ],
+            pay_schedule: [ :frequency, :period_rule, :period_start_weekday, :period_anchor_date, :pay_date_rule, :pay_date_offset_days,
+                            :payroll_cutoff_days_before, :payroll_cutoff_at_minutes, :timezone, :notes ],
             workweek: [ :starts_on_weekday, :starts_at_minutes, :timezone, :notes ]
           )
         end
@@ -77,7 +78,7 @@ module Api
           )
           schedule.as_json(only: [
             :id, :frequency, :period_rule, :period_start_weekday, :period_anchor_date, :pay_date_rule,
-            :pay_date_offset_days, :timezone, :source, :confirmation_status,
+            :pay_date_offset_days, :payroll_cutoff_days_before, :payroll_cutoff_at_minutes, :timezone, :source, :confirmation_status,
             :confirmed_at, :effective_on, :ends_on, :notes
           ])
         end

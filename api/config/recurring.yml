@@ -24,6 +24,11 @@ production:
     queue: default
     schedule: every 5 minutes
 
+  dispatch_aire_payroll_calendar_sync:
+    class: AirePayrollCalendarDispatchJob
+    queue: default
+    schedule: every minute
+
   dispatch_historical_client_bootstraps:
     class: HistoricalClientBootstrapDispatchJob
     queue: default

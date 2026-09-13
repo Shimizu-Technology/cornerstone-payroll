@@ -1036,6 +1036,14 @@ export const payPeriodsApi = {
     api.get<PayPeriodListResponse>('/admin/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`, undefined, { companyId }),
+  publishAireCalendar: (id: number) =>
+    api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState; created: boolean }>(
+      `/admin/pay_periods/${id}/aire_payroll_calendar/publish`
+    ),
+  retryAireCalendarDelivery: (id: number) =>
+    api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
+      `/admin/pay_periods/${id}/aire_payroll_calendar/retry_delivery`
+    ),
   payrollFieldInputs: (id: number) =>
     api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
   comparison: (id: number) =>
@@ -3065,6 +3073,8 @@ export interface CompanyPayScheduleSetting {
   period_anchor_date?: string | null;
   pay_date_rule: 'manual' | 'days_after_period_end';
   pay_date_offset_days?: number | null;
+  payroll_cutoff_days_before: number;
+  payroll_cutoff_at_minutes: number;
   timezone: string;
   source: ScheduleSource;
   confirmation_status: ScheduleConfirmationStatus;
@@ -3098,7 +3108,7 @@ export const payScheduleSettingsApi = {
   get: () => api.get<PayScheduleSettingsResponse>('/admin/pay_schedule_settings'),
   update: (data: {
     effective_on: string;
-    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'timezone' | 'notes'>;
+    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'payroll_cutoff_days_before' | 'payroll_cutoff_at_minutes' | 'timezone' | 'notes'>;
     workweek: Pick<CompanyWorkweekSetting, 'starts_on_weekday' | 'starts_at_minutes' | 'timezone' | 'notes'>;
   }) => api.put<PayScheduleSettingsResponse>('/admin/pay_schedule_settings', { pay_schedule_settings: data }),
 };
