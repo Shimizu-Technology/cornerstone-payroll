@@ -84,6 +84,14 @@ module TimeTracking
       request_json(payroll_cockpit_uri("/exceptions", query), validate_source: false, surface_remote_error: true)
     end
 
+    def payroll_cockpit_settlement_cases(external_pay_period_id:, page: 1, per_page: 250, status: nil)
+      query = {
+        external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
+      }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
+      query[:status] = status if status.present?
+      request_json(payroll_cockpit_uri("/settlement_cases", query), validate_source: false, surface_remote_error: true)
+    end
+
     def approve_payroll_time_entry(entry_id:, command_id:, expected_version:, decision:, reason:)
       delegated_request_json(
         payroll_cockpit_time_entry_approval_uri(entry_id),
@@ -93,6 +101,32 @@ module TimeTracking
           decision: decision,
           reason: reason
         }
+      )
+    end
+
+    def correct_payroll_time_entry(entry_id:, command_id:, expected_version:, reason:, attributes:)
+      delegated_request_json(
+        payroll_cockpit_time_entry_correction_uri(entry_id),
+        body: attributes.to_h.merge(
+          command_id: command_id,
+          expected_version: expected_version,
+          reason: reason
+        )
+      )
+    end
+
+    def route_payroll_settlement_case(case_id:, command_id:, expected_version:, reason:, destination_kind:,
+                                      target_external_pay_period_id: nil, action_due_on: nil)
+      delegated_request_json(
+        payroll_cockpit_settlement_case_uri(case_id, action: "route"),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          reason: reason,
+          destination_kind: destination_kind,
+          target_external_pay_period_id: target_external_pay_period_id,
+          action_due_on: action_due_on
+        }.compact
       )
     end
 
@@ -243,6 +277,23 @@ module TimeTracking
       raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
 
       source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/approval")
+    end
+
+    def payroll_cockpit_time_entry_correction_uri(entry_id)
+      normalized_id = entry_id.to_s
+      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+
+      source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/correction")
+    end
+
+    def payroll_cockpit_settlement_case_uri(case_id, action: nil)
+      normalized_id = case_id.to_s.downcase
+      unless normalized_id.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+        raise Error, "Invalid AIRE settlement case ID"
+      end
+
+      suffix = action ? "/#{action}" : ""
+      source_uri("/api/v1/payroll/cockpit/settlement_cases/#{normalized_id}#{suffix}")
     end
 
     def payroll_cockpit_uri(path, query = nil)

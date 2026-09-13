@@ -7,6 +7,7 @@ import type {
   AirePayrollCalendarState,
   AirePayrollCockpitOverview,
   AirePayrollExceptionsResponse,
+  AirePayrollSettlementCasesResponse,
   AirePayrollTimeEntriesResponse,
 } from '@/types';
 import { AirePayrollCockpit } from './AirePayrollCockpit';
@@ -15,7 +16,10 @@ const apiMocks = vi.hoisted(() => ({
   overview: vi.fn(),
   entries: vi.fn(),
   exceptions: vi.fn(),
+  settlements: vi.fn(),
   review: vi.fn(),
+  correct: vi.fn(),
+  routeSettlement: vi.fn(),
   finalize: vi.fn(),
   publish: vi.fn(),
   retry: vi.fn(),
@@ -34,7 +38,10 @@ vi.mock('@/services/api', () => ({
     airePayrollCockpit: apiMocks.overview,
     airePayrollTimeEntries: apiMocks.entries,
     airePayrollExceptions: apiMocks.exceptions,
+    airePayrollSettlementCases: apiMocks.settlements,
     reviewAireTimeEntry: apiMocks.review,
+    correctAireTimeEntry: apiMocks.correct,
+    routeAireSettlementCase: apiMocks.routeSettlement,
     finalizeAirePayrollPeriod: apiMocks.finalize,
     publishAireCalendar: apiMocks.publish,
     retryAireCalendarDelivery: apiMocks.retry,
@@ -84,6 +91,7 @@ const timeEntry = {
   end_time: '05:09 PM',
   hours: 8.08,
   break_minutes: 60,
+  breaks: [{ id: '9', start_time: '2026-10-14T02:00:00Z', end_time: '2026-10-14T03:00:00Z', duration_minutes: 60, active: false }],
   category: { id: '2', key: 'regular', name: 'Regular' },
   capture: { entry_method: 'manual', clock_source: null, ordinary: false, admin_override: true },
   state: {
@@ -135,6 +143,13 @@ function fixtures(canCommand = true) {
     }],
     employee_pagination: { current_page: 1, per_page: 100, total_count: 1, total_pages: 1, truncated: false },
     command_access: { can_read: true, can_command: canCommand, delegation_configured: canCommand },
+    routing_options: [{
+      external_pay_period_id: 'cb55b145-0dbc-4211-96d3-eb63fa7c5278',
+      pay_period_id: 18,
+      start_date: '2026-10-16',
+      end_date: '2026-10-31',
+      pay_date: '2026-11-10',
+    }],
   };
   const entries: AirePayrollTimeEntriesResponse = {
     payroll_period: period,
@@ -149,7 +164,40 @@ function fixtures(canCommand = true) {
     leave_exception_pagination: { current_page: 1, per_page: 100, total_count: 0, total_pages: 1, truncated: false },
     carryovers: { items: [], summary: {}, truncated: false },
   };
-  return { overview, entries, exceptions };
+  const settlements: AirePayrollSettlementCasesResponse = {
+    settlement_cases: [{
+      id: '9a708e48-f04e-47e8-8e0c-7b727def25d4',
+      version: 2,
+      source_time_entry_version: 3,
+      status: 'open',
+      source_time_entry_id: '42',
+      employee: { ...timeEntry.employee, email: 'malia@example.com' },
+      time: {
+        original_work_date: '2026-10-14',
+        held_total_hours: 8.08,
+        current_total_hours: 8.18,
+        category: timeEntry.category,
+        approval_status: 'pending',
+        entry_status: 'completed',
+      },
+      origin: {
+        reason: 'pending_approval',
+        payroll_batch_id: 'AIRE-PAY-ORIGIN',
+        payroll_period_id: calendar.external_pay_period_id,
+        excluded_at: calendar.cutoff_at!,
+      },
+      routing: {
+        destination_kind: 'unassigned',
+        owner_role: 'aire_admins',
+        action_due_on: '2026-10-25',
+      },
+      processing: null,
+      events: [],
+    }],
+    pagination: { current_page: 1, per_page: 250, total_count: 1, total_pages: 1, truncated: false },
+    summary: { open: 1, scheduled: 0, in_payroll: 0, settled: 0, attention_due: 1 },
+  };
+  return { overview, entries, exceptions, settlements };
 }
 
 function mockLoads(canCommand = true) {
@@ -157,12 +205,15 @@ function mockLoads(canCommand = true) {
   apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
   apiMocks.entries.mockResolvedValue(data.entries);
   apiMocks.exceptions.mockResolvedValue(data.exceptions);
+  apiMocks.settlements.mockResolvedValue(data.settlements);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoads();
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
+  apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
+  apiMocks.routeSettlement.mockResolvedValue({ settlement_case: { ...fixtures().settlements.settlement_cases[0], status: 'scheduled', version: 3 } });
   apiMocks.finalize.mockResolvedValue({ result: { status: 'finalized', payroll_batch_id: 'AIRE-PAY-1' } });
 });
 
@@ -201,6 +252,113 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
   });
 
+  it('corrects a manual timecard in AIRE and makes the new approval requirement explicit', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect((screen.getByLabelText('Start time') as HTMLInputElement).value).toBe('08:04');
+    expect((screen.getByLabelText('End time') as HTMLInputElement).value).toBe('17:09');
+    expect((screen.getByLabelText('Break 1 start') as HTMLInputElement).value).toBe('12:00');
+    expect((screen.getByLabelText('Break 1 end') as HTMLInputElement).value).toBe('13:00');
+    await user.clear(screen.getByLabelText('End time'));
+    fireEvent.change(screen.getByLabelText('End time'), { target: { value: '17:15' } });
+    await user.type(screen.getByLabelText('Correction reason'), 'Employee confirmed the missed punch');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 3,
+      reason: 'Employee confirmed the missed punch',
+      work_date: '2026-10-14',
+      start_time: '08:04',
+      end_time: '17:15',
+      time_category_id: '2',
+      breaks: [{ start_time: '12:00', end_time: '13:00' }],
+      command_id: expect.any(String),
+    })));
+    expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
+  });
+
+  it('preserves legacy aggregate break minutes when exact break times are unavailable', async () => {
+    const user = userEvent.setup();
+    apiMocks.entries.mockResolvedValueOnce({
+      ...fixtures().entries,
+      time_entries: [{
+        ...timeEntry,
+        breaks: [],
+        state: { ...timeEntry.state, approval_status: 'approved', overtime_status: 'pending' },
+      }],
+    });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    expect(screen.getByText('Overtime approval needed')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByText(/AIRE has 60 total break minutes but no exact break times/i)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Correcting the description only' } });
+    const save = screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await user.click(save);
+
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalled());
+    const payload = apiMocks.correct.mock.calls[0]?.[2];
+    expect(payload).not.toHaveProperty('breaks');
+  });
+
+  it('shows the held-time evidence and routes it to a published future payroll', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+
+    await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+    expect(screen.getByText('8.08 held hours')).toBeTruthy();
+    expect(screen.getByText(/Current corrected time is 8.18 hours/i)).toBeTruthy();
+    expect(screen.getByText(/No payment has been recorded/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Choose destination' }));
+    expect(screen.getByText(/8.18 current corrected hours \(originally held 8.08\)/i)).toBeTruthy();
+    expect((screen.getByLabelText('Regular payroll') as HTMLSelectElement).value).toBe('cb55b145-0dbc-4211-96d3-eb63fa7c5278');
+    fireEvent.change(screen.getByLabelText('Routing reason'), { target: { value: 'Pay in the next available regular payroll' } });
+    const submit = screen.getByRole('button', { name: 'Route to payroll' }) as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    await user.click(submit);
+
+    await waitFor(() => expect(apiMocks.routeSettlement).toHaveBeenCalledWith(
+      17,
+      '9a708e48-f04e-47e8-8e0c-7b727def25d4',
+      expect.objectContaining({
+        expected_version: 2,
+        destination_kind: 'regular',
+        target_external_pay_period_id: 'cb55b145-0dbc-4211-96d3-eb63fa7c5278',
+        reason: 'Pay in the next available regular payroll',
+      })
+    ));
+  });
+
+  it('requires an explicit reason before marking held hours not payable', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+
+    await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+    await user.click(screen.getByRole('button', { name: 'Choose destination' }));
+    await user.click(screen.getByRole('radio', { name: /Mark not payable/i }));
+    const submit = screen.getByRole('button', { name: 'Mark not payable' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    await user.type(screen.getByLabelText('Routing reason'), 'Confirmed duplicate time entry');
+    await user.click(submit);
+
+    await waitFor(() => expect(apiMocks.routeSettlement).toHaveBeenCalledWith(
+      17,
+      '9a708e48-f04e-47e8-8e0c-7b727def25d4',
+      expect.objectContaining({
+        destination_kind: 'not_payable',
+        reason: 'Confirmed duplicate time entry',
+      })
+    ));
+    expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
+  });
+
   it('keeps the workspace readable but disables commands without a personal delegation', async () => {
     mockLoads(false);
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
@@ -229,6 +387,9 @@ describe('AirePayrollCockpit', () => {
     apiMocks.exceptions
       .mockImplementationOnce(async () => { await staleGate; return stale.exceptions; })
       .mockResolvedValue(current.exceptions);
+    apiMocks.settlements
+      .mockImplementationOnce(async () => { await staleGate; return stale.settlements; })
+      .mockResolvedValue(current.settlements);
 
     const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(1));
@@ -239,6 +400,19 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
     expect(screen.getByText('Current Employee')).toBeTruthy();
     expect(screen.queryByText('Malia Cruz')).toBeNull();
+  });
+
+  it('closes commands from the prior payroll when the operator navigates to another period', async () => {
+    const user = userEvent.setup();
+    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByRole('heading', { name: 'Correct time in AIRE' })).toBeTruthy();
+
+    view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Correct time in AIRE' })).toBeNull());
+    expect(apiMocks.correct).not.toHaveBeenCalled();
   });
 
   it('locks a due period only after confirmation and refreshes both systems', async () => {

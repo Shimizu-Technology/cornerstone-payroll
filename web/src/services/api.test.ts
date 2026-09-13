@@ -190,6 +190,21 @@ describe('ApiClient company identity', (): void => {
     await payPeriodsApi.airePayrollCockpit(17, { employee_page: 2 });
     await payPeriodsApi.airePayrollTimeEntries(17, { employee_id: '91', approval_status: 'pending', page: 3 });
     await payPeriodsApi.airePayrollExceptions(17, { page: 4, leave_page: 5 });
+    await payPeriodsApi.airePayrollSettlementCases(17, { page: 6, status: 'open' });
+    await payPeriodsApi.correctAireTimeEntry(17, '42', {
+      ...command,
+      work_date: '2026-10-14',
+      start_time: '08:00',
+      end_time: '17:00',
+      time_category_id: '7',
+      description: 'Regular shift',
+      breaks: [{ start_time: '12:00', end_time: '13:00' }],
+    });
+    await payPeriodsApi.routeAireSettlementCase(17, '9a708e48-f04e-47e8-8e0c-7b727def25d4', {
+      ...command,
+      destination_kind: 'regular',
+      target_external_pay_period_id: 'cb55b145-0dbc-4211-96d3-eb63fa7c5278',
+    });
     await payPeriodsApi.finalizeAirePayrollPeriod(17, command);
 
     const calls = fetchMock.mock.calls.map(([input, options]) => ({
@@ -211,7 +226,18 @@ describe('ApiClient company identity', (): void => {
     expect(Object.fromEntries(calls[4].url.searchParams)).toEqual({
       page: '4', leave_page: '5', per_page: '250', leave_per_page: '100',
     });
-    expect(calls[5]).toMatchObject({ method: 'POST', body: command });
-    expect(calls[5].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/finalize');
+    expect(Object.fromEntries(calls[5].url.searchParams)).toEqual({ page: '6', status: 'open', per_page: '250' });
+    expect(calls[6]).toMatchObject({
+      method: 'POST',
+      body: expect.objectContaining({ expected_version: 2, work_date: '2026-10-14', breaks: [{ start_time: '12:00', end_time: '13:00' }] }),
+    });
+    expect(calls[6].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/time_entries/42/correction');
+    expect(calls[7]).toMatchObject({
+      method: 'POST',
+      body: expect.objectContaining({ destination_kind: 'regular', target_external_pay_period_id: 'cb55b145-0dbc-4211-96d3-eb63fa7c5278' }),
+    });
+    expect(calls[7].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/settlement_cases/9a708e48-f04e-47e8-8e0c-7b727def25d4/route');
+    expect(calls[8]).toMatchObject({ method: 'POST', body: command });
+    expect(calls[8].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/finalize');
   });
 });

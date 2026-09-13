@@ -125,6 +125,109 @@ RSpec.describe TimeTracking::Client do
       expect(stub).to have_been_requested.once
     end
 
+    it "reads the held-time settlement queue with bounded filters" do
+      stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/settlement_cases")
+        .with(
+          query: {
+            "external_pay_period_id" => external_id,
+            "page" => "1",
+            "per_page" => "250",
+            "status" => "open"
+          },
+          headers: { "X-Payroll-Shared-Secret" => "secret" }
+        )
+        .to_return(status: 200, body: { settlement_cases: [] }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      result = client_for(source).payroll_cockpit_settlement_cases(
+        external_pay_period_id: external_id,
+        page: 0,
+        per_page: 10_000,
+        status: "open"
+      )
+
+      expect(result).to eq("settlement_cases" => [])
+      expect(stub).to have_been_requested.once
+    end
+
+    it "sends delegated time corrections and settlement routing with complete evidence" do
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+      correction_command_id = SecureRandom.uuid
+      route_command_id = SecureRandom.uuid
+      settlement_case_id = SecureRandom.uuid
+      correction_stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries/42/correction")
+        .with(
+          headers: {
+            "X-Payroll-Shared-Secret" => "secret",
+            "X-Aire-Delegation-Token" => "operator-grant"
+          },
+          body: {
+            "command_id" => correction_command_id,
+            "expected_version" => 3,
+            "reason" => "Employee confirmed the missed punch",
+            "work_date" => "2026-10-14",
+            "start_time" => "08:00",
+            "end_time" => "17:00",
+            "time_category_id" => 7,
+            "description" => "Regular shift",
+            "breaks" => [ { "start_time" => "12:00", "end_time" => "13:00" } ]
+          }
+        )
+        .to_return(status: 200, body: { time_entry: { id: "42", version: 4 } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+      route_stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/settlement_cases/#{settlement_case_id}/route")
+        .with(
+          headers: {
+            "X-Payroll-Shared-Secret" => "secret",
+            "X-Aire-Delegation-Token" => "operator-grant"
+          },
+          body: {
+            "command_id" => route_command_id,
+            "expected_version" => 2,
+            "reason" => "Move to the next regular payroll",
+            "destination_kind" => "regular",
+            "target_external_pay_period_id" => external_id
+          }
+        )
+        .to_return(status: 200, body: { settlement_case: { id: settlement_case_id, version: 3 } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      client = client_for(source, delegation: delegation)
+      correction = client.correct_payroll_time_entry(
+        entry_id: 42,
+        command_id: correction_command_id,
+        expected_version: 3,
+        reason: "Employee confirmed the missed punch",
+        attributes: {
+          work_date: "2026-10-14",
+          start_time: "08:00",
+          end_time: "17:00",
+          time_category_id: 7,
+          description: "Regular shift",
+          breaks: [ { start_time: "12:00", end_time: "13:00" } ]
+        }
+      )
+      routed = client.route_payroll_settlement_case(
+        case_id: settlement_case_id,
+        command_id: route_command_id,
+        expected_version: 2,
+        reason: "Move to the next regular payroll",
+        destination_kind: "regular",
+        target_external_pay_period_id: external_id
+      )
+
+      expect(correction.dig("time_entry", "version")).to eq(4)
+      expect(routed.dig("settlement_case", "version")).to eq(3)
+      expect(correction_stub).to have_been_requested.once
+      expect(route_stub).to have_been_requested.once
+    end
+
     it "refuses to send a delegation token over non-loopback HTTP" do
       source.update!(base_url: "http://time.example.com/client-a")
       delegation = create(
@@ -211,7 +314,7 @@ RSpec.describe TimeTracking::Client do
       }
     end
 
-    it "rejects unsafe period and time entry identifiers before a request" do
+    it "rejects unsafe period, time entry, and settlement identifiers before a request" do
       request = stub_request(:any, %r{time\.example\.com})
 
       expect do
@@ -227,6 +330,16 @@ RSpec.describe TimeTracking::Client do
             reason: "Verified"
           )
       end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE time entry ID/)
+      expect do
+        client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
+          .route_payroll_settlement_case(
+            case_id: "../case",
+            command_id: SecureRandom.uuid,
+            expected_version: 1,
+            reason: "Invalid identifier",
+            destination_kind: "not_payable"
+          )
+      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE settlement case ID/)
       expect(request).not_to have_been_requested
     end
 

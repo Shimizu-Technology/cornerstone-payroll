@@ -237,8 +237,11 @@ Rails.application.routes.draw do
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :time_entries
             get :exceptions
+            get :settlement_cases
             post :finalize
             post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
+            post "time_entries/:time_entry_id/correction", action: :correct_time_entry, as: :time_entry_correction
+            post "settlement_cases/:settlement_case_id/route", action: :route_settlement_case, as: :settlement_case_route
           end
           resources :payroll_liabilities, only: [ :index ]
           member do
