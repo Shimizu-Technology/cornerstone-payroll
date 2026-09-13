@@ -7,7 +7,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
-import { readinessUploadError, reconcileEmployeeDocumentLoads, selectReadinessItem } from '@/lib/employee-document-upload';
+import { isCurrentEmployeeDocumentRequest, readinessUploadError, reconcileEmployeeDocumentLoads, selectReadinessItem } from '@/lib/employee-document-upload';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -93,10 +93,22 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
     files: [] as File[],
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadSequenceRef = useRef(0);
+  const loadedEmployeeIdRef = useRef<number | null>(null);
 
   const api = isClient ? clientDocumentsApi : adminClientDocumentsApi;
 
   const loadDocuments = useCallback(async () => {
+    const requestId = loadSequenceRef.current + 1;
+    loadSequenceRef.current = requestId;
+    if (loadedEmployeeIdRef.current !== employeeId) {
+      loadedEmployeeIdRef.current = employeeId;
+      setDocuments([]);
+      setRequirements([]);
+      setReadyForPayroll(true);
+      setRequirementDrafts({});
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -106,6 +118,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
           ? clientEmployeeDocumentRequirementsApi.list(employeeId)
           : adminEmployeeDocumentRequirementsApi.list(employeeId),
       ]);
+      if (!isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)) return;
+
       const loaded = reconcileEmployeeDocumentLoads(documentsResult, requirementsResult);
       if (loaded.documents) {
         setDocuments(loaded.documents.data);
@@ -126,12 +140,15 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       }
       setError(loaded.error);
     } finally {
-      setLoading(false);
+      if (isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)) setLoading(false);
     }
   }, [api, employeeId, isClient, onReadinessChange]);
 
   useEffect(() => {
     void loadDocuments();
+    return () => {
+      loadSequenceRef.current += 1;
+    };
   }, [loadDocuments]);
 
   const selectedFiles = form.files;

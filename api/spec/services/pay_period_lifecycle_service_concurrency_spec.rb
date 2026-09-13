@@ -147,7 +147,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     requirement = employee.employee_document_requirements.first
     readiness_checked = Queue.new
     release_transition = Queue.new
-    writer_started = Queue.new
+    writer_backend_pid = Queue.new
     results = Queue.new
 
     allow(EmployeeDocumentReadiness).to receive(:require_payroll_ready!).and_wrap_original do |original, period|
@@ -163,7 +163,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       review_thread = Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do
           thread_requirement = EmployeeDocumentRequirement.find(requirement.id)
-          writer_started << true
+          writer_backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
           EmployeeDocumentRequirementReviewService.new(
             requirement: thread_requirement,
             actor: User.find(actor.id),
@@ -177,7 +177,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
           results << [ :error, e ]
         end
       end
-      Timeout.timeout(5) { writer_started.pop }
+      backend_pid = Timeout.timeout(5) { writer_backend_pid.pop }
+      wait_for_database_lock!(backend_pid)
       expect(review_thread.join(0.2)).to be_nil
     ensure
       release_transition << true
@@ -191,6 +192,20 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
   end
 
   private
+
+  def wait_for_database_lock!(backend_pid)
+    pid = Integer(backend_pid)
+    Timeout.timeout(5) do
+      loop do
+        wait_event_type = ActiveRecord::Base.connection.select_value(
+          "SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{pid}"
+        )
+        break if wait_event_type == "Lock"
+
+        sleep 0.01
+      end
+    end
+  end
 
   def lifecycle_thread(results, operation)
     Thread.new do

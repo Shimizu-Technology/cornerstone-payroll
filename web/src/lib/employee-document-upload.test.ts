@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { readinessUploadError, reconcileEmployeeDocumentLoads, selectReadinessItem } from './employee-document-upload';
+import {
+  isCurrentEmployeeDocumentRequest,
+  readinessUploadError,
+  reconcileEmployeeDocumentLoads,
+  selectReadinessItem,
+} from './employee-document-upload';
 
 describe('employee document readiness upload state', () => {
   it('clears previously selected files when a readiness item is selected', () => {
@@ -34,5 +39,19 @@ describe('employee document readiness upload state', () => {
     expect(result.documents).toBe(documents);
     expect(result.readiness).toBeUndefined();
     expect(result.error).toBe('Payroll readiness could not be loaded: Readiness service unavailable');
+  });
+
+  it('uses a distinct readiness fallback for non-error rejections', () => {
+    const result = reconcileEmployeeDocumentLoads(
+      { status: 'fulfilled', value: [] },
+      { status: 'rejected', reason: undefined },
+    );
+
+    expect(result.error).toBe('Payroll readiness could not be loaded: Try again or contact support.');
+  });
+
+  it('rejects an employee-document response superseded by a newer request', () => {
+    expect(isCurrentEmployeeDocumentRequest(8, 9)).toBe(false);
+    expect(isCurrentEmployeeDocumentRequest(9, 9)).toBe(true);
   });
 });

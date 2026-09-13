@@ -17,6 +17,10 @@ export function readinessUploadError(requirementId: string, files: File[]): stri
   return null;
 }
 
+export function isCurrentEmployeeDocumentRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId;
+}
+
 export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
   documentsResult: PromiseSettledResult<Documents>,
   readinessResult: PromiseSettledResult<Readiness>,
@@ -26,7 +30,11 @@ export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
     loadErrors.push(documentsResult.reason instanceof Error ? documentsResult.reason.message : 'Employee documents could not be loaded');
   }
   if (readinessResult.status === 'rejected') {
-    const reason = readinessResult.reason instanceof Error ? readinessResult.reason.message : 'Payroll readiness could not be loaded';
+    const reason = readinessResult.reason instanceof Error
+      ? readinessResult.reason.message
+      : typeof readinessResult.reason === 'string' && readinessResult.reason.trim()
+        ? readinessResult.reason.trim()
+        : 'Try again or contact support.';
     loadErrors.push(`Payroll readiness could not be loaded: ${reason}`);
   }
 
