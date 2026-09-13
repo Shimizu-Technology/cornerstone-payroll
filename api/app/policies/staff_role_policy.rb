@@ -55,6 +55,8 @@ class StaffRolePolicy
     "api/v1/admin/pay_component_tax_rules#create" => :manage_organization,
     "api/v1/admin/pay_component_tax_rules#update" => :manage_organization,
     "api/v1/admin/pay_schedule_settings#update" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_calendars#publish" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_calendars#retry_delivery" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
     "api/v1/admin/payroll_filing_responsibilities#upsert" => :manage_filing_review,

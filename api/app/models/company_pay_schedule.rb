@@ -6,6 +6,7 @@ class CompanyPaySchedule < ApplicationRecord
   PAY_DATE_RULES = %w[manual days_after_period_end].freeze
   SOURCES = %w[operator_confirmed production_inferred legacy_system_default].freeze
   CONFIRMATION_STATUSES = %w[confirmed needs_confirmation].freeze
+  PAYROLL_CUTOFF_DAYS_BEFORE = 7
 
   belongs_to :company
   belongs_to :confirmed_by, class_name: "User", optional: true
@@ -23,6 +24,10 @@ class CompanyPaySchedule < ApplicationRecord
   validates :pay_date_offset_days,
             numericality: { only_integer: true, greater_than_or_equal_to: 0, less_than_or_equal_to: 31 },
             allow_nil: true
+  validates :payroll_cutoff_days_before,
+            inclusion: { in: [ PAYROLL_CUTOFF_DAYS_BEFORE ] }
+  validates :payroll_cutoff_at_minutes,
+            numericality: { only_integer: true, greater_than_or_equal_to: 0, less_than_or_equal_to: 1_439 }
   validate :ends_on_not_before_effective_on
   validate :automatic_period_rule_has_weekday
   validate :biweekly_rule_has_aligned_anchor

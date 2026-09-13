@@ -6,6 +6,7 @@ class TimeTrackingSource < ApplicationRecord
   belongs_to :company
   has_many :time_tracking_employee_mappings, dependent: :destroy
   has_many :time_tracking_imports, dependent: :destroy
+  has_many :aire_payroll_calendar_periods, dependent: :restrict_with_error
 
   encrypts :shared_secret
 

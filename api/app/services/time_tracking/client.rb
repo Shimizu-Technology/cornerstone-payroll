@@ -36,6 +36,20 @@ module TimeTracking
       request_json(payroll_batch_uri(batch_id), validate_source: true)
     end
 
+    def publish_payroll_calendar_period(external_pay_period_id:, payload:, idempotency_key:)
+      request_json(
+        payroll_calendar_period_uri(external_pay_period_id),
+        validate_source: false,
+        method: :put,
+        body: payload,
+        headers: { "Idempotency-Key" => idempotency_key }
+      )
+    end
+
+    def payroll_calendar_period(external_pay_period_id:)
+      request_json(payroll_calendar_period_uri(external_pay_period_id), validate_source: false)
+    end
+
     def record_payroll_batch_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, metadata: {})
       request_json(
         payroll_batch_processing_events_uri(batch_id),
@@ -73,16 +87,29 @@ module TimeTracking
       )
     end
 
-    class Error < StandardError; end
+    class Error < StandardError
+      attr_reader :response_status
+
+      def initialize(message, response_status: nil)
+        @response_status = response_status
+        super(message)
+      end
+    end
 
     private
 
-    def request_json(uri, validate_source:, method: :get, body: nil)
-      request = method == :post ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
+    def request_json(uri, validate_source:, method: :get, body: nil, headers: {})
+      request = case method
+      when :get then Net::HTTP::Get.new(uri)
+      when :post then Net::HTTP::Post.new(uri)
+      when :put then Net::HTTP::Put.new(uri)
+      else raise ArgumentError, "Unsupported HTTP method"
+      end
       request["Accept"] = "application/json"
       request["Accept-Encoding"] = "identity"
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
+      headers.each { |key, value| request[key] = value }
       if body
         request["Content-Type"] = "application/json"
         request.body = JSON.generate(body)
@@ -93,7 +120,7 @@ module TimeTracking
       response, body = perform_request(uri, request, pinned_ips, connection_deadline)
 
       unless response.is_a?(Net::HTTPSuccess)
-        raise Error, "#{@source.name} returned HTTP #{response.code}"
+        raise Error.new("#{@source.name} returned HTTP #{response.code}", response_status: response.code.to_i)
       end
       content_type = response["Content-Type"].to_s.downcase
       raise Error, "#{@source.name} returned a non-JSON response" unless content_type.start_with?("application/json")
@@ -137,6 +164,15 @@ module TimeTracking
       uri = payroll_batch_uri(batch_id)
       uri.path = "#{uri.path}/processing_events"
       uri
+    end
+
+    def payroll_calendar_period_uri(external_pay_period_id)
+      normalized_id = external_pay_period_id.to_s.downcase
+      unless normalized_id.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
+        raise Error, "Invalid payroll calendar period ID"
+      end
+
+      source_uri("/api/v1/payroll/calendar_periods/#{normalized_id}")
     end
 
     def source_uri(suffix)

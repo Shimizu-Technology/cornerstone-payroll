@@ -23,6 +23,7 @@ class PayPeriod < ApplicationRecord
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
+  has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
@@ -105,6 +106,9 @@ class PayPeriod < ApplicationRecord
   validate :parallel_run_cannot_be_committed
   validate :intake_stale_session_matches_period
   validate :migration_rehearsal_cannot_be_committed
+  validate :published_aire_cutoff_dates_are_immutable,
+           on: :update,
+           if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
   validate :starts_after_historical_ytd_boundary,
            if: lambda {
              validation_context == :payroll_calculation ||
@@ -498,6 +502,16 @@ class PayPeriod < ApplicationRecord
     if pay_date < end_date
       errors.add(:pay_date, "must be on or after end date")
     end
+  end
+
+  def published_aire_cutoff_dates_are_immutable
+    publication = aire_payroll_calendar_period&.latest_delivered_publication
+    return unless publication&.cutoff_at&.<=(Time.current)
+
+    errors.add(
+      :base,
+      "This pay period's published AIRE cutoff has passed. Keep the locked dates and use a correction or supplemental run."
+    )
   end
 
   def supplemental_target_must_be_regular
