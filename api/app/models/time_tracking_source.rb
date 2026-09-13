@@ -6,6 +6,7 @@ class TimeTrackingSource < ApplicationRecord
   belongs_to :company
   has_many :time_tracking_employee_mappings, dependent: :destroy
   has_many :time_tracking_imports, dependent: :destroy
+  has_many :time_tracking_delegations, dependent: :destroy
   has_many :aire_payroll_calendar_periods, dependent: :restrict_with_error
 
   encrypts :shared_secret
@@ -21,6 +22,16 @@ class TimeTrackingSource < ApplicationRecord
 
   def shared_secret_configured?
     shared_secret.present?
+  end
+
+  def delegation_for(user)
+    return unless user
+
+    if time_tracking_delegations.loaded?
+      time_tracking_delegations.find { |delegation| delegation.user_id == user.id }
+    else
+      time_tracking_delegations.find_by(user_id: user.id)
+    end
   end
 
   private

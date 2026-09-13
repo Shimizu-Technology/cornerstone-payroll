@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2872,6 +2872,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_160000) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
+  create_table "time_tracking_delegations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.text "token", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["company_id"], name: "index_time_tracking_delegations_on_company_id"
+    t.index ["id", "company_id"], name: "idx_time_tracking_delegations_tenant_key", unique: true
+    t.index ["time_tracking_source_id", "user_id"], name: "idx_time_tracking_delegations_source_user", unique: true
+    t.index ["time_tracking_source_id"], name: "index_time_tracking_delegations_on_time_tracking_source_id"
+    t.index ["user_id"], name: "index_time_tracking_delegations_on_user_id"
+  end
+
   create_table "time_tracking_employee_mappings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3433,6 +3447,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_160000) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "time_tracking_delegations", "companies", on_delete: :cascade
+  add_foreign_key "time_tracking_delegations", "time_tracking_sources", column: ["time_tracking_source_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_time_tracking_delegations_source_tenant", on_delete: :cascade
+  add_foreign_key "time_tracking_delegations", "time_tracking_sources", on_delete: :cascade
+  add_foreign_key "time_tracking_delegations", "users", on_delete: :cascade
   add_foreign_key "time_tracking_employee_mappings", "companies"
   add_foreign_key "time_tracking_employee_mappings", "employees"
   add_foreign_key "time_tracking_employee_mappings", "time_tracking_sources"
