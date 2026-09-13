@@ -11,7 +11,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, employeesApi, payrollItemsApi, reportsApi, setAuthToken, setAuthTokenProvider } from './api';
+import { apiClient, employeesApi, payPeriodsApi, payrollItemsApi, reportsApi, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
@@ -124,5 +124,94 @@ describe('ApiClient company identity', (): void => {
         notes: 'Reviewed against locked QuickBooks payroll.',
       },
     });
+  });
+
+  it('keeps an AIRE time-entry identifier inside one approval path segment', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ command: { id: 'test', replayed: false } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await payPeriodsApi.reviewAireTimeEntry(17, '42/../../entries?all=true', {
+      command_id: '0f5c1e56-2831-4b3f-b991-3dfaa3c51c24',
+      expected_version: 2,
+      decision: 'approve',
+      reason: 'Verified source entry',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/pay_periods/17/aire_payroll_cockpit/time_entries/42%2F..%2F..%2Fentries%3Fall%3Dtrue/approval',
+    );
+  });
+
+  it('sends source settings and delegated AIRE access in one update request', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ time_tracking_source: { id: 4 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await timeTrackingSourcesApi.update(4, {
+      name: 'AIRE',
+      base_url: 'https://aire.example.com',
+      active: true,
+      delegation_token: 'personal-token',
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      time_tracking_source: {
+        name: 'AIRE',
+        base_url: 'https://aire.example.com',
+        active: true,
+        delegation_token: 'personal-token',
+      },
+    });
+  });
+
+  it('uses the expected contracts for AIRE delegation and cockpit requests', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+    const command = {
+      command_id: '0f5c1e56-2831-4b3f-b991-3dfaa3c51c24',
+      expected_version: 2,
+      reason: 'Cutoff review complete',
+    };
+
+    await timeTrackingSourcesApi.saveDelegation(4, 'personal-token');
+    await timeTrackingSourcesApi.removeDelegation(4);
+    await payPeriodsApi.airePayrollCockpit(17, { employee_page: 2 });
+    await payPeriodsApi.airePayrollTimeEntries(17, { employee_id: '91', approval_status: 'pending', page: 3 });
+    await payPeriodsApi.airePayrollExceptions(17, { page: 4, leave_page: 5 });
+    await payPeriodsApi.finalizeAirePayrollPeriod(17, command);
+
+    const calls = fetchMock.mock.calls.map(([input, options]) => ({
+      url: new URL(String(input)),
+      method: options?.method,
+      body: options?.body ? JSON.parse(String(options.body)) : undefined,
+    }));
+    expect(calls[0]).toMatchObject({
+      method: 'PUT',
+      body: { delegation_token: 'personal-token' },
+    });
+    expect(calls[0].url.pathname).toContain('/admin/time_tracking_sources/4/delegation');
+    expect(calls[1].method).toBe('DELETE');
+    expect(calls[1].url.pathname).toContain('/admin/time_tracking_sources/4/delegation');
+    expect(Object.fromEntries(calls[2].url.searchParams)).toEqual({ employee_page: '2', employee_per_page: '100' });
+    expect(Object.fromEntries(calls[3].url.searchParams)).toEqual({
+      employee_id: '91', approval_status: 'pending', page: '3', per_page: '250',
+    });
+    expect(Object.fromEntries(calls[4].url.searchParams)).toEqual({
+      page: '4', leave_page: '5', per_page: '250', leave_per_page: '100',
+    });
+    expect(calls[5]).toMatchObject({ method: 'POST', body: command });
+    expect(calls[5].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/finalize');
   });
 });

@@ -23,6 +23,7 @@ class Company < ApplicationRecord
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy
+  has_many :time_tracking_delegations, dependent: :destroy
   has_many :aire_payroll_calendar_periods, dependent: :restrict_with_error
   has_many :pay_periods, dependent: :destroy
   has_many :company_pay_schedules, dependent: :restrict_with_error
