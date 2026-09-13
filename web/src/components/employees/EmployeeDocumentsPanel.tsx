@@ -7,6 +7,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
+import { readinessUploadError, selectReadinessItem } from '@/lib/employee-document-upload';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -133,8 +134,9 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
   const handleUpload = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (selectedFiles.length === 0) {
-      setError('Choose at least one employee document to upload');
+    const uploadError = readinessUploadError(form.requirement_id, selectedFiles);
+    if (uploadError) {
+      setError(uploadError);
       return;
     }
 
@@ -406,7 +408,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                 <Select
                   id={`employee-document-requirement-${employeeId}`}
                   value={form.requirement_id}
-                  onChange={(event) => setForm((current) => ({ ...current, requirement_id: event.target.value }))}
+                  onChange={(event) => {
+                    setForm((current) => selectReadinessItem(current, event.target.value));
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
                 >
                   <option value="">General employee file</option>
                   {requirements.map((requirement) => (

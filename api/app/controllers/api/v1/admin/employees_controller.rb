@@ -53,6 +53,7 @@ module Api
           require_ssn_confirmation!(@employee)
 
           Employee.transaction do
+            current_company.lock!
             @employee.save!
             EmployeeW4ElectionChangeService.new(
               employee: @employee,

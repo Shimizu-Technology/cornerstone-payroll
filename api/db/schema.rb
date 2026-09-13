@@ -834,6 +834,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.jsonb "default_custom_earnings", default: [], null: false
     t.jsonb "default_payroll_adjustments", default: [], null: false
     t.bigint "department_id"
+    t.boolean "document_readiness_required", default: false, null: false
     t.string "email"
     t.decimal "employer_retirement_match_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "employer_roth_match_rate", precision: 5, scale: 4, default: "0.0"

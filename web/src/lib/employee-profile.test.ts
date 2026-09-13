@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Employee } from '@/types';
-import { canonicalSsn, importedProfileAllowsBlank, validateHireDate } from './employee-profile';
+import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from './employee-profile';
 
 const imported = {
   configuration_source: 'quickbooks_history', configuration_review_status: 'needs_review',
@@ -22,5 +22,12 @@ describe('incremental imported profile corrections', () => {
     expect(validateHireDate('0006-04-20')).toMatch(/year/);
     expect(validateHireDate('1998-05-26')).toBeNull();
     expect(validateHireDate('')).toBeNull();
+  });
+  it('applies document readiness only to the employee that produced it', () => {
+    const employee = { id: 17, document_readiness: { total: 2, required: 2, satisfied: 0, ready_for_payroll: false } } as Employee;
+    const ready = { total: 2, required: 2, satisfied: 2, ready_for_payroll: true };
+
+    expect(withDocumentReadiness(employee, 17, ready)?.document_readiness).toEqual(ready);
+    expect(withDocumentReadiness(employee, 99, ready)).toBe(employee);
   });
 });

@@ -89,14 +89,35 @@ RSpec.describe EmployeeDocumentRequirementReviewService do
     )
   end
 
-  it "requires a reason for verified, rejected, and waived outcomes" do
-    expect do
-      described_class.new(
-        requirement: requirement,
-        actor: actor,
-        attributes: { status: "verified", lock_version: requirement.lock_version }
-      ).call!
-    end.to raise_error(described_class::Error, /Explain the reviewed outcome/)
+  described_class::REVIEWED_STATUSES.each do |status|
+    it "requires a reason for #{status}" do
+      expect do
+        described_class.new(
+          requirement: requirement,
+          actor: actor,
+          attributes: { status: status, lock_version: requirement.lock_version }
+        ).call!
+      end.to raise_error(described_class::Error, /Explain the reviewed outcome/)
+    end
+  end
+
+  it "refreshes the receipt time when staff selects replacement evidence" do
+    replacement = create(:client_document, company: company, employee: employee, uploaded_by: actor)
+    original_received_at = 2.days.ago
+    requirement.update!(received_at: original_received_at)
+
+    described_class.new(
+      requirement: requirement,
+      actor: actor,
+      attributes: {
+        status: "received",
+        client_document_id: replacement.id,
+        lock_version: requirement.lock_version
+      }
+    ).call!
+
+    expect(requirement.reload.client_document).to eq(replacement)
+    expect(requirement.received_at).to be > original_received_at
   end
 
   it "rejects stale checklist versions" do

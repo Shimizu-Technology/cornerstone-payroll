@@ -80,6 +80,7 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
         "identity_and_work_authorization",
         "withholding_election"
       )
+      expect(pending_employee).to be_document_readiness_required
     end
 
     it "does not re-apply a request that has already been reviewed" do

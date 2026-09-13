@@ -131,6 +131,61 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     expect(CompanyYtdTotal.find_by!(company: company, year: pay_period.pay_date.year).gross_pay).to eq(2_000)
   end
 
+  it "serializes a readiness change after the payroll transition decision" do
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+    employee.employee_document_requirements.each do |requirement|
+      document = create(:client_document, company: company, employee: employee, uploaded_by: actor)
+      requirement.update!(
+        client_document: document,
+        status: "verified",
+        received_at: 1.day.ago,
+        reviewed_by: actor,
+        reviewed_at: 1.day.ago,
+        review_note: "Verified before payroll"
+      )
+    end
+    requirement = employee.employee_document_requirements.first
+    readiness_checked = Queue.new
+    release_transition = Queue.new
+    writer_started = Queue.new
+    results = Queue.new
+
+    allow(EmployeeDocumentReadiness).to receive(:require_payroll_ready!).and_wrap_original do |original, period|
+      original.call(period)
+      readiness_checked << true
+      release_transition.pop
+    end
+
+    commit_thread = lifecycle_thread(results, :commit!)
+    readiness_checked.pop
+    review_thread = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do
+        thread_requirement = EmployeeDocumentRequirement.find(requirement.id)
+        writer_started << true
+        EmployeeDocumentRequirementReviewService.new(
+          requirement: thread_requirement,
+          actor: User.find(actor.id),
+          attributes: {
+            status: "received",
+            lock_version: thread_requirement.lock_version
+          }
+        ).call!
+        results << [ :ok, :review ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+    writer_started.pop
+    expect { results.pop(true) }.to raise_error(ThreadError)
+
+    release_transition << true
+    [ commit_thread, review_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
+
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :commit! ], [ :ok, :review ])
+    expect(pay_period.reload).to be_committed
+    expect(requirement.reload.status).to eq("received")
+  end
+
   private
 
   def lifecycle_thread(results, operation)
@@ -236,6 +291,9 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all
     PayrollItem.where(id: payroll_item_ids).delete_all
+    EmployeeDocumentRequirementEvent.where(company_id: company_id).delete_all
+    EmployeeDocumentRequirement.where(company_id: company_id).delete_all
+    ClientDocument.where(company_id: company_id).delete_all
     EmployeeYtdTotal.where(employee_id: employee_id).delete_all
     CompanyYtdTotal.where(company_id: company_id).delete_all
     PayPeriod.where(id: pay_period_ids).delete_all

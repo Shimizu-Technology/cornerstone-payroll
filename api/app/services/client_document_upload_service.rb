@@ -23,6 +23,7 @@ class ClientDocumentUploadService
     documents = []
 
     ClientDocument.transaction do
+      Company.lock.find(@company_id) if document_requirement
       files.each do |file|
         file_key = build_file_key(file.original_filename)
         content_type = ClientDocument.detected_content_type(file)

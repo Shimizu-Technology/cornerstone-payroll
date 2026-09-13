@@ -368,6 +368,12 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           "identity_and_work_authorization",
           "withholding_election"
         )
+        expect(json["data"]["document_readiness"]).to include(
+          "total" => 2,
+          "required" => 2,
+          "satisfied" => 0,
+          "ready_for_payroll" => false
+        )
       end
 
       it "routes recurring components to typed payroll fields during creation" do
