@@ -97,9 +97,8 @@ class PayrollGoLiveReadiness
   end
 
   def employee_document_gap_count
-    @employee_document_gap_count ||= EmployeeDocumentRequirement.required_for_payroll.unresolved
-      .joins(:employee)
-      .where(company_id: company.id, employees: { status: "active" })
-      .count
+    @employee_document_gap_count ||= EmployeeDocumentReadiness.gap_count(
+      employees: company.employees.active.where(document_readiness_required: true)
+    )
   end
 end

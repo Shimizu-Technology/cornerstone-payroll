@@ -214,6 +214,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["company_id"], name: "index_client_documents_on_company_id"
     t.index ["employee_id"], name: "index_client_documents_on_employee_id"
     t.index ["file_key"], name: "index_client_documents_on_file_key", unique: true
+    t.index ["id", "company_id"], name: "idx_client_documents_readiness_tenant_key", unique: true
     t.index ["uploaded_by_id"], name: "index_client_documents_on_uploaded_by_id"
   end
 
@@ -567,6 +568,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["created_by_id"], name: "index_employee_document_requirements_on_created_by_id"
     t.index ["employee_id", "requirement_type"], name: "index_employee_document_requirements_on_employee_and_type", unique: true
     t.index ["employee_id"], name: "index_employee_document_requirements_on_employee_id"
+    t.index ["id", "company_id"], name: "idx_employee_document_requirements_tenant_key", unique: true
     t.index ["reviewed_by_id"], name: "index_employee_document_requirements_on_reviewed_by_id"
   end
 
@@ -872,6 +874,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["company_id"], name: "index_employees_on_company_id"
     t.index ["department_id"], name: "index_employees_on_department_id"
     t.index ["employment_type"], name: "index_employees_on_employment_type"
+    t.index ["id", "company_id"], name: "idx_employees_document_readiness_tenant_key", unique: true
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
@@ -3060,14 +3063,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
-  add_foreign_key "employee_document_requirement_events", "client_documents", on_delete: :nullify
+  add_foreign_key "employee_document_requirement_events", "client_documents", column: ["client_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_document_tenant"
   add_foreign_key "employee_document_requirement_events", "companies"
-  add_foreign_key "employee_document_requirement_events", "employee_document_requirements"
-  add_foreign_key "employee_document_requirement_events", "employees"
+  add_foreign_key "employee_document_requirement_events", "employee_document_requirements", column: ["employee_document_requirement_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_requirement_tenant"
+  add_foreign_key "employee_document_requirement_events", "employees", column: ["employee_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_employee_tenant"
   add_foreign_key "employee_document_requirement_events", "users", column: "actor_id", on_delete: :nullify
-  add_foreign_key "employee_document_requirements", "client_documents", on_delete: :nullify
+  add_foreign_key "employee_document_requirements", "client_documents", column: ["client_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirements_document_tenant"
   add_foreign_key "employee_document_requirements", "companies"
-  add_foreign_key "employee_document_requirements", "employees"
+  add_foreign_key "employee_document_requirements", "employees", column: ["employee_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirements_employee_tenant"
   add_foreign_key "employee_document_requirements", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_document_requirements", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "employee_loans", "companies"
