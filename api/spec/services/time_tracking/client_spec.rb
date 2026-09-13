@@ -44,6 +44,66 @@ RSpec.describe TimeTracking::Client do
     end
   end
 
+  describe "#publish_payroll_calendar_period" do
+    it "uses the versioned AIRE calendar path, shared secret, PUT body, and idempotency key" do
+      source = create(
+        :time_tracking_source,
+        source_type: "aire_services",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      external_id = SecureRandom.uuid
+      publication_id = SecureRandom.uuid
+      payload = { "schema_version" => "1.0", "publication_id" => publication_id }
+      stub = stub_request(:put, "https://time.example.com/api/v1/payroll/calendar_periods/#{external_id}")
+        .with(
+          body: payload.to_json,
+          headers: {
+            "X-Shared-Secret" => "secret",
+            "X-Payroll-Shared-Secret" => "secret",
+            "Idempotency-Key" => publication_id
+          }
+        )
+        .to_return(
+          status: 201,
+          body: { payroll_calendar_period: { external_pay_period_id: external_id } }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      result = client_for(source).publish_payroll_calendar_period(
+        external_pay_period_id: external_id,
+        payload: payload,
+        idempotency_key: publication_id
+      )
+
+      expect(result.dig("payroll_calendar_period", "external_pay_period_id")).to eq(external_id)
+      expect(stub).to have_been_requested.once
+    end
+
+    it "retains the response status without exposing a rejected JSON body" do
+      source = create(:time_tracking_source, source_type: "aire_services", base_url: "https://time.example.com")
+      external_id = SecureRandom.uuid
+      stub_request(:put, "https://time.example.com/api/v1/payroll/calendar_periods/#{external_id}")
+        .to_return(
+          status: 409,
+          body: { error: "secret source details" }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect do
+        client_for(source).publish_payroll_calendar_period(
+          external_pay_period_id: external_id,
+          payload: {},
+          idempotency_key: SecureRandom.uuid
+        )
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.response_status).to eq(409)
+        expect(error.message).to include("HTTP 409")
+        expect(error.message).not_to include("secret source details")
+      }
+    end
+  end
+
   describe "#time_summary" do
     it "builds the time summary URL when the configured source base URL has no path" do
       source = TimeTrackingSource.create!(
