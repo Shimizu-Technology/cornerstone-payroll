@@ -47,7 +47,7 @@ interface EmployeeDocumentsPanelProps {
   isClient: boolean;
   className?: string;
   headerAction?: React.ReactNode;
-  onReadinessChange?: (readiness: EmployeeDocumentReadinessResponse['readiness']) => void;
+  onReadinessChange?: (readiness: EmployeeDocumentReadinessResponse['readiness'] | undefined) => void;
 }
 
 interface RequirementReviewDraft {
@@ -55,6 +55,8 @@ interface RequirementReviewDraft {
   clientDocumentId: string;
   reviewNote: string;
 }
+
+type ReadinessLoadStatus = 'loading' | 'available' | 'unavailable';
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -79,7 +81,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const { user } = useAuth();
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [requirements, setRequirements] = useState<EmployeeDocumentRequirement[]>([]);
-  const [readyForPayroll, setReadyForPayroll] = useState(true);
+  const [readyForPayroll, setReadyForPayroll] = useState<boolean | null>(null);
+  const [readinessLoadStatus, setReadinessLoadStatus] = useState<ReadinessLoadStatus>('loading');
   const [requirementDrafts, setRequirementDrafts] = useState<Record<number, RequirementReviewDraft>>({});
   const [savingRequirementId, setSavingRequirementId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,7 +119,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       loadedEmployeeIdRef.current = employeeId;
       setDocuments([]);
       setRequirements([]);
-      setReadyForPayroll(true);
+      setReadyForPayroll(null);
+      setReadinessLoadStatus('loading');
       setRequirementDrafts({});
       setSavingRequirementId(null);
       setUploading(false);
@@ -132,6 +136,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
     try {
       setLoading(true);
+      setReadinessLoadStatus('loading');
       setError(null);
       const [documentsResult, requirementsResult] = await Promise.allSettled([
         api.list({ employee_id: employeeId }),
@@ -152,6 +157,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         const requirementsResponse = loaded.readiness;
         setRequirements(requirementsResponse.data);
         setReadyForPayroll(requirementsResponse.readiness.ready_for_payroll);
+        setReadinessLoadStatus('available');
         onReadinessChange?.(requirementsResponse.readiness);
         setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
           requirement.id,
@@ -161,6 +167,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
             reviewNote: requirement.review_note || '',
           },
         ])));
+      } else {
+        setReadyForPayroll(null);
+        setReadinessLoadStatus('unavailable');
+        onReadinessChange?.(undefined);
       }
       setError(loaded.error);
     } finally {
@@ -347,7 +357,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                 Uploads count as received first. Cornerstone staff must verify them, or record a reasoned waiver, before this employee can be included in an approved payroll.
               </p>
             </div>
-            {requirements.length > 0 && (
+            {readinessLoadStatus === 'available' && requirements.length > 0 && readyForPayroll !== null && (
               <span className={cn(
                 'inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold',
                 readyForPayroll ? 'bg-success-50 text-success-800' : 'bg-warning-50 text-warning-900',
@@ -358,7 +368,15 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
             )}
           </div>
 
-          {requirements.length === 0 ? (
+          {readinessLoadStatus === 'loading' ? (
+            <p className="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-4 text-sm text-neutral-600">
+              Loading payroll readiness…
+            </p>
+          ) : readinessLoadStatus === 'unavailable' ? (
+            <p className="mt-4 rounded-xl border border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
+              Payroll readiness is unavailable. Retry before approving or processing payroll for this employee.
+            </p>
+          ) : requirements.length === 0 ? (
             <p className="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-4 text-sm text-neutral-600">
               No new-hire document checklist is required for this existing employee.
             </p>
@@ -475,7 +493,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
         <form onSubmit={handleUpload} className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-4">
           <div className="grid gap-4 md:grid-cols-2">
-            {requirements.length > 0 && (
+            {readinessLoadStatus === 'available' && requirements.length > 0 && (
               <div className="md:col-span-2">
                 <label htmlFor={`employee-document-requirement-${employeeId}`} className="mb-2 block text-sm font-medium text-neutral-700">Readiness item</label>
                 <Select

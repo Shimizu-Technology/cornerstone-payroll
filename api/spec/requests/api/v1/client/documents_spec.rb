@@ -86,8 +86,8 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
     end
 
     it "does not delete a document that is still linked to readiness evidence" do
-      linked_document = create(:client_document, company: company, employee: employee, uploaded_by: client_user)
-      create(
+      linked_document = readiness_document
+      requirement = create(
         :employee_document_requirement,
         company: company,
         employee: employee,
@@ -102,6 +102,32 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(requirement.reload.client_document).to eq(linked_document)
+      expect_readiness_storage_to_exist(linked_document)
+    end
+
+    it "does not delete a document retained only by readiness history" do
+      linked_document = readiness_document
+      requirement = create(:employee_document_requirement, company: company, employee: employee)
+      event = requirement.events.create!(
+        company: company,
+        employee: employee,
+        client_document: linked_document,
+        document_title: linked_document.title,
+        actor: client_user,
+        event_type: "document_received",
+        from_status: "missing",
+        to_status: "received"
+      )
+
+      expect do
+        delete "/api/v1/client/documents/#{linked_document.id}"
+      end.not_to change(ClientDocument, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(event.reload.client_document).to eq(linked_document)
+      expect_readiness_storage_to_exist(linked_document)
     end
 
     it "does not allow one client user to delete another uploader's document" do
@@ -314,5 +340,28 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
     ensure
       docx.close!
     end
+  end
+
+  def readiness_document
+    document = create(
+      :client_document,
+      company: company,
+      employee: employee,
+      uploaded_by: client_user,
+      preview_file_key: "client_documents/company_#{company.id}/previews/#{SecureRandom.uuid}.pdf",
+      preview_status: "ready",
+      preview_content_type: "application/pdf",
+      preview_generated_at: Time.current
+    )
+    storage = R2StorageService.new
+    storage.upload(document.file_key, "retained readiness source", content_type: document.content_type)
+    storage.upload(document.preview_file_key, "%PDF-1.4\nretained preview", content_type: "application/pdf")
+    document
+  end
+
+  def expect_readiness_storage_to_exist(document)
+    storage = R2StorageService.new
+    expect(storage.download(document.file_key)).to be_present
+    expect(storage.download(document.preview_file_key)).to be_present
   end
 end

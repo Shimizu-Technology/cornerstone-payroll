@@ -404,7 +404,7 @@ export function EmployeeForm() {
     }
   }, [companyId, id, isClient]);
 
-  const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness']): void => {
+  const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness'] | undefined): void => {
     if (companyIdRef.current !== companyId) return;
 
     const expectedEmployeeId = Number(id);

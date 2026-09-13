@@ -78,5 +78,31 @@ class CreateEmployeeDocumentRequirements < ActiveRecord::Migration[8.1]
       column: [ :client_document_id, :company_id ],
       primary_key: [ :id, :company_id ],
       name: "fk_employee_document_requirement_events_document_tenant"
+
+    reversible do |direction|
+      direction.up do
+        execute <<~SQL
+          CREATE FUNCTION prevent_employee_document_requirement_event_mutation()
+          RETURNS trigger
+          LANGUAGE plpgsql
+          AS $function$
+          BEGIN
+            RAISE EXCEPTION 'employee_document_requirement_events are append-only'
+              USING ERRCODE = 'integrity_constraint_violation';
+          END;
+          $function$;
+
+          CREATE TRIGGER employee_document_requirement_events_append_only
+          BEFORE UPDATE OR DELETE ON employee_document_requirement_events
+          FOR EACH ROW
+          EXECUTE FUNCTION prevent_employee_document_requirement_event_mutation();
+        SQL
+      end
+
+      direction.down do
+        execute "DROP TRIGGER IF EXISTS employee_document_requirement_events_append_only ON employee_document_requirement_events"
+        execute "DROP FUNCTION IF EXISTS prevent_employee_document_requirement_event_mutation()"
+      end
+    end
   end
 end

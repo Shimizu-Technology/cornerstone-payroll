@@ -21,15 +21,23 @@ class ClientDocumentUploadService
 
     uploaded_keys = []
     documents = []
+    prepared_uploads = files.map do |file|
+      file_key = build_file_key(file.original_filename)
+      content_type = ClientDocument.detected_content_type(file)
+      @storage.upload(file_key, file.tempfile || file, content_type: content_type)
+      uploaded_keys << file_key
+      { file: file, file_key: file_key, content_type: content_type }
+    end
 
     ClientDocument.transaction do
-      Company.lock.find(@company_id) if document_requirement
-      files.each do |file|
-        file_key = build_file_key(file.original_filename)
-        content_type = ClientDocument.detected_content_type(file)
-        @storage.upload(file_key, file.tempfile || file, content_type: content_type)
-        uploaded_keys << file_key
+      if document_requirement
+        Company.lock.find(@company_id)
+        employee = find_employee!
+        document_requirement = find_document_requirement!(employee, files)
+      end
 
+      prepared_uploads.each do |prepared_upload|
+        file = prepared_upload.fetch(:file)
         documents << ClientDocument.create!(
           company_id: @company_id,
           employee: employee,
@@ -37,8 +45,8 @@ class ClientDocumentUploadService
           title: document_title_for(file, files.count),
           category: @params[:category].presence || "misc",
           file_name: file.original_filename,
-          file_key: file_key,
-          content_type: content_type,
+          file_key: prepared_upload.fetch(:file_key),
+          content_type: prepared_upload.fetch(:content_type),
           file_size: file.size,
           notes: @params[:notes],
           preview_status: ClientDocument.initial_preview_status_for(file),

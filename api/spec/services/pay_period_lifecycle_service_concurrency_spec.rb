@@ -310,7 +310,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all
     PayrollItem.where(id: payroll_item_ids).delete_all
-    EmployeeDocumentRequirementEvent.where(company_id: company_id).delete_all
+    delete_readiness_events_for_cleanup(company_id)
     EmployeeDocumentRequirement.where(company_id: company_id).delete_all
     ClientDocument.where(company_id: company_id).delete_all
     EmployeeYtdTotal.where(employee_id: employee_id).delete_all
@@ -322,5 +322,17 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     User.where(id: actor.id).delete_all
     Company.where(id: company_id).delete_all
     Organization.where(id: organization.id).delete_all
+  end
+
+  def delete_readiness_events_for_cleanup(company_id)
+    connection = EmployeeDocumentRequirementEvent.connection
+    connection.execute(
+      "ALTER TABLE employee_document_requirement_events DISABLE TRIGGER employee_document_requirement_events_append_only"
+    )
+    EmployeeDocumentRequirementEvent.where(company_id: company_id).delete_all
+  ensure
+    connection&.execute(
+      "ALTER TABLE employee_document_requirement_events ENABLE TRIGGER employee_document_requirement_events_append_only"
+    )
   end
 end

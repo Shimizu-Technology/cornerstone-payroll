@@ -38,7 +38,7 @@ describe('employee document readiness upload state', () => {
     );
 
     expect(result.documents).toBe(documents);
-    expect(result.readiness).toBeUndefined();
+    expect(result.readiness).toBeNull();
     expect(result.error).toBe('Payroll readiness could not be loaded: Readiness service unavailable');
   });
 
