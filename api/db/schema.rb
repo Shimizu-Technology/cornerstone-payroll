@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2061,6 +2061,59 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_040000) do
     t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
   end
 
+  create_table "payroll_filing_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "event_type", null: false
+    t.bigint "evidence_document_id", null: false
+    t.string "from_status"
+    t.string "idempotency_key", null: false
+    t.text "notes"
+    t.datetime "occurred_at", null: false
+    t.bigint "payroll_filing_record_id", null: false
+    t.string "preparer_name", null: false
+    t.bigint "recorded_by_id", null: false
+    t.string "reference_number", null: false
+    t.string "signer_name"
+    t.string "signer_title"
+    t.string "source_fingerprint", null: false
+    t.jsonb "source_snapshot", default: {}, null: false
+    t.string "to_status", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "idempotency_key"], name: "idx_payroll_filing_events_idempotency", unique: true
+    t.index ["company_id"], name: "index_payroll_filing_events_on_company_id"
+    t.index ["evidence_document_id"], name: "index_payroll_filing_events_on_evidence_document_id"
+    t.index ["payroll_filing_record_id", "occurred_at", "id"], name: "idx_payroll_filing_events_timeline"
+    t.index ["payroll_filing_record_id"], name: "index_payroll_filing_events_on_payroll_filing_record_id"
+    t.index ["recorded_by_id"], name: "index_payroll_filing_events_on_recorded_by_id"
+    t.check_constraint "event_type::text = ANY (ARRAY['submitted'::character varying, 'resubmitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'correction_needed'::character varying]::text[])", name: "payroll_filing_events_type"
+    t.check_constraint "from_status IS NULL OR (from_status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[]))", name: "payroll_filing_events_from_status"
+    t.check_constraint "to_status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[])", name: "payroll_filing_events_to_status"
+  end
+
+  create_table "payroll_filing_records", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "confirmation_number", null: false
+    t.datetime "created_at", null: false
+    t.string "filing_type", null: false
+    t.integer "lock_version", default: 0, null: false
+    t.integer "quarter"
+    t.datetime "resolved_at"
+    t.string "source_fingerprint", null: false
+    t.jsonb "source_snapshot", default: {}, null: false
+    t.string "status", default: "submitted", null: false
+    t.datetime "submitted_at", null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "filing_type", "tax_year", "quarter"], name: "idx_payroll_filings_quarterly_identity", unique: true, where: "(quarter IS NOT NULL)"
+    t.index ["company_id", "filing_type", "tax_year"], name: "idx_payroll_filings_annual_identity", unique: true, where: "(quarter IS NULL)"
+    t.index ["company_id"], name: "index_payroll_filing_records_on_company_id"
+    t.index ["id", "company_id"], name: "idx_payroll_filing_records_tenant_key", unique: true
+    t.check_constraint "(filing_type::text = ANY (ARRAY['w2_gu_w3_ss'::character varying, 'form_1099_nec'::character varying]::text[])) AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_500_payment'::character varying, 'w1'::character varying, 'swica'::character varying, 'federal_941'::character varying]::text[])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_records_identity"
+    t.check_constraint "status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[])", name: "payroll_filing_records_status"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_records_tax_year"
+  end
+
   create_table "payroll_filing_responsibilities", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3357,6 +3410,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_040000) do
   add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
+  add_foreign_key "payroll_filing_events", "client_documents", column: "evidence_document_id", on_delete: :restrict
+  add_foreign_key "payroll_filing_events", "client_documents", column: ["evidence_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_payroll_filing_events_document_tenant"
+  add_foreign_key "payroll_filing_events", "companies", on_delete: :restrict
+  add_foreign_key "payroll_filing_events", "payroll_filing_records", column: ["payroll_filing_record_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_payroll_filing_events_record_tenant"
+  add_foreign_key "payroll_filing_events", "payroll_filing_records", on_delete: :restrict
+  add_foreign_key "payroll_filing_events", "users", column: "recorded_by_id", on_delete: :restrict
+  add_foreign_key "payroll_filing_records", "companies", on_delete: :restrict
   add_foreign_key "payroll_filing_responsibilities", "companies"
   add_foreign_key "payroll_filing_responsibilities", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "companies", column: "source_company_id", on_delete: :restrict
@@ -3492,5 +3552,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_040000) do
     CREATE TRIGGER check_reconciliation_events_append_only
     BEFORE UPDATE OR DELETE ON check_reconciliation_events
     FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+
+    CREATE OR REPLACE FUNCTION prevent_payroll_filing_event_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'payroll_filing_events are append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER payroll_filing_events_append_only
+    BEFORE UPDATE OR DELETE ON payroll_filing_events
+    FOR EACH ROW EXECUTE FUNCTION prevent_payroll_filing_event_mutation();
   SQL
 end
