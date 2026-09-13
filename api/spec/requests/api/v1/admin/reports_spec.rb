@@ -529,6 +529,34 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    it "returns a status-specific error for an unsupported preparation status" do
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "w1" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task['id']}", params: {
+        task: { status: "sent_to_space" }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Unsupported quarterly task status: sent_to_space")
+      expect(QuarterlyComplianceTask.find(task.fetch("id")).status).to eq("not_started")
+    end
+
+    it "does not let a direct API request overwrite a retained legacy filing outcome" do
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "w1" }
+      QuarterlyComplianceTask.find(task.fetch("id")).update_column(:status, "filed")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task['id']}", params: {
+        task: { status: "in_progress" }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/retained read-only/)
+      expect(QuarterlyComplianceTask.find(task.fetch("id")).status).to eq("filed")
+    end
+
     it "keeps Schedule B in the preparation workflow instead of treating it as a separate filing" do
       post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 

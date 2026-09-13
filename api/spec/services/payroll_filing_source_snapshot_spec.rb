@@ -45,4 +45,32 @@ RSpec.describe PayrollFilingSourceSnapshot do
     expect(after_printing.fingerprint).to eq(initial.fingerprint)
     expect(after_printing.snapshot).to eq(initial.snapshot)
   end
+
+  it "changes when another committed payroll enters the filing period" do
+    initial = described_class.new(company: company, tax_year: 2026, quarter: 2).call
+    later_period = create(
+      :pay_period,
+      :committed,
+      company: company,
+      start_date: Date.new(2026, 4, 16),
+      end_date: Date.new(2026, 4, 30),
+      pay_date: Date.new(2026, 5, 5),
+      committed_by_id: actor.id
+    )
+    create(
+      :payroll_item,
+      company: company,
+      pay_period: later_period,
+      employee: employee,
+      gross_pay: 750,
+      total_deductions: 150,
+      net_pay: 600,
+      check_number: "4201"
+    )
+
+    changed = described_class.new(company: company, tax_year: 2026, quarter: 2).call
+
+    expect(changed.fingerprint).not_to eq(initial.fingerprint)
+    expect(changed.snapshot.fetch(:cornerstone_payrolls).size).to eq(2)
+  end
 end
