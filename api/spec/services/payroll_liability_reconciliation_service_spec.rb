@@ -34,6 +34,7 @@ RSpec.describe PayrollLiabilityReconciliationService do
     result = described_class.new(pay_period: period).call
 
     expect(result[:status]).to eq("posted")
+    expect(result[:payment_tracking_status]).to eq("tracked_in_liability_center")
     expect(result[:net_liability]).to eq(50.0)
     expect(result[:totals_by_category]).to include(
       "guam_income_tax_withheld" => 10.0,
