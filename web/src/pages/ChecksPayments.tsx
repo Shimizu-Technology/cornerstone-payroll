@@ -9,14 +9,17 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { NumericInput } from '@/components/ui/numeric-input';
-import { nonEmployeeChecksApi, companiesApi, type CompanyDetail } from '@/services/api';
+import { nonEmployeeChecksApi, companiesApi, payrollLiabilityCenterApi, type CompanyDetail } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
-import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
+import type { NonEmployeeCheck, NonEmployeeCheckType, OutgoingPaymentMethod, PaymentPeriodType, PayrollLiabilityCenter as PayrollLiabilityCenterData, PayrollLiabilityCenterObligation } from '@/types';
 import { NonEmployeeCheckEditModal } from '@/components/checks/NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from '@/components/checks/NonEmployeeCheckHistory';
 import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
 import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
 import { DRT } from '@/lib/constants';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
+import { formatDateRange } from '@/lib/utils';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -55,17 +58,21 @@ const PERIOD_LABELS: Record<PaymentPeriodType, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-700',
-  unprinted: 'bg-yellow-100 text-yellow-700',
-  printed: 'bg-green-100 text-green-700',
-  voided: 'bg-red-100 text-red-700',
+  pending: 'bg-neutral-100 text-neutral-700',
+  prepared: 'bg-primary-100 text-primary-800',
+  unprinted: 'bg-warning-100 text-warning-800',
+  printed: 'bg-success-100 text-success-800',
+  paid: 'bg-success-100 text-success-800',
+  voided: 'bg-danger-100 text-danger-700',
 };
 
 interface FormState {
+  pay_period_id: number | null;
   payable_to: string;
   amount: string;
   check_type: NonEmployeeCheckType;
   check_number: string;
+  payment_method: OutgoingPaymentMethod;
   payment_period_type: PaymentPeriodType;
   tax_year: string;
   tax_quarter: string;
@@ -77,6 +84,7 @@ interface FormState {
   reference_number: string;
   description: string;
   line_items: VoucherLineItemForm[];
+  liability_entry_ids: number[];
 }
 
 function localDateString() {
@@ -90,10 +98,12 @@ function localDateString() {
 function initialFormState(): FormState {
   const today = new Date();
   return {
+    pay_period_id: null,
     payable_to: '',
     amount: '',
     check_type: 'grt',
     check_number: '',
+    payment_method: 'check',
     payment_period_type: 'month',
     tax_year: String(today.getFullYear()),
     tax_quarter: String(Math.floor(today.getMonth() / 3) + 1),
@@ -105,15 +115,17 @@ function initialFormState(): FormState {
     reference_number: '',
     description: '',
     line_items: [],
+    liability_entry_ids: [],
   };
 }
 
 const fieldClassName = 'rounded-xl';
 
 function periodPayload(form: Pick<FormState, 'payment_period_type' | 'tax_year' | 'tax_quarter' | 'tax_month'>) {
+  const usesTaxYear = ['month', 'quarter', 'year'].includes(form.payment_period_type);
   return {
     payment_period_type: form.payment_period_type,
-    tax_year: form.payment_period_type === 'none' ? null : form.tax_year ? Number(form.tax_year) : null,
+    tax_year: usesTaxYear && form.tax_year ? Number(form.tax_year) : null,
     tax_quarter: form.payment_period_type === 'quarter' && form.tax_quarter
       ? Number(form.tax_quarter)
       : null,
@@ -127,6 +139,9 @@ export function ChecksPayments() {
   const { activeCompanyId } = useCompany();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
+  const [liabilityCenter, setLiabilityCenter] = useState<PayrollLiabilityCenterData | null>(null);
+  const [liabilityLoading, setLiabilityLoading] = useState(true);
+  const [liabilityError, setLiabilityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -145,6 +160,9 @@ export function ChecksPayments() {
   const [previewTitle, setPreviewTitle] = useState('Check preview');
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
+  const [payingCheck, setPayingCheck] = useState<NonEmployeeCheck | null>(null);
+  const [paymentConfirmation, setPaymentConfirmation] = useState('');
+  const [paymentDate, setPaymentDate] = useState(localDateString());
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const loadChecks = useCallback(async () => {
@@ -152,7 +170,6 @@ export function ChecksPayments() {
     setError(null);
     try {
       const response = await nonEmployeeChecksApi.list({
-        standalone: 'true',
         ...(statusFilter === 'active' ? { active: 'true' } : {}),
         ...(typeFilter !== 'all' ? { check_type: typeFilter } : {}),
       });
@@ -164,9 +181,26 @@ export function ChecksPayments() {
     }
   }, [statusFilter, typeFilter]);
 
+  const loadLiabilities = useCallback(async () => {
+    setLiabilityLoading(true);
+    setLiabilityError(null);
+    try {
+      const response = await payrollLiabilityCenterApi.get();
+      setLiabilityCenter(response.payroll_liability_center);
+    } catch (err) {
+      setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+    } finally {
+      setLiabilityLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadChecks();
   }, [loadChecks]);
+
+  useEffect(() => {
+    void loadLiabilities();
+  }, [activeCompanyId, loadLiabilities]);
 
   useEffect(() => {
     if (!activeCompanyId) return;
@@ -207,6 +241,7 @@ export function ChecksPayments() {
     }
 
     const payload = {
+      pay_period_id: form.pay_period_id,
       payable_to: form.payable_to.trim(),
       amount: Number(form.amount),
       check_type: form.check_type,
@@ -215,6 +250,8 @@ export function ChecksPayments() {
       due_date: form.due_date || null,
       payment_date: form.payment_date || null,
       confirmation_number: form.confirmation_number.trim() || null,
+      payment_method: form.payment_method,
+      liability_entry_ids: form.liability_entry_ids,
       memo: form.memo.trim() || undefined,
       reference_number: form.reference_number.trim() || undefined,
       description: form.description.trim() || undefined,
@@ -238,7 +275,7 @@ export function ChecksPayments() {
       await nonEmployeeChecksApi.create(payload);
       setShowForm(false);
       setForm(initialFormState());
-      await loadChecks();
+      await Promise.all([loadChecks(), loadLiabilities()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create check');
     } finally {
@@ -250,11 +287,18 @@ export function ChecksPayments() {
     setError(null);
     setShowForm(true);
     setForm({
+      // A clone is a new standalone payment. Never carry an old payroll run
+      // association forward without also carrying its exact liability journal
+      // allocation, which intentionally cannot be cloned.
+      pay_period_id: null,
       payable_to: check.payable_to || '',
       amount: check.amount != null ? String(check.amount) : '',
       check_type: check.check_type,
       check_number: '',
-      payment_period_type: check.payment_period_type || 'none',
+      payment_method: check.payment_method || 'check',
+      payment_period_type: check.payment_period_type === 'pay_period'
+        ? 'none'
+        : check.payment_period_type || 'none',
       tax_year: check.tax_year ? String(check.tax_year) : String(new Date().getFullYear()),
       tax_quarter: check.tax_quarter ? String(check.tax_quarter) : String(Math.floor(new Date().getMonth() / 3) + 1),
       tax_month: check.tax_month ? String(check.tax_month) : String(new Date().getMonth() + 1),
@@ -270,6 +314,7 @@ export function ChecksPayments() {
         service_period: lineItem.service_period || '',
         amount: lineItem.amount != null ? String(lineItem.amount) : '',
       })),
+      liability_entry_ids: [],
     });
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -279,13 +324,62 @@ export function ChecksPayments() {
     setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
+  const handlePrepareLiabilities = (obligations: PayrollLiabilityCenterObligation[]) => {
+    const amount = obligations.reduce((sum, obligation) => sum + Math.max(obligation.unreserved_amount, 0), 0);
+    const authority = obligations[0]?.authority || '';
+    const payableTo = authority === 'Guam Department of Revenue and Taxation' ? 'Treasurer of Guam' : authority;
+    setError(null);
+    setShowForm(true);
+    setForm({
+      ...initialFormState(),
+      pay_period_id: obligations.length === 1 ? obligations[0].pay_period_id : null,
+      payable_to: payableTo,
+      amount: amount.toFixed(2),
+      check_type: liabilityPaymentType(obligations),
+      payment_period_type: obligations.length === 1 ? 'pay_period' : 'none',
+      memo: obligations.length === 1
+        ? `Payroll liabilities · PPE ${formatDate(obligations[0].period_end)}`
+        : `Combined payroll liabilities · ${obligations.length} pay periods`,
+      description: `Prepared from committed payroll liability journal for ${authority}.`,
+      liability_entry_ids: obligations.flatMap((obligation) => obligation.entry_ids),
+      line_items: obligations.map((obligation) => ({
+        description: `${authority} · PPE ${formatDate(obligation.period_end)}`,
+        reference_number: '',
+        service_period: formatDateRange(obligation.period_start, obligation.period_end),
+        amount: Math.max(obligation.unreserved_amount, 0).toFixed(2),
+      })),
+    });
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
+
   const handleMarkPrinted = async (check: NonEmployeeCheck) => {
     setBusyId(check.id);
     try {
       const response = await nonEmployeeChecksApi.markPrinted(check.id);
       handleSavedCheck(response.non_employee_check);
+      await loadLiabilities();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark printed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleMarkPaid = async () => {
+    if (!payingCheck || !paymentDate) return;
+    setBusyId(payingCheck.id);
+    setError(null);
+    try {
+      const response = await nonEmployeeChecksApi.markPaid(payingCheck.id, {
+        payment_date: paymentDate,
+        confirmation_number: paymentConfirmation.trim() || undefined,
+      });
+      handleSavedCheck(response.non_employee_check);
+      setPayingCheck(null);
+      setPaymentConfirmation('');
+      await loadLiabilities();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to mark payment paid');
     } finally {
       setBusyId(null);
     }
@@ -295,8 +389,8 @@ export function ChecksPayments() {
     if (!voidReason.trim()) return;
     setBusyId(check.id);
     try {
-      const response = await nonEmployeeChecksApi.voidCheck(check.id, voidReason.trim());
-      handleSavedCheck(response.non_employee_check);
+      await nonEmployeeChecksApi.voidCheck(check.id, voidReason.trim());
+      await Promise.all([loadChecks(), loadLiabilities()]);
       setVoidingId(null);
       setVoidReason('');
     } catch (err) {
@@ -307,11 +401,12 @@ export function ChecksPayments() {
   };
 
   const handleDelete = async (check: NonEmployeeCheck) => {
-    if (!window.confirm(`Delete ${check.payable_to}'s check?`)) return;
+    if (!window.confirm(`Delete the payment to ${check.payable_to}?`)) return;
     setBusyId(check.id);
     try {
       await nonEmployeeChecksApi.delete(check.id);
       setChecks(prev => prev.filter(c => c.id !== check.id));
+      await loadLiabilities();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete check');
     } finally {
@@ -374,8 +469,12 @@ export function ChecksPayments() {
       'Amount',
       'Type',
       'Status',
+      'Payment Method',
       'Check Number',
       'Payment Date',
+      'Paid At',
+      'Paid By',
+      'Payroll Liability Allocated',
       'Due Date',
       'Tax Period',
       'Tax Year',
@@ -393,8 +492,12 @@ export function ChecksPayments() {
       Number(check.amount).toFixed(2),
       CHECK_TYPE_LABELS[check.check_type],
       check.check_status,
+      check.payment_method,
       check.check_number || '',
       check.payment_date || '',
+      check.paid_at || '',
+      check.paid_by_name || '',
+      check.liability_allocated_amount ? Number(check.liability_allocated_amount).toFixed(2) : '',
       check.due_date || '',
       periodLabel(check),
       check.tax_year || '',
@@ -440,10 +543,10 @@ export function ChecksPayments() {
     <div className="min-h-full bg-neutral-50">
       <Header
         title="Checks & Payments"
-        description="Standalone company checks for GRT, quarterly payments, vendors, reimbursements, and other non-pay-period disbursements."
+        description="Prepare checks and electronic payments, then reconcile payroll taxes and other obligations in one place."
         actions={
           <Button onClick={toggleCreateForm}>
-            {showForm ? 'Cancel' : 'New Check'}
+            {showForm ? 'Cancel' : 'New Payment'}
           </Button>
         }
       />
@@ -457,11 +560,19 @@ export function ChecksPayments() {
 
         {showForm && (
           <Card className="p-4 sm:p-5">
+            {form.liability_entry_ids.length > 0 && (
+              <div className="mb-4 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-900">
+                <p className="font-semibold">Connected to committed payroll</p>
+                <p className="mt-2 leading-5">This payment reserves the selected liability journal entries. It will not count as paid until you explicitly confirm it below.</p>
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
               <Input
                 label="Payable to"
                 placeholder="e.g., Treasurer of Guam"
+                helperText={form.liability_entry_ids.length > 0 ? 'Set by the selected payroll liabilities.' : undefined}
                 value={form.payable_to}
+                disabled={form.liability_entry_ids.length > 0}
                 onChange={e => setForm(p => ({ ...p, payable_to: e.target.value }))}
               />
               <FormField label="Amount">
@@ -480,21 +591,40 @@ export function ChecksPayments() {
               >
                 {STANDALONE_TYPES.map(type => <option key={type} value={type}>{CHECK_TYPE_LABELS[type]}</option>)}
               </Select>
-              <Input
-                label="Check number"
-                helperText="Optional until printed."
-                placeholder="e.g., 1234"
-                value={form.check_number}
-                onChange={e => setForm(p => ({ ...p, check_number: e.target.value }))}
-              />
+              <Select
+                label="Payment method"
+                value={form.payment_method}
+                onChange={e => setForm(p => ({ ...p, payment_method: e.target.value as OutgoingPaymentMethod, check_number: e.target.value === 'check' ? p.check_number : '' }))}
+              >
+                <option value="check">Paper check</option>
+                <option value="ach">ACH</option>
+                <option value="eftps">EFTPS</option>
+                <option value="wire">Wire</option>
+                <option value="card">Card</option>
+                <option value="cash">Cash</option>
+                <option value="other">Other</option>
+              </Select>
+              {form.payment_method === 'check' && <Input
+                  label="Check number"
+                  helperText="Optional until printed."
+                  placeholder="e.g., 1234"
+                  value={form.check_number}
+                  onChange={e => setForm(p => ({ ...p, check_number: e.target.value }))}
+                />}
               <Select
                 label="Tax/reporting period"
                 value={form.payment_period_type}
-                onChange={e => setForm(p => ({ ...p, payment_period_type: e.target.value as PaymentPeriodType }))}
+                disabled={form.liability_entry_ids.length > 0 && form.pay_period_id !== null}
+                onChange={e => setForm(p => ({
+                  ...p,
+                  payment_period_type: e.target.value as PaymentPeriodType,
+                  pay_period_id: e.target.value === 'pay_period' ? p.pay_period_id : null,
+                }))}
               >
+                {form.pay_period_id !== null && <option value="pay_period">Pay period</option>}
                 {(['none', 'month', 'quarter', 'year'] as PaymentPeriodType[]).map(type => <option key={type} value={type}>{PERIOD_LABELS[type]}</option>)}
               </Select>
-              {form.payment_period_type !== 'none' && (
+              {(['month', 'quarter', 'year'] as PaymentPeriodType[]).includes(form.payment_period_type) && (
                 <Input
                   label="Tax year"
                   placeholder="e.g., 2026"
@@ -523,7 +653,7 @@ export function ChecksPayments() {
               )}
               <Input
                 label="Payment date"
-                helperText="Date the check/payment is issued."
+                helperText="Planned issue date. Confirming paid is a separate step."
                 type="date"
                 value={form.payment_date}
                 onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))}
@@ -588,19 +718,27 @@ export function ChecksPayments() {
               onChange={line_items => setForm(p => ({ ...p, line_items }))}
               className="mt-4"
             />
-            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            {form.payment_method === 'check' && <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50 p-4 text-sm text-primary-900">
               Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
               Before printing on live check stock, test on plain paper or a photocopy of the real check first.
               <Link to="/check-settings" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
                 Open Check Settings
               </Link>
-            </div>
+            </div>}
             <div className="mt-4 grid grid-cols-1 gap-2 sm:flex">
-              <Button onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : 'Create Check'}</Button>
+              <Button onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : form.liability_entry_ids.length > 0 ? 'Prepare Payment' : 'Create Payment'}</Button>
               <Button variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
             </div>
           </Card>
         )}
+
+        <PayrollLiabilityCenter
+          center={liabilityCenter}
+          loading={liabilityLoading}
+          error={liabilityError}
+          onPrepare={handlePrepareLiabilities}
+          onUpdated={setLiabilityCenter}
+        />
 
         <Card className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -647,12 +785,12 @@ export function ChecksPayments() {
 
         <Card className="overflow-hidden">
           <div className="border-b bg-white px-4 py-3 text-sm text-neutral-600">
-            {totals.count} active check{totals.count === 1 ? '' : 's'} · {formatCurrency(totals.amount)}
+            {totals.count} active payment{totals.count === 1 ? '' : 's'} · {formatCurrency(totals.amount)}
           </div>
           {loading ? (
             <div className="p-6 text-sm text-neutral-500">Loading checks...</div>
           ) : visibleChecks.length === 0 ? (
-            <div className="p-6 text-sm text-neutral-500">No standalone checks found.</div>
+            <div className="p-6 text-sm text-neutral-500">No payments found.</div>
           ) : (
             <div className="divide-y">
               {visibleChecks.map(check => (
@@ -661,8 +799,9 @@ export function ChecksPayments() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-neutral-900">{check.payable_to}</span>
-                        <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>{check.check_status}</Badge>
+                        <Badge className={STATUS_COLORS[displayCheckStatus(check)] || 'bg-neutral-100 text-neutral-700'}>{displayCheckStatus(check)}</Badge>
                         <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type]}</Badge>
+                        {check.liability_payment && <Badge variant="outline">Payroll liability</Badge>}
                         {check.edit_count ? (
                           <button className="text-xs font-medium text-blue-700" onClick={() => toggleHistory(check.id)}>
                             {check.edit_count} edit{check.edit_count === 1 ? '' : 's'}
@@ -671,9 +810,10 @@ export function ChecksPayments() {
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">
                         <span className="font-semibold text-neutral-900">{formatCurrency(Number(check.amount))}</span>
-                        <span>Check #{check.check_number || '-'}</span>
+                        <span>{check.payment_method === 'check' ? `Check #${check.check_number || '-'}` : check.payment_method.toUpperCase()}</span>
                         <span>{periodLabel(check)}</span>
-                        {check.payment_date && <span>Payment {formatDate(check.payment_date)}</span>}
+                        {check.payment_date && <span>{check.paid_at ? 'Paid' : 'Payment date'} {formatDate(check.payment_date)}</span>}
+                        {check.paid_by_name && <span>Confirmed by {check.paid_by_name}</span>}
                         {check.due_date && <span>Due {formatDate(check.due_date)}</span>}
                         {check.confirmation_number && <span>Confirmation {check.confirmation_number}</span>}
                         <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatDate(check.created_at)}</span>
@@ -697,15 +837,29 @@ export function ChecksPayments() {
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
-                      <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
+                      {check.payment_method === 'check' && <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Preview
-                      </Button>
+                      </Button>}
                       <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Voucher
                       </Button>
-                      {!check.voided && !check.printed_at && (
+                      {!check.voided && check.payment_method === 'check' && !check.printed_at && (
                         <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check)} disabled={busyId === check.id}>
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Printed
+                        </Button>
+                      )}
+                      {!check.voided && !check.paid_at && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setPayingCheck(check);
+                            setPaymentDate(check.payment_date || localDateString());
+                            setPaymentConfirmation(check.confirmation_number || '');
+                          }}
+                          disabled={busyId === check.id || (check.payment_method === 'check' && !check.printed_at)}
+                          title={check.payment_method === 'check' && !check.printed_at ? 'Print the check first' : undefined}
+                        >
+                          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Paid
                         </Button>
                       )}
                       <Button size="sm" variant="outline" onClick={() => handleCloneCheck(check)}>
@@ -721,7 +875,7 @@ export function ChecksPayments() {
                           <Button size="sm" variant="destructive" onClick={() => handleVoid(check)} disabled={busyId === check.id}>Confirm</Button>
                         </>
                       )}
-                      {!check.printed_at && !check.voided && (
+                      {!check.liability_payment && !check.printed_at && !check.paid_at && !check.voided && (
                         <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(check)} disabled={busyId === check.id}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -740,7 +894,22 @@ export function ChecksPayments() {
         </Card>
       </div>
 
-      <NonEmployeeCheckEditModal check={editingCheck} onClose={() => setEditingCheck(null)} onSaved={handleSavedCheck} />
+      <Dialog open={payingCheck !== null} onOpenChange={(open) => { if (!open && busyId === null) setPayingCheck(null); }}>
+        {payingCheck && <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm payment was issued</DialogTitle>
+            <DialogDescription>{formatCurrency(Number(payingCheck.amount))} to {payingCheck.payable_to}. This is the moment connected payroll liabilities will count as paid.</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Input label="Payment date" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
+            <Input label="Confirmation number" helperText={['ach', 'eftps', 'wire', 'card'].includes(payingCheck.payment_method) ? 'Required for this electronic payment.' : 'Optional reference.'} value={paymentConfirmation} onChange={(event) => setPaymentConfirmation(event.target.value)} />
+          </div>
+          <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-5 text-warning-900">Confirm only after the check was issued or the electronic transfer succeeded. A prepared payment is not the same as a paid liability.</div>
+          <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setPayingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void handleMarkPaid()} disabled={busyId !== null || !paymentDate || (['ach', 'eftps', 'wire', 'card'].includes(payingCheck.payment_method) && !paymentConfirmation.trim())}>{busyId !== null ? 'Confirming…' : 'Confirm Paid'}</Button></DialogFooter>
+        </DialogContent>}
+      </Dialog>
+
+      <NonEmployeeCheckEditModal check={editingCheck} onClose={() => setEditingCheck(null)} onSaved={(updated) => { handleSavedCheck(updated); void loadLiabilities(); }} />
 
       {previewUrl && previewCheck && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-neutral-950/70 p-4">
@@ -781,6 +950,23 @@ function formatCurrency(value: number) {
 function formatDate(value: string) {
   const date = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00`);
   return date.toLocaleDateString();
+}
+
+function displayCheckStatus(check: NonEmployeeCheck) {
+  return check.liability_payment && check.check_status === 'pending' ? 'prepared' : check.check_status;
+}
+
+function liabilityPaymentType(obligations: PayrollLiabilityCenterObligation[]): NonEmployeeCheckType {
+  const authority = obligations[0]?.authority;
+  if (
+    authority === 'Guam Department of Revenue and Taxation'
+    || authority === 'United States Treasury'
+  ) return 'tax_deposit';
+
+  const categories = obligations.flatMap((obligation) => obligation.categories.map((category) => category.category));
+  if (categories.length > 0 && categories.every((category) => category === 'child_support')) return 'child_support';
+  if (categories.length > 0 && categories.every((category) => category === 'garnishment')) return 'garnishment';
+  return 'other';
 }
 
 function periodLabel(check: NonEmployeeCheck) {

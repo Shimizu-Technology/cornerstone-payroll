@@ -1953,6 +1953,7 @@ export type NonEmployeeCheckType =
   | 'other';
 
 export type PaymentPeriodType = 'none' | 'pay_period' | 'month' | 'quarter' | 'year';
+export type OutgoingPaymentMethod = 'check' | 'ach' | 'eftps' | 'wire' | 'card' | 'cash' | 'other';
 
 export interface NonEmployeeCheck {
   id: number;
@@ -1974,6 +1975,12 @@ export interface NonEmployeeCheck {
   payment_date?: string | null;
   effective_payment_date?: string | null;
   confirmation_number?: string | null;
+  payment_method: OutgoingPaymentMethod;
+  paid_at?: string | null;
+  paid_by_id?: number | null;
+  paid_by_name?: string | null;
+  liability_payment?: boolean;
+  liability_allocated_amount?: number;
   line_items: NonEmployeeCheckLineItem[];
   print_count: number;
   printed_at?: string;
@@ -1986,6 +1993,67 @@ export interface NonEmployeeCheck {
   created_by_name?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type PayrollLiabilityObligationStatus =
+  | 'unpaid'
+  | 'partially_prepared'
+  | 'prepared'
+  | 'partially_paid'
+  | 'paid'
+  | 'overdue'
+  | 'credit';
+
+export interface PayrollLiabilityCenterObligation {
+  key: string;
+  pay_period_id: number;
+  authority: string;
+  liability_date: string;
+  period_start: string;
+  period_end: string;
+  pay_date: string;
+  due_date?: string | null;
+  calculated_amount: number;
+  prepared_amount: number;
+  paid_amount: number;
+  outstanding_amount: number;
+  unreserved_amount: number;
+  status: PayrollLiabilityObligationStatus;
+  entry_ids: number[];
+  categories: Array<{ category: string; amount: number }>;
+}
+
+export interface PayrollLiabilityCenterPayment {
+  id: number;
+  payable_to: string;
+  amount: number;
+  payment_method: OutgoingPaymentMethod;
+  payment_date?: string | null;
+  confirmation_number?: string | null;
+  check_number?: string | null;
+  status: string;
+  printed_at?: string | null;
+  paid_at?: string | null;
+  paid_by_name?: string | null;
+  created_by_name?: string | null;
+  voided: boolean;
+  void_reason?: string | null;
+  allocated_amount: number;
+}
+
+export interface PayrollLiabilityCenter {
+  company_id: number;
+  as_of: string;
+  totals: {
+    calculated_amount: number;
+    prepared_amount: number;
+    paid_amount: number;
+    outstanding_amount: number;
+    unreserved_amount: number;
+    overdue_count: number;
+  };
+  obligations: PayrollLiabilityCenterObligation[];
+  payments: PayrollLiabilityCenterPayment[];
 }
 
 export interface NonEmployeeCheckLineItem {

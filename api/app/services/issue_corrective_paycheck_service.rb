@@ -670,7 +670,7 @@ class IssueCorrectivePaycheckService
 
     return if fit_total.to_f <= 0 # no positive FIT delta → no deposit needed
 
-    NonEmployeeCheck.create!(
+    check = NonEmployeeCheck.create!(
       company_id:           supplemental.company_id,
       pay_period_id:        supplemental.id,
       created_by:           @actor,
@@ -683,5 +683,12 @@ class IssueCorrectivePaycheckService
       memo:                 "FIT deposit for corrective paycheck (#{supplemental.start_date} – #{supplemental.end_date})",
       description:          "Federal Income Tax (FIT) — corrective deposit for #{@employee.full_name}"
     )
+    PayrollLiabilityFitPaymentConnector.connect!(
+      non_employee_check: check,
+      pay_period: supplemental,
+      actor: @actor
+    )
+  rescue PayrollLiabilityCheckAllocationService::Error => e
+    raise CorrectionError, "FIT payment could not be connected to its payroll liabilities: #{e.message}"
   end
 end

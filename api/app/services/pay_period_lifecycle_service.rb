@@ -239,7 +239,7 @@ class PayPeriodLifecycleService
     return unless total_fit.positive?
 
     NonEmployeeCheck.transaction(requires_new: true) do
-      NonEmployeeCheck.create!(
+      check = NonEmployeeCheck.create!(
         pay_period: pay_period,
         company_id: pay_period.company_id,
         payable_to: "Treasurer of Guam",
@@ -253,9 +253,16 @@ class PayPeriodLifecycleService
         description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
         created_by: actor
       )
+      PayrollLiabilityFitPaymentConnector.connect!(
+        non_employee_check: check,
+        pay_period: pay_period,
+        actor: actor
+      )
     end
   rescue ActiveRecord::RecordNotUnique
     # The unique-per-period index is a final idempotency backstop.
+  rescue PayrollLiabilityCheckAllocationService::Error => e
+    raise Error, "FIT payment could not be connected to its payroll liabilities: #{e.message}"
   end
 
   def record_correction_commit!

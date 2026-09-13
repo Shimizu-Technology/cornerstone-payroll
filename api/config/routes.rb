@@ -426,11 +426,15 @@ Rails.application.routes.draw do
           end
           member do
             post :mark_printed
+            post :mark_paid
             post :void_check
             get :check_pdf
             get :voucher_pdf
             get :history
           end
+        end
+        resource :payroll_liability_center, only: :show, controller: "payroll_liability_center" do
+          post :due_date, action: :update_due_date
         end
 
         # General Transmittals (standalone, non-pay-period delivery packets)
