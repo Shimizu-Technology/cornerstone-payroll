@@ -35,6 +35,7 @@ class StaffRolePolicy
     "api/v1/admin/payroll_filing_responsibilities" => :payroll_operations,
     "api/v1/admin/payroll_liability_center" => :payroll_operations,
     "api/v1/admin/check_register" => :payroll_operations,
+    "api/v1/admin/payroll_final_records" => :payroll_operations,
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,

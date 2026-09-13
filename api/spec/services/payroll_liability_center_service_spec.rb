@@ -69,4 +69,18 @@ RSpec.describe PayrollLiabilityCenterService do
     expect(drt[:status]).to eq("overdue")
     expect(result.dig(:totals, :overdue_count)).to eq(1)
   end
+
+  it "can return one pay period without loading company-wide payment history" do
+    other_period = create(:pay_period, :committed, company:, start_date: Date.new(2026, 8, 16),
+      end_date: Date.new(2026, 8, 31), pay_date: Date.new(2026, 9, 5))
+    create(:payroll_item, company:, employee:, pay_period: other_period,
+      withholding_tax: 50, social_security_tax: 31, employer_social_security_tax: 31)
+    PayrollLiabilityPostingService.post!(pay_period: other_period, actor:)
+
+    result = described_class.new(company:, pay_period_id: period.id, include_payments: false).call
+
+    expect(result[:obligations]).not_to be_empty
+    expect(result[:obligations].pluck(:pay_period_id).uniq).to eq([ period.id ])
+    expect(result[:payments]).to eq([])
+  end
 end

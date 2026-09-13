@@ -2509,6 +2509,121 @@ export interface QuarterlyOfficialFormFields {
   employees?: Array<Record<string, string | number | null | string[]>>;
 }
 
+export interface PayrollFinalRecord {
+  schema_version: string;
+  generated_at: string;
+  record_fingerprint: string;
+  company: { id: number; name: string };
+  pay_period: {
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: string;
+    correction_status: string | null;
+    cycle: string;
+    run_purpose: string;
+    committed_at: string | null;
+    committed_by_name: string | null;
+  };
+  official_payroll: {
+    status: 'official' | 'voided';
+    paycheck_count: number;
+    gross_pay: string;
+    non_taxable_pay: string;
+    employee_deductions: string;
+    net_pay: string;
+    employer_taxes: string;
+    employer_contributions: string;
+    total_payroll_cost: string;
+    client_approval_required: boolean;
+    approved_review_revision: number | null;
+    calculation_checksum: string | null;
+  };
+  journal: {
+    basis: string;
+    lines: Array<{ account_key: string; account_label: string; debit: string; credit: string; source: string }>;
+    debit_total: string;
+    credit_total: string;
+    difference: string;
+    balanced: boolean;
+  };
+  employee_payments: {
+    required_count: number;
+    assigned_count: number;
+    printed_count: number;
+    delivered_count: number;
+    reconciled_count: number;
+    outstanding_count: number;
+    total_amount: string;
+    by_status: Record<string, number>;
+    rows: Array<{
+      payroll_item_id: number;
+      employee_id: number;
+      employee_name: string;
+      amount: string;
+      check_number: string | null;
+      issuance_status: string;
+      reconciliation_status: string;
+    }>;
+  };
+  liabilities: {
+    posting_status: string;
+    payment_tracking_status: string;
+    calculated_amount: string;
+    prepared_amount: string;
+    paid_amount: string;
+    outstanding_amount: string;
+    unreserved_amount: string;
+    unclassified_components: Array<{ label: string; amount: number; reason: string }>;
+    obligations: Array<{
+      key: string;
+      authority: string;
+      liability_date: string;
+      due_date: string | null;
+      calculated_amount: string;
+      prepared_amount: string;
+      paid_amount: string;
+      outstanding_amount: string;
+      status: string;
+    }>;
+  };
+  ytd_reconciliation: {
+    status: string;
+    basis: string;
+    through_pay_date: string;
+    cornerstone_payroll_count: number;
+    cornerstone_paycheck_count: number;
+    quickbooks_paycheck_count: number;
+    historical_adjustment_count: number;
+    excluded_unlinked_paycheck_count: number;
+    historical_ytd_bridge: { applied: boolean; tax_years: number[]; through_pay_date: string | null; through_period_end: string | null };
+    totals: Record<string, string>;
+  };
+  evidence: {
+    payroll_approval: { approved_at: string | null; approved_by_name: string | null };
+    client_approval_required: boolean;
+    review: null | {
+      revision: number;
+      calculation_checksum: string;
+      approved_at: string;
+      approved_by_name: string | null;
+      approval_method: string;
+      approval_evidence_reference: string | null;
+    };
+    source_packages: Array<{
+      id: number;
+      source_type: string;
+      package_id: string;
+      revision: number;
+      import_hash: string;
+      documents: Array<{ filename: string; sha256: string; source_role: string }>;
+    }>;
+    time_tracking_imports: Array<Record<string, string | number | null>>;
+  };
+  completion: { status: 'attention_required' | 'in_progress' | 'complete'; blockers: string[]; open_items: string[] };
+}
+
 export const reportsApi = {
   dashboard: () =>
     api.get<DashboardResponse>('/admin/reports/dashboard'),
@@ -2521,6 +2636,12 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
   payrollRegisterXlsx: (payRunKey: string | number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
+  payrollFinalRecord: (payPeriodId: number) =>
+    api.get<{ final_record: PayrollFinalRecord }>(`/admin/pay_periods/${payPeriodId}/final_record`),
+  payrollFinalRecordXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/final_record.xlsx`),
+  payrollFinalRecordPdf: (payPeriodId: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/final_record.pdf`),
   employeePayHistory: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
     api.get<{ report: EmployeePayHistoryReport }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
   employeePayHistoryXlsx: (employeeId: number, period: PayrollReportPeriodParams = {}) =>

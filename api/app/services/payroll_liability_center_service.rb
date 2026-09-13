@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 class PayrollLiabilityCenterService
-  def initialize(company:)
+  def initialize(company:, pay_period_id: nil, include_payments: true)
     @company = company
+    @pay_period_id = pay_period_id
+    @include_payments = include_payments
   end
 
   def call
@@ -10,7 +12,9 @@ class PayrollLiabilityCenterService
       payroll_liability_check_allocations: :non_employee_check,
       payroll_liability_posting: :pay_period
     ).to_a
-    due_dates = company.payroll_liability_obligation_due_dates.index_by do |record|
+    due_date_scope = company.payroll_liability_obligation_due_dates
+    due_date_scope = due_date_scope.where(pay_period_id:) if pay_period_id
+    due_dates = due_date_scope.index_by do |record|
       [ record.pay_period_id, record.authority ]
     end
     obligations = entries.group_by do |entry|
@@ -19,13 +23,17 @@ class PayrollLiabilityCenterService
       obligation_json(pay_period_id, authority, group, due_dates[[ pay_period_id, authority ]])
     end.sort_by { |row| [ row[:due_date]&.iso8601 || "9999-12-31", row[:liability_date].iso8601, row[:authority] ] }
 
-    payments = liability_payments.includes(:paid_by, :created_by, :payroll_liability_check_allocations)
-      .order(Arel.sql("COALESCE(payment_date, DATE(non_employee_checks.created_at)) DESC"), created_at: :desc)
-      .map { |payment| payment_json(payment) }
+    payments = if include_payments
+      liability_payments.includes(:paid_by, :created_by, :payroll_liability_check_allocations)
+        .order(Arel.sql("COALESCE(payment_date, DATE(non_employee_checks.created_at)) DESC"), created_at: :desc)
+        .map { |payment| payment_json(payment) }
+    else
+      []
+    end
 
     {
       company_id: company.id,
-      as_of: Date.current,
+      as_of: PayrollBusinessClock.today,
       totals: totals(obligations),
       obligations:,
       payments:
@@ -34,12 +42,13 @@ class PayrollLiabilityCenterService
 
   private
 
-  attr_reader :company
+  attr_reader :company, :pay_period_id, :include_payments
 
   def active_entries
     reversed_source_ids = PayrollLiabilityPosting.reversals.select(:source_posting_id)
-    company.payroll_liability_entries.joins(:payroll_liability_posting)
+    scope = company.payroll_liability_entries.joins(:payroll_liability_posting)
       .merge(PayrollLiabilityPosting.source_postings.where.not(id: reversed_source_ids))
+    pay_period_id ? scope.where(payroll_liability_postings: { pay_period_id: }) : scope
   end
 
   def liability_payments
@@ -86,7 +95,7 @@ class PayrollLiabilityCenterService
   def status_for(outstanding:, unreserved:, paid:, prepared:, due_date:)
     return "credit" if outstanding.negative?
     return "paid" if outstanding.zero?
-    return "overdue" if due_date.present? && due_date < Date.current
+    return "overdue" if due_date.present? && due_date < PayrollBusinessClock.today
     return "partially_paid" if paid.positive?
     return "prepared" if unreserved <= 0
     return "partially_prepared" if prepared.positive?

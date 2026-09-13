@@ -162,7 +162,7 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error }: Payrol
       )}
 
       <div className="border-t border-current/10 px-4 py-3 text-xs text-gray-600">
-        This phase records what payroll created. Recording payments, allocations, confirmation numbers, and proof of settlement will be added in the payment-ledger PR; this status does not mean an authority or payee has been paid.
+        Posted means the obligation is recorded; it does not mean the recipient has been paid. Prepare payments, retain confirmation details, and track settlement in Checks &amp; Payments.
       </div>
     </Card>
   );

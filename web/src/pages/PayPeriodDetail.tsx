@@ -45,6 +45,7 @@ import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecord
 import { AirePayrollCockpit } from '@/components/payroll/AirePayrollCockpit';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
+import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
@@ -3366,6 +3367,8 @@ export function PayPeriodDetail({
             onConfirmed={() => setCheckPrintRefreshToken((value) => value + 1)}
           />
         )}
+
+        {isCommitted && <PayrollFinalRecordPanel payPeriodId={payPeriod.id} />}
 
         {/* Reports Download Panel — for calculated/approved/committed */}
         {!isDraft && payrollItems.length > 0 && (
