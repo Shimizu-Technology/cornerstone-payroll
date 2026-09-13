@@ -581,6 +581,22 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('shows reviewed new-hire readiness with labeled controls and retained history', async ({ page }): Promise<void> => {
+    await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
+
+    await expect(page.getByText('Payroll ready', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Manage documents' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Ready for payroll', { exact: true })).toBeVisible();
+    await expect(dialog.getByLabel('Readiness outcome')).toHaveCount(2);
+    await expect(dialog.getByRole('button', { name: 'Save Identity and work authorization status' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Save Signed withholding election status' })).toBeVisible();
+
+    await dialog.getByText('View retained readiness history', { exact: true }).first().click();
+    await expect(dialog.getByText('Synthetic release fixture readiness reviewed', { exact: true }).first()).toBeVisible();
+  });
+
   test('discards a delayed employee save after switching clients', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {

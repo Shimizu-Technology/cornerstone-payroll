@@ -68,6 +68,53 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     expect(storage.download(document.preview_file_key)).to be_present
   end
 
+  it "retains a document and both storage objects while it is actively linked to readiness" do
+    employee = create(:employee, company: company)
+    document.update!(employee: employee)
+    requirement = create(
+      :employee_document_requirement,
+      company: company,
+      employee: employee,
+      client_document: document,
+      status: "received",
+      received_at: Time.current
+    )
+
+    expect do
+      delete "/api/v1/admin/client_documents/#{document.id}"
+    end.not_to change(ClientDocument, :count)
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body.fetch("error")).to include("linked")
+    expect(requirement.reload.client_document).to eq(document)
+    expect_readiness_storage_to_exist(document)
+  end
+
+  it "retains a document and both storage objects when only readiness history links it" do
+    employee = create(:employee, company: company)
+    document.update!(employee: employee)
+    requirement = create(:employee_document_requirement, company: company, employee: employee)
+    event = requirement.events.create!(
+      company: company,
+      employee: employee,
+      client_document: document,
+      document_title: document.title,
+      actor: admin_user,
+      event_type: "document_received",
+      from_status: "missing",
+      to_status: "received"
+    )
+
+    expect do
+      delete "/api/v1/admin/client_documents/#{document.id}"
+    end.not_to change(ClientDocument, :count)
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body.fetch("error")).to include("linked")
+    expect(event.reload.client_document).to eq(document)
+    expect_readiness_storage_to_exist(document)
+  end
+
   it "writes an audit log only after a successful delete" do
     destroy_audit_count = AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
 
@@ -94,5 +141,12 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     expect(
       AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
     ).to eq(destroy_audit_count)
+  end
+
+
+  def expect_readiness_storage_to_exist(retained_document)
+    storage = R2StorageService.new
+    expect(storage.download(retained_document.file_key)).to be_present
+    expect(storage.download(retained_document.preview_file_key)).to be_present
   end
 end

@@ -45,6 +45,7 @@ module Api
               user_agent: request.user_agent
             )
           end
+          audit_requirement_received!(result.document_requirement) if result.document_requirement
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
@@ -96,9 +97,19 @@ module Api
           )
           cleanup_storage_keys(file_keys)
           head :no_content
+        rescue ActiveRecord::RecordNotDestroyed
+          raise unless readiness_evidence?(@document)
+
+          render json: {
+            error: "This file is linked to retained employee-readiness evidence and cannot be deleted. Attach and verify a replacement when needed."
+          }, status: :unprocessable_entity
         end
 
         private
+
+        def readiness_evidence?(document)
+          document.employee_document_requirements.exists? || document.employee_document_requirement_events.exists?
+        end
 
         def set_document
           @document = ClientDocument.find_by(id: params[:id], company_id: current_company_id)
@@ -168,6 +179,19 @@ module Api
           rescue R2StorageService::UploadError => e
             Rails.logger.error("Admin client document storage cleanup failed for #{key}: #{e.message}")
           end
+        end
+
+        def audit_requirement_received!(requirement)
+          AuditLog.record!(
+            user: current_user,
+            company_id: current_company_id,
+            action: "employee_document_requirements#receive",
+            record_type: "employee_document_requirements",
+            record_id: requirement.id,
+            metadata: { employee_id: requirement.employee_id, requirement_type: requirement.requirement_type },
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent
+          )
         end
       end
     end

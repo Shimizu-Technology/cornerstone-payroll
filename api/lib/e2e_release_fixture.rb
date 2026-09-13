@@ -195,6 +195,18 @@ class E2eReleaseFixture
         pay_rate: 19.25,
         hire_date: Date.new(2026, 1, 1)
       )
+      EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: admin)
+      employee.employee_document_requirements.find_each do |requirement|
+        EmployeeDocumentRequirementReviewService.new(
+          requirement: requirement,
+          actor: admin,
+          attributes: {
+            status: "waived",
+            review_note: "Synthetic release fixture readiness reviewed",
+            lock_version: requirement.lock_version
+          }
+        ).call!
+      end
 
       bonus_alpha = create_employee!(
         company: company,

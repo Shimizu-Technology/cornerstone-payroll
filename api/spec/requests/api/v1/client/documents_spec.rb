@@ -61,6 +61,75 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       expect(response).to have_http_status(:no_content)
     end
 
+    it "links one upload to a readiness item as received without treating it as verified" do
+      requirement = create(:employee_document_requirement, company: company, employee: employee)
+
+      post "/api/v1/client/documents",
+        params: {
+          title: "Signed W-4",
+          category: "employee_onboarding",
+          employee_id: employee.id,
+          requirement_id: requirement.id,
+          file: upload
+        }
+
+      expect(response).to have_http_status(:created), response.body
+      expect(requirement.reload).to have_attributes(status: "received", reviewed_at: nil, reviewed_by_id: nil)
+      expect(requirement.client_document).to be_present
+      expect(requirement.events.sole).to have_attributes(
+        event_type: "document_received",
+        from_status: "missing",
+        to_status: "received",
+        actor: client_user
+      )
+      expect(AuditLog.where(action: "employee_document_requirements#receive", record_id: requirement.id)).to exist
+    end
+
+    it "does not delete a document that is still linked to readiness evidence" do
+      linked_document = readiness_document
+      requirement = create(
+        :employee_document_requirement,
+        company: company,
+        employee: employee,
+        client_document: linked_document,
+        status: "received",
+        received_at: Time.current
+      )
+
+      expect do
+        delete "/api/v1/client/documents/#{linked_document.id}"
+      end.not_to change(ClientDocument, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(requirement.reload.client_document).to eq(linked_document)
+      expect_readiness_storage_to_exist(linked_document)
+    end
+
+    it "does not delete a document retained only by readiness history" do
+      linked_document = readiness_document
+      requirement = create(:employee_document_requirement, company: company, employee: employee)
+      event = requirement.events.create!(
+        company: company,
+        employee: employee,
+        client_document: linked_document,
+        document_title: linked_document.title,
+        actor: client_user,
+        event_type: "document_received",
+        from_status: "missing",
+        to_status: "received"
+      )
+
+      expect do
+        delete "/api/v1/client/documents/#{linked_document.id}"
+      end.not_to change(ClientDocument, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(event.reload.client_document).to eq(linked_document)
+      expect_readiness_storage_to_exist(linked_document)
+    end
+
     it "does not allow one client user to delete another uploader's document" do
       document = ClientDocument.create!(
         company: company,
@@ -271,5 +340,28 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
     ensure
       docx.close!
     end
+  end
+
+  def readiness_document
+    document = create(
+      :client_document,
+      company: company,
+      employee: employee,
+      uploaded_by: client_user,
+      preview_file_key: "client_documents/company_#{company.id}/previews/#{SecureRandom.uuid}.pdf",
+      preview_status: "ready",
+      preview_content_type: "application/pdf",
+      preview_generated_at: Time.current
+    )
+    storage = R2StorageService.new
+    storage.upload(document.file_key, "retained readiness source", content_type: document.content_type)
+    storage.upload(document.preview_file_key, "%PDF-1.4\nretained preview", content_type: "application/pdf")
+    document
+  end
+
+  def expect_readiness_storage_to_exist(document)
+    storage = R2StorageService.new
+    expect(storage.download(document.file_key)).to be_present
+    expect(storage.download(document.preview_file_key)).to be_present
   end
 end

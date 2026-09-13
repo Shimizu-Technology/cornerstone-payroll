@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -214,6 +214,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
     t.index ["company_id"], name: "index_client_documents_on_company_id"
     t.index ["employee_id"], name: "index_client_documents_on_employee_id"
     t.index ["file_key"], name: "index_client_documents_on_file_key", unique: true
+    t.index ["id", "company_id"], name: "idx_client_documents_readiness_tenant_key", unique: true
     t.index ["uploaded_by_id"], name: "index_client_documents_on_uploaded_by_id"
   end
 
@@ -523,6 +524,71 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
     t.index ["employee_id"], name: "index_employee_deductions_on_employee_id"
   end
 
+  create_table "employee_document_requirement_events", force: :cascade do |t|
+    t.bigint "actor_id"
+    t.bigint "client_document_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "document_title"
+    t.bigint "employee_document_requirement_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "event_type", null: false
+    t.string "from_status"
+    t.text "note"
+    t.string "to_status", null: false
+    t.datetime "updated_at", null: false
+    t.index ["actor_id"], name: "index_employee_document_requirement_events_on_actor_id"
+    t.index ["client_document_id"], name: "idx_on_client_document_id_96591a9515"
+    t.index ["company_id"], name: "index_employee_document_requirement_events_on_company_id"
+    t.index ["employee_document_requirement_id", "created_at"], name: "index_employee_document_requirement_events_on_history"
+    t.index ["employee_document_requirement_id"], name: "idx_on_employee_document_requirement_id_04b47c5045"
+    t.index ["employee_id"], name: "index_employee_document_requirement_events_on_employee_id"
+  end
+
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_employee_document_requirement_event_mutation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      RAISE EXCEPTION 'employee_document_requirement_events are append-only'
+        USING ERRCODE = 'integrity_constraint_violation';
+    END;
+    $function$;
+
+    CREATE TRIGGER employee_document_requirement_events_append_only
+    BEFORE UPDATE OR DELETE ON employee_document_requirement_events
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_employee_document_requirement_event_mutation();
+  SQL
+
+  create_table "employee_document_requirements", force: :cascade do |t|
+    t.bigint "client_document_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.date "due_on"
+    t.bigint "employee_id", null: false
+    t.string "label", null: false
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "received_at"
+    t.boolean "required_for_payroll", default: true, null: false
+    t.string "requirement_type", null: false
+    t.text "review_note"
+    t.datetime "reviewed_at"
+    t.bigint "reviewed_by_id"
+    t.string "status", default: "missing", null: false
+    t.datetime "updated_at", null: false
+    t.index ["client_document_id"], name: "index_employee_document_requirements_on_client_document_id"
+    t.index ["company_id", "status"], name: "index_employee_document_requirements_on_company_and_status"
+    t.index ["company_id"], name: "index_employee_document_requirements_on_company_id"
+    t.index ["created_by_id"], name: "index_employee_document_requirements_on_created_by_id"
+    t.index ["employee_id", "requirement_type"], name: "index_employee_document_requirements_on_employee_and_type", unique: true
+    t.index ["employee_id"], name: "index_employee_document_requirements_on_employee_id"
+    t.index ["id", "company_id"], name: "idx_employee_document_requirements_tenant_key", unique: true
+    t.index ["reviewed_by_id"], name: "index_employee_document_requirements_on_reviewed_by_id"
+  end
+
   create_table "employee_loans", force: :cascade do |t|
     t.date "balance_as_of"
     t.string "balance_source"
@@ -787,6 +853,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
     t.jsonb "default_custom_earnings", default: [], null: false
     t.jsonb "default_payroll_adjustments", default: [], null: false
     t.bigint "department_id"
+    t.boolean "document_readiness_required", default: false, null: false
     t.string "email"
     t.decimal "employer_retirement_match_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "employer_roth_match_rate", precision: 5, scale: 4, default: "0.0"
@@ -824,6 +891,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
     t.index ["company_id"], name: "index_employees_on_company_id"
     t.index ["department_id"], name: "index_employees_on_department_id"
     t.index ["employment_type"], name: "index_employees_on_employment_type"
+    t.index ["id", "company_id"], name: "idx_employees_document_readiness_tenant_key", unique: true
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
@@ -3012,6 +3080,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_070000) do
   add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
+  add_foreign_key "employee_document_requirement_events", "client_documents", column: ["client_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_document_tenant"
+  add_foreign_key "employee_document_requirement_events", "companies"
+  add_foreign_key "employee_document_requirement_events", "employee_document_requirements", column: ["employee_document_requirement_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_requirement_tenant"
+  add_foreign_key "employee_document_requirement_events", "employees", column: ["employee_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirement_events_employee_tenant"
+  add_foreign_key "employee_document_requirement_events", "users", column: "actor_id", on_delete: :nullify
+  add_foreign_key "employee_document_requirements", "client_documents", column: ["client_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirements_document_tenant"
+  add_foreign_key "employee_document_requirements", "companies"
+  add_foreign_key "employee_document_requirements", "employees", column: ["employee_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_employee_document_requirements_employee_tenant"
+  add_foreign_key "employee_document_requirements", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "employee_document_requirements", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"

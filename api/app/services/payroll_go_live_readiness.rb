@@ -24,6 +24,7 @@ class PayrollGoLiveReadiness
     values << "Add an effective W-4 election for every active W-2 employee" if missing_w4_count.positive?
     values << "Verify opening balances for every active recurring loan deduction" if loan_setup_gap_count.positive?
     values << "Move every legacy recurring earning and adjustment to typed payroll fields" if legacy_recurring_component_count.positive?
+    values << "Resolve every required employee document checklist" if employee_document_gap_count.positive?
     values << "Confirm the successor pay schedule" unless current_schedule&.confirmed?
     values << "Confirm the successor legal workweek" unless current_workweek&.confirmed?
     values << "Record two consecutive passing parallel payrolls" if review.consecutive_pass_count < 2
@@ -42,6 +43,7 @@ class PayrollGoLiveReadiness
       "employees_missing_w4" => missing_w4_count,
       "loan_setup_gaps" => loan_setup_gap_count,
       "legacy_recurring_components" => legacy_recurring_component_count,
+      "employee_document_gaps" => employee_document_gap_count,
       "pay_schedule_confirmed" => current_schedule&.confirmed? || false,
       "workweek_confirmed" => current_workweek&.confirmed? || false,
       "consecutive_parallel_passes" => review.consecutive_pass_count,
@@ -92,5 +94,11 @@ class PayrollGoLiveReadiness
       PayrollItem.normalize_custom_earning_entries(employee.default_custom_earnings).size +
         Employee.normalize_payroll_adjustments(employee.default_payroll_adjustments).count { |entry| entry["active"] != false }
     end
+  end
+
+  def employee_document_gap_count
+    @employee_document_gap_count ||= EmployeeDocumentReadiness.gap_count(
+      employees: company.employees.active.where(document_readiness_required: true)
+    )
   end
 end
