@@ -15,12 +15,14 @@ class EmployeeClassificationTransitionService
     authorize!
 
     Employee.transaction do
+      employee.company.lock!
       employee.lock!
       validate_transition!
 
       new_employee = Employee.create!(new_employee_attributes)
       create_w4_election!(new_employee)
       create_primary_wage_rate!(new_employee)
+      EmployeeDocumentReadiness.seed_new_hire!(employee: new_employee, actor: actor)
 
       employee.update!(
         status: "terminated",

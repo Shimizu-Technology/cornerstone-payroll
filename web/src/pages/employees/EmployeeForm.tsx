@@ -13,7 +13,7 @@ import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocuments
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
-import { canonicalSsn, importedProfileAllowsBlank, validateHireDate } from '@/lib/employee-profile';
+import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -407,8 +407,9 @@ export function EmployeeForm() {
   const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness']): void => {
     if (companyIdRef.current !== companyId) return;
 
-    setLoadedEmployee((current) => current ? { ...current, document_readiness: readiness } : current);
-  }, [companyId]);
+    const expectedEmployeeId = Number(id);
+    setLoadedEmployee((current) => withDocumentReadiness(current, expectedEmployeeId, readiness));
+  }, [companyId, id]);
 
   const fetchPayrollFields = useCallback(async () => {
     if (isClient) return;

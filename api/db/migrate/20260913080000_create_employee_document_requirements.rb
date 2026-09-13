@@ -2,6 +2,8 @@
 
 class CreateEmployeeDocumentRequirements < ActiveRecord::Migration[8.1]
   def change
+    add_column :employees, :document_readiness_required, :boolean, null: false, default: false
+
     create_table :employee_document_requirements do |t|
       t.references :company, null: false, foreign_key: true
       t.references :employee, null: false, foreign_key: true

@@ -1572,6 +1572,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     it "blocks approval while an included employee has unresolved required documents" do
       pay_period.update!(status: "calculated")
       create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      employee.update!(document_readiness_required: true)
       create(:employee_document_requirement, company: company, employee: employee)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
@@ -1700,6 +1701,17 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event).to be_present
       expect(assigned_event.check_number).to eq(item.reload.check_number)
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
+    end
+
+    it "blocks commit while an included new hire has unresolved required documents" do
+      employee.update!(document_readiness_required: true)
+      create(:employee_document_requirement, company: company, employee: employee)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Resolve required new-hire documents")
+      expect(pay_period.reload).to be_approved
     end
 
     it "queues a committed acknowledgement for each applied finalized AIRE batch" do
