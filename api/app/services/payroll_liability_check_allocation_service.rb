@@ -31,6 +31,7 @@ class PayrollLiabilityCheckAllocationService
 
       authorities = entries.map(&:authority).uniq
       raise Error, "One payment can cover only one recipient" unless authorities.one?
+      validate_payment_recipient!(payment, authorities.first)
 
       available = available_amount(entries, payment.company_id)
       amount = payment.amount.to_d.round(2)
@@ -62,6 +63,13 @@ class PayrollLiabilityCheckAllocationService
       .where(non_employee_checks: { voided: false })
       .sum(:amount).to_d
     (liability - reserved).round(2)
+  end
+
+  def validate_payment_recipient!(payment, authority)
+    expected = authority == PayrollLiabilityPostingService::GUAM_DRT ? "Treasurer of Guam" : authority
+    return if payment.payable_to.to_s.squish.casecmp?(expected.squish)
+
+    raise Error, "Payment recipient must be #{expected} for the selected payroll liabilities"
   end
 
   def create_allocations!(payment, entries, requested)

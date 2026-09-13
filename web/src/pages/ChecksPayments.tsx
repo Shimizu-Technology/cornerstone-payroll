@@ -570,7 +570,9 @@ export function ChecksPayments() {
               <Input
                 label="Payable to"
                 placeholder="e.g., Treasurer of Guam"
+                helperText={form.liability_entry_ids.length > 0 ? 'Set by the selected payroll liabilities.' : undefined}
                 value={form.payable_to}
+                disabled={form.liability_entry_ids.length > 0}
                 onChange={e => setForm(p => ({ ...p, payable_to: e.target.value }))}
               />
               <FormField label="Amount">

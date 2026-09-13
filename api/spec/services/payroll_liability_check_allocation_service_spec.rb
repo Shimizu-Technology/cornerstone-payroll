@@ -55,6 +55,17 @@ RSpec.describe PayrollLiabilityCheckAllocationService do
     }.to raise_error(described_class::Error, /one recipient/)
   end
 
+  it "rejects a payment addressed to someone other than the liability recipient" do
+    entries = posting.entries.where(authority: PayrollLiabilityPostingService::US_TREASURY)
+
+    expect {
+      described_class.allocate!(
+        non_employee_check: payment(amount: 124, payable_to: "Unrelated Vendor"),
+        entry_ids: entries.pluck(:id)
+      )
+    }.to raise_error(described_class::Error, /recipient must be United States Treasury/)
+  end
+
   it "ignores reversed journal postings" do
     ids = posting.entries.pluck(:id)
     PayrollLiabilityPostingService.reverse!(pay_period: period, reason: "Voided payroll")
