@@ -1083,6 +1083,14 @@ export const payPeriodsApi = {
     `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/time_entries/${encodeURIComponent(timeEntryId)}/approval`,
     data
   ),
+  reviewAireOvertime: (
+    payPeriodId: number,
+    timeEntryId: string,
+    data: { command_id: string; expected_version: number; decision: 'approve' | 'deny'; reason: string }
+  ) => api.post<import('@/types').AirePayrollCommandResponse>(
+    `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/time_entries/${encodeURIComponent(timeEntryId)}/overtime_approval`,
+    data
+  ),
   correctAireTimeEntry: (
     payPeriodId: number,
     timeEntryId: string,

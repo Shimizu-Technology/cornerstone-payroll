@@ -716,6 +716,7 @@ export interface AirePayrollTimeEntry {
     included_hours?: number;
   };
   approval?: { actor?: { payroll_integration_id?: string; name: string } | null; occurred_at?: string | null; note?: string | null };
+  overtime_approval?: { actor?: { payroll_integration_id?: string; name: string } | null; occurred_at?: string | null; note?: string | null };
   employee: {
     id?: string | null;
     payroll_integration_id?: string | null;

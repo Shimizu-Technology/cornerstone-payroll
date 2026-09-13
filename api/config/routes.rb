@@ -240,6 +240,7 @@ Rails.application.routes.draw do
             get :settlement_cases
             post :finalize
             post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
+            post "time_entries/:time_entry_id/overtime_approval", action: :approve_time_entry_overtime, as: :time_entry_overtime_approval
             post "time_entries/:time_entry_id/correction", action: :correct_time_entry, as: :time_entry_correction
             post "settlement_cases/:settlement_case_id/route", action: :route_settlement_case, as: :settlement_case_route
           end

@@ -125,6 +125,43 @@ RSpec.describe TimeTracking::Client do
       expect(stub).to have_been_requested.once
     end
 
+    it "sends delegated overtime decisions to the dedicated AIRE command" do
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+      command_id = SecureRandom.uuid
+      stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries/42/overtime_approval")
+        .with(
+          headers: {
+            "X-Payroll-Shared-Secret" => "secret",
+            "X-Aire-Delegation-Token" => "operator-grant"
+          },
+          body: hash_including(
+            "command_id" => command_id,
+            "expected_version" => 3,
+            "decision" => "deny",
+            "reason" => "Overtime was not authorized"
+          )
+        )
+        .to_return(status: 200, body: { time_entry: { id: "42", version: 4 } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      result = client_for(source, delegation: delegation).approve_payroll_overtime(
+        entry_id: 42,
+        command_id: command_id,
+        expected_version: 3,
+        decision: "deny",
+        reason: "Overtime was not authorized"
+      )
+
+      expect(result.dig("time_entry", "version")).to eq(4)
+      expect(stub).to have_been_requested.once
+    end
+
     it "reads the held-time settlement queue with bounded filters" do
       stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/settlement_cases")
         .with(
