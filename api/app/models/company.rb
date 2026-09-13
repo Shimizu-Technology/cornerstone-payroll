@@ -46,6 +46,8 @@ class Company < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :client_documents, dependent: :destroy
+  has_many :employee_document_requirements, dependent: :restrict_with_error
+  has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :employee_change_requests, dependent: :destroy
   has_many :form500_filings, dependent: :destroy
   has_many :pay_component_tax_rules, dependent: :restrict_with_error

@@ -93,6 +93,8 @@ class Employee < ApplicationRecord
   has_many :daily_time_records, dependent: :restrict_with_error
   has_many :payroll_time_allocations, dependent: :restrict_with_error
   has_many :employee_change_requests, dependent: :restrict_with_error
+  has_many :employee_document_requirements, dependent: :restrict_with_error
+  has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error

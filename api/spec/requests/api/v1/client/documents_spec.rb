@@ -61,6 +61,49 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       expect(response).to have_http_status(:no_content)
     end
 
+    it "links one upload to a readiness item as received without treating it as verified" do
+      requirement = create(:employee_document_requirement, company: company, employee: employee)
+
+      post "/api/v1/client/documents",
+        params: {
+          title: "Signed W-4",
+          category: "employee_onboarding",
+          employee_id: employee.id,
+          requirement_id: requirement.id,
+          file: upload
+        }
+
+      expect(response).to have_http_status(:created), response.body
+      expect(requirement.reload).to have_attributes(status: "received", reviewed_at: nil, reviewed_by_id: nil)
+      expect(requirement.client_document).to be_present
+      expect(requirement.events.sole).to have_attributes(
+        event_type: "document_received",
+        from_status: "missing",
+        to_status: "received",
+        actor: client_user
+      )
+      expect(AuditLog.where(action: "employee_document_requirements#receive", record_id: requirement.id)).to exist
+    end
+
+    it "does not delete a document that is still linked to readiness evidence" do
+      linked_document = create(:client_document, company: company, employee: employee, uploaded_by: client_user)
+      create(
+        :employee_document_requirement,
+        company: company,
+        employee: employee,
+        client_document: linked_document,
+        status: "received",
+        received_at: Time.current
+      )
+
+      expect do
+        delete "/api/v1/client/documents/#{linked_document.id}"
+      end.not_to change(ClientDocument, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("linked")
+    end
+
     it "does not allow one client user to delete another uploader's document" do
       document = ClientDocument.create!(
         company: company,

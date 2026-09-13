@@ -34,4 +34,14 @@ RSpec.describe PayrollGoLiveReadiness do
     expect(readiness.blockers).to include("Move every legacy recurring earning and adjustment to typed payroll fields")
     expect(readiness.facts.fetch("legacy_recurring_components")).to eq(1)
   end
+
+  it "blocks cutover while an active employee has unresolved required documents" do
+    employee = create(:employee, company: company)
+    create(:employee_document_requirement, company: company, employee: employee)
+
+    readiness = described_class.new(review)
+
+    expect(readiness.blockers).to include("Resolve every required employee document checklist")
+    expect(readiness.facts.fetch("employee_document_gaps")).to eq(1)
+  end
 end

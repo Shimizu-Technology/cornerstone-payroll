@@ -248,6 +248,12 @@ export interface Employee {
   configuration_source?: 'quickbooks_history' | null;
   configuration_review_status?: 'complete' | 'needs_review';
   configuration_review_items?: Array<{ code: string; message: string; fields: string[] }>;
+  document_readiness?: {
+    total: number;
+    required: number;
+    satisfied: number;
+    ready_for_payroll: boolean;
+  };
   configuration_review_resolutions?: Array<{
     id: number;
     item_code: string;

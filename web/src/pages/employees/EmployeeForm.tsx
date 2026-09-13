@@ -14,7 +14,7 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
@@ -403,6 +403,12 @@ export function EmployeeForm() {
       if (isCurrentRequest()) setIsLoading(false);
     }
   }, [companyId, id, isClient]);
+
+  const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness']): void => {
+    if (companyIdRef.current !== companyId) return;
+
+    setLoadedEmployee((current) => current ? { ...current, document_readiness: readiness } : current);
+  }, [companyId]);
 
   const fetchPayrollFields = useCallback(async () => {
     if (isClient) return;
@@ -2413,7 +2419,14 @@ export function EmployeeForm() {
                     <FileText className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle>Employee Documents</CardTitle>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CardTitle>Employee Documents</CardTitle>
+                      {loadedEmployee?.document_readiness && loadedEmployee.document_readiness.required > 0 && (
+                        <span className={`rounded-full px-4 py-2 text-xs font-semibold ${loadedEmployee.document_readiness.ready_for_payroll ? 'bg-success-50 text-success-800' : 'bg-warning-50 text-warning-900'}`}>
+                          {loadedEmployee.document_readiness.ready_for_payroll ? 'Payroll ready' : `${loadedEmployee.document_readiness.required - loadedEmployee.document_readiness.satisfied} item${loadedEmployee.document_readiness.required - loadedEmployee.document_readiness.satisfied === 1 ? '' : 's'} blocking approval`}
+                        </span>
+                      )}
+                    </div>
                     <CardDescription>
                       W-4s, W-9s, direct deposit forms, IDs, and supporting files for {employeeDisplayName}.
                     </CardDescription>
@@ -2474,6 +2487,7 @@ export function EmployeeForm() {
               employeeName={employeeDisplayName}
               isClient={isClient}
               className="mb-0 border-0 shadow-none ring-0"
+              onReadinessChange={handleDocumentReadinessChange}
               headerAction={
                 <Button type="button" variant="outline" size="sm" onClick={() => setEmployeeDocumentsOpen(false)}>
                   Close

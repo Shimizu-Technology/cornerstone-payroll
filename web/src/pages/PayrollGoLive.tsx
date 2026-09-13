@@ -44,6 +44,7 @@ const readinessLabels: Record<string, string> = {
   company_setup_gaps: 'Required company fields missing',
   employees_needing_review: 'Employee setup items open',
   employees_missing_w4: 'Employees missing W-4',
+  employee_document_gaps: 'Required employee documents unresolved',
   loan_setup_gaps: 'Loan balance gaps',
   pay_schedule_confirmed: 'Pay schedule confirmed',
   workweek_confirmed: 'Workweek confirmed',
@@ -54,7 +55,7 @@ const readinessLabels: Record<string, string> = {
 };
 
 function readinessPassed(key: string, value: boolean | number): boolean {
-  if (key === 'employees_needing_review' || key === 'employees_missing_w4' || key === 'loan_setup_gaps' || key === 'company_setup_gaps') return value === 0;
+  if (key === 'employees_needing_review' || key === 'employees_missing_w4' || key === 'employee_document_gaps' || key === 'loan_setup_gaps' || key === 'company_setup_gaps') return value === 0;
   if (key === 'consecutive_parallel_passes') return Number(value) >= 2;
   return value === true;
 }

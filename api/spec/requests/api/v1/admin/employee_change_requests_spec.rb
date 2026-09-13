@@ -53,6 +53,35 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       expect(change_request.review_notes).to eq("Looks good")
     end
 
+    it "creates the document-readiness checklist when staff approves a client-submitted new hire" do
+      pending_employee = create(
+        :employee,
+        company: company,
+        department: department,
+        status: "inactive",
+        portal_pending_approval: true,
+        pay_rate: 0
+      )
+      creation_request = create(
+        :employee_change_request,
+        company: company,
+        employee: pending_employee,
+        requested_by: requester,
+        request_kind: "create",
+        proposed_changes: { status: "active", portal_pending_approval: false, pay_rate: 18 },
+        original_values: { status: "inactive", portal_pending_approval: true, pay_rate: 0 }
+      )
+
+      patch "/api/v1/admin/employee_change_requests/#{creation_request.id}/approve",
+        params: { review_notes: "New-hire payroll setup reviewed" }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(pending_employee.reload.employee_document_requirements.pluck(:requirement_type)).to contain_exactly(
+        "identity_and_work_authorization",
+        "withholding_election"
+      )
+    end
+
     it "does not re-apply a request that has already been reviewed" do
       patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
         params: { review_notes: "First review" }

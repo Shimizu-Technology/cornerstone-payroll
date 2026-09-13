@@ -25,7 +25,9 @@ Rails.application.routes.draw do
       end
 
       namespace :client do
-        resources :employees, only: [ :index, :show, :create, :update ]
+        resources :employees, only: [ :index, :show, :create, :update ] do
+          resources :document_requirements, only: :index, controller: :employee_document_requirements
+        end
         resources :departments, only: [ :index, :create, :update ]
         resources :documents, only: [ :index, :create, :destroy ] do
           member do
@@ -198,6 +200,7 @@ Rails.application.routes.draw do
           end
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
+          resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do
