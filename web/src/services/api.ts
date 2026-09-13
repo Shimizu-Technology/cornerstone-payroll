@@ -1070,12 +1070,49 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit/exceptions`,
       { ...params, per_page: 250, leave_per_page: 100 }
     ),
+  airePayrollSettlementCases: (id: number, params?: { page?: number; status?: string }) =>
+    api.get<import('@/types').AirePayrollSettlementCasesResponse>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/settlement_cases`,
+      { ...params, per_page: 250 }
+    ),
   reviewAireTimeEntry: (
     payPeriodId: number,
     timeEntryId: string,
     data: { command_id: string; expected_version: number; decision: 'approve' | 'deny'; reason: string }
   ) => api.post<import('@/types').AirePayrollCommandResponse>(
     `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/time_entries/${encodeURIComponent(timeEntryId)}/approval`,
+    data
+  ),
+  correctAireTimeEntry: (
+    payPeriodId: number,
+    timeEntryId: string,
+    data: {
+      command_id: string;
+      expected_version: number;
+      reason: string;
+      work_date: string;
+      start_time: string;
+      end_time: string;
+      time_category_id: string;
+      description: string;
+      breaks?: Array<{ start_time: string; end_time: string }>;
+    }
+  ) => api.post<import('@/types').AirePayrollCommandResponse>(
+    `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/time_entries/${encodeURIComponent(timeEntryId)}/correction`,
+    data
+  ),
+  routeAireSettlementCase: (
+    payPeriodId: number,
+    settlementCaseId: string,
+    data: {
+      command_id: string;
+      expected_version: number;
+      reason: string;
+      destination_kind: 'regular' | 'not_payable';
+      target_external_pay_period_id?: string;
+    }
+  ) => api.post<import('@/types').AirePayrollCommandResponse>(
+    `/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/settlement_cases/${encodeURIComponent(settlementCaseId)}/route`,
     data
   ),
   finalizeAirePayrollPeriod: (

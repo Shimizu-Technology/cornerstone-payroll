@@ -4,11 +4,13 @@ import {
   Check,
   CheckCircle2,
   Clock3,
+  FilePenLine,
   History,
   Loader2,
   LockKeyhole,
   RefreshCw,
   ShieldAlert,
+  Split,
   Users,
   X,
 } from 'lucide-react';
@@ -33,6 +35,8 @@ import type {
   AirePayrollTimeEntriesResponse,
   AirePayrollTimeEntry,
   AirePayrollPagination,
+  AirePayrollSettlementCase,
+  AirePayrollSettlementCasesResponse,
 } from '@/types';
 
 type Props = {
@@ -41,10 +45,30 @@ type Props = {
   onRefresh: () => Promise<void> | void;
 };
 
-type View = 'timecards' | 'exceptions' | 'team' | 'history';
+type View = 'timecards' | 'exceptions' | 'held_time' | 'team' | 'history';
 type Review = { entry: AirePayrollTimeEntry; decision: 'approve' | 'deny'; commandId: string };
 type ReviewTarget = Omit<Review, 'commandId'>;
 type FinalizeCommand = { commandId: string; version: number };
+type CorrectionBreak = { start_time: string; end_time: string };
+type Correction = {
+  entry: AirePayrollTimeEntry;
+  commandId: string;
+  reason: string;
+  workDate: string;
+  startTime: string;
+  endTime: string;
+  timeCategoryId: string;
+  description: string;
+  breaks: CorrectionBreak[];
+  preservesLegacyBreakMinutes: boolean;
+};
+type SettlementRoute = {
+  settlementCase: AirePayrollSettlementCase;
+  commandId: string;
+  destinationKind: 'regular' | 'not_payable';
+  targetExternalPayPeriodId: string;
+  reason: string;
+};
 
 const lifecycleTone = (status?: string) => {
   if (['payment_issued', 'committed', 'imported', 'finalized', 'ready_for_cutoff'].includes(status || '')) return 'success' as const;
@@ -56,12 +80,14 @@ const lifecycleTone = (status?: string) => {
 const approvalTone = (entry: AirePayrollTimeEntry) => {
   if (['missing_category', 'partially_included'].includes(entry.state.payroll_disposition || '')) return 'warning' as const;
   if (entry.state.payable_now) return 'success' as const;
-  if (entry.state.approval_status === 'denied') return 'danger' as const;
+  if (entry.state.approval_status === 'denied' || entry.state.overtime_status === 'denied') return 'danger' as const;
   return 'warning' as const;
 };
 
 const dispositionLabel = (entry: AirePayrollTimeEntry) => {
   const disposition = entry.state.payroll_disposition;
+  if (entry.state.approval_status === 'approved' && entry.state.overtime_status === 'pending') return 'Overtime approval needed';
+  if (entry.state.overtime_status === 'denied') return 'Overtime denied';
   if (disposition === 'missing_category') return 'Missing category';
   if (disposition === 'partially_included') return 'Partially included at cutoff';
   if (disposition === 'created_after_cutoff') return 'Submitted after cutoff';
@@ -86,6 +112,49 @@ const commandId = () => {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+};
+
+const toTimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const twelveHour = value.trim().match(/^(\d{1,2}):(\d{2})\s*([AP]M)$/i);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]) % 12;
+    if (twelveHour[3].toUpperCase() === 'PM') hour += 12;
+    return `${String(hour).padStart(2, '0')}:${twelveHour[2]}`;
+  }
+  if (value.includes('T')) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Pacific/Guam',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(parsed);
+      const hour = parts.find((part) => part.type === 'hour')?.value;
+      const minute = parts.find((part) => part.type === 'minute')?.value;
+      if (hour && minute) return `${hour}:${minute}`;
+    }
+  }
+  return value.slice(0, 5);
+};
+
+const startCorrection = (entry: AirePayrollTimeEntry): Correction => {
+  const breaks = (entry.breaks || [])
+    .map((breakRow) => ({ start_time: toTimeInput(breakRow.start_time), end_time: toTimeInput(breakRow.end_time) }));
+
+  return {
+    entry,
+    commandId: commandId(),
+    reason: '',
+    workDate: entry.work_date,
+    startTime: toTimeInput(entry.start_time),
+    endTime: toTimeInput(entry.end_time),
+    timeCategoryId: entry.category?.id || '',
+    description: entry.description || '',
+    breaks,
+    preservesLegacyBreakMinutes: breaks.length === 0 && entry.break_minutes > 0,
+  };
 };
 
 function Metric({ label, value, detail, tone = 'neutral' }: { label: string; value: string | number; detail: string; tone?: 'neutral' | 'success' | 'warning' }) {
@@ -121,13 +190,18 @@ function PageControls({ pagination, onPage }: { pagination?: AirePayrollPaginati
   );
 }
 
-function TimecardRow({ entry, canCommand, onReview }: {
+function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   entry: AirePayrollTimeEntry;
   canCommand: boolean;
   onReview: (review: ReviewTarget) => void;
+  onCorrect: (entry: AirePayrollTimeEntry) => void;
 }) {
   const pending = entry.state.approval_status === 'pending';
   const needsReview = pending && !entry.capture.ordinary;
+  const statusLabel = dispositionLabel(entry);
+  const showLifecycle = entry.lifecycle
+    && !(entry.lifecycle.status === 'awaiting_approval' && statusLabel.toLowerCase().includes('approval'))
+    && entry.lifecycle.label.toLowerCase() !== statusLabel.toLowerCase();
   return (
     <div className="grid gap-3 border-t border-neutral-100 px-4 py-4 first:border-t-0 lg:grid-cols-[1.2fr_1fr_0.8fr_1.1fr_auto] lg:items-center">
       <div>
@@ -146,11 +220,16 @@ function TimecardRow({ entry, canCommand, onReview }: {
         <p className="mt-1 text-xs text-neutral-500">{entry.category?.name || 'Uncategorized'}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={approvalTone(entry)}>{dispositionLabel(entry)}</Badge>
-        {entry.lifecycle && <Badge variant={lifecycleTone(entry.lifecycle.status)}>{entry.lifecycle.label}</Badge>}
+        <Badge variant={approvalTone(entry)}>{statusLabel}</Badge>
+        {showLifecycle && entry.lifecycle && <Badge variant={lifecycleTone(entry.lifecycle.status)}>{entry.lifecycle.label}</Badge>}
         {entry.state.missing_punch && <Badge variant="danger">Missing punch</Badge>}
       </div>
       <div className="flex gap-2 lg:justify-end">
+        {(entry.state.missing_punch || !entry.capture.ordinary) && (
+          <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onCorrect(entry)}>
+            <FilePenLine className="mr-1 h-3.5 w-3.5" /> Correct
+          </Button>
+        )}
         {needsReview && (
           <>
             <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny' })}>
@@ -170,12 +249,16 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
   const [overview, setOverview] = useState<AirePayrollCockpitOverview | null>(null);
   const [timeEntries, setTimeEntries] = useState<AirePayrollTimeEntriesResponse | null>(null);
   const [exceptions, setExceptions] = useState<AirePayrollExceptionsResponse | null>(null);
+  const [settlementCases, setSettlementCases] = useState<AirePayrollSettlementCasesResponse | null>(null);
   const [view, setView] = useState<View>('timecards');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
+  const [correction, setCorrection] = useState<Correction | null>(null);
+  const [settlementRoute, setSettlementRoute] = useState<SettlementRoute | null>(null);
+  const [commandSuccess, setCommandSuccess] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [showFinalize, setShowFinalize] = useState(false);
   const [finalizeCommand, setFinalizeCommand] = useState<FinalizeCommand | null>(null);
@@ -184,7 +267,28 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
   const [exceptionPage, setExceptionPage] = useState(1);
   const [leavePage, setLeavePage] = useState(1);
   const [employeePage, setEmployeePage] = useState(1);
+  const [settlementPage, setSettlementPage] = useState(1);
   const requestGeneration = useRef(0);
+
+  useEffect(() => {
+    requestGeneration.current += 1;
+    setOverview(null);
+    setTimeEntries(null);
+    setExceptions(null);
+    setSettlementCases(null);
+    setReview(null);
+    setCorrection(null);
+    setSettlementRoute(null);
+    setShowFinalize(false);
+    setCommandError(null);
+    setCommandSuccess(null);
+    setReason('');
+    setTimePage(1);
+    setExceptionPage(1);
+    setLeavePage(1);
+    setEmployeePage(1);
+    setSettlementPage(1);
+  }, [payPeriodId]);
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
@@ -193,22 +297,24 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
     setLoading(true);
     setRefreshError(null);
     try {
-      const [overviewResult, entriesResult, exceptionsResult] = await Promise.all([
+      const [overviewResult, entriesResult, exceptionsResult, settlementResult] = await Promise.all([
         payPeriodsApi.airePayrollCockpit(payPeriodId, { employee_page: employeePage }),
         payPeriodsApi.airePayrollTimeEntries(payPeriodId, { page: timePage }),
         payPeriodsApi.airePayrollExceptions(payPeriodId, { page: exceptionPage, leave_page: leavePage }),
+        payPeriodsApi.airePayrollSettlementCases(payPeriodId, { page: settlementPage }),
       ]);
       if (generation !== requestGeneration.current) return;
       setOverview(overviewResult.aire_payroll_cockpit);
       setTimeEntries(entriesResult);
       setExceptions(exceptionsResult);
+      setSettlementCases(settlementResult);
     } catch (caught) {
       if (generation !== requestGeneration.current) return;
       setRefreshError(caught instanceof Error ? caught.message : 'Could not refresh AIRE payroll details');
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
-  }, [calendar.external_pay_period_id, calendar.finalized_batch, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, timePage]);
+  }, [calendar.external_pay_period_id, calendar.finalized_batch, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
 
   useEffect(() => {
     void load();
@@ -271,6 +377,76 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
     }
   };
 
+  const submitCorrection = async () => {
+    if (!correction || correction.reason.trim().length < 3 || !correction.workDate
+      || !correction.startTime || !correction.endTime || !correction.timeCategoryId
+      || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)) return;
+    setBusy(true);
+    setCommandError(null);
+    setCommandSuccess(null);
+    try {
+      const detailedBreaks = correction.breaks.length > 0 || !correction.preservesLegacyBreakMinutes
+        ? { breaks: correction.breaks }
+        : {};
+      await payPeriodsApi.correctAireTimeEntry(payPeriodId, correction.entry.id, {
+        command_id: correction.commandId,
+        expected_version: correction.entry.version,
+        reason: correction.reason.trim(),
+        work_date: correction.workDate,
+        start_time: correction.startTime,
+        end_time: correction.endTime,
+        time_category_id: correction.timeCategoryId,
+        description: correction.description.trim(),
+        ...detailedBreaks,
+      });
+      setCorrection(null);
+      setCommandSuccess('Time corrected in AIRE. It now needs administrator approval before it can be paid.');
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        setCorrection(null);
+        setCommandError('That time entry changed in AIRE. The latest details have been reloaded; open the correction again before saving.');
+      } else {
+        setCommandError(caught instanceof Error ? caught.message : 'Could not correct the time entry');
+      }
+    } finally {
+      await load();
+      setBusy(false);
+    }
+  };
+
+  const submitSettlementRoute = async () => {
+    if (!settlementRoute || settlementRoute.reason.trim().length < 3
+      || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)) return;
+    setBusy(true);
+    setCommandError(null);
+    setCommandSuccess(null);
+    try {
+      await payPeriodsApi.routeAireSettlementCase(payPeriodId, settlementRoute.settlementCase.id, {
+        command_id: settlementRoute.commandId,
+        expected_version: settlementRoute.settlementCase.version,
+        reason: settlementRoute.reason.trim(),
+        destination_kind: settlementRoute.destinationKind,
+        ...(settlementRoute.destinationKind === 'regular'
+          ? { target_external_pay_period_id: settlementRoute.targetExternalPayPeriodId }
+          : {}),
+      });
+      setSettlementRoute(null);
+      setCommandSuccess(settlementRoute.destinationKind === 'regular'
+        ? 'Held time routed to the selected regular payroll in AIRE.'
+        : 'Held time marked not payable in AIRE with your review reason.');
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        setSettlementRoute(null);
+        setCommandError('That held-time case changed in AIRE. The latest details have been reloaded; review it again.');
+      } else {
+        setCommandError(caught instanceof Error ? caught.message : 'Could not update the held-time destination');
+      }
+    } finally {
+      await load();
+      setBusy(false);
+    }
+  };
+
   const finalize = async () => {
     if (!overview || !finalizeCommand || finalizeReason.trim().length < 3) return;
     setBusy(true);
@@ -308,6 +484,8 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
   const periodCanFinalize = overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
   const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
   const visibleError = commandError || refreshError;
+  const correctionCategories = correction?.entry.available_time_categories
+    ?? (correction?.entry.category ? [correction.entry.category] : []);
 
   return (
     <div className="space-y-4">
@@ -360,6 +538,13 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
               </div>
             )}
 
+            {commandSuccess && !visibleError && (
+              <div role="status" className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{commandSuccess}</p>
+              </div>
+            )}
+
             {loading && !overview ? (
               <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-neutral-600">
                 <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Loading live AIRE payroll details…
@@ -407,6 +592,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                     {([
                       ['timecards', 'Timecards', timeEntries?.pagination.total_count || 0],
                       ['exceptions', 'Needs attention', (exceptions?.time_exception_pagination.total_count || 0) + (exceptions?.leave_exception_pagination.total_count || 0)],
+                      ['held_time', 'Held time', settlementCases?.pagination.total_count || 0],
                       ['team', 'Team', overview.employee_pagination.total_count],
                       ['history', 'Payment history', overview.processing_history.length],
                     ] as Array<[View, string, number]>).map(([key, label, count]) => (
@@ -426,7 +612,13 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                 {(view === 'timecards' || view === 'exceptions') && (
                   <div>
                     {renderedEntries?.length ? renderedEntries.map((entry) => (
-                      <TimecardRow key={entry.id} entry={entry} canCommand={canCommand} onReview={(next) => { setReview({ ...next, commandId: commandId() }); setReason(''); setCommandError(null); }} />
+                      <TimecardRow
+                        key={entry.id}
+                        entry={entry}
+                        canCommand={canCommand}
+                        onReview={(next) => { setReview({ ...next, commandId: commandId() }); setReason(''); setCommandError(null); setCommandSuccess(null); }}
+                        onCorrect={(target) => { setCorrection(startCorrection(target)); setCommandError(null); setCommandSuccess(null); }}
+                      />
                     )) : (
                       <div className="px-6 py-10 text-center text-sm text-neutral-500">
                         {view === 'exceptions' ? 'No timecard exceptions need attention.' : 'AIRE has no timecards in this pay period.'}
@@ -459,6 +651,126 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                     {view === 'exceptions' && exceptions && exceptions.leave_exception_pagination.total_pages > 1 && (
                       <div className="border-t border-neutral-200"><PageControls pagination={exceptions.leave_exception_pagination} onPage={setLeavePage} /></div>
                     )}
+                  </div>
+                )}
+
+                {view === 'held_time' && (
+                  <div>
+                    <div className="border-b border-neutral-200 bg-warning-50/60 px-4 py-4 sm:px-6">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="font-semibold text-neutral-950">Hours excluded at cutoff</h4>
+                          <p className="mt-1 text-sm leading-5 text-neutral-600">Every case stays here until it is placed in a later payroll, explicitly marked not payable, or fully settled.</p>
+                        </div>
+                        {settlementCases && (
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            <Badge variant={settlementCases.summary.attention_due ? 'warning' : 'default'}>{settlementCases.summary.attention_due} due</Badge>
+                            <Badge variant="default">{settlementCases.summary.scheduled} scheduled</Badge>
+                            <Badge variant="success">{settlementCases.summary.settled} settled</Badge>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {settlementCases?.settlement_cases.length ? (
+                      <div className="divide-y divide-neutral-100">
+                        {settlementCases.settlement_cases.map((settlementCase) => {
+                          const matchingEntry = [
+                            ...(timeEntries?.time_entries || []),
+                            ...(exceptions?.time_exceptions || []),
+                          ].find((entry) => entry.id === settlementCase.source_time_entry_id);
+                          const routeOption = overview.routing_options.find((option) => (
+                            option.external_pay_period_id === settlementCase.routing.target_external_pay_period_id
+                          ));
+                          const canManage = ['open', 'scheduled'].includes(settlementCase.status);
+                          const statusLabel = {
+                            open: 'Needs destination',
+                            scheduled: 'Scheduled for payroll',
+                            in_payroll: 'In payroll',
+                            settled: 'Settled',
+                            not_payable: 'Not payable',
+                            superseded: 'Replaced by later change',
+                          }[settlementCase.status];
+                          return (
+                            <article key={settlementCase.id} className="px-4 py-5 sm:px-6">
+                              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h5 className="font-semibold text-neutral-950">{settlementCase.employee.name}</h5>
+                                    <MappingBadge status={settlementCase.employee.cornerstone.status} />
+                                    <Badge variant={lifecycleTone(settlementCase.status)}>{statusLabel}</Badge>
+                                  </div>
+                                  <p className="mt-2 text-sm text-neutral-700">
+                                    <span className="font-semibold text-neutral-950">{Number(settlementCase.time.held_total_hours).toFixed(2)} held hours</span>
+                                    {' · '}worked {formatDate(settlementCase.time.original_work_date)}
+                                    {settlementCase.time.category?.name ? ` · ${settlementCase.time.category.name}` : ''}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-5 text-neutral-500">
+                                    Excluded because {settlementCase.origin.reason.replaceAll('_', ' ')} · AIRE batch {settlementCase.origin.payroll_batch_id}
+                                  </p>
+                                  {settlementCase.time.current_total_hours != null
+                                    && Math.abs(Number(settlementCase.time.current_total_hours) - Number(settlementCase.time.held_total_hours)) >= 0.005 && (
+                                    <p className="mt-2 rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2 text-xs font-medium leading-5 text-primary-900">
+                                      Current corrected time is {Number(settlementCase.time.current_total_hours).toFixed(2)} hours. The held amount above remains the original cutoff record.
+                                    </p>
+                                  )}
+                                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                                    <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Destination</p>
+                                      <p className="mt-1 font-medium text-neutral-900">
+                                        {settlementCase.routing.destination_kind === 'regular'
+                                          ? routeOption ? `${formatDateRange(routeOption.start_date, routeOption.end_date)} · pay ${formatDate(routeOption.pay_date)}` : 'Future regular payroll'
+                                          : settlementCase.routing.destination_kind === 'supplemental' ? 'Supplemental payroll' : settlementCase.routing.destination_kind === 'not_payable' ? 'Not payable' : 'Not selected yet'}
+                                      </p>
+                                      <p className="mt-1 text-xs text-neutral-500">Action due {formatDate(settlementCase.routing.action_due_on)}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Latest payment fact</p>
+                                      <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || 'Not imported into payroll'}</p>
+                                      <p className="mt-1 text-xs text-neutral-500">
+                                        {settlementCase.processing?.payment_reference
+                                          ? `Reference ${settlementCase.processing.payment_reference}`
+                                          : settlementCase.included_payroll_batch_id ? `AIRE batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {settlementCase.routing.note && <p className="mt-3 text-xs italic text-neutral-500">Last review note: {settlementCase.routing.note}</p>}
+                                </div>
+                                {canManage && (
+                                  <div className="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+                                    {matchingEntry && (
+                                      <Button type="button" size="sm" variant="outline" disabled={!canCommand || busy} onClick={() => { setCorrection(startCorrection(matchingEntry)); setCommandError(null); setCommandSuccess(null); }}>
+                                        <FilePenLine className="mr-1 h-3.5 w-3.5" /> Correct time
+                                      </Button>
+                                    )}
+                                    <Button type="button" size="sm" variant="outline" disabled={!canCommand || busy} onClick={() => {
+                                      setSettlementRoute({
+                                        settlementCase,
+                                        commandId: commandId(),
+                                        destinationKind: settlementCase.routing.destination_kind === 'not_payable' ? 'not_payable' : 'regular',
+                                        targetExternalPayPeriodId: settlementCase.routing.target_external_pay_period_id
+                                          || overview.routing_options[0]?.external_pay_period_id || '',
+                                        reason: '',
+                                      });
+                                      setCommandError(null);
+                                      setCommandSuccess(null);
+                                    }}>
+                                      <Split className="mr-1 h-3.5 w-3.5" /> {settlementCase.routing.destination_kind === 'unassigned' ? 'Choose destination' : 'Change destination'}
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-6 py-10 text-center">
+                        <CheckCircle2 className="mx-auto h-6 w-6 text-success-600" />
+                        <p className="mt-3 font-semibold text-neutral-900">No held-time cases for this payroll</p>
+                        <p className="mt-1 text-sm text-neutral-500">Anything excluded at cutoff will appear here automatically.</p>
+                      </div>
+                    )}
+                    <PageControls pagination={settlementCases?.pagination} onPage={setSettlementPage} />
                   </div>
                 )}
 
@@ -516,6 +828,85 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve time' : 'Deny time'}</Button></DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={Boolean(correction)}
+        onOpenChange={(open) => { if (!open && !busy) setCorrection(null); }}
+        dismissOnEscape={!busy}
+      >
+        {correction && (
+          <DialogContent className="relative max-h-[90vh] max-w-2xl overflow-y-auto rounded-2xl p-5 sm:p-6">
+            <DialogHeader className="pr-10 text-left">
+              <DialogTitle className="font-display font-bold text-neutral-950">Correct time in AIRE</DialogTitle>
+              <DialogDescription className="leading-6 text-neutral-600">
+                {correction.entry.employee.name} · Changes are written to AIRE and will require a separate administrator approval.
+              </DialogDescription>
+            </DialogHeader>
+            {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-neutral-800">Work date<input aria-label="Work date" type="date" value={correction.workDate} onChange={(event) => setCorrection({ ...correction, workDate: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 font-normal" /></label>
+              <label className="text-sm font-semibold text-neutral-800">Time category<select aria-label="Time category" value={correction.timeCategoryId} onChange={(event) => setCorrection({ ...correction, timeCategoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose category</option>{correctionCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+              <label className="text-sm font-semibold text-neutral-800">Start time<input aria-label="Start time" type="time" value={correction.startTime} onChange={(event) => setCorrection({ ...correction, startTime: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 font-normal" /></label>
+              <label className="text-sm font-semibold text-neutral-800">End time<input aria-label="End time" type="time" value={correction.endTime} onChange={(event) => setCorrection({ ...correction, endTime: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 font-normal" /></label>
+            </div>
+            <label className="mt-4 block text-sm font-semibold text-neutral-800">Description<input aria-label="Description" type="text" value={correction.description} onChange={(event) => setCorrection({ ...correction, description: event.target.value })} placeholder="What work was performed?" className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 font-normal" /></label>
+            <div className="mt-5 rounded-xl border border-neutral-200 p-4">
+              <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-neutral-900">Breaks</p><p className="mt-1 text-xs text-neutral-500">Include the complete corrected break list.</p></div><Button type="button" size="sm" variant="outline" onClick={() => setCorrection({ ...correction, breaks: [...correction.breaks, { start_time: '', end_time: '' }] })}>Add break</Button></div>
+              {correction.breaks.length === 0 && correction.preservesLegacyBreakMinutes ? (
+                <div className="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm leading-5 text-warning-900">
+                  AIRE has {correction.entry.break_minutes} total break minutes but no exact break times. That total will stay unchanged unless you add detailed break times.
+                </div>
+              ) : correction.breaks.length === 0 ? <p className="mt-3 text-sm text-neutral-500">No breaks recorded.</p> : (
+                <div className="mt-3 space-y-3">
+                  {correction.breaks.map((breakRow, index) => (
+                    <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                      <label className="text-xs font-semibold text-neutral-600">Break starts<input aria-label={`Break ${index + 1} start`} type="time" value={breakRow.start_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, start_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+                      <label className="text-xs font-semibold text-neutral-600">Break ends<input aria-label={`Break ${index + 1} end`} type="time" value={breakRow.end_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, end_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+                      <Button type="button" size="sm" variant="ghost" aria-label={`Remove break ${index + 1}`} onClick={() => setCorrection({ ...correction, breaks: correction.breaks.filter((_, rowIndex) => rowIndex !== index) })}><X className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Correction reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Correction reason" value={correction.reason} onChange={(event) => setCorrection({ ...correction, reason: event.target.value })} rows={3} placeholder="What did you verify and why was this changed?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+            <button type="button" onClick={() => setCorrection(null)} disabled={busy} aria-label="Close correction" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={Boolean(settlementRoute)}
+        onOpenChange={(open) => { if (!open && !busy) setSettlementRoute(null); }}
+        dismissOnEscape={!busy}
+      >
+        {settlementRoute && overview && (
+          <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
+            <DialogHeader className="pr-10 text-left">
+              <DialogTitle className="font-display font-bold text-neutral-950">Choose where these hours go</DialogTitle>
+              <DialogDescription className="leading-6 text-neutral-600">
+                {settlementRoute.settlementCase.employee.name} · {
+                  settlementRoute.settlementCase.time.current_total_hours != null
+                    && Math.abs(Number(settlementRoute.settlementCase.time.current_total_hours) - Number(settlementRoute.settlementCase.time.held_total_hours)) >= 0.005
+                    ? `${Number(settlementRoute.settlementCase.time.current_total_hours).toFixed(2)} current corrected hours (originally held ${Number(settlementRoute.settlementCase.time.held_total_hours).toFixed(2)})`
+                    : `${Number(settlementRoute.settlementCase.time.held_total_hours).toFixed(2)} held hours`
+                } · worked {formatDate(settlementRoute.settlementCase.time.original_work_date)}
+              </DialogDescription>
+            </DialogHeader>
+            {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
+            <div className="mt-5 grid gap-3">
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">The hours will be included automatically once they are approved and that payroll reaches cutoff.</span></span></span></label>
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in AIRE’s history.</span></span></span></label>
+            </div>
+            {settlementRoute.destinationKind === 'regular' && (
+              <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">Publish the next regular pay period to AIRE before routing these hours.</span>}</label>
+            )}
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+            <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : 'Mark not payable'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

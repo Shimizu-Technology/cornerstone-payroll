@@ -186,6 +186,52 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(response.parsed_body.dig("time_exceptions", 0, "state", "approval_status")).to eq("pending")
   end
 
+  it "returns held-time settlement cases with Cornerstone employee mappings" do
+    employee = create(:employee, company: company, department: create(:department, company: company))
+    employee_uuid = SecureRandom.uuid
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: "91",
+      source_user_uuid: employee_uuid
+    )
+    settlement_case_id = SecureRandom.uuid
+    allow(client).to receive(:payroll_cockpit_settlement_cases).and_return(
+      "settlement_cases" => [
+        {
+          "id" => settlement_case_id,
+          "version" => 2,
+          "status" => "open",
+          "employee" => {
+            "payroll_integration_id" => employee_uuid,
+            "name" => "Aire Employee",
+            "email" => "employee@example.com"
+          },
+          "time" => { "held_total_hours" => 8.0 },
+          "routing" => { "destination_kind" => "unassigned" },
+          "events" => []
+        }
+      ],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1 },
+      "summary" => { "active_count" => 1, "active_hours" => 8.0 }
+    )
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/settlement_cases", params: { status: "open" }
+
+    expect(response).to have_http_status(:ok)
+    expect(client).to have_received(:payroll_cockpit_settlement_cases).with(
+      external_pay_period_id: external_id,
+      page: 1,
+      per_page: 250,
+      status: "open"
+    )
+    expect(response.parsed_body.dig("settlement_cases", 0, "employee", "cornerstone")).to include(
+      "status" => "mapped",
+      "employee_id" => employee.id
+    )
+  end
+
   it "uses the current operator's delegation for approvals and records an audit event" do
     delegation = create(
       :time_tracking_delegation,
@@ -223,6 +269,241 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       action: "aire_payroll_cockpit#time_denied",
       record_type: "AireTimeEntry"
     )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed this was entered in error")
+  end
+
+  it "corrects time through the current delegation and records the command audit" do
+    delegation = create(
+      :time_tracking_delegation,
+      company: company,
+      time_tracking_source: source,
+      user: admin,
+      token: "admin-grant"
+    )
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:correct_payroll_time_entry).and_return(
+      "time_entry" => { "id" => "42", "version" => 4, "state" => { "approval_status" => "pending" } },
+      "command" => { "replayed" => false }
+    )
+    command_id = SecureRandom.uuid
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/time_entries/42/correction", params: {
+      command_id: command_id,
+      expected_version: 3,
+      reason: "Employee confirmed the missed punch",
+      work_date: "2026-10-14",
+      start_time: "08:00",
+      end_time: "17:00",
+      time_category_id: 7,
+      description: "Regular shift",
+      breaks: [ { start_time: "12:00", end_time: "13:00" } ]
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(delegated_client).to have_received(:correct_payroll_time_entry).with(
+      entry_id: "42",
+      command_id: command_id,
+      expected_version: "3",
+      reason: "Employee confirmed the missed punch",
+      attributes: include(
+        "work_date" => "2026-10-14",
+        "start_time" => "08:00",
+        "end_time" => "17:00",
+        "time_category_id" => "7",
+        "description" => "Regular shift",
+        "breaks" => [ include("start_time" => "12:00", "end_time" => "13:00") ]
+      )
+    )
+    expect(AuditLog.order(:id).last).to have_attributes(
+      action: "aire_payroll_cockpit#time_corrected",
+      record_type: "AireTimeEntry",
+      record_id: 42
+    )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed the missed punch")
+  end
+
+  it "routes held time to a regular payroll or an explicit not-payable disposition" do
+    delegation = create(
+      :time_tracking_delegation,
+      company: company,
+      time_tracking_source: source,
+      user: admin,
+      token: "admin-grant"
+    )
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:route_payroll_settlement_case).and_return(
+      "settlement_case" => { "id" => SecureRandom.uuid, "version" => 3 },
+      "command" => { "replayed" => false }
+    )
+    settlement_case_id = SecureRandom.uuid
+    command_id = SecureRandom.uuid
+    target_pay_period = create(
+      :pay_period,
+      company: company,
+      start_date: pay_period.end_date + 1.day,
+      end_date: pay_period.end_date + 15.days,
+      pay_date: pay_period.end_date + 25.days
+    )
+    target_calendar_period = create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: target_pay_period
+    )
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: target_calendar_period, delivery_status: "delivered")
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/settlement_cases/#{settlement_case_id}/route", params: {
+      command_id: command_id,
+      expected_version: 2,
+      reason: "Move to the next regular payroll",
+      destination_kind: "regular",
+      target_external_pay_period_id: target_calendar_period.external_pay_period_id
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(delegated_client).to have_received(:route_payroll_settlement_case).with(
+      case_id: settlement_case_id,
+      command_id: command_id,
+      expected_version: "2",
+      reason: "Move to the next regular payroll",
+      destination_kind: "regular",
+      target_external_pay_period_id: target_calendar_period.external_pay_period_id,
+      action_due_on: target_pay_period.pay_date
+    )
+    expect(AuditLog.order(:id).last).to have_attributes(
+      action: "aire_payroll_cockpit#settlement_case_routed",
+      record_type: "AirePayrollSettlementCase",
+      record_id: nil
+    )
+    expect(AuditLog.order(:id).last.metadata.fetch("external_record_id")).to eq(settlement_case_id)
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Move to the next regular payroll")
+  end
+
+  it "does not expose a false manual supplemental-payroll action" do
+    create(:time_tracking_delegation, company: company, time_tracking_source: source, user: admin)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/settlement_cases/#{SecureRandom.uuid}/route", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 2,
+      reason: "Try a supplemental payroll",
+      destination_kind: "supplemental",
+      target_external_pay_period_id: "manual-name"
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("next regular payroll")
+    expect(TimeTracking::Client).not_to have_received(:new)
+  end
+
+  it "offers only delivered, unfinished regular AIRE periods as routing destinations" do
+    pay_period.update!(start_date: Date.new(2026, 10, 1), end_date: Date.new(2026, 10, 15), pay_date: Date.new(2026, 10, 25))
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, delivery_status: "delivered")
+
+    next_period = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 10, 16),
+      end_date: Date.new(2026, 10, 31),
+      pay_date: Date.new(2026, 11, 10)
+    )
+    next_calendar_period = create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: next_period
+    )
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: next_calendar_period, delivery_status: "delivered")
+
+    unfinished_publication = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: next_calendar_period, schedule_version: 2, delivery_status: "delivered")
+    event_payload = {
+      "event_id" => SecureRandom.uuid,
+      "event_type" => AirePayrollEvent::EVENT_TYPE,
+      "occurred_at" => Time.current.iso8601,
+      "payroll_batch" => { "batch_id" => "finalized-next-period", "checksum" => "a" * 64 }
+    }
+    AirePayrollEvent.create!(
+      aire_payroll_calendar_period: next_calendar_period,
+      aire_payroll_calendar_publication: unfinished_publication,
+      time_tracking_source: source,
+      event_id: event_payload.fetch("event_id"),
+      event_type: AirePayrollEvent::EVENT_TYPE,
+      occurred_at: Time.current,
+      payload: event_payload,
+      payload_checksum: TimeTracking::CanonicalPayload.checksum(event_payload),
+      payroll_batch_id: "finalized-next-period",
+      payroll_batch_checksum: "a" * 64,
+      verification_status: "verified",
+      verified_at: Time.current,
+      verified_batch_summary: { "checksum" => "a" * 64 }
+    )
+
+    undelivered_period = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 11, 1),
+      end_date: Date.new(2026, 11, 15),
+      pay_date: Date.new(2026, 11, 25)
+    )
+    undelivered_calendar = create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: undelivered_period
+    )
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: undelivered_calendar, delivery_status: "pending")
+
+    eligible_period = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 11, 16),
+      end_date: Date.new(2026, 11, 30),
+      pay_date: Date.new(2026, 12, 10)
+    )
+    eligible_calendar = create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: eligible_period
+    )
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: eligible_calendar, delivery_status: "delivered")
+
+    allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
+    allow(client).to receive(:payroll_cockpit_employees).and_return(employee_payload)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
+
+    expect(response).to have_http_status(:ok)
+    options = response.parsed_body.dig("aire_payroll_cockpit", "routing_options")
+    expect(options).to contain_exactly(include(
+      "external_pay_period_id" => eligible_calendar.external_pay_period_id,
+      "pay_period_id" => eligible_period.id,
+      "start_date" => "2026-11-16",
+      "end_date" => "2026-11-30",
+      "pay_date" => "2026-12-10"
+    ))
+  end
+
+  it "does not let an accountant with a delegation send correction or routing commands" do
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(accountant)
+    create(:time_tracking_delegation, company: company, time_tracking_source: source, user: accountant)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/time_entries/42/correction", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 2,
+      reason: "Attempted correction"
+    }
+    expect(response).to have_http_status(:forbidden)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/settlement_cases/#{SecureRandom.uuid}/route", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 2,
+      reason: "Attempted routing",
+      destination_kind: "not_payable"
+    }
+    expect(response).to have_http_status(:forbidden)
   end
 
   it "rejects an unsupported approval decision without calling AIRE" do
@@ -255,6 +536,36 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
 
     expect(response).to have_http_status(:conflict)
     expect(response.parsed_body.fetch("error")).to eq("AIRE: period changed")
+  end
+
+  it "retains the cutoff reason in the local finalization audit" do
+    delegation = create(
+      :time_tracking_delegation,
+      company: company,
+      time_tracking_source: source,
+      user: admin,
+      token: "admin-grant"
+    )
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:finalize_payroll_cockpit_period).and_return(
+      "result" => { "status" => "finalized", "payroll_batch_id" => "AIRE-PAY-42" },
+      "command" => { "replayed" => false }
+    )
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/finalize", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 2,
+      reason: "Cutoff review complete"
+    }
+
+    expect(response).to have_http_status(:accepted)
+    expect(AuditLog.order(:id).last).to have_attributes(
+      action: "aire_payroll_cockpit#finalization_requested",
+      record_type: "PayPeriod",
+      record_id: pay_period.id
+    )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Cutoff review complete")
   end
 
   it "lets accountants read the cockpit but not send commands" do
