@@ -395,6 +395,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
         json = response.parsed_body
         expect(json["data"]["ssn_last_four"]).to eq("6789")
+        expect(json["data"]).not_to have_key("ssn")
         expect(json["data"]).not_to have_key("ssn_encrypted")
 
         employee = Employee.last

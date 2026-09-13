@@ -16,3 +16,23 @@ export function readinessUploadError(requirementId: string, files: File[]): stri
   if (requirementId && files.length !== 1) return 'Choose exactly one file for a readiness item';
   return null;
 }
+
+export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
+  documentsResult: PromiseSettledResult<Documents>,
+  readinessResult: PromiseSettledResult<Readiness>,
+): { documents?: Documents; readiness?: Readiness; error: string | null } {
+  const loadErrors: string[] = [];
+  if (documentsResult.status === 'rejected') {
+    loadErrors.push(documentsResult.reason instanceof Error ? documentsResult.reason.message : 'Employee documents could not be loaded');
+  }
+  if (readinessResult.status === 'rejected') {
+    const reason = readinessResult.reason instanceof Error ? readinessResult.reason.message : 'Payroll readiness could not be loaded';
+    loadErrors.push(`Payroll readiness could not be loaded: ${reason}`);
+  }
+
+  return {
+    documents: documentsResult.status === 'fulfilled' ? documentsResult.value : undefined,
+    readiness: readinessResult.status === 'fulfilled' ? readinessResult.value : undefined,
+    error: loadErrors.join(' ') || null,
+  };
+}

@@ -7,7 +7,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
-import { readinessUploadError, selectReadinessItem } from '@/lib/employee-document-upload';
+import { readinessUploadError, reconcileEmployeeDocumentLoads, selectReadinessItem } from '@/lib/employee-document-upload';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -100,26 +100,31 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
     try {
       setLoading(true);
       setError(null);
-      const [documentsResponse, requirementsResponse] = await Promise.all([
+      const [documentsResult, requirementsResult] = await Promise.allSettled([
         api.list({ employee_id: employeeId }),
         isClient
           ? clientEmployeeDocumentRequirementsApi.list(employeeId)
           : adminEmployeeDocumentRequirementsApi.list(employeeId),
       ]);
-      setDocuments(documentsResponse.data);
-      setRequirements(requirementsResponse.data);
-      setReadyForPayroll(requirementsResponse.readiness.ready_for_payroll);
-      onReadinessChange?.(requirementsResponse.readiness);
-      setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
-        requirement.id,
-        {
-          status: requirement.status === 'missing' ? 'received' : requirement.status,
-          clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
-          reviewNote: requirement.review_note || '',
-        },
-      ])));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load employee documents');
+      const loaded = reconcileEmployeeDocumentLoads(documentsResult, requirementsResult);
+      if (loaded.documents) {
+        setDocuments(loaded.documents.data);
+      }
+      if (loaded.readiness) {
+        const requirementsResponse = loaded.readiness;
+        setRequirements(requirementsResponse.data);
+        setReadyForPayroll(requirementsResponse.readiness.ready_for_payroll);
+        onReadinessChange?.(requirementsResponse.readiness);
+        setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
+          requirement.id,
+          {
+            status: requirement.status === 'missing' ? 'received' : requirement.status,
+            clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
+            reviewNote: requirement.review_note || '',
+          },
+        ])));
+      }
+      setError(loaded.error);
     } finally {
       setLoading(false);
     }

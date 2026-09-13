@@ -68,7 +68,6 @@ module Api
           render json: {
             data: serialize_employee(
               @employee,
-              include_sensitive: true,
               include_w4_history: true,
               include_document_readiness: true
             )

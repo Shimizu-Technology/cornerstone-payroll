@@ -157,29 +157,33 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     end
 
     commit_thread = lifecycle_thread(results, :commit!)
-    readiness_checked.pop
-    review_thread = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        thread_requirement = EmployeeDocumentRequirement.find(requirement.id)
-        writer_started << true
-        EmployeeDocumentRequirementReviewService.new(
-          requirement: thread_requirement,
-          actor: User.find(actor.id),
-          attributes: {
-            status: "received",
-            lock_version: thread_requirement.lock_version
-          }
-        ).call!
-        results << [ :ok, :review ]
-      rescue StandardError => e
-        results << [ :error, e ]
+    review_thread = nil
+    begin
+      Timeout.timeout(5) { readiness_checked.pop }
+      review_thread = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          thread_requirement = EmployeeDocumentRequirement.find(requirement.id)
+          writer_started << true
+          EmployeeDocumentRequirementReviewService.new(
+            requirement: thread_requirement,
+            actor: User.find(actor.id),
+            attributes: {
+              status: "received",
+              lock_version: thread_requirement.lock_version
+            }
+          ).call!
+          results << [ :ok, :review ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        end
       end
+      Timeout.timeout(5) { writer_started.pop }
+      expect(review_thread.join(0.2)).to be_nil
+    ensure
+      release_transition << true
     end
-    writer_started.pop
-    expect { results.pop(true) }.to raise_error(ThreadError)
 
-    release_transition << true
-    [ commit_thread, review_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
+    [ commit_thread, review_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
 
     expect(2.times.map { results.pop }).to contain_exactly([ :ok, :commit! ], [ :ok, :review ])
     expect(pay_period.reload).to be_committed

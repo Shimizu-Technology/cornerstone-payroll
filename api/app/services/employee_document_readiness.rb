@@ -33,29 +33,49 @@ class EmployeeDocumentReadiness
     ).order(:last_name, :first_name, :id).to_a
     return if employees.empty?
 
-    unresolved = EmployeeDocumentRequirement.required_for_payroll.unresolved
-      .where(company_id: pay_period.company_id, employee_id: employees.map(&:id))
+    gaps = gaps_for(employees: employees)
+    return if gaps.empty?
+
+    details = gaps.map { |gap| "#{gap.fetch(:employee_name)}: #{gap.fetch(:label)} (#{gap.fetch(:status).tr('_', ' ')})" }
+
+    raise BlockedError,
+      "Resolve required new-hire documents before approving or committing payroll: #{details.join('; ')}."
+  end
+
+  def self.gap_count(employees:)
+    gaps_for(employees: employees).size
+  end
+
+  def self.gaps_for(employees:)
+    employee_rows = employees.to_a
+    return [] if employee_rows.empty?
+
+    employee_ids = employee_rows.map(&:id)
+    requirements = EmployeeDocumentRequirement.required_for_payroll
+      .where(company_id: employee_rows.first.company_id, employee_id: employee_ids)
       .includes(:employee)
       .order("employees.last_name", "employees.first_name", :requirement_type)
       .references(:employee)
       .to_a
-    requirements_by_employee = EmployeeDocumentRequirement.required_for_payroll
-      .where(company_id: pay_period.company_id, employee_id: employees.map(&:id))
-      .pluck(:employee_id, :requirement_type)
-      .group_by(&:first)
-
-    details = unresolved.map { |requirement| "#{requirement.employee.full_name}: #{requirement.label} (#{requirement.status.tr('_', ' ')})" }
-    employees.each do |employee|
-      present_types = Array(requirements_by_employee[employee.id]).map(&:second)
+    requirements_by_employee = requirements.group_by(&:employee_id)
+    gaps = requirements.reject(&:satisfied?).map do |requirement|
+      {
+        employee_name: requirement.employee.full_name,
+        label: requirement.label,
+        status: requirement.status
+      }
+    end
+    employee_rows.each do |employee|
+      present_types = Array(requirements_by_employee[employee.id]).map(&:requirement_type)
       (DEFAULT_REQUIREMENTS.fetch(employee.tax_classification) - present_types).each do |requirement_type|
-        label = EmployeeDocumentRequirement::REQUIREMENT_TYPES.fetch(requirement_type)
-        details << "#{employee.full_name}: #{label} (checklist missing)"
+        gaps << {
+          employee_name: employee.full_name,
+          label: EmployeeDocumentRequirement::REQUIREMENT_TYPES.fetch(requirement_type),
+          status: "checklist_missing"
+        }
       end
     end
-    return if details.empty?
-
-    raise BlockedError,
-      "Resolve required new-hire documents before approving or committing payroll: #{details.join('; ')}."
+    gaps
   end
 
   def self.summary(employee)

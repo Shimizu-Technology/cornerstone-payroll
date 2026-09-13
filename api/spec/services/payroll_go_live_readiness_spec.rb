@@ -36,12 +36,54 @@ RSpec.describe PayrollGoLiveReadiness do
   end
 
   it "blocks cutover while an active employee has unresolved required documents" do
+    actor = create(:user, company: company)
     employee = create(:employee, company: company)
-    create(:employee_document_requirement, company: company, employee: employee)
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+    verified = employee.employee_document_requirements.find_by!(requirement_type: "identity_and_work_authorization")
+    document = create(:client_document, company: company, employee: employee, uploaded_by: actor)
+    verified.update!(
+      client_document: document,
+      status: "verified",
+      received_at: Time.current,
+      reviewed_by: actor,
+      reviewed_at: Time.current,
+      review_note: "Verified against signed source"
+    )
 
     readiness = described_class.new(review)
 
     expect(readiness.blockers).to include("Resolve every required employee document checklist")
     expect(readiness.facts.fetch("employee_document_gaps")).to eq(1)
+  end
+
+  it "blocks cutover when an opted-in employee is missing checklist rows" do
+    create(:employee, company: company, document_readiness_required: true)
+
+    readiness = described_class.new(review)
+
+    expect(readiness.blockers).to include("Resolve every required employee document checklist")
+    expect(readiness.facts.fetch("employee_document_gaps")).to eq(2)
+  end
+
+  it "accepts a complete verified document checklist" do
+    actor = create(:user, company: company)
+    employee = create(:employee, company: company)
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+    employee.employee_document_requirements.each do |requirement|
+      document = create(:client_document, company: company, employee: employee, uploaded_by: actor)
+      requirement.update!(
+        client_document: document,
+        status: "verified",
+        received_at: Time.current,
+        reviewed_by: actor,
+        reviewed_at: Time.current,
+        review_note: "Verified against signed source"
+      )
+    end
+
+    readiness = described_class.new(review)
+
+    expect(readiness.facts.fetch("employee_document_gaps")).to eq(0)
+    expect(readiness.blockers).not_to include("Resolve every required employee document checklist")
   end
 end

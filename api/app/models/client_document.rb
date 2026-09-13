@@ -33,7 +33,7 @@ class ClientDocument < ApplicationRecord
   belongs_to :uploaded_by, class_name: "User", optional: true
   has_many :client_portal_messages, dependent: :nullify
   has_many :employee_document_requirements, dependent: :restrict_with_error
-  has_many :employee_document_requirement_events
+  has_many :employee_document_requirement_events, dependent: :restrict_with_error
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
