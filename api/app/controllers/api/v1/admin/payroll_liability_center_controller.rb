@@ -12,20 +12,24 @@ module Api
           period = PayPeriod.where(company_id: current_company_id).find(due_date_params.fetch(:pay_period_id))
           authority = due_date_params.fetch(:authority).to_s.strip
           raise ArgumentError, "Recipient is required" if authority.blank?
-          unless active_obligation_exists?(period, authority)
-            return render json: { error: "Payroll liability was not found" }, status: :not_found
-          end
+          period.with_lock do
+            unless active_obligation_exists?(period, authority)
+              return render json: { error: "Payroll liability was not found" }, status: :not_found
+            end
 
-          record = PayrollLiabilityObligationDueDate.find_or_initialize_by(
-            pay_period: period,
-            authority:
-          )
-          record.assign_attributes(
-            company: current_company,
-            due_date: Date.iso8601(due_date_params.fetch(:due_date)),
-            updated_by: current_user
-          )
-          record.save!
+            record = PayrollLiabilityObligationDueDate.find_or_initialize_by(
+              pay_period: period,
+              authority:
+            )
+            previous_due_date = record.due_date
+            record.assign_attributes(
+              company: current_company,
+              due_date: Date.iso8601(due_date_params.fetch(:due_date)),
+              updated_by: current_user
+            )
+            record.save!
+            record_due_date_audit!(record, previous_due_date:) if record.saved_change_to_due_date?
+          end
 
           render json: { payroll_liability_center: center_payload }
         rescue Date::Error
@@ -50,6 +54,28 @@ module Api
             .joins(:entries)
             .where(payroll_liability_entries: { authority: })
             .exists?
+        end
+
+        def record_due_date_audit!(record, previous_due_date:)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: current_company.organization_id,
+            company_id: current_company_id,
+            action: "payroll_liability_obligation_due_dates#updated",
+            record_type: "payroll_liability_obligation_due_dates",
+            record_id: record.id,
+            subject_name: "#{record.authority} due date",
+            metadata: {
+              changed_fields: [ "due_date" ],
+              before_values: { due_date: previous_due_date&.iso8601 },
+              after_values: { due_date: record.due_date.iso8601 },
+              pay_period_id: record.pay_period_id
+            },
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id,
+            event_category: "activity"
+          )
         end
       end
     end

@@ -58,7 +58,7 @@ RSpec.describe PayPeriodPayDateCorrectionService do
     }.not_to change(PayrollLiabilityPosting, :count)
   end
 
-  it "requires linked liability payments to be voided or deleted before restating the journal" do
+  it "requires linked liability payments to be voided before restating the journal" do
     posting = PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
     entries = posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT)
     payment = create(:non_employee_check, company: company, pay_period: pay_period,

@@ -2,7 +2,7 @@
 
 # Prevents a payroll correction from replacing or reversing liability journal
 # entries while an active outgoing payment still points at those entries.
-# Staff must void a paid payment, or void/delete a prepared payment, first so
+# Staff must void a paid or prepared payment first so
 # both the liability and payment histories remain explicit and explainable.
 class PayrollLiabilityPaymentGuard
   def self.ensure_clear!(pay_period:, error_class:, action:)
@@ -20,6 +20,6 @@ class PayrollLiabilityPaymentGuard
     end.join(", ")
 
     raise error_class,
-          "Void or delete the linked liability payment before #{action}: #{references}"
+          "Void the linked liability payment before #{action}: #{references}"
   end
 end

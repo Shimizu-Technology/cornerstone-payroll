@@ -1841,10 +1841,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
     t.index ["paid_by_id"], name: "index_non_employee_checks_on_paid_by_id"
     t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
+    t.check_constraint "paid_at IS NULL AND paid_by_id IS NULL OR paid_at IS NOT NULL AND paid_by_id IS NOT NULL", name: "non_employee_checks_paid_actor_check"
+    t.check_constraint "paid_at IS NULL OR NOT (payment_method::text = ANY (ARRAY['ach'::character varying::text, 'eftps'::character varying::text, 'wire'::character varying::text, 'card'::character varying::text])) OR NULLIF(btrim(confirmation_number::text), ''::text) IS NOT NULL", name: "non_employee_checks_paid_electronic_confirmation_check"
     t.check_constraint "paid_at IS NULL OR payment_date IS NOT NULL", name: "non_employee_checks_paid_date_check"
     t.check_constraint "paid_at IS NULL OR payment_method::text <> 'check'::text OR printed_at IS NOT NULL", name: "non_employee_checks_paid_paper_printed_check"
-    t.check_constraint "paid_at IS NULL OR NOT (payment_method::text = ANY (ARRAY['ach'::character varying, 'eftps'::character varying, 'wire'::character varying, 'card'::character varying]::text[])) OR NULLIF(btrim(confirmation_number::text), ''::text) IS NOT NULL", name: "non_employee_checks_paid_electronic_confirmation_check"
-    t.check_constraint "paid_at IS NULL AND paid_by_id IS NULL OR paid_at IS NOT NULL AND paid_by_id IS NOT NULL", name: "non_employee_checks_paid_actor_check"
     t.check_constraint "payment_method::text = ANY (ARRAY['check'::character varying::text, 'ach'::character varying::text, 'eftps'::character varying::text, 'wire'::character varying::text, 'card'::character varying::text, 'cash'::character varying::text, 'other'::character varying::text])", name: "non_employee_checks_payment_method_check"
     t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying::text, 'pay_period'::character varying::text, 'month'::character varying::text, 'quarter'::character varying::text, 'year'::character varying::text])", name: "non_employee_checks_payment_period_type_check"
     t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
@@ -3297,7 +3297,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
-  add_foreign_key "non_employee_checks", "users", column: "paid_by_id", on_delete: :nullify
+  add_foreign_key "non_employee_checks", "users", column: "paid_by_id", on_delete: :restrict
   add_foreign_key "organizations", "companies", column: "primary_company_id"
   add_foreign_key "pay_component_tax_rules", "companies", on_delete: :restrict
   add_foreign_key "pay_component_tax_rules", "users", column: "approved_by_id", on_delete: :nullify
@@ -3355,14 +3355,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   add_foreign_key "payroll_items", "payroll_items", column: "correction_for_payroll_item_id"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
   add_foreign_key "payroll_liability_check_allocations", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_check_allocations", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "payroll_liability_check_allocations", "non_employee_checks", on_delete: :restrict
   add_foreign_key "payroll_liability_check_allocations", "payroll_liability_entries", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "companies", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "pay_component_tax_rules", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "payroll_items", on_delete: :restrict
   add_foreign_key "payroll_liability_entries", "payroll_liability_postings", on_delete: :restrict
   add_foreign_key "payroll_liability_obligation_due_dates", "companies", on_delete: :restrict
-  add_foreign_key "payroll_liability_obligation_due_dates", "pay_periods", on_delete: :cascade
+  add_foreign_key "payroll_liability_obligation_due_dates", "pay_periods", on_delete: :restrict
   add_foreign_key "payroll_liability_obligation_due_dates", "users", column: "updated_by_id", on_delete: :nullify
   add_foreign_key "payroll_liability_postings", "companies", on_delete: :restrict
   add_foreign_key "payroll_liability_postings", "pay_periods", on_delete: :restrict

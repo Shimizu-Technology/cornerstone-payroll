@@ -469,6 +469,7 @@ RSpec.describe IssueCorrectivePaycheckService do
       fit_check = supplemental.non_employee_checks.first
       expect(fit_check.payable_to).to eq("Treasurer of Guam")
       expect(fit_check.auto_generated_type).to eq("fit_deposit")
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(fit_check.amount)
     end
 
     it "reports a clean correction error and rolls back when the FIT payment cannot be connected" do

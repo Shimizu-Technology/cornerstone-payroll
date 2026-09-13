@@ -97,6 +97,36 @@ RSpec.describe "Non-employee liability payments", type: :request do
     )
   end
 
+  it "preserves paid electronic payments even when they have no liability allocations" do
+    payment = create(:non_employee_check, company:, amount: 124,
+      payable_to: PayrollLiabilityPostingService::US_TREASURY,
+      check_type: "tax_deposit", payment_method: "ach", payment_date: Date.new(2026, 8, 21),
+      confirmation_number: "ACH-ABC", paid_at: Time.current, paid_by: admin_user)
+
+    expect {
+      delete "/api/v1/admin/non_employee_checks/#{payment.id}", as: :json
+    }.not_to change(NonEmployeeCheck, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to match(/Void a paid payment/)
+    expect(payment.reload).not_to be_voided
+  end
+
+  it "preserves prepared liability payments until they are explicitly voided" do
+    payment = create(:non_employee_check, company:, amount: 124,
+      payable_to: PayrollLiabilityPostingService::US_TREASURY,
+      check_type: "tax_deposit", payment_method: "eftps", payment_date: Date.new(2026, 8, 21))
+    PayrollLiabilityCheckAllocationService.allocate!(non_employee_check: payment, entry_ids: entry_ids)
+
+    expect {
+      delete "/api/v1/admin/non_employee_checks/#{payment.id}", as: :json
+    }.not_to change(NonEmployeeCheck, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to match(/Void a prepared liability payment/)
+    expect(payment.reload.payroll_liability_check_allocations.sum(:amount)).to eq(124)
+  end
+
   it "requires a paper check to be printed before it can be marked paid" do
     payment = create(:non_employee_check, company:, amount: 124,
       payable_to: PayrollLiabilityPostingService::US_TREASURY,

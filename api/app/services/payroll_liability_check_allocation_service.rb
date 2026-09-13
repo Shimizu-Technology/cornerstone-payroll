@@ -25,6 +25,7 @@ class PayrollLiabilityCheckAllocationService
       raise Error, "Select at least one payroll liability" if entry_ids.empty?
       raise Error, "This payment already has liability allocations" if payment.payroll_liability_check_allocations.exists?
 
+      lock_selected_pay_periods!(payment.company_id)
       entries = active_entries.includes(:payroll_liability_posting).lock
         .where(id: entry_ids, company_id: payment.company_id).order(:id).to_a
       raise Error, "One or more selected liabilities are unavailable" unless entries.length == entry_ids.length
@@ -53,6 +54,14 @@ class PayrollLiabilityCheckAllocationService
     reversed_source_ids = PayrollLiabilityPosting.reversals.select(:source_posting_id)
     PayrollLiabilityEntry.joins(:payroll_liability_posting)
       .merge(PayrollLiabilityPosting.source_postings.where.not(id: reversed_source_ids))
+  end
+
+  def lock_selected_pay_periods!(company_id)
+    pay_period_ids = PayrollLiabilityEntry.joins(:payroll_liability_posting)
+      .where(id: entry_ids, company_id:)
+      .distinct
+      .pluck("payroll_liability_postings.pay_period_id")
+    PayPeriod.where(id: pay_period_ids, company_id:).order(:id).lock.load
   end
 
   def available_amount(entries, company_id)

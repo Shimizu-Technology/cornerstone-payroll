@@ -106,7 +106,7 @@ RSpec.describe PayPeriodCorrectionService do
         expect(committed_period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
       end
 
-      it "requires linked liability payments to be voided or deleted before payroll is voided" do
+      it "requires linked liability payments to be voided before payroll is voided" do
         posting = PayrollLiabilityPostingService.post!(pay_period: committed_period, actor: actor)
         entries = posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT)
         payment = create(:non_employee_check, company: company, pay_period: committed_period,

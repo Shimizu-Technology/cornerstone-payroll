@@ -58,12 +58,12 @@ const PERIOD_LABELS: Record<PaymentPeriodType, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-700',
-  prepared: 'bg-blue-100 text-blue-800',
-  unprinted: 'bg-yellow-100 text-yellow-700',
-  printed: 'bg-green-100 text-green-700',
-  paid: 'bg-emerald-100 text-emerald-800',
-  voided: 'bg-red-100 text-red-700',
+  pending: 'bg-neutral-100 text-neutral-700',
+  prepared: 'bg-primary-100 text-primary-800',
+  unprinted: 'bg-warning-100 text-warning-800',
+  printed: 'bg-success-100 text-success-800',
+  paid: 'bg-success-100 text-success-800',
+  voided: 'bg-danger-100 text-danger-700',
 };
 
 interface FormState {
@@ -561,7 +561,7 @@ export function ChecksPayments() {
         {showForm && (
           <Card className="p-4 sm:p-5">
             {form.liability_entry_ids.length > 0 && (
-              <div className="mb-4 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-900">
+              <div className="mb-4 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-900">
                 <p className="font-semibold">Connected to committed payroll</p>
                 <p className="mt-2 leading-5">This payment reserves the selected liability journal entries. It will not count as paid until you explicitly confirm it below.</p>
               </div>
@@ -718,7 +718,7 @@ export function ChecksPayments() {
               onChange={line_items => setForm(p => ({ ...p, line_items }))}
               className="mt-4"
             />
-            {form.payment_method === 'check' && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            {form.payment_method === 'check' && <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50 p-4 text-sm text-primary-900">
               Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
               Before printing on live check stock, test on plain paper or a photocopy of the real check first.
               <Link to="/check-settings" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
@@ -799,7 +799,7 @@ export function ChecksPayments() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-neutral-900">{check.payable_to}</span>
-                        <Badge className={STATUS_COLORS[displayCheckStatus(check)] || 'bg-gray-100 text-gray-700'}>{displayCheckStatus(check)}</Badge>
+                        <Badge className={STATUS_COLORS[displayCheckStatus(check)] || 'bg-neutral-100 text-neutral-700'}>{displayCheckStatus(check)}</Badge>
                         <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type]}</Badge>
                         {check.liability_payment && <Badge variant="outline">Payroll liability</Badge>}
                         {check.edit_count ? (
@@ -875,7 +875,7 @@ export function ChecksPayments() {
                           <Button size="sm" variant="destructive" onClick={() => handleVoid(check)} disabled={busyId === check.id}>Confirm</Button>
                         </>
                       )}
-                      {!check.printed_at && !check.paid_at && !check.voided && (
+                      {!check.liability_payment && !check.printed_at && !check.paid_at && !check.voided && (
                         <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(check)} disabled={busyId === check.id}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -904,7 +904,7 @@ export function ChecksPayments() {
             <Input label="Payment date" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
             <Input label="Confirmation number" helperText={['ach', 'eftps', 'wire', 'card'].includes(payingCheck.payment_method) ? 'Required for this electronic payment.' : 'Optional reference.'} value={paymentConfirmation} onChange={(event) => setPaymentConfirmation(event.target.value)} />
           </div>
-          <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm leading-5 text-warning-900">Confirm only after the check was issued or the electronic transfer succeeded. A prepared payment is not the same as a paid liability.</div>
+          <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-5 text-warning-900">Confirm only after the check was issued or the electronic transfer succeeded. A prepared payment is not the same as a paid liability.</div>
           <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setPayingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void handleMarkPaid()} disabled={busyId !== null || !paymentDate || (['ach', 'eftps', 'wire', 'card'].includes(payingCheck.payment_method) && !paymentConfirmation.trim())}>{busyId !== null ? 'Confirming…' : 'Confirm Paid'}</Button></DialogFooter>
         </DialogContent>}
       </Dialog>

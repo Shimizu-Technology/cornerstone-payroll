@@ -22,12 +22,12 @@ interface Props {
 
 const STATUS: Record<PayrollLiabilityObligationStatus, { label: string; className: string }> = {
   unpaid: { label: 'Not prepared', className: 'bg-neutral-100 text-neutral-700' },
-  partially_prepared: { label: 'Partly prepared', className: 'bg-blue-100 text-blue-800' },
-  prepared: { label: 'Prepared · not paid', className: 'bg-blue-100 text-blue-800' },
-  partially_paid: { label: 'Partly paid', className: 'bg-amber-100 text-amber-900' },
+  partially_prepared: { label: 'Partly prepared', className: 'bg-primary-100 text-primary-800' },
+  prepared: { label: 'Prepared · not paid', className: 'bg-primary-100 text-primary-800' },
+  partially_paid: { label: 'Partly paid', className: 'bg-warning-100 text-warning-900' },
   paid: { label: 'Paid', className: 'bg-success-100 text-success-800' },
   overdue: { label: 'Overdue', className: 'bg-danger-100 text-danger-800' },
-  credit: { label: 'Credit · review', className: 'bg-purple-100 text-purple-800' },
+  credit: { label: 'Credit · review', className: 'bg-warning-100 text-warning-900' },
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -91,7 +91,7 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
   }
 
   if (error) {
-    return <Card className="border-danger-200 bg-danger-50 p-4 sm:p-6"><div className="flex gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 text-danger-600" /><div><h2 className="font-semibold text-danger-900">Payroll liabilities are unavailable</h2><p className="mt-2 text-sm text-danger-800">{error}</p></div></div></Card>;
+    return <Card className="border-danger-200 bg-danger-50 p-4 sm:p-6"><div className="flex gap-4"><AlertTriangle className="mt-2 h-5 w-5 text-danger-600" /><div><h2 className="font-semibold text-danger-900">Payroll liabilities are unavailable</h2><p className="mt-2 text-sm text-danger-800">{error}</p></div></div></Card>;
   }
 
   if (!center) return null;
@@ -114,7 +114,7 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
         </div>
       </div>
 
-      {actionError && <div role="alert" className="m-4 rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800 sm:mx-6">{actionError}</div>}
+      {actionError && <div role="alert" className="m-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800 sm:mx-6">{actionError}</div>}
 
       {groups.length === 0 ? (
         <div className="p-6 text-center"><CheckCircle2 className="mx-auto h-8 w-8 text-success-600" /><p className="mt-2 font-semibold text-neutral-900">No committed payroll liabilities yet</p><p className="mt-2 text-sm text-neutral-500">Committed payrolls will appear here automatically.</p></div>
@@ -126,7 +126,7 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
             const preparable = obligations.filter((item) => item.unreserved_amount > 0);
             return (
               <section key={authority} className="p-4 sm:p-6">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div><h3 className="font-display text-lg font-bold text-neutral-950">{authority}</h3><p className="mt-2 text-sm text-neutral-500">{formatCurrency(outstanding)} still owed across {obligations.length} payroll {obligations.length === 1 ? 'obligation' : 'obligations'}.</p></div>
                   {preparable.length > 1 && <Button type="button" onClick={() => onPrepare(preparable)}>Prepare combined {formatCurrency(unreserved)} payment</Button>}
                 </div>
@@ -143,9 +143,9 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
                         <Amount label="Paid" value={obligation.paid_amount} tone="success" />
                         <Amount label="Still owed" value={obligation.outstanding_amount} tone={obligation.status === 'overdue' ? 'danger' : 'default'} />
                         <div>
-                          <div className="flex items-end gap-2"><Input id={`liability-due-date-${obligation.pay_period_id}-${obligation.authority.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`} aria-label={`Due date for ${authority} ${obligation.period_end}`} label="Due date" type="date" value={dueValue} onChange={(event) => setDueDrafts((current) => ({ ...current, [obligation.key]: event.target.value }))} /><Button type="button" size="sm" variant="ghost" className="mb-0.5" disabled={!dueValue || dueValue === obligation.due_date || savingKey === obligation.key} onClick={() => void saveDueDate(obligation)}>{savingKey === obligation.key ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}</Button></div>
+                          <div className="flex items-end gap-2"><Input id={`liability-due-date-${obligation.pay_period_id}-${obligation.authority.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`} aria-label={`Due date for ${authority} ${obligation.period_end}`} label="Due date" type="date" value={dueValue} onChange={(event) => setDueDrafts((current) => ({ ...current, [obligation.key]: event.target.value }))} /><Button type="button" size="sm" variant="ghost" disabled={!dueValue || dueValue === obligation.due_date || savingKey !== null} onClick={() => void saveDueDate(obligation)}>{savingKey === obligation.key ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}</Button></div>
                           {obligation.unreserved_amount > 0 && <Button type="button" size="sm" variant="outline" className="mt-2 w-full" onClick={() => onPrepare([obligation])}><ReceiptText className="mr-2 h-4 w-4" />Prepare {formatCurrency(obligation.unreserved_amount)}</Button>}
-                          {obligation.prepared_amount > obligation.paid_amount && obligation.unreserved_amount <= 0 && obligation.outstanding_amount > 0 && <p className="mt-2 text-xs leading-5 text-blue-700">Payment prepared below; confirm it only after it is actually issued.</p>}
+                          {obligation.prepared_amount > obligation.paid_amount && obligation.unreserved_amount <= 0 && obligation.outstanding_amount > 0 && <p className="mt-2 text-xs leading-5 text-primary-700">Payment prepared below; confirm it only after it is actually issued.</p>}
                         </div>
                       </div>
                     );
@@ -157,14 +157,14 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
         </div>
       )}
 
-      <div className="flex gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-600 sm:px-6"><CalendarClock className="mt-0.5 h-4 w-4 shrink-0" /><p>Due dates are reviewed by Cornerstone staff. The system does not guess legal deposit deadlines. Voiding a payment releases its reserved liabilities while preserving the payment and audit history.</p></div>
+      <div className="flex gap-2 border-t border-neutral-200 bg-neutral-50 p-4 text-xs leading-5 text-neutral-600 sm:px-6"><CalendarClock className="mt-2 h-4 w-4 shrink-0" /><p>Due dates are reviewed by Cornerstone staff. The system does not guess legal deposit deadlines. Voiding a payment releases its reserved liabilities while preserving the payment and audit history.</p></div>
     </Card>
   );
 }
 
 function Summary({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'success' | 'warning' | 'danger' }) {
   const valueClass = { default: 'text-white', success: 'text-success-200', warning: 'text-warning-200', danger: 'text-danger-200' }[tone];
-  return <div className="rounded-xl border border-white/10 bg-white/10 p-3"><p className="text-[11px] font-bold uppercase tracking-wider text-primary-200">{label}</p><p className={`mt-2 font-display text-lg font-bold ${valueClass}`}>{formatCurrency(value)}</p></div>;
+  return <div className="rounded-xl border border-white/10 bg-white/10 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-primary-200">{label}</p><p className={`mt-2 font-display text-lg font-bold ${valueClass}`}>{formatCurrency(value)}</p></div>;
 }
 
 function Amount({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'success' | 'danger' }) {

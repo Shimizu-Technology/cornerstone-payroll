@@ -227,8 +227,13 @@ module Api
 
         # DELETE /api/v1/admin/non_employee_checks/:id
         def destroy
-          if @check.payroll_liability_check_allocations.exists? && @check.paid_at.present?
-            return render json: { error: "Void a paid liability payment instead of deleting it" }, status: :unprocessable_entity
+          if @check.paid_at.present?
+            return render json: { error: "Void a paid payment instead of deleting it" }, status: :unprocessable_entity
+          end
+          if @check.payroll_liability_check_allocations.exists?
+            return render json: {
+              error: "Void a prepared liability payment instead of deleting it so its history is preserved"
+            }, status: :unprocessable_entity
           end
           if @check.printed?
             return render json: { error: "Cannot delete a printed check; void it instead" }, status: :unprocessable_entity

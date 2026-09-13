@@ -312,6 +312,8 @@ describe('ApiClient company identity', (): void => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain('/admin/payroll_liability_center');
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Company-Id')).toBe('7');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/admin/payroll_liability_center/due_date');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       payroll_liability_obligation: {
         pay_period_id: 18,

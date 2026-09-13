@@ -56,7 +56,7 @@ class Company < ApplicationRecord
   has_many :payroll_liability_postings, dependent: :restrict_with_error
   has_many :payroll_liability_entries, dependent: :restrict_with_error
   has_many :payroll_liability_check_allocations, dependent: :restrict_with_error
-  has_many :payroll_liability_obligation_due_dates, dependent: :destroy
+  has_many :payroll_liability_obligation_due_dates, dependent: :restrict_with_error
   has_many :quarterly_compliance_packets, dependent: :destroy
   has_many :payroll_filing_responsibilities, dependent: :restrict_with_error
   has_many :historical_import_batches, dependent: :restrict_with_error

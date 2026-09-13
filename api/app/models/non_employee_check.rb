@@ -33,7 +33,7 @@ class NonEmployeeCheck < ApplicationRecord
            inverse_of: :non_employee_check
   has_many :payroll_liability_check_allocations,
            inverse_of: :non_employee_check,
-           dependent: :delete_all
+           dependent: :restrict_with_error
 
   accepts_nested_attributes_for :line_items, allow_destroy: true
 

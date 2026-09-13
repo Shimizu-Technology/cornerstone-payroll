@@ -16,7 +16,7 @@ class ConnectPaymentsToPayrollLiabilities < ActiveRecord::Migration[8.1]
 
     add_column :non_employee_checks, :payment_method, :string, null: false, default: "check"
     add_column :non_employee_checks, :paid_at, :datetime
-    add_reference :non_employee_checks, :paid_by, foreign_key: { to_table: :users, on_delete: :nullify }
+    add_reference :non_employee_checks, :paid_by, foreign_key: { to_table: :users, on_delete: :restrict }
     add_check_constraint :non_employee_checks,
                          "payment_method IN ('check', 'ach', 'eftps', 'wire', 'card', 'cash', 'other')",
                          name: "non_employee_checks_payment_method_check"
@@ -35,7 +35,7 @@ class ConnectPaymentsToPayrollLiabilities < ActiveRecord::Migration[8.1]
 
     create_table :payroll_liability_check_allocations do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }
-      t.references :non_employee_check, null: false, foreign_key: { on_delete: :cascade },
+      t.references :non_employee_check, null: false, foreign_key: { on_delete: :restrict },
                    index: { name: "idx_liability_check_allocations_payment" }
       t.references :payroll_liability_entry, null: false, foreign_key: { on_delete: :restrict },
                    index: { name: "idx_liability_check_allocations_entry" }
@@ -53,7 +53,7 @@ class ConnectPaymentsToPayrollLiabilities < ActiveRecord::Migration[8.1]
 
     create_table :payroll_liability_obligation_due_dates do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }
-      t.references :pay_period, null: false, foreign_key: { on_delete: :cascade }
+      t.references :pay_period, null: false, foreign_key: { on_delete: :restrict }
       t.string :authority, null: false
       t.date :due_date, null: false
       t.references :updated_by, foreign_key: { to_table: :users, on_delete: :nullify }
