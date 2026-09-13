@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This workspace gives Cornerstone payroll staff the AIRE facts and actions they need for a normal payroll run without requiring them to sign in to AIRE. AIRE remains the system of record for time. Cornerstone remains the system of record for payroll calculation, checks, taxes, liabilities, reports, and payment status.
+This workspace gives Cornerstone payroll staff the AIRE facts and actions they need for a normal payroll run without requiring them to sign in to AIRE. AIRE remains the system of record for time. Cornerstone remains the system of record for payroll calculation, checks, taxes, liabilities, reports, and payment status. AIRE retains an acknowledgement mirror of Cornerstone's batch, payroll-item, and payment events so AIRE can show each source entry's downstream state; the mirrored processing history does not become a second authority for whether Cornerstone paid someone.
 
 The pay-period page presents:
 
@@ -36,13 +36,16 @@ Until AIRE has a grant-management screen, an AIRE administrator issues a token w
 
 ## Cornerstone endpoints
 
-All routes are staff-authenticated and tenant-scoped to the active company and pay period:
+All routes are staff-authenticated and tenant-scoped. Cockpit routes are scoped to the active company and pay period:
 
 - `GET /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit`
 - `GET /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit/time_entries`
 - `GET /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit/exceptions`
 - `POST /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit/time_entries/:time_entry_id/approval`
 - `POST /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit/finalize`
+
+Personal-delegation routes are scoped to the active company, named time-tracking source, and current operator:
+
 - `PUT /api/v1/admin/time_tracking_sources/:id/delegation`
 - `DELETE /api/v1/admin/time_tracking_sources/:id/delegation`
 
@@ -54,7 +57,7 @@ The proxy keeps AIRE's pagination boundaries: 100 employees, 250 time entries, a
 
 Every response containing live payroll detail is marked `no-store`. The proxy retains AIRE's `409 Conflict` and `422 Unprocessable Entity` meanings so the interface can distinguish stale data from an invalid action. Authentication failures from AIRE become a failed dependency; unexpected transport failures become a bad gateway. Only a short JSON `error` message is eligible for display. Non-JSON bodies, arrays, and oversized responses are not surfaced.
 
-Commands use a new UUID plus the AIRE record version. A retry of the same command is safe. A changed record returns a conflict and the workspace reloads current data before the operator can decide again.
+Each command UUID identifies one logical approval, denial, or finalization decision together with the AIRE record version. An ambiguous transport retry reuses that UUID and version while the record is unchanged, so AIRE can replay the original receipt without executing the command twice. A changed record returns a conflict; the workspace reloads current data and creates a new UUID only when the operator makes a new decision against that new version.
 
 ## Deliberate boundary
 

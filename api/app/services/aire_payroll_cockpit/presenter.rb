@@ -8,13 +8,13 @@ module AirePayrollCockpit
 
     def overview(period_payload:, employees_payload:, command_access:)
       {
-        payroll_period: period_payload.fetch("payroll_period"),
-        readiness: period_payload.fetch("readiness"),
+        payroll_period: required(period_payload, "payroll_period"),
+        readiness: required(period_payload, "readiness"),
         finalized_batch: period_payload["finalized_batch"],
         processing_history: period_payload.fetch("processing_history", []),
         carryovers: period_payload.fetch("carryovers", {}),
         employees: employees_payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
-        employee_pagination: employees_payload.fetch("pagination"),
+        employee_pagination: required(employees_payload, "pagination"),
         command_access: command_access
       }
     end
@@ -33,6 +33,15 @@ module AirePayrollCockpit
     end
 
     private
+
+    def required(payload, key)
+      payload.fetch(key) do
+        raise TimeTracking::Client::Error.new(
+          "#{@source.name} returned an incomplete payroll cockpit payload",
+          response_status: 502
+        )
+      end
+    end
 
     def decorate_employee(employee)
       employee.merge(

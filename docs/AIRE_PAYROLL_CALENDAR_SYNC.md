@@ -26,7 +26,7 @@ This contract lets Chels schedule AIRE payroll from Cornerstone without making e
 - Normal clock and kiosk entries are eligible without another approval. Manual or manually corrected time must be approved in AIRE before cutoff.
 - Late, open, unapproved, denied, and otherwise ineligible time remains visible with its reason. It is not silently deleted or added to the locked batch.
 - Publishing a calendar does not import time, calculate payroll, issue a check, or mark wages paid.
-- Finalizing an AIRE batch does not mean Cornerstone processed or paid it. Payment state is reported separately by the existing processing-event contract.
+- Finalizing an AIRE batch does not mean Cornerstone processed or paid it. Cornerstone remains authoritative for payment status and sends processing events that AIRE retains as an acknowledgement mirror for entry-level visibility.
 - Direct deposit is outside this implementation.
 
 ## State flow
