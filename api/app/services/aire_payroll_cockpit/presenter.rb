@@ -6,7 +6,7 @@ module AirePayrollCockpit
       @source = source
     end
 
-    def overview(period_payload:, employees_payload:, command_access:)
+    def overview(period_payload:, employees_payload:, command_access:, routing_options: [])
       {
         payroll_period: required(period_payload, "payroll_period"),
         readiness: required(period_payload, "readiness"),
@@ -15,7 +15,8 @@ module AirePayrollCockpit
         carryovers: period_payload.fetch("carryovers", {}),
         employees: employees_payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
         employee_pagination: required(employees_payload, "pagination"),
-        command_access: command_access
+        command_access: command_access,
+        routing_options: routing_options
       }
     end
 
@@ -29,6 +30,12 @@ module AirePayrollCockpit
       payload.merge(
         "time_exceptions" => payload.fetch("time_exceptions", []).map { |entry| decorate_entry(entry) },
         "leave_exceptions" => payload.fetch("leave_exceptions", []).map { |request_record| decorate_leave(request_record) }
+      )
+    end
+
+    def settlement_cases(payload)
+      payload.merge(
+        "settlement_cases" => payload.fetch("settlement_cases", []).map { |settlement_case| decorate_settlement_case(settlement_case) }
       )
     end
 
@@ -62,6 +69,13 @@ module AirePayrollCockpit
     def decorate_leave(request_record)
       employee = request_record.fetch("employee", {})
       request_record.merge(
+        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], required: true))
+      )
+    end
+
+    def decorate_settlement_case(settlement_case)
+      employee = settlement_case.fetch("employee", {})
+      settlement_case.merge(
         "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], required: true))
       )
     end

@@ -60,6 +60,8 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_calendars#publish" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_calendars#retry_delivery" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#approve_time_entry" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_cockpits#correct_time_entry" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_cockpits#route_settlement_case" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#finalize" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,

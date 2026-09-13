@@ -22,7 +22,8 @@ module Api
             aire_payroll_cockpit: presenter.overview(
               period_payload: period_payload,
               employees_payload: employees_payload,
-              command_access: command_access_payload
+              command_access: command_access_payload,
+              routing_options: routing_options_payload
             )
           }
         rescue TimeTracking::Client::Error => e
@@ -55,6 +56,18 @@ module Api
           render_source_error(e)
         end
 
+        def settlement_cases
+          payload = cockpit_client.payroll_cockpit_settlement_cases(
+            external_pay_period_id: external_pay_period_id,
+            page: bounded_page(:page),
+            per_page: bounded_per_page(:per_page, maximum: 250),
+            status: params[:status]
+          )
+          render json: cockpit_presenter.settlement_cases(payload)
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def approve_time_entry
           decision = command_params.fetch(:decision).to_s.downcase
           unless %w[approve deny].include?(decision)
@@ -73,6 +86,74 @@ module Api
             record_type: "AireTimeEntry",
             record_id: params[:time_entry_id],
             command_id: command_params[:command_id],
+            reason: command_params[:reason],
+            result: result
+          )
+          render json: result
+        rescue ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def correct_time_entry
+          attributes = correction_params.except(:command_id, :expected_version, :reason).to_h
+          result = cockpit_client(with_delegation: true).correct_payroll_time_entry(
+            entry_id: params[:time_entry_id],
+            command_id: correction_params.fetch(:command_id),
+            expected_version: correction_params.fetch(:expected_version),
+            reason: correction_params.fetch(:reason),
+            attributes: attributes
+          )
+          record_command_audit!(
+            action: "aire_payroll_cockpit#time_corrected",
+            record_type: "AireTimeEntry",
+            record_id: params[:time_entry_id],
+            command_id: correction_params[:command_id],
+            reason: correction_params[:reason],
+            result: result
+          )
+          render json: result
+        rescue ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def route_settlement_case
+          destination_kind = route_params.fetch(:destination_kind).to_s
+          unless %w[regular not_payable].include?(destination_kind)
+            return render json: {
+              error: "Choose the next regular payroll or mark the case not payable"
+            }, status: :unprocessable_entity
+          end
+
+          target_period = if destination_kind == "regular"
+            routing_options_payload.find do |option|
+              option.fetch(:external_pay_period_id) == route_params[:target_external_pay_period_id]
+            end
+          end
+          if destination_kind == "regular" && target_period.nil?
+            return render json: {
+              error: "Choose an available future regular payroll"
+            }, status: :unprocessable_entity
+          end
+
+          result = cockpit_client(with_delegation: true).route_payroll_settlement_case(
+            case_id: params[:settlement_case_id],
+            command_id: route_params.fetch(:command_id),
+            expected_version: route_params.fetch(:expected_version),
+            reason: route_params.fetch(:reason),
+            destination_kind: destination_kind,
+            target_external_pay_period_id: target_period&.fetch(:external_pay_period_id, nil),
+            action_due_on: target_period&.fetch(:pay_date, nil)
+          )
+          record_command_audit!(
+            action: "aire_payroll_cockpit#settlement_case_routed",
+            record_type: "AirePayrollSettlementCase",
+            record_id: params[:settlement_case_id],
+            command_id: route_params[:command_id],
+            reason: route_params[:reason],
             result: result
           )
           render json: result
@@ -94,6 +175,7 @@ module Api
             record_type: "PayPeriod",
             record_id: @pay_period.id,
             command_id: command_params[:command_id],
+            reason: command_params[:reason],
             result: result
           )
           render json: result, status: :accepted
@@ -161,6 +243,54 @@ module Api
           params.permit(:command_id, :expected_version, :decision, :reason)
         end
 
+        def correction_params
+          params.permit(
+            :command_id,
+            :expected_version,
+            :reason,
+            :work_date,
+            :start_time,
+            :end_time,
+            :time_category_id,
+            :description,
+            breaks: %i[start_time end_time]
+          )
+        end
+
+        def route_params
+          params.permit(
+            :command_id,
+            :expected_version,
+            :reason,
+            :destination_kind,
+            :target_external_pay_period_id,
+            :action_due_on
+          )
+        end
+
+        def routing_options_payload
+          @source.aire_payroll_calendar_periods
+            .includes(:publications, :payroll_events, :pay_period)
+            .joins(:pay_period)
+            .where(pay_periods: { cycle: "regular" })
+            .where("pay_periods.start_date > ?", @pay_period.end_date)
+            .order("pay_periods.start_date ASC, pay_periods.id ASC")
+            .filter_map do |calendar_period|
+              publication = calendar_period.latest_publication
+              next unless publication&.delivered?
+              next if calendar_period.payroll_events.any?(&:verified?)
+
+              pay_period = calendar_period.pay_period
+              {
+                external_pay_period_id: calendar_period.external_pay_period_id,
+                pay_period_id: pay_period.id,
+                start_date: pay_period.start_date,
+                end_date: pay_period.end_date,
+                pay_date: pay_period.pay_date
+              }
+            end
+        end
+
         def bounded_page(key)
           [ params[key].to_i, 1 ].max
         end
@@ -171,19 +301,22 @@ module Api
           requested.clamp(1, maximum)
         end
 
-        def record_command_audit!(action:, record_type:, record_id:, command_id:, result:)
+        def record_command_audit!(action:, record_type:, record_id:, command_id:, reason:, result:)
+          local_record_id = record_id if record_id.to_s.match?(/\A[1-9]\d*\z/)
           AuditLog.record!(
             user: current_user,
             company_id: current_company_id,
             action: action,
             record_type: record_type,
-            record_id: record_id,
+            record_id: local_record_id,
             subject_name: "AIRE payroll command",
             event_category: "payroll",
             metadata: {
               command_id: command_id,
+              external_record_id: local_record_id ? nil : record_id,
+              reason: reason,
               replayed: result.dig("command", "replayed") == true
-            }
+            }.compact
           )
         end
 

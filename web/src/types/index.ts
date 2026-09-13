@@ -653,7 +653,7 @@ export interface AirePayrollCockpitEmployee {
   role?: string;
   time_tracking_enabled?: boolean;
   approval_groups?: Array<{ key: string; label: string }>;
-  time_categories?: Array<{ id: string; key: string; name: string }>;
+  time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   cornerstone: AirePayrollCockpitMapping;
 }
 
@@ -702,7 +702,8 @@ export interface AirePayrollTimeEntry {
   hours: number;
   break_minutes: number;
   breaks?: Array<{ id: string; start_time: string; end_time?: string | null; duration_minutes?: number; active: boolean }>;
-  category?: { id: string; key: string; name: string } | null;
+  category?: { id: string; key?: string | null; name: string } | null;
+  available_time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   capture: { entry_method?: string | null; clock_source?: string | null; ordinary: boolean; admin_override: boolean };
   state: {
     status: string;
@@ -768,6 +769,15 @@ export interface AirePayrollCockpitOverview {
   employees: AirePayrollCockpitEmployee[];
   employee_pagination: AirePayrollPagination;
   command_access: { can_read: boolean; can_command: boolean; delegation_configured: boolean };
+  routing_options: AirePayrollRoutingOption[];
+}
+
+export interface AirePayrollRoutingOption {
+  external_pay_period_id: string;
+  pay_period_id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
 }
 
 export interface AirePayrollPagination {
@@ -809,8 +819,78 @@ export interface AirePayrollExceptionsResponse {
   };
 }
 
+export interface AirePayrollSettlementCaseEvent {
+  event_id: string;
+  event_type: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  occurred_at: string;
+  actor?: { payroll_integration_id?: string; name: string } | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AirePayrollSettlementCase {
+  id: string;
+  version: number;
+  source_time_entry_version: number;
+  status: 'open' | 'scheduled' | 'in_payroll' | 'settled' | 'not_payable' | 'superseded';
+  source_time_entry_id: string;
+  employee: {
+    payroll_integration_id?: string | null;
+    name: string;
+    email?: string | null;
+    cornerstone: AirePayrollCockpitMapping;
+  };
+  time: {
+    original_work_date: string;
+    held_total_hours: number;
+    current_total_hours?: number | null;
+    category?: { id: string; key: string; name: string } | null;
+    approval_status?: string | null;
+    entry_status?: string | null;
+  };
+  origin: {
+    reason: string;
+    payroll_batch_id: string;
+    payroll_period_id?: string | null;
+    excluded_at: string;
+  };
+  routing: {
+    destination_kind: 'unassigned' | 'regular' | 'supplemental' | 'not_payable';
+    target_external_pay_period_id?: string | null;
+    target_pay_date?: string | null;
+    owner_role: string;
+    assigned_to?: { payroll_integration_id?: string; name: string } | null;
+    action_due_on: string;
+    note?: string | null;
+  };
+  included_payroll_batch_id?: string | null;
+  processing?: {
+    status: string;
+    occurred_at: string;
+    external_pay_period_id?: string;
+    external_payroll_item_id?: string;
+    payment_method?: string;
+    payment_reference?: string;
+  } | null;
+  events: AirePayrollSettlementCaseEvent[];
+}
+
+export interface AirePayrollSettlementCasesResponse {
+  settlement_cases: AirePayrollSettlementCase[];
+  pagination: AirePayrollPagination;
+  summary: {
+    open: number;
+    scheduled: number;
+    in_payroll: number;
+    settled: number;
+    attention_due: number;
+  };
+}
+
 export interface AirePayrollCommandResponse {
   time_entry?: AirePayrollTimeEntry;
+  settlement_case?: AirePayrollSettlementCase;
   payroll_period?: AirePayrollCockpitPeriod;
   result?: { status: string; payroll_batch_id?: string };
   command?: { replayed?: boolean };
