@@ -20,6 +20,16 @@ RSpec.describe TimeTracking::SourceConfigurationService do
     expect(source.delegation_for(actor)&.token).to eq("personal-token")
   end
 
+  it "locks the source before creating an operator's first delegation" do
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    service = described_class.new(company_id: company.id, actor: actor, source: source)
+    expect(source).to receive(:lock!).and_call_original
+
+    delegation = service.save_delegation!("personal-token")
+
+    expect(delegation.reload.token).to eq("personal-token")
+  end
+
   it "rolls back source changes when delegated access is invalid" do
     source = create(:time_tracking_source, company: company, source_type: "custom", active: false)
 

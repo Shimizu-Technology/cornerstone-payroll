@@ -270,6 +270,9 @@ module TimeTracking
     def delegated_request_json(uri, body:)
       token = @delegation&.token.to_s
       raise Error, "Your AIRE payroll delegation is not configured" if token.blank?
+      unless uri.scheme == "https" || development_loopback?(uri)
+        raise Error, "Delegated AIRE payroll commands require HTTPS"
+      end
 
       request_json(
         uri,
@@ -279,6 +282,13 @@ module TimeTracking
         headers: { "X-Aire-Delegation-Token" => token },
         surface_remote_error: true
       )
+    end
+
+    def development_loopback?(uri)
+      return false if Rails.env.production?
+
+      host = DestinationPolicy.normalize_host(uri.host)
+      host == "localhost" || host.end_with?(".localhost")
     end
 
     def source_uri(suffix)

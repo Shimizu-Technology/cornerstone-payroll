@@ -30,17 +30,18 @@ module TimeTracking
       end
       raise ActiveRecord::RecordInvalid, source if source.errors.any?
 
-      delegation = TimeTrackingDelegation.find_or_initialize_by(
-        company_id: company_id,
-        time_tracking_source: source,
-        user: actor
-      )
       TimeTrackingDelegation.transaction do
+        source.lock!
+        delegation = TimeTrackingDelegation.find_or_initialize_by(
+          company_id: company_id,
+          time_tracking_source: source,
+          user: actor
+        )
         delegation.token = normalized_token
         delegation.save!
         record_delegation_audit!("time_tracking_delegation#saved")
+        delegation
       end
-      delegation
     end
 
     def remove_delegation!

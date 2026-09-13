@@ -40,7 +40,12 @@ RSpec.describe TimeTracking::Client do
                    headers: { "Content-Type" => "application/json" })
       entries_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries")
         .with(
-          query: hash_including("external_pay_period_id" => external_id, "page" => "2", "per_page" => "25"),
+          query: hash_including(
+            "external_pay_period_id" => external_id,
+            "page" => "2",
+            "per_page" => "25",
+            "approval_status" => "pending"
+          ),
           headers: { "X-Payroll-Shared-Secret" => "secret" }
         )
         .to_return(status: 200, body: { time_entries: [] }.to_json,
@@ -117,6 +122,52 @@ RSpec.describe TimeTracking::Client do
       )
 
       expect(result.dig("time_entry", "id")).to eq("42")
+      expect(stub).to have_been_requested.once
+    end
+
+    it "refuses to send a delegation token over non-loopback HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+
+      expect do
+        client_for(source, delegation: delegation).approve_payroll_time_entry(
+          entry_id: 42,
+          command_id: SecureRandom.uuid,
+          expected_version: 3,
+          decision: "approve",
+          reason: "Verified by payroll"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+    end
+
+    it "permits loopback HTTP for local cockpit development" do
+      source.update!(base_url: "http://localhost:4101")
+      delegation = create(
+        :time_tracking_delegation,
+        company: source.company,
+        time_tracking_source: source,
+        user: create(:user, company: source.company, organization: source.company.organization, role: "manager"),
+        token: "operator-grant"
+      )
+      stub = stub_request(:post, "http://localhost:4101/api/v1/payroll/cockpit/time_entries/42/approval")
+        .to_return(status: 200, body: { command: { replayed: false } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      response = client_for(source, delegation: delegation).approve_payroll_time_entry(
+        entry_id: 42,
+        command_id: SecureRandom.uuid,
+        expected_version: 3,
+        decision: "approve",
+        reason: "Verified by payroll"
+      )
+
+      expect(response.dig("command", "replayed")).to be(false)
       expect(stub).to have_been_requested.once
     end
 

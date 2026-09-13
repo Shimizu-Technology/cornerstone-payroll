@@ -403,7 +403,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                 )}
 
                 <div className="border-b border-neutral-200 px-4 pt-4 sm:px-6">
-                  <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="AIRE payroll details">
+                  <div className="flex gap-1 overflow-x-auto" aria-label="AIRE payroll details">
                     {([
                       ['timecards', 'Timecards', timeEntries?.pagination.total_count || 0],
                       ['exceptions', 'Needs attention', (exceptions?.time_exception_pagination.total_count || 0) + (exceptions?.leave_exception_pagination.total_count || 0)],
@@ -413,8 +413,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                       <button
                         key={key}
                         type="button"
-                        role="tab"
-                        aria-selected={view === key}
+                        aria-pressed={view === key}
                         onClick={() => setView(key)}
                         className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${view === key ? 'border-primary-700 text-primary-800' : 'border-transparent text-neutral-500 hover:text-neutral-900'}`}
                       >

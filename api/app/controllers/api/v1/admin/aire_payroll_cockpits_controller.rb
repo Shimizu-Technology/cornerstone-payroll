@@ -130,8 +130,18 @@ module Api
         end
 
         def cockpit_client(with_delegation: false)
+          require_published_source!
           delegation = current_delegation if with_delegation
           TimeTracking::Client.new(@source, delegation: delegation)
+        end
+
+        def require_published_source!
+          return if @source
+
+          raise TimeTracking::Client::Error.new(
+            "Publish this pay period to AIRE before opening its payroll cockpit",
+            response_status: 422
+          )
         end
 
         def command_access_payload

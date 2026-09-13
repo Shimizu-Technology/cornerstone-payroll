@@ -30,7 +30,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     {
       "payroll_period" => {
         "external_pay_period_id" => external_id,
-        "status" => "open",
+        "status" => "scheduled",
         "lock_version" => 2,
         "cutoff_at" => "2026-10-18T17:00:00+10:00"
       },
@@ -121,6 +121,16 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
 
     expect(response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone", "status"))
       .to eq("unmapped")
+  end
+
+  it "maps an incomplete AIRE payload to a bad gateway response" do
+    allow(client).to receive(:payroll_cockpit_period).and_return("payroll_period" => period_payload.fetch("payroll_period"))
+    allow(client).to receive(:payroll_cockpit_employees).and_return(employee_payload)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
+
+    expect(response).to have_http_status(:bad_gateway)
+    expect(response.parsed_body.fetch("error")).to eq("#{source.name} returned an incomplete payroll cockpit payload")
   end
 
   it "does not require a time mapping when AIRE time tracking is disabled" do
@@ -272,6 +282,14 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
 
     unpublished = create(:pay_period, company: company)
     get "/api/v1/admin/pay_periods/#{unpublished.id}/aire_payroll_cockpit"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("Publish this pay period")
+
+    post "/api/v1/admin/pay_periods/#{unpublished.id}/aire_payroll_cockpit/finalize", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 0,
+      reason: "Cutoff review complete"
+    }
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to include("Publish this pay period")
   end
