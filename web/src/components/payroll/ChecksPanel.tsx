@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
-import { ApiError, checksApi, payStubsApi } from '@/services/api';
+import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -14,6 +14,7 @@ import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
 import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
+import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
@@ -21,11 +22,11 @@ interface ChecksPanelProps {
   refreshToken?: number;
 }
 
-type CheckAction = 'preview' | 'markPrinted' | 'markDelivered' | 'stub';
+type CheckAction = 'preview' | 'markPrinted' | 'stub';
 
 function checkStatusBadge(item: CheckItem): ReactElement {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
-  if (item.check_status === 'delivered') return <Badge variant="success">Delivered / paid</Badge>;
+  if (item.check_status === 'delivered') return <Badge variant="success">Issued</Badge>;
   if (item.check_printed_at)
     return (
       <Badge variant="info">
@@ -54,7 +55,7 @@ function eventLabel(eventType: string): string {
   switch (eventType) {
     case 'assigned': return 'Assigned';
     case 'printed': return 'Printed';
-    case 'delivered': return 'Delivered';
+    case 'delivered': return 'Issued';
     case 'voided': return 'Voided';
     case 'reprinted': return 'Reissued';
     case 'batch_downloaded': return 'Batch downloaded';
@@ -81,6 +82,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
+  const [deliveryTarget, setDeliveryTarget] = useState<CheckItem | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
@@ -304,28 +306,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
-  const handleMarkDelivered = async (item: CheckItem): Promise<void> => {
-    const linkedNotice = item.aire_linked ? ' This marks the linked AIRE hours as paid.' : '';
-    if (!window.confirm(`Confirm that check #${item.check_number} was delivered to ${item.employee_name}?${linkedNotice}`)) return;
-    setActionLoading({ id: item.id, action: 'markDelivered' });
-    try {
-      const result = await checksApi.markDelivered(item.id);
-      setChecks((current) => current.map((check) => (check.id === item.id ? result.data.payroll_item : check)));
-      if (result.meta.already_delivered) {
-        alert('This check was already marked as delivered.');
-      }
-      await load();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        alert(err instanceof Error ? err.message : 'Failed to mark check as delivered');
-      }
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
     setVoidTarget(null);
@@ -410,7 +390,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
               <span><span className="font-medium text-gray-900">{meta.total}</span> total</span>
               <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> unprinted</span>
               <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
-              <span><span className="font-medium text-emerald-700">{meta.delivered}</span> delivered</span>
+              <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
               {meta.voided > 0 && (
                 <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
               )}
@@ -470,8 +450,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       )}
 
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-        Printing means the check was prepared. Mark it delivered only after the employee has received it.
+        Printing means the check was prepared. Record it as issued only after it was released to the employee.
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
+        {meta?.requires_verified_print_package && ' This client requires the verified print package and a different operator’s confirmation.'}
       </div>
 
       {checkNumberChanges.length > 0 && (
@@ -551,7 +532,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                       <InlineCheckNumberField
                         value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                         ariaLabel={`Check number for ${item.employee_name}`}
-                        disabled={savingCheckNumbers}
+                        disabled={savingCheckNumbers || Boolean(item.check_printed_at)}
                         dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                         error={checkNumberErrors[item.id]}
                         onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -577,14 +558,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         {isActionLoading(item.id, 'stub') ? 'Loading…' : 'Stub'}
                       </Button>
                     )}
-                    {!item.voided && (
+                    {!item.voided && !meta?.requires_verified_print_package && (
                       <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(item)} disabled={isActionLoading(item.id, 'markPrinted')}>
                         {isActionLoading(item.id, 'markPrinted') ? 'Loading…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
                       </Button>
                     )}
                     {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
-                      <Button size="sm" onClick={() => void handleMarkDelivered(item)} disabled={isActionLoading(item.id, 'markDelivered')}>
-                        {isActionLoading(item.id, 'markDelivered') ? 'Saving…' : 'Mark Delivered'}
+                      <Button size="sm" onClick={() => setDeliveryTarget(item)}>
+                        Record Issued
                       </Button>
                     )}
                     {!item.voided && item.check_number && (
@@ -647,7 +628,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         <InlineCheckNumberField
                           value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                           ariaLabel={`Check number for ${item.employee_name}`}
-                          disabled={savingCheckNumbers}
+                          disabled={savingCheckNumbers || Boolean(item.check_printed_at)}
                           dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                           error={checkNumberErrors[item.id]}
                           onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -725,16 +706,15 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                       {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
                         <Button
                           size="sm"
-                          onClick={() => void handleMarkDelivered(item)}
-                          disabled={isActionLoading(item.id, 'markDelivered')}
+                          onClick={() => setDeliveryTarget(item)}
                           className="text-xs px-2 py-2"
                         >
-                          {isActionLoading(item.id, 'markDelivered') ? '…' : 'Delivered'}
+                          Record Issued
                         </Button>
                       )}
 
                       {/* Mark printed */}
-                      {!item.voided && (
+                      {!item.voided && !meta?.requires_verified_print_package && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -801,6 +781,16 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
           item={reprintTarget}
           onClose={() => setReprintTarget(null)}
           onComplete={handleReprintComplete}
+        />
+      )}
+      {deliveryTarget && (
+        <RecordCheckDeliveryDialog
+          item={deliveryTarget}
+          onClose={() => setDeliveryTarget(null)}
+          onComplete={async () => {
+            setDeliveryTarget(null);
+            await load();
+          }}
         />
       )}
 

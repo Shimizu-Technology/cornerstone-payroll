@@ -34,6 +34,7 @@ class NonEmployeeCheck < ApplicationRecord
   has_many :payroll_liability_check_allocations,
            inverse_of: :non_employee_check,
            dependent: :restrict_with_error
+  has_many :check_reconciliation_events, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :line_items, allow_destroy: true
 
@@ -112,14 +113,18 @@ class NonEmployeeCheck < ApplicationRecord
   end
 
   def void!(reason:)
-    raise ArgumentError, "Already voided" if voided?
     raise ArgumentError, "Void reason is required" if reason.blank?
 
-    update!(
-      voided: true,
-      voided_at: Time.current,
-      void_reason: reason
-    )
+    with_lock do
+      raise ArgumentError, "Already voided" if voided?
+      raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
+
+      update!(
+        voided: true,
+        voided_at: Time.current,
+        void_reason: reason
+      )
+    end
   end
 
   def check_status

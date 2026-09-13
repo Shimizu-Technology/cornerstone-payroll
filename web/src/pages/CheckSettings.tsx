@@ -29,6 +29,7 @@ function checkSettingsSnapshot(values: {
   layoutOverridesJson: string;
   memoTemplate: string;
   autoCreateFitCheck: boolean;
+  requireDistinctCheckPrintConfirmer: boolean;
 }) {
   return JSON.stringify(values);
 }
@@ -118,6 +119,7 @@ export function CheckSettingsPage() {
   const [layoutOverridesJson, setLayoutOverridesJson] = useState('{}');
   const [memoTemplate, setMemoTemplate] = useState('');
   const [autoCreateFitCheck, setAutoCreateFitCheck] = useState(false);
+  const [requireDistinctCheckPrintConfirmer, setRequireDistinctCheckPrintConfirmer] = useState(false);
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
@@ -152,7 +154,8 @@ export function CheckSettingsPage() {
     layoutOverridesJson,
     memoTemplate,
     autoCreateFitCheck,
-  }), [stockType, offsetX, offsetY, bankName, bankAddress, layoutOverridesJson, memoTemplate, autoCreateFitCheck]);
+    requireDistinctCheckPrintConfirmer,
+  }), [stockType, offsetX, offsetY, bankName, bankAddress, layoutOverridesJson, memoTemplate, autoCreateFitCheck, requireDistinctCheckPrintConfirmer]);
 
   const hasUnsavedCheckSettings = savedSettingsSnapshot !== null && currentSettingsSnapshot !== savedSettingsSnapshot;
 
@@ -170,6 +173,7 @@ export function CheckSettingsPage() {
     const nextLayoutOverridesJson = JSON.stringify(s.check_layout_config ?? {}, null, 2);
     const nextMemoTemplate = s.check_memo_template ?? '';
     const nextAutoCreateFitCheck = s.auto_create_fit_check ?? false;
+    const nextRequireDistinctCheckPrintConfirmer = s.require_distinct_check_print_confirmer ?? false;
 
     setSettings(s);
     setStockType(s.check_stock_type);
@@ -180,6 +184,7 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(nextLayoutOverridesJson);
     setMemoTemplate(nextMemoTemplate);
     setAutoCreateFitCheck(nextAutoCreateFitCheck);
+    setRequireDistinctCheckPrintConfirmer(nextRequireDistinctCheckPrintConfirmer);
     setNextCheckNumber(String(s.next_check_number));
     setActivePrinterProfileId(s.active_printer_profile_id ?? null);
     setActivePrinterProfileName(s.active_printer_profile_name ?? null);
@@ -192,6 +197,7 @@ export function CheckSettingsPage() {
       layoutOverridesJson: nextLayoutOverridesJson,
       memoTemplate: nextMemoTemplate,
       autoCreateFitCheck: nextAutoCreateFitCheck,
+      requireDistinctCheckPrintConfirmer: nextRequireDistinctCheckPrintConfirmer,
     }));
   }, []);
 
@@ -368,6 +374,7 @@ export function CheckSettingsPage() {
         bank_address: bankAddress.trim() || null,
         check_memo_template: memoTemplate.trim() || null,
         auto_create_fit_check: autoCreateFitCheck,
+        require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
         check_layout_config: parsedLayoutOverrides,
       });
       applySettingsToForm(data.check_settings);
@@ -435,6 +442,8 @@ export function CheckSettingsPage() {
     bank_name: bankName.trim() || null,
     bank_address: bankAddress.trim() || null,
     check_memo_template: memoTemplate.trim() || null,
+    auto_create_fit_check: autoCreateFitCheck,
+    require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
     check_layout_config: layoutConfig,
   });
 
@@ -1190,6 +1199,29 @@ export function CheckSettingsPage() {
                 />
               </button>
             </div>
+            <div className="flex items-center justify-between border-t border-neutral-200 pt-4">
+              <div className="pr-4">
+                <Label className="text-sm font-medium text-neutral-900">Require a second person to confirm printing</Label>
+                <p className="mt-2 max-w-2xl text-xs leading-5 text-neutral-500">
+                  When enabled, the person who generates a check package cannot confirm it as printed. Leave this off for a one-person payroll workflow such as Chels&apos;s AIRE process.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={requireDistinctCheckPrintConfirmer}
+                onClick={() => setRequireDistinctCheckPrintConfirmer(!requireDistinctCheckPrintConfirmer)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 ${
+                  requireDistinctCheckPrintConfirmer ? 'bg-primary-600' : 'bg-neutral-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition duration-200 ${
+                    requireDistinctCheckPrintConfirmer ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
             <div className="flex justify-end pt-2">
               <Button onClick={handleSaveSettings} disabled={saving}>
                 {saving ? 'Saving…' : 'Save Settings'}
@@ -1246,11 +1278,11 @@ export function CheckSettingsPage() {
           <CardContent className="p-4">
             <ol className="text-sm text-gray-700 space-y-2 list-decimal list-inside">
               <li>Run and commit a payroll — check numbers are automatically assigned.</li>
-              <li>Go to the Pay Period detail page and scroll to the <strong>Checks</strong> section.</li>
-              <li>Click <strong>Download All Checks PDF</strong> to get a single PDF with all checks.</li>
-              <li>Load your pre-printed check stock into the printer and print.</li>
-              <li>Click <strong>Mark All Printed</strong> after printing to record in the audit trail.</li>
-              <li>If a check is damaged, use <strong>Reprint</strong> — a new check number is issued.</li>
+              <li>Open the pay run and go to its <strong>Checks</strong> section.</li>
+              <li>Select <strong>Print checks</strong>, review the queue, and generate one controlled package.</li>
+              <li>Load your pre-printed check stock, print the package, and inspect the paper.</li>
+              <li>Select <strong>Confirm printed correctly</strong> only after every check is correct.</li>
+              <li>If a check is damaged, use <strong>Reissue</strong> to preserve the old record and assign a new number.</li>
               <li>If a check must be cancelled, use <strong>Void</strong> with a written reason.</li>
             </ol>
           </CardContent>

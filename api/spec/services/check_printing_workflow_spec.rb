@@ -139,4 +139,25 @@ RSpec.describe "Unified check printing workflow" do
     expect(run.reload.status).to eq("generated")
     expect(employee_check.reload.check_printed_at).to be_nil
   end
+
+  it "optionally requires a different operator to confirm the print package" do
+    company.update!(require_distinct_check_print_confirmer: true)
+    confirmer = create(:user, company:, organization: company.organization)
+    run = CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [],
+      starting_slot: 1,
+      storage: storage
+    ).call
+
+    expect {
+      CheckPrintRunConfirmationService.new(run:, actor: actor).call
+    }.to raise_error(ArgumentError, /different authorized payroll operator/)
+    expect(run.reload.status).to eq("generated")
+
+    expect(CheckPrintRunConfirmationService.new(run:, actor: confirmer).call.fetch(:marked_printed)).to eq(1)
+    expect(run.reload).to have_attributes(status: "confirmed", confirmed_by_id: confirmer.id)
+  end
 end

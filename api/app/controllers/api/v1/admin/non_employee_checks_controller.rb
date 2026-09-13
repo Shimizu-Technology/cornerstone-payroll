@@ -245,6 +245,10 @@ module Api
 
         # POST /api/v1/admin/non_employee_checks/:id/mark_printed
         def mark_printed
+          if @check.pay_period && @check.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
+
           @check.mark_printed!
           render json: { non_employee_check: check_payload(@check.reload) }
         rescue ArgumentError => e
@@ -332,6 +336,9 @@ module Api
         def mark_all_printed
           checks = printable_batch_checks(include_printed: false)
           return if performed?
+          if checks.any? { |check| check.pay_period && check.company.require_distinct_check_print_confirmer? }
+            return render json: { error: "Use each pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
+          end
 
           marked_count = 0
           NonEmployeeCheck.transaction do

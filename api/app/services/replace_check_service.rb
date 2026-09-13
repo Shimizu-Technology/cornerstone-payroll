@@ -255,6 +255,9 @@ class ReplaceCheckService
     if @payroll_item.voided?
       raise InvalidStateError, "Cannot replace an already-voided check"
     end
+    if CheckReconciliationStatus.for(@payroll_item) == "cleared"
+      raise InvalidStateError, "Reverse the clearing evidence before replacing this check"
+    end
     if @payroll_item.check_number.blank?
       raise InvalidStateError, "Payroll item has no check number — nothing to replace"
     end

@@ -672,6 +672,20 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(own_check.reload.printed_at).to be_present
       expect(foreign_check.reload.printed_at).to be_nil
     end
+
+    it "requires the verified package workflow for pay-period checks when second-person confirmation is enabled" do
+      company.update!(require_distinct_check_print_confirmer: true)
+      check = create(:non_employee_check, company: company, pay_period: pay_period,
+        check_number: "7001", payable_to: "Vendor One", amount: 35.00)
+
+      post "/api/v1/admin/non_employee_checks/mark_all_printed",
+        params: { pay_period_id: pay_period.id },
+        as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+      expect(check.reload.printed_at).to be_nil
+    end
   end
 
   describe "DELETE /api/v1/admin/non_employee_checks/:id" do

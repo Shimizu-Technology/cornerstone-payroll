@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -206,7 +206,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   create_table "check_events", force: :cascade do |t|
     t.string "check_number", null: false
     t.datetime "created_at", null: false
+    t.jsonb "details", default: {}, null: false
+    t.date "effective_on", null: false
     t.string "event_type", null: false
+    t.string "evidence_reference"
+    t.string "evidence_type"
     t.string "ip_address"
     t.bigint "payroll_item_id", null: false
     t.string "reason"
@@ -247,6 +251,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
     t.check_constraint "selected_count > 0", name: "check_print_runs_selected_count_check"
     t.check_constraint "starting_slot >= 1 AND starting_slot <= 4", name: "check_print_runs_starting_slot_check"
     t.check_constraint "status::text = ANY (ARRAY['generated'::character varying::text, 'confirmed'::character varying::text])", name: "check_print_runs_status_check"
+  end
+
+  create_table "check_reconciliation_events", force: :cascade do |t|
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.string "check_number", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.date "effective_on", null: false
+    t.string "event_type", null: false
+    t.string "evidence_reference"
+    t.string "evidence_type"
+    t.string "idempotency_key", null: false
+    t.bigint "non_employee_check_id"
+    t.bigint "pay_period_id"
+    t.bigint "payroll_item_id"
+    t.text "reason"
+    t.bigint "recorded_by_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "idempotency_key"], name: "idx_check_reconciliation_events_idempotency", unique: true
+    t.index ["company_id"], name: "index_check_reconciliation_events_on_company_id"
+    t.index ["non_employee_check_id", "check_number", "created_at"], name: "idx_check_reconciliation_events_non_employee_instrument"
+    t.index ["non_employee_check_id"], name: "index_check_reconciliation_events_on_non_employee_check_id"
+    t.index ["pay_period_id"], name: "index_check_reconciliation_events_on_pay_period_id"
+    t.index ["payroll_item_id", "check_number", "created_at"], name: "idx_check_reconciliation_events_payroll_instrument"
+    t.index ["payroll_item_id"], name: "index_check_reconciliation_events_on_payroll_item_id"
+    t.index ["recorded_by_id"], name: "index_check_reconciliation_events_on_recorded_by_id"
+    t.check_constraint "((payroll_item_id IS NOT NULL)::integer + (non_employee_check_id IS NOT NULL)::integer) = 1", name: "check_reconciliation_events_one_source"
+    t.check_constraint "amount > 0::numeric", name: "check_reconciliation_events_positive_amount"
+    t.check_constraint "event_type::text = ANY (ARRAY['cleared'::character varying, 'clearing_reversed'::character varying, 'replacement_required'::character varying]::text[])", name: "check_reconciliation_events_event_type"
+    t.check_constraint "evidence_type IS NULL OR (evidence_type::text = ANY (ARRAY['bank_statement'::character varying, 'bank_portal'::character varying, 'accountant_review'::character varying, 'payee_confirmation'::character varying, 'other'::character varying]::text[]))", name: "check_reconciliation_events_evidence_type"
   end
 
   create_table "check_signoff_sheets", force: :cascade do |t|
@@ -360,6 +394,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
     t.string "payroll_environment", default: "live", null: false
     t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
+    t.boolean "require_distinct_check_print_confirmer", default: false, null: false
     t.boolean "simple_payroll_register_enabled", default: false, null: false
     t.string "state"
     t.datetime "updated_at", null: false
@@ -3101,11 +3136,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   add_foreign_key "cable_connection_tickets", "companies"
   add_foreign_key "cable_connection_tickets", "users"
   add_foreign_key "check_events", "payroll_items"
-  add_foreign_key "check_events", "users", on_delete: :nullify
+  add_foreign_key "check_events", "users", on_delete: :restrict
   add_foreign_key "check_print_runs", "companies"
   add_foreign_key "check_print_runs", "pay_periods"
   add_foreign_key "check_print_runs", "users", column: "confirmed_by_id"
   add_foreign_key "check_print_runs", "users", column: "created_by_id"
+  add_foreign_key "check_reconciliation_events", "companies", on_delete: :restrict
+  add_foreign_key "check_reconciliation_events", "non_employee_checks", on_delete: :restrict
+  add_foreign_key "check_reconciliation_events", "pay_periods", on_delete: :restrict
+  add_foreign_key "check_reconciliation_events", "payroll_items", on_delete: :restrict
+  add_foreign_key "check_reconciliation_events", "users", column: "recorded_by_id", on_delete: :restrict
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
@@ -3434,4 +3474,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_023000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
+
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION '% records are append-only', TG_TABLE_NAME;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS check_events_append_only ON check_events;
+    CREATE TRIGGER check_events_append_only
+    BEFORE UPDATE OR DELETE ON check_events
+    FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+
+    DROP TRIGGER IF EXISTS check_reconciliation_events_append_only ON check_reconciliation_events;
+    CREATE TRIGGER check_reconciliation_events_append_only
+    BEFORE UPDATE OR DELETE ON check_reconciliation_events
+    FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+  SQL
 end

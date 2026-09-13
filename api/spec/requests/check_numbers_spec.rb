@@ -111,4 +111,16 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(CheckEvent.where(event_type: "renumbered")).to be_empty
     expect(NonEmployeeCheckEdit.all).to be_empty
   end
+
+  it "does not renumber checks after physical preparation has started" do
+    item_a.mark_printed!(user: admin_user)
+
+    patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+      changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("Reissue prepared or issued")
+    expect(item_a.reload.check_number).to eq("3000")
+  end
 end
