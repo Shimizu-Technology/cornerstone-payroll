@@ -86,6 +86,7 @@ module Api
             record_type: "AireTimeEntry",
             record_id: params[:time_entry_id],
             command_id: command_params[:command_id],
+            reason: command_params[:reason],
             result: result
           )
           render json: result
@@ -109,6 +110,7 @@ module Api
             record_type: "AireTimeEntry",
             record_id: params[:time_entry_id],
             command_id: correction_params[:command_id],
+            reason: correction_params[:reason],
             result: result
           )
           render json: result
@@ -151,6 +153,7 @@ module Api
             record_type: "AirePayrollSettlementCase",
             record_id: params[:settlement_case_id],
             command_id: route_params[:command_id],
+            reason: route_params[:reason],
             result: result
           )
           render json: result
@@ -172,6 +175,7 @@ module Api
             record_type: "PayPeriod",
             record_id: @pay_period.id,
             command_id: command_params[:command_id],
+            reason: command_params[:reason],
             result: result
           )
           render json: result, status: :accepted
@@ -297,7 +301,7 @@ module Api
           requested.clamp(1, maximum)
         end
 
-        def record_command_audit!(action:, record_type:, record_id:, command_id:, result:)
+        def record_command_audit!(action:, record_type:, record_id:, command_id:, reason:, result:)
           local_record_id = record_id if record_id.to_s.match?(/\A[1-9]\d*\z/)
           AuditLog.record!(
             user: current_user,
@@ -310,6 +314,7 @@ module Api
             metadata: {
               command_id: command_id,
               external_record_id: local_record_id ? nil : record_id,
+              reason: reason,
               replayed: result.dig("command", "replayed") == true
             }.compact
           )

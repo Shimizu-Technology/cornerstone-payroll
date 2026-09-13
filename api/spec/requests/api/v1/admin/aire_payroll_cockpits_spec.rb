@@ -269,6 +269,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       action: "aire_payroll_cockpit#time_denied",
       record_type: "AireTimeEntry"
     )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed this was entered in error")
   end
 
   it "corrects time through the current delegation and records the command audit" do
@@ -319,6 +320,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       record_type: "AireTimeEntry",
       record_id: 42
     )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed the missed punch")
   end
 
   it "routes held time to a regular payroll or an explicit not-payable disposition" do
@@ -376,6 +378,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       record_id: nil
     )
     expect(AuditLog.order(:id).last.metadata.fetch("external_record_id")).to eq(settlement_case_id)
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Move to the next regular payroll")
   end
 
   it "does not expose a false manual supplemental-payroll action" do
@@ -533,6 +536,36 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
 
     expect(response).to have_http_status(:conflict)
     expect(response.parsed_body.fetch("error")).to eq("AIRE: period changed")
+  end
+
+  it "retains the cutoff reason in the local finalization audit" do
+    delegation = create(
+      :time_tracking_delegation,
+      company: company,
+      time_tracking_source: source,
+      user: admin,
+      token: "admin-grant"
+    )
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:finalize_payroll_cockpit_period).and_return(
+      "result" => { "status" => "finalized", "payroll_batch_id" => "AIRE-PAY-42" },
+      "command" => { "replayed" => false }
+    )
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/finalize", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 2,
+      reason: "Cutoff review complete"
+    }
+
+    expect(response).to have_http_status(:accepted)
+    expect(AuditLog.order(:id).last).to have_attributes(
+      action: "aire_payroll_cockpit#finalization_requested",
+      record_type: "PayPeriod",
+      record_id: pay_period.id
+    )
+    expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Cutoff review complete")
   end
 
   it "lets accountants read the cockpit but not send commands" do

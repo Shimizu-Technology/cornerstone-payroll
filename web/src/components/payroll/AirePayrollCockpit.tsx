@@ -484,10 +484,8 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
   const periodCanFinalize = overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
   const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
   const visibleError = commandError || refreshError;
-  const correctionEmployee = correction && overview?.employees.find((employee) => (
-    employee.payroll_integration_id === correction.entry.employee.payroll_integration_id
-  ));
-  const correctionCategories = correctionEmployee?.time_categories || (correction?.entry.category ? [correction.entry.category] : []);
+  const correctionCategories = correction?.entry.available_time_categories
+    ?? (correction?.entry.category ? [correction.entry.category] : []);
 
   return (
     <div className="space-y-4">

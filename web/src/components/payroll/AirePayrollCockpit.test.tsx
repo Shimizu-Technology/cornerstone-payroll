@@ -93,6 +93,10 @@ const timeEntry = {
   break_minutes: 60,
   breaks: [{ id: '9', start_time: '2026-10-14T02:00:00Z', end_time: '2026-10-14T03:00:00Z', duration_minutes: 60, active: false }],
   category: { id: '2', key: 'regular', name: 'Regular' },
+  available_time_categories: [
+    { id: '3', key: 'admin', name: 'Admin duties' },
+    { id: '2', key: 'regular', name: 'Regular' },
+  ],
   capture: { entry_method: 'manual', clock_source: null, ordinary: false, admin_override: true },
   state: {
     status: 'completed',
@@ -278,6 +282,33 @@ describe('AirePayrollCockpit', () => {
       command_id: expect.any(String),
     })));
     expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
+  });
+
+  it('uses categories carried by the time entry when its employee is outside the current team page', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.employees = [];
+    data.overview.employee_pagination = {
+      current_page: 1,
+      per_page: 100,
+      total_count: 101,
+      total_pages: 2,
+      truncated: false,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    const category = screen.getByLabelText('Time category') as HTMLSelectElement;
+    expect(Array.from(category.options, (option) => option.textContent)).toEqual([
+      'Choose category',
+      'Admin duties',
+      'Regular',
+    ]);
+    expect(category.value).toBe('2');
+    expect((screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('preserves legacy aggregate break minutes when exact break times are unavailable', async () => {

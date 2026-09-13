@@ -653,7 +653,7 @@ export interface AirePayrollCockpitEmployee {
   role?: string;
   time_tracking_enabled?: boolean;
   approval_groups?: Array<{ key: string; label: string }>;
-  time_categories?: Array<{ id: string; key: string; name: string }>;
+  time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   cornerstone: AirePayrollCockpitMapping;
 }
 
@@ -702,7 +702,8 @@ export interface AirePayrollTimeEntry {
   hours: number;
   break_minutes: number;
   breaks?: Array<{ id: string; start_time: string; end_time?: string | null; duration_minutes?: number; active: boolean }>;
-  category?: { id: string; key: string; name: string } | null;
+  category?: { id: string; key?: string | null; name: string } | null;
+  available_time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   capture: { entry_method?: string | null; clock_source?: string | null; ordinary: boolean; admin_override: boolean };
   state: {
     status: string;
