@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -28,6 +28,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["event_id"], name: "index_aire_payroll_acknowledgements_on_event_id", unique: true
     t.index ["time_tracking_import_id"], name: "index_aire_payroll_acknowledgements_on_time_tracking_import_id"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying::text, 'committed'::character varying::text, 'payment_issued'::character varying::text, 'payment_failed'::character varying::text])", name: "aire_payroll_acknowledgements_status_check"
+  end
+
+  create_table "aire_payroll_calendar_periods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.uuid "external_pay_period_id", null: false
+    t.bigint "pay_period_id", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_aire_payroll_calendar_periods_on_company_id"
+    t.index ["external_pay_period_id"], name: "idx_aire_calendar_periods_external_id", unique: true
+    t.index ["id", "time_tracking_source_id"], name: "idx_aire_calendar_periods_source_key", unique: true
+    t.index ["pay_period_id"], name: "index_aire_payroll_calendar_periods_on_pay_period_id"
+    t.index ["time_tracking_source_id", "pay_period_id"], name: "idx_aire_calendar_periods_source_pay_period", unique: true
+    t.index ["time_tracking_source_id"], name: "index_aire_payroll_calendar_periods_on_time_tracking_source_id"
+  end
+
+  create_table "aire_payroll_calendar_publications", force: :cascade do |t|
+    t.bigint "aire_payroll_calendar_period_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "delivered_at"
+    t.integer "delivery_attempts", default: 0, null: false
+    t.datetime "delivery_enqueued_until"
+    t.string "delivery_status", default: "pending", null: false
+    t.datetime "last_delivery_attempt_at"
+    t.text "last_error"
+    t.integer "last_response_status"
+    t.datetime "next_delivery_attempt_at"
+    t.jsonb "payload", default: {}, null: false
+    t.string "payload_checksum", null: false
+    t.uuid "publication_id", null: false
+    t.integer "schedule_version", null: false
+    t.jsonb "source_state", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["aire_payroll_calendar_period_id", "schedule_version"], name: "idx_aire_calendar_publications_version", unique: true
+    t.index ["aire_payroll_calendar_period_id"], name: "idx_aire_calendar_publications_period"
+    t.index ["created_by_id"], name: "index_aire_payroll_calendar_publications_on_created_by_id"
+    t.index ["delivery_status", "next_delivery_attempt_at", "delivery_enqueued_until"], name: "idx_aire_calendar_publications_due"
+    t.index ["id", "aire_payroll_calendar_period_id"], name: "idx_aire_calendar_publications_period_key", unique: true
+    t.index ["publication_id"], name: "idx_aire_calendar_publications_publication", unique: true
+    t.check_constraint "delivery_attempts >= 0", name: "aire_calendar_publications_attempts_check"
+    t.check_constraint "delivery_status::text = ANY (ARRAY['pending'::character varying::text, 'failed'::character varying::text, 'delivered'::character varying::text])", name: "aire_calendar_publications_status_check"
+    t.check_constraint "schedule_version > 0", name: "aire_calendar_publications_version_check"
   end
 
   create_table "aire_payroll_entry_acknowledgements", force: :cascade do |t|
@@ -55,6 +99,38 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["source_event_key"], name: "idx_aire_entry_ack_unique_source_event", unique: true
     t.index ["time_tracking_import_id"], name: "idx_on_time_tracking_import_id_95ff82b3b6"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying::text, 'committed'::character varying::text, 'payment_prepared'::character varying::text, 'payment_issued'::character varying::text, 'payment_failed'::character varying::text, 'payment_voided'::character varying::text])", name: "aire_payroll_entry_ack_status_check"
+  end
+
+  create_table "aire_payroll_events", force: :cascade do |t|
+    t.bigint "aire_payroll_calendar_period_id", null: false
+    t.bigint "aire_payroll_calendar_publication_id", null: false
+    t.datetime "created_at", null: false
+    t.uuid "event_id", null: false
+    t.string "event_type", null: false
+    t.text "last_error"
+    t.datetime "last_verification_attempt_at"
+    t.datetime "next_verification_attempt_at"
+    t.datetime "occurred_at", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.string "payload_checksum", null: false
+    t.string "payroll_batch_checksum", null: false
+    t.string "payroll_batch_id", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "verification_attempts", default: 0, null: false
+    t.datetime "verification_enqueued_until"
+    t.string "verification_status", default: "pending", null: false
+    t.datetime "verified_at"
+    t.jsonb "verified_batch_summary", default: {}, null: false
+    t.index ["aire_payroll_calendar_period_id"], name: "idx_aire_payroll_events_period"
+    t.index ["aire_payroll_calendar_publication_id"], name: "idx_aire_payroll_events_publication"
+    t.index ["event_id"], name: "idx_aire_payroll_events_event_id", unique: true
+    t.index ["time_tracking_source_id", "payroll_batch_id"], name: "idx_aire_payroll_events_source_batch", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_aire_payroll_events_source"
+    t.index ["verification_status", "next_verification_attempt_at", "verification_enqueued_until"], name: "idx_aire_payroll_events_due"
+    t.check_constraint "event_type::text = 'payroll_batch.finalized'::text", name: "aire_payroll_events_type_check"
+    t.check_constraint "verification_attempts >= 0", name: "aire_payroll_events_attempts_check"
+    t.check_constraint "verification_status::text = ANY (ARRAY['pending'::character varying::text, 'failed'::character varying::text, 'rejected'::character varying::text, 'verified'::character varying::text])", name: "aire_payroll_events_status_check"
   end
 
   create_table "annual_retirement_limits", force: :cascade do |t|
@@ -323,6 +399,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.text "notes"
     t.integer "pay_date_offset_days"
     t.string "pay_date_rule", default: "manual", null: false
+    t.integer "payroll_cutoff_at_minutes", default: 1020, null: false
+    t.integer "payroll_cutoff_days_before", default: 7, null: false
     t.date "period_anchor_date"
     t.string "period_rule", default: "manual", null: false
     t.integer "period_start_weekday"
@@ -337,6 +415,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_pay_schedules_dates_check"
     t.check_constraint "frequency::text = ANY (ARRAY['weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text, 'monthly'::character varying::text])", name: "company_pay_schedules_frequency_check"
     t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying::text, 'days_after_period_end'::character varying::text])", name: "company_pay_schedules_pay_date_rule_check"
+    t.check_constraint "payroll_cutoff_at_minutes >= 0 AND payroll_cutoff_at_minutes <= 1439", name: "company_pay_schedules_cutoff_time_check"
+    t.check_constraint "payroll_cutoff_days_before = 7", name: "company_pay_schedules_cutoff_days_check"
     t.check_constraint "period_anchor_date IS NULL OR period_start_weekday IS NULL OR EXTRACT(dow FROM period_anchor_date)::integer = period_start_weekday", name: "company_pay_schedules_anchor_weekday_check"
     t.check_constraint "period_rule::text <> 'biweekly'::text OR period_anchor_date IS NOT NULL", name: "company_pay_schedules_biweekly_anchor_check"
     t.check_constraint "period_rule::text = ANY (ARRAY['manual'::character varying::text, 'weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text])", name: "company_pay_schedules_period_rule_check"
@@ -498,8 +578,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.text "item_message", null: false
     t.text "resolution_note", null: false
     t.datetime "reviewed_at", null: false
-    t.bigint "reviewed_by_id"
     t.string "reviewed_by_email", null: false
+    t.bigint "reviewed_by_id"
     t.string "reviewed_by_name", null: false
     t.string "reviewed_by_role", null: false
     t.datetime "updated_at", null: false
@@ -616,7 +696,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["company_id"], name: "index_employee_loans_on_company_id"
     t.index ["created_by_id"], name: "index_employee_loans_on_created_by_id"
     t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
-    t.index [ "employee_id", "deduction_type_id" ], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
+    t.index ["employee_id", "deduction_type_id"], name: "idx_employee_loans_unique_deduction", unique: true, where: "(deduction_type_id IS NOT NULL)"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
     t.index ["stopped_by_id"], name: "index_employee_loans_on_stopped_by_id"
@@ -642,7 +722,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["employee_id", "active"], name: "idx_employee_payroll_fields_employee_active"
     t.index ["employee_id", "payroll_field_definition_id"], name: "idx_employee_payroll_fields_unique", unique: true
     t.index ["employee_id"], name: "index_employee_payroll_fields_on_employee_id"
-    t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
+    t.index ["employee_loan_id"], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index ["employee_loan_id"], name: "index_employee_payroll_fields_on_employee_loan_id"
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
@@ -681,11 +761,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["created_by_id"], name: "index_employee_retirement_elections_on_created_by_id"
     t.index ["employee_id", "effective_on"], name: "idx_employee_retirement_elections_effective", unique: true
     t.index ["employee_id"], name: "index_employee_retirement_elections_on_employee_id"
-    t.check_constraint "(employer_match_destination::text = ANY (ARRAY['traditional'::character varying, 'roth'::character varying]::text[])) AND (true_up_policy::text = ANY (ARRAY['none'::character varying, 'year_to_date'::character varying]::text[]))", name: "retirement_elections_match_policy"
-    t.check_constraint "(traditional_contribution_type::text = ANY (ARRAY['percentage'::character varying, 'fixed'::character varying]::text[])) AND (roth_contribution_type::text = ANY (ARRAY['percentage'::character varying, 'fixed'::character varying]::text[]))", name: "retirement_elections_contribution_types"
-    t.check_constraint "eligible_compensation::text = ANY (ARRAY['gross_wages'::character varying, 'gross_excluding_tips'::character varying, 'base_pay'::character varying]::text[])", name: "retirement_elections_compensation"
-    t.check_constraint "employer_match_mode::text = ANY (ARRAY['none'::character varying, 'compensation_percentage'::character varying, 'employee_deferral_percentage'::character varying]::text[])", name: "retirement_elections_match_mode"
-    t.check_constraint "limit_priority::text = ANY (ARRAY['proportional'::character varying, 'traditional_first'::character varying, 'roth_first'::character varying]::text[])", name: "retirement_elections_limit_priority"
+    t.check_constraint "(employer_match_destination::text = ANY (ARRAY['traditional'::character varying::text, 'roth'::character varying::text])) AND (true_up_policy::text = ANY (ARRAY['none'::character varying::text, 'year_to_date'::character varying::text]))", name: "retirement_elections_match_policy"
+    t.check_constraint "(traditional_contribution_type::text = ANY (ARRAY['percentage'::character varying::text, 'fixed'::character varying::text])) AND (roth_contribution_type::text = ANY (ARRAY['percentage'::character varying::text, 'fixed'::character varying::text]))", name: "retirement_elections_contribution_types"
+    t.check_constraint "eligible_compensation::text = ANY (ARRAY['gross_wages'::character varying::text, 'gross_excluding_tips'::character varying::text, 'base_pay'::character varying::text])", name: "retirement_elections_compensation"
+    t.check_constraint "employer_match_mode::text = ANY (ARRAY['none'::character varying::text, 'compensation_percentage'::character varying::text, 'employee_deferral_percentage'::character varying::text])", name: "retirement_elections_match_mode"
+    t.check_constraint "limit_priority::text = ANY (ARRAY['proportional'::character varying::text, 'traditional_first'::character varying::text, 'roth_first'::character varying::text])", name: "retirement_elections_limit_priority"
     t.check_constraint "participating = false OR eligible = true", name: "retirement_elections_participation_eligibility"
     t.check_constraint "traditional_amount >= 0::numeric AND roth_amount >= 0::numeric AND employer_match_ytd_before_system >= 0::numeric AND (plan_annual_employee_limit IS NULL OR plan_annual_employee_limit >= 0::numeric) AND (employer_match_period_cap IS NULL OR employer_match_period_cap >= 0::numeric) AND (employer_match_annual_cap IS NULL OR employer_match_annual_cap >= 0::numeric)", name: "retirement_elections_amount_ranges"
     t.check_constraint "traditional_rate >= 0::numeric AND traditional_rate <= 1::numeric AND roth_rate >= 0::numeric AND roth_rate <= 1::numeric AND employer_match_rate >= 0::numeric AND employer_match_rate <= 1::numeric AND (employer_match_deferral_cap_rate IS NULL OR employer_match_deferral_cap_rate >= 0::numeric AND employer_match_deferral_cap_rate <= 1::numeric)", name: "retirement_elections_rate_ranges"
@@ -1688,7 +1768,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
     t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
     t.index ["recorded_by_id"], name: "index_loan_transactions_on_recorded_by_id"
-    t.index [ "reverses_transaction_id" ], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
+    t.index ["reverses_transaction_id"], name: "index_loan_transactions_on_reverses_transaction_id", unique: true
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
     t.check_constraint "balance_before IS NULL AND balance_after IS NULL OR balance_before IS NOT NULL AND balance_after IS NOT NULL", name: "loan_transactions_balance_pair"
     t.check_constraint "source::text = ANY (ARRAY['opening_balance'::character varying::text, 'payroll'::character varying::text, 'manual'::character varying::text])", name: "loan_transactions_source_check"
@@ -1896,6 +1976,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
     t.index ["corrects_pay_period_id"], name: "index_pay_periods_on_corrects_pay_period_id"
     t.index ["cycle"], name: "index_pay_periods_on_cycle"
+    t.index ["id", "company_id"], name: "idx_pay_periods_aire_calendar_tenant_key", unique: true
     t.index ["intake_stale_session_id"], name: "idx_pay_periods_intake_stale_session"
     t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
@@ -1956,10 +2037,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["company_id", "tax_year", "quarter", "filing_type"], name: "idx_payroll_filing_responsibilities_quarterly", unique: true, where: "(quarter IS NOT NULL)"
     t.index ["company_id"], name: "index_payroll_filing_responsibilities_on_company_id"
     t.index ["reviewed_by_id"], name: "index_payroll_filing_responsibilities_on_reviewed_by_id"
-    t.check_constraint "filing_type::text = 'w2_gu'::text AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_941'::character varying, 'guam_withholding'::character varying, 'swica'::character varying]::text[])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_responsibilities_period_check"
-    t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying, 'guam_withholding'::character varying, 'swica'::character varying, 'w2_gu'::character varying]::text[])", name: "payroll_filing_responsibilities_type_check"
-    t.check_constraint "imported_payroll_inclusion::text = ANY (ARRAY['included'::character varying, 'excluded'::character varying]::text[])", name: "payroll_filing_responsibilities_inclusion_check"
-    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying, 'cornerstone'::character varying]::text[])", name: "payroll_filing_responsibilities_party_check"
+    t.check_constraint "filing_type::text = 'w2_gu'::text AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_responsibilities_period_check"
+    t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text, 'w2_gu'::character varying::text])", name: "payroll_filing_responsibilities_type_check"
+    t.check_constraint "imported_payroll_inclusion::text = ANY (ARRAY['included'::character varying::text, 'excluded'::character varying::text])", name: "payroll_filing_responsibilities_inclusion_check"
+    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying::text, 'cornerstone'::character varying::text])", name: "payroll_filing_responsibilities_party_check"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_responsibilities_year_check"
   end
 
@@ -1970,9 +2051,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.string "company_setup_digest"
     t.text "company_setup_review_notes"
     t.datetime "company_setup_reviewed_at"
+    t.string "company_setup_reviewed_by_email"
     t.bigint "company_setup_reviewed_by_id"
     t.string "company_setup_reviewed_by_name"
-    t.string "company_setup_reviewed_by_email"
     t.string "company_setup_reviewed_by_role"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
@@ -2003,7 +2084,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["technical_signed_by_id"], name: "index_payroll_go_live_reviews_on_technical_signed_by_id"
     t.check_constraint "jsonb_typeof(setup_summary) = 'object'::text AND jsonb_typeof(setup_plan) = 'object'::text AND jsonb_typeof(attestations) = 'object'::text", name: "payroll_go_live_reviews_object_json_check"
     t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text", name: "payroll_go_live_reviews_array_json_check"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'setup_applied'::character varying, 'approved'::character varying]::text[])", name: "payroll_go_live_reviews_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'setup_applied'::character varying::text, 'approved'::character varying::text])", name: "payroll_go_live_reviews_status_check"
   end
 
   create_table "payroll_imports", force: :cascade do |t|
@@ -2047,9 +2128,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_documents_session"
     t.index ["storage_reference"], name: "idx_payroll_intake_documents_storage_reference", unique: true, where: "(storage_reference IS NOT NULL)"
     t.check_constraint "\"position\" >= 0", name: "payroll_intake_documents_position_nonnegative"
-    t.check_constraint "source_role::text = ANY (ARRAY['pasted_email'::character varying, 'email_attachment'::character varying, 'revel_hours'::character varying, 'supplemental_workbook'::character varying, 'supporting_document'::character varying, 'legacy_source'::character varying]::text[])", name: "payroll_intake_documents_source_role"
+    t.check_constraint "source_role::text = ANY (ARRAY['pasted_email'::character varying::text, 'email_attachment'::character varying::text, 'revel_hours'::character varying::text, 'supplemental_workbook'::character varying::text, 'supporting_document'::character varying::text, 'legacy_source'::character varying::text])", name: "payroll_intake_documents_source_role"
     t.check_constraint "verification_status::text <> 'verified'::text OR byte_size > 0 AND sha256::text ~ '^[0-9a-f]{64}$'::text AND verified_at IS NOT NULL", name: "payroll_intake_documents_verified_fingerprint"
-    t.check_constraint "verification_status::text = ANY (ARRAY['verified'::character varying, 'failed'::character varying, 'legacy_unverified'::character varying]::text[])", name: "payroll_intake_documents_verification_status"
+    t.check_constraint "verification_status::text = ANY (ARRAY['verified'::character varying::text, 'failed'::character varying::text, 'legacy_unverified'::character varying::text])", name: "payroll_intake_documents_verification_status"
   end
 
   create_table "payroll_intake_rows", force: :cascade do |t|
@@ -2092,10 +2173,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_rows_session"
     t.index ["status", "excluded"], name: "idx_payroll_intake_rows_status_excluded"
     t.index ["target_pay_period_id"], name: "idx_payroll_intake_rows_target_period"
-    t.check_constraint "(disposition::text = ANY (ARRAY['pending'::character varying, 'included'::character varying]::text[])) OR NULLIF(btrim(disposition_reason), ''::text) IS NOT NULL", name: "payroll_intake_rows_reason_required"
+    t.check_constraint "(disposition::text = ANY (ARRAY['pending'::character varying::text, 'included'::character varying::text])) OR NULLIF(btrim(disposition_reason), ''::text) IS NOT NULL", name: "payroll_intake_rows_reason_required"
     t.check_constraint "disposition::text = 'deferred'::text AND target_pay_period_id IS NOT NULL OR disposition::text <> 'deferred'::text AND target_pay_period_id IS NULL", name: "payroll_intake_rows_deferred_target"
     t.check_constraint "disposition::text = 'pending'::text OR dispositioned_at IS NOT NULL", name: "payroll_intake_rows_dispositioned_at"
-    t.check_constraint "disposition::text = ANY (ARRAY['pending'::character varying, 'included'::character varying, 'excluded'::character varying, 'deferred'::character varying, 'informational'::character varying]::text[])", name: "payroll_intake_rows_disposition"
+    t.check_constraint "disposition::text = ANY (ARRAY['pending'::character varying::text, 'included'::character varying::text, 'excluded'::character varying::text, 'deferred'::character varying::text, 'informational'::character varying::text])", name: "payroll_intake_rows_disposition"
   end
 
   create_table "payroll_intake_sessions", force: :cascade do |t|
@@ -2153,7 +2234,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.string "reporting_group"
     t.datetime "updated_at", null: false
     t.index ["deduction_type_id"], name: "index_payroll_item_deductions_on_deduction_type_id"
-    t.index [ "employee_loan_id" ], name: "index_payroll_item_deductions_on_employee_loan_id"
+    t.index ["employee_loan_id"], name: "index_payroll_item_deductions_on_employee_loan_id"
     t.index ["payroll_item_id", "deduction_type_id"], name: "idx_pi_deductions_on_pi_and_dt", unique: true
     t.index ["payroll_item_id"], name: "index_payroll_item_deductions_on_payroll_item_id"
     t.index ["reporting_group"], name: "idx_payroll_item_deductions_reporting_group"
@@ -2448,7 +2529,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["payroll_go_live_review_id"], name: "idx_parallel_reviews_go_live"
     t.index ["recorded_by_id"], name: "index_payroll_parallel_run_reviews_on_recorded_by_id"
     t.check_constraint "jsonb_typeof(differences) = 'object'::text", name: "payroll_parallel_run_reviews_differences_check"
-    t.check_constraint "result::text = ANY (ARRAY['pass'::character varying, 'fail'::character varying]::text[])", name: "payroll_parallel_run_reviews_result_check"
+    t.check_constraint "result::text = ANY (ARRAY['pass'::character varying::text, 'fail'::character varying::text])", name: "payroll_parallel_run_reviews_result_check"
     t.check_constraint "source_system::text = 'quickbooks'::text", name: "payroll_parallel_run_reviews_source_check"
   end
 
@@ -2508,11 +2589,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["pay_period_id", "revision"], name: "idx_payroll_review_packages_period_revision", unique: true
     t.index ["pay_period_id"], name: "idx_payroll_review_packages_current", unique: true, where: "(superseded_at IS NULL)"
     t.index ["pay_period_id"], name: "index_payroll_review_packages_on_pay_period_id"
-    t.check_constraint "approval_method IS NULL OR (approval_method::text = ANY (ARRAY['client_portal'::character varying, 'email_attestation'::character varying]::text[]))", name: "payroll_review_packages_approval_method_check"
+    t.check_constraint "approval_method IS NULL OR (approval_method::text = ANY (ARRAY['client_portal'::character varying::text, 'email_attestation'::character varying::text]))", name: "payroll_review_packages_approval_method_check"
     t.check_constraint "revision > 0", name: "payroll_review_packages_revision_positive"
-    t.check_constraint "status::text = 'approved'::text AND approved_at IS NOT NULL AND approved_by_id IS NOT NULL AND approval_recorded_by_id IS NOT NULL AND approval_method IS NOT NULL AND approval_acknowledgement::text = 'I approve this exact payroll review revision for processing.'::text AND (approval_method::text <> 'email_attestation'::text OR NULLIF(btrim(approval_evidence_reference::text), ''::text) IS NOT NULL) AND (approval_method::text <> 'client_portal'::text OR approved_by_id = approval_recorded_by_id) OR status::text = 'pending'::text AND approved_at IS NULL AND approved_by_id IS NULL AND approval_recorded_by_id IS NULL AND approval_method IS NULL AND approval_acknowledgement IS NULL OR status::text = 'superseded'::text", name: "payroll_review_packages_approval_shape"
+    t.check_constraint "status::text = 'approved'::text AND approved_at IS NOT NULL AND approved_by_id IS NOT NULL AND approval_recorded_by_id IS NOT NULL AND approval_method IS NOT NULL AND approval_acknowledgement = 'I approve this exact payroll review revision for processing.'::text AND (approval_method::text <> 'email_attestation'::text OR NULLIF(btrim(approval_evidence_reference::text), ''::text) IS NOT NULL) AND (approval_method::text <> 'client_portal'::text OR approved_by_id = approval_recorded_by_id) OR status::text = 'pending'::text AND approved_at IS NULL AND approved_by_id IS NULL AND approval_recorded_by_id IS NULL AND approval_method IS NULL AND approval_acknowledgement IS NULL OR status::text = 'superseded'::text", name: "payroll_review_packages_approval_shape"
     t.check_constraint "status::text = 'superseded'::text AND superseded_at IS NOT NULL AND NULLIF(btrim(supersession_reason), ''::text) IS NOT NULL OR status::text <> 'superseded'::text AND superseded_at IS NULL AND supersession_reason IS NULL", name: "payroll_review_packages_supersession_shape"
-    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'superseded'::character varying]::text[])", name: "payroll_review_packages_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'approved'::character varying::text, 'superseded'::character varying::text])", name: "payroll_review_packages_status_check"
   end
 
   create_table "payroll_time_allocations", force: :cascade do |t|
@@ -2894,6 +2975,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
     t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
     t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
     t.index ["company_id"], name: "index_time_tracking_sources_one_active_per_company", unique: true, where: "(active = true)"
+    t.index ["id", "company_id"], name: "idx_time_tracking_sources_tenant_key", unique: true
   end
 
   create_table "timecards", force: :cascade do |t|
@@ -3025,9 +3107,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   end
 
   add_foreign_key "aire_payroll_acknowledgements", "time_tracking_imports"
+  add_foreign_key "aire_payroll_calendar_periods", "companies", on_delete: :restrict
+  add_foreign_key "aire_payroll_calendar_periods", "pay_periods", column: ["pay_period_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_aire_calendar_periods_pay_period_tenant"
+  add_foreign_key "aire_payroll_calendar_periods", "pay_periods", on_delete: :restrict
+  add_foreign_key "aire_payroll_calendar_periods", "time_tracking_sources", column: ["time_tracking_source_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_aire_calendar_periods_source_tenant"
+  add_foreign_key "aire_payroll_calendar_periods", "time_tracking_sources", on_delete: :restrict
+  add_foreign_key "aire_payroll_calendar_publications", "aire_payroll_calendar_periods", on_delete: :restrict
+  add_foreign_key "aire_payroll_calendar_publications", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "aire_payroll_entry_acknowledgements", "check_events"
   add_foreign_key "aire_payroll_entry_acknowledgements", "payroll_items"
   add_foreign_key "aire_payroll_entry_acknowledgements", "time_tracking_imports"
+  add_foreign_key "aire_payroll_events", "aire_payroll_calendar_periods", column: ["aire_payroll_calendar_period_id", "time_tracking_source_id"], primary_key: ["id", "time_tracking_source_id"], name: "fk_aire_payroll_events_period_source"
+  add_foreign_key "aire_payroll_events", "aire_payroll_calendar_periods", on_delete: :restrict
+  add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", column: ["aire_payroll_calendar_publication_id", "aire_payroll_calendar_period_id"], primary_key: ["id", "aire_payroll_calendar_period_id"], name: "fk_aire_payroll_events_publication_period"
+  add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", on_delete: :restrict
+  add_foreign_key "aire_payroll_events", "time_tracking_sources", on_delete: :restrict
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
@@ -3220,6 +3314,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   add_foreign_key "invoices", "users", column: "created_by_id"
   add_foreign_key "invoices", "users", column: "updated_by_id"
   add_foreign_key "loan_transactions", "employee_loans"
+  add_foreign_key "loan_transactions", "loan_transactions", column: "reverses_transaction_id"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"
   add_foreign_key "loan_transactions", "users", column: "recorded_by_id", on_delete: :nullify
@@ -3274,6 +3369,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   add_foreign_key "payroll_intake_sessions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "payroll_intake_sessions", "users", column: "superseded_by_user_id", on_delete: :nullify
   add_foreign_key "payroll_item_deductions", "deduction_types"
+  add_foreign_key "payroll_item_deductions", "employee_loans"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
   add_foreign_key "payroll_item_field_entries", "payroll_field_definitions"
@@ -3367,6 +3463,4 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_13_080000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
-  add_foreign_key "loan_transactions", "loan_transactions", column: "reverses_transaction_id"
-  add_foreign_key "payroll_item_deductions", "employee_loans"
 end

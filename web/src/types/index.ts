@@ -581,6 +581,61 @@ export interface AirePayrollRecord {
   source_processing_synced_at?: string | null;
 }
 
+export type AirePayrollCutoffState =
+  | 'unpublished'
+  | 'publishing'
+  | 'publication_failed'
+  | 'schedule_changed'
+  | 'scheduled'
+  | 'upcoming'
+  | 'due'
+  | 'cutoff_due'
+  | 'finalized'
+  | 'batch_verifying'
+  | 'batch_verification_failed'
+  | 'batch_rejected'
+  | 'batch_verified';
+
+export interface AirePayrollCalendarState {
+  enabled: boolean;
+  source_id: number;
+  source_name: string;
+  eligible: boolean;
+  eligibility_error?: string | null;
+  external_pay_period_id?: string | null;
+  cutoff_at?: string | null;
+  cutoff_state: AirePayrollCutoffState;
+  needs_revision: boolean;
+  can_publish: boolean;
+  can_retry: boolean;
+  publication?: {
+    id: number;
+    schedule_version: number;
+    publication_id: string;
+    delivery_status: 'pending' | 'failed' | 'delivered';
+    delivery_attempts: number;
+    delivered_at?: string | null;
+    last_delivery_attempt_at?: string | null;
+    next_delivery_attempt_at?: string | null;
+    last_response_status?: number | null;
+    last_error?: string | null;
+    source_state?: Record<string, unknown>;
+  } | null;
+  finalized_batch?: {
+    event_id: string;
+    verification_status: 'pending' | 'failed' | 'rejected' | 'verified';
+    verification_attempts: number;
+    occurred_at: string;
+    verified_at?: string | null;
+    last_error?: string | null;
+    payroll_batch_id: string;
+    payroll_batch_checksum: string;
+    finalized_at?: string | null;
+    summary?: Record<string, number>;
+    issues?: Record<string, number>;
+  } | null;
+}
+
 export interface PayPeriod {
   id: number;
   company_id?: number;
@@ -618,6 +673,7 @@ export interface PayPeriod {
   payroll_review?: PayrollReviewPackage | null;
   time_tracking?: {
     active_source_types: string[];
+    aire_calendar?: AirePayrollCalendarState | null;
     linked_aire_records: AirePayrollRecord[];
   };
   created_by_id?: number;

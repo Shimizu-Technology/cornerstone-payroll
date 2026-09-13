@@ -20,6 +20,8 @@ type FormState = {
   period_anchor_date: string;
   pay_date_rule: 'manual' | 'days_after_period_end';
   pay_date_offset_days: number;
+  payroll_cutoff_days_before: number;
+  payroll_cutoff_time: string;
   workweek_start_weekday: number;
   workweek_start_time: string;
   notes: string;
@@ -27,6 +29,11 @@ type FormState = {
 
 function minutesToTime(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+function timeToMinutes(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  return (hours * 60) + minutes;
 }
 
 function nextEffectiveDate(current: string) {
@@ -48,6 +55,8 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
     period_anchor_date: schedule.period_anchor_date || '',
     pay_date_rule: schedule.pay_date_rule,
     pay_date_offset_days: schedule.pay_date_offset_days ?? 0,
+    payroll_cutoff_days_before: schedule.payroll_cutoff_days_before ?? 7,
+    payroll_cutoff_time: minutesToTime(schedule.payroll_cutoff_at_minutes ?? 1020),
     workweek_start_weekday: workweek.starts_on_weekday,
     workweek_start_time: minutesToTime(workweek.starts_at_minutes),
     notes: schedule.notes || '',
@@ -94,8 +103,13 @@ export function PayScheduleSettings() {
 
   const save = async () => {
     if (!form) return;
+    const cutoffMinutes = timeToMinutes(form.payroll_cutoff_time);
     if (form.notes.trim().length < 5) {
       setError('Add a short confirmation note identifying who confirmed the schedule or what source was used.');
+      return;
+    }
+    if (!Number.isInteger(cutoffMinutes) || cutoffMinutes < 0 || cutoffMinutes > 1439) {
+      setError('Choose a valid Guam payroll cutoff time.');
       return;
     }
     if ((form.period_rule === 'weekly' || form.period_rule === 'biweekly') && Number.isNaN(form.period_start_weekday)) {
@@ -108,6 +122,10 @@ export function PayScheduleSettings() {
     }
     if (form.period_rule === 'biweekly' && new Date(`${form.period_anchor_date}T12:00:00`).getDay() !== form.period_start_weekday) {
       setError(`The biweekly anchor must fall on ${WEEKDAYS[form.period_start_weekday]}.`);
+      return;
+    }
+    if (form.payroll_cutoff_days_before !== 7) {
+      setError('Payroll cutoff must be seven calendar days before the pay date.');
       return;
     }
     try {
@@ -123,6 +141,8 @@ export function PayScheduleSettings() {
           period_anchor_date: form.period_rule === 'biweekly' ? form.period_anchor_date : null,
           pay_date_rule: form.pay_date_rule,
           pay_date_offset_days: form.pay_date_rule === 'days_after_period_end' ? form.pay_date_offset_days : null,
+          payroll_cutoff_days_before: form.payroll_cutoff_days_before,
+          payroll_cutoff_at_minutes: cutoffMinutes,
           timezone: 'Pacific/Guam',
           notes: form.notes,
         },
@@ -184,6 +204,8 @@ export function PayScheduleSettings() {
               {form.period_rule === 'biweekly' && <div className="space-y-2 sm:col-span-2"><Label htmlFor="period-anchor">Known period start date</Label><Input id="period-anchor" type="date" required value={form.period_anchor_date} onChange={(event) => setForm({ ...form, period_anchor_date: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">Use the first day of any confirmed two-week pay period. This anchors which alternating week begins each cycle.</p></div>}
               <div className="space-y-2"><Label htmlFor="pay-date-rule">Pay-date rule</Label><Select id="pay-date-rule" value={form.pay_date_rule} onChange={(event) => setForm({ ...form, pay_date_rule: event.target.value as FormState['pay_date_rule'] })}><option value="manual">Manual pay date</option><option value="days_after_period_end">Days after period ends</option></Select></div>
               {form.pay_date_rule === 'days_after_period_end' && <div className="space-y-2"><Label htmlFor="pay-date-offset">Days after period end</Label><Input id="pay-date-offset" type="number" min={0} max={31} value={form.pay_date_offset_days} onChange={(event) => setForm({ ...form, pay_date_offset_days: Number(event.target.value) })} /></div>}
+              <div className="space-y-2"><Label htmlFor="cutoff-days">Payroll cutoff</Label><div className="flex items-center gap-2"><Input id="cutoff-days" className="w-24" type="number" min={7} max={7} value={form.payroll_cutoff_days_before} readOnly /><span className="text-sm text-neutral-600">days before pay date</span></div><p className="text-xs leading-5 text-neutral-500">The payroll policy fixes this at one week so Cornerstone and AIRE always use the same boundary.</p></div>
+              <div className="space-y-2"><Label htmlFor="cutoff-time">Cutoff time (Guam)</Label><Input id="cutoff-time" type="time" value={form.payroll_cutoff_time} onChange={(event) => setForm({ ...form, payroll_cutoff_time: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">AIRE currently requires seven calendar days. Its automated lock uses this exact local time.</p></div>
             </CardContent>
           </Card>
 

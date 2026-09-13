@@ -18,6 +18,8 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     expect(response).to have_http_status(:ok)
     settings = response.parsed_body.fetch("pay_schedule_settings")
     expect(settings.dig("pay_schedule", "period_rule")).to eq("manual")
+    expect(settings.dig("pay_schedule", "payroll_cutoff_days_before")).to eq(7)
+    expect(settings.dig("pay_schedule", "payroll_cutoff_at_minutes")).to eq(1_020)
     expect(settings.dig("workweek", "source")).to eq("legacy_system_default")
     expect(settings.dig("workweek", "confirmation_status")).to eq("needs_confirmation")
   end
@@ -46,6 +48,8 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
           period_anchor_date: "2026-08-09",
           pay_date_rule: "days_after_period_end",
           pay_date_offset_days: 6,
+          payroll_cutoff_days_before: 7,
+          payroll_cutoff_at_minutes: 990,
           timezone: "Pacific/Guam",
           notes: "Confirmed by client"
         },
@@ -59,9 +63,44 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     }
 
     expect(response).to have_http_status(:ok)
-    expect(company.company_pay_schedules.last).to be_confirmed
+    expect(company.company_pay_schedules.last).to have_attributes(
+      confirmation_status: "confirmed",
+      payroll_cutoff_days_before: 7,
+      payroll_cutoff_at_minutes: 990
+    )
+    expect(response.parsed_body.dig("pay_schedule_settings", "pay_schedule")).to include(
+      "payroll_cutoff_days_before" => 7,
+      "payroll_cutoff_at_minutes" => 990
+    )
     expect(company.company_workweeks.last).to be_confirmed
     expect(company.company_workweeks.last.confirmed_by).to eq(admin_user)
+  end
+
+  it "rejects a cutoff that is not exactly seven calendar days" do
+    put "/api/v1/admin/pay_schedule_settings", params: {
+      pay_schedule_settings: {
+        effective_on: "2026-08-10",
+        pay_schedule: {
+          frequency: "semimonthly",
+          period_rule: "semimonthly",
+          pay_date_rule: "manual",
+          payroll_cutoff_days_before: 6,
+          payroll_cutoff_at_minutes: 1_020,
+          timezone: "Pacific/Guam",
+          notes: "Confirmed by client"
+        },
+        workweek: {
+          starts_on_weekday: 0,
+          starts_at_minutes: 0,
+          timezone: "Pacific/Guam",
+          notes: "Confirmed by client"
+        }
+      }
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to include(/Payroll cutoff days before is not included/)
+    expect(company.company_pay_schedules).to be_empty
   end
 
   it "rejects non-midnight workweeks without closing the current configuration" do
@@ -103,7 +142,7 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     }
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("errors")).to include(/must be midnight/)
+    expect(response.parsed_body.fetch("errors").join(" ")).to match(/must be midnight/)
     expect(current_schedule.reload.ends_on).to be_nil
     expect(current_workweek.reload.ends_on).to be_nil
     expect(company.company_workweeks.count).to eq(1)

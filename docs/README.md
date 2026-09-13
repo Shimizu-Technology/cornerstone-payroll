@@ -25,6 +25,7 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 - [Deterministic payroll release lane](DETERMINISTIC_RELEASE_LANE.md) — disposable full-stack browser fixture, deidentified PDF corpus, commands, and evidence rules.
 - [Time Summary v1 contract](TIME_TRACKING_V1_CONTRACT.md) — normative Workforce/Tax-to-Payroll payload, authority boundary, reconciliation rules, and versioning policy.
 - [AIRE finalized payroll batch import](AIRE_FINALIZED_BATCH_IMPORT.md) — immutable batch boundary, validation, provenance, idempotency, correction handling, and operator workflow.
+- [Cornerstone–AIRE payroll calendar sync](AIRE_PAYROLL_CALENDAR_SYNC.md) — schedule ownership, Guam T-7 cutoff policy, autonomous AIRE finalization, durable event verification, and operator-visible states.
 - [Staff role and permission matrix](ROLE_PERMISSION_MATRIX_2026-05-14.md) — approved staff capabilities, high-impact endpoint ownership, and enforcement rules.
 - [Payroll, QuickBooks, and compliance master plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md) — payroll parity and compliance roadmap after Gate 0.
 - [Production readiness checklist](PRODUCTION_READINESS_CHECKLIST.md) — environment-specific evidence and release signoff.

@@ -42,6 +42,7 @@ import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecordsDialog';
+import { AirePayrollCalendarCard } from '@/components/payroll/AirePayrollCalendarCard';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
@@ -1632,6 +1633,14 @@ export function PayPeriodDetail({
             )}
           </div>
         ))}
+
+        {payPeriod.time_tracking?.aire_calendar && (
+          <AirePayrollCalendarCard
+            payPeriodId={payPeriod.id}
+            calendar={payPeriod.time_tracking.aire_calendar}
+            onRefresh={() => loadPayPeriod(payPeriod.id, true)}
+          />
+        )}
 
         {payPeriod.notes && (
           <Card className="border-blue-100 bg-blue-50/60">
