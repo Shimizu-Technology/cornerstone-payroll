@@ -219,8 +219,8 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
       </div>
       <div className="text-sm text-neutral-700">
         <p className="font-medium text-neutral-950">{entry.start_time || 'Missing'} – {entry.end_time || 'Missing'}</p>
-        <p className="mt-1 text-xs text-neutral-500">{entry.break_minutes} min break · {captureSource}</p>
-        {entry.description && <p className="mt-1 text-xs text-neutral-500">{entry.description}</p>}
+        <p className="mt-2 text-xs text-neutral-500">{entry.break_minutes} min break · {captureSource}</p>
+        {entry.description && <p className="mt-2 text-xs text-neutral-500">{entry.description}</p>}
       </div>
       <div>
         <p className="font-display text-lg font-bold text-neutral-950">{Number(entry.hours).toFixed(2)} hrs</p>
@@ -252,20 +252,20 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         {needsTimeReview && (
           <>
             <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny', kind: 'time' })}>
-              <X className="mr-1 h-3.5 w-3.5" /> Deny time
+              <X className="mr-2 h-3.5 w-3.5" /> Deny time
             </Button>
             <Button type="button" size="sm" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'approve', kind: 'time' })}>
-              <Check className="mr-1 h-3.5 w-3.5" /> Approve time
+              <Check className="mr-2 h-3.5 w-3.5" /> Approve time
             </Button>
           </>
         )}
         {needsOvertimeReview && (
           <>
             <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'deny', kind: 'overtime' })}>
-              <X className="mr-1 h-3.5 w-3.5" /> Deny overtime
+              <X className="mr-2 h-3.5 w-3.5" /> Deny overtime
             </Button>
             <Button type="button" size="sm" disabled={!canCommand} onClick={() => onReview({ entry, decision: 'approve', kind: 'overtime' })}>
-              <Check className="mr-1 h-3.5 w-3.5" /> Approve overtime
+              <Check className="mr-2 h-3.5 w-3.5" /> Approve overtime
             </Button>
           </>
         )}
@@ -865,7 +865,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
+            <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

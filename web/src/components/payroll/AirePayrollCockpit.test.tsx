@@ -321,8 +321,10 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
     expect(await screen.findByText(/Time approved by AIRE Admin/)).toBeTruthy();
+    expect(screen.getByText(/Oct 15, 2026, 8:00:00 AM/)).toBeTruthy();
     expect(screen.getByText(/Matched the schedule/)).toBeTruthy();
     expect(screen.getByText(/Overtime approved by Chels Shimizu/)).toBeTruthy();
+    expect(screen.getByText(/Oct 15, 2026, 8:05:00 AM/)).toBeTruthy();
     expect(screen.getByText(/Authorized overtime/)).toBeTruthy();
   });
 
