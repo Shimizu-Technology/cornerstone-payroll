@@ -23,7 +23,7 @@ module Api
 
         def show
           render json: {
-            data: serialize_employee(@employee, include_department: true)
+            data: serialize_employee(@employee, include_department: true, include_document_readiness: true)
           }
         end
 
@@ -225,7 +225,7 @@ module Api
           }
         end
 
-        def serialize_employee(employee, include_department: false)
+        def serialize_employee(employee, include_department: false, include_document_readiness: false)
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
@@ -249,6 +249,8 @@ module Api
               name: employee.department.name
             }
           end
+
+          data["document_readiness"] = EmployeeDocumentReadiness.summary(employee) if include_document_readiness
 
           data
         end

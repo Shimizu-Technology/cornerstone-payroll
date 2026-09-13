@@ -364,6 +364,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"]["last_name"]).to eq("Doe")
         expect(json["data"]["job_title"]).to eq("Controller")
         expect(json["data"]["email"]).to eq("john.doe@example.com")
+        expect(Employee.last.employee_document_requirements.pluck(:requirement_type)).to contain_exactly(
+          "identity_and_work_authorization",
+          "withholding_election"
+        )
+        expect(json["data"]["document_readiness"]).to include(
+          "total" => 2,
+          "required" => 2,
+          "satisfied" => 0,
+          "ready_for_payroll" => false
+        )
       end
 
       it "routes recurring components to typed payroll fields during creation" do
@@ -385,6 +395,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
         json = response.parsed_body
         expect(json["data"]["ssn_last_four"]).to eq("6789")
+        expect(json["data"]).not_to have_key("ssn")
         expect(json["data"]).not_to have_key("ssn_encrypted")
 
         employee = Employee.last

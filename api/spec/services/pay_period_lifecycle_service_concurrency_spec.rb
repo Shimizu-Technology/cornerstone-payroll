@@ -131,7 +131,81 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     expect(CompanyYtdTotal.find_by!(company: company, year: pay_period.pay_date.year).gross_pay).to eq(2_000)
   end
 
+  it "serializes a readiness change after the payroll transition decision" do
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+    employee.employee_document_requirements.each do |requirement|
+      document = create(:client_document, company: company, employee: employee, uploaded_by: actor)
+      requirement.update!(
+        client_document: document,
+        status: "verified",
+        received_at: 1.day.ago,
+        reviewed_by: actor,
+        reviewed_at: 1.day.ago,
+        review_note: "Verified before payroll"
+      )
+    end
+    requirement = employee.employee_document_requirements.first
+    readiness_checked = Queue.new
+    release_transition = Queue.new
+    writer_backend_pid = Queue.new
+    results = Queue.new
+
+    allow(EmployeeDocumentReadiness).to receive(:require_payroll_ready!).and_wrap_original do |original, period|
+      original.call(period)
+      readiness_checked << true
+      release_transition.pop
+    end
+
+    commit_thread = lifecycle_thread(results, :commit!)
+    review_thread = nil
+    begin
+      Timeout.timeout(5) { readiness_checked.pop }
+      review_thread = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          thread_requirement = EmployeeDocumentRequirement.find(requirement.id)
+          writer_backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
+          EmployeeDocumentRequirementReviewService.new(
+            requirement: thread_requirement,
+            actor: User.find(actor.id),
+            attributes: {
+              status: "received",
+              lock_version: thread_requirement.lock_version
+            }
+          ).call!
+          results << [ :ok, :review ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        end
+      end
+      backend_pid = Timeout.timeout(5) { writer_backend_pid.pop }
+      wait_for_database_lock!(backend_pid)
+      expect(review_thread.join(0.2)).to be_nil
+    ensure
+      release_transition << true
+    end
+
+    [ commit_thread, review_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :commit! ], [ :ok, :review ])
+    expect(pay_period.reload).to be_committed
+    expect(requirement.reload.status).to eq("received")
+  end
+
   private
+
+  def wait_for_database_lock!(backend_pid)
+    pid = Integer(backend_pid)
+    Timeout.timeout(5) do
+      loop do
+        wait_event_type = ActiveRecord::Base.connection.select_value(
+          "SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{pid}"
+        )
+        break if wait_event_type == "Lock"
+
+        sleep 0.01
+      end
+    end
+  end
 
   def lifecycle_thread(results, operation)
     Thread.new do
@@ -236,6 +310,9 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all
     PayrollItem.where(id: payroll_item_ids).delete_all
+    delete_readiness_events_for_cleanup(company_id)
+    EmployeeDocumentRequirement.where(company_id: company_id).delete_all
+    ClientDocument.where(company_id: company_id).delete_all
     EmployeeYtdTotal.where(employee_id: employee_id).delete_all
     CompanyYtdTotal.where(company_id: company_id).delete_all
     PayPeriod.where(id: pay_period_ids).delete_all
@@ -245,5 +322,17 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     User.where(id: actor.id).delete_all
     Company.where(id: company_id).delete_all
     Organization.where(id: organization.id).delete_all
+  end
+
+  def delete_readiness_events_for_cleanup(company_id)
+    connection = EmployeeDocumentRequirementEvent.connection
+    connection.execute(
+      "ALTER TABLE employee_document_requirement_events DISABLE TRIGGER employee_document_requirement_events_append_only"
+    )
+    EmployeeDocumentRequirementEvent.where(company_id: company_id).delete_all
+  ensure
+    connection&.execute(
+      "ALTER TABLE employee_document_requirement_events ENABLE TRIGGER employee_document_requirement_events_append_only"
+    )
   end
 end

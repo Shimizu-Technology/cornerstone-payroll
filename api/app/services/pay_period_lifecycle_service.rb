@@ -24,6 +24,7 @@ class PayPeriodLifecycleService
 
       validate_go_live_gate!
       validate_variable_period_pay!
+      validate_employee_document_readiness!
       validate_client_approval!
       pay_period.update!(
         status: "approved",
@@ -69,6 +70,7 @@ class PayPeriodLifecycleService
 
       validate_go_live_gate!
       validate_variable_period_pay!
+      validate_employee_document_readiness!
       validate_client_approval!
       pay_period.update!(
         status: "committed",
@@ -132,6 +134,12 @@ class PayPeriodLifecycleService
   def validate_client_approval!
     PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).verify_required_approval!
   rescue PayrollReview::RevisionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
+  def validate_employee_document_readiness!
+    EmployeeDocumentReadiness.require_payroll_ready!(pay_period)
+  rescue EmployeeDocumentReadiness::BlockedError => e
     raise InvalidTransitionError, e.message
   end
 

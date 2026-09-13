@@ -66,6 +66,11 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
       source: "employee_creation",
       created_by_id: super_admin.id
     )
+    expect(result.new_employee).to be_document_readiness_required
+    expect(result.new_employee.employee_document_requirements.pluck(:requirement_type)).to contain_exactly(
+      "identity_and_work_authorization",
+      "withholding_election"
+    )
     expect(historical_item.reload.employee_id).to eq(contractor.id)
     expect(AuditLog.last).to have_attributes(
       action: "employees#transition_tax_classification",

@@ -39,7 +39,8 @@ module Api
               include_lifecycle: true,
               include_w4_history: true,
               include_retirement_history: true,
-              include_configuration_review_history: true
+              include_configuration_review_history: true,
+              include_document_readiness: true
             )
           }
         end
@@ -52,6 +53,7 @@ module Api
           require_ssn_confirmation!(@employee)
 
           Employee.transaction do
+            current_company.lock!
             @employee.save!
             EmployeeW4ElectionChangeService.new(
               employee: @employee,
@@ -60,9 +62,16 @@ module Api
               source: "employee_creation",
               reason: w4_reason
             ).call!
+            EmployeeDocumentReadiness.seed_new_hire!(employee: @employee, actor: current_user)
           end
 
-          render json: { data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true) }, status: :created
+          render json: {
+            data: serialize_employee(
+              @employee,
+              include_w4_history: true,
+              include_document_readiness: true
+            )
+          }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -391,7 +400,8 @@ module Api
           include_lifecycle: false,
           include_w4_history: false,
           include_retirement_history: false,
-          include_configuration_review_history: false
+          include_configuration_review_history: false,
+          include_document_readiness: false
         )
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
@@ -463,6 +473,10 @@ module Api
                   "reviewed_by_name" => resolution.reviewed_by_name
                 )
               end
+          end
+
+          if include_document_readiness
+            data["document_readiness"] = EmployeeDocumentReadiness.summary(employee)
           end
 
           data

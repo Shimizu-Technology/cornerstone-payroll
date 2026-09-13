@@ -17,3 +17,11 @@ export function validateHireDate(value: string): string | null {
   return year < 1900 || year > new Date().getFullYear() + 1 || !/^\d{4}-\d{2}-\d{2}$/.test(value)
     ? 'Hire date must have a year between 1900 and next year' : null;
 }
+
+export function withDocumentReadiness(
+  employee: Employee | null,
+  expectedEmployeeId: number,
+  readiness: Employee['document_readiness'],
+): Employee | null {
+  return employee?.id === expectedEmployeeId ? { ...employee, document_readiness: readiness } : employee;
+}

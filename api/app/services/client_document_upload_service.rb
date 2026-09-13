@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class ClientDocumentUploadService
-  Result = Struct.new(:documents, :uploaded_keys, keyword_init: true)
+  Result = Struct.new(:documents, :uploaded_keys, :document_requirement, keyword_init: true)
 
   def initialize(company_id:, current_user:, params:)
     @company_id = company_id
@@ -15,19 +15,29 @@ class ClientDocumentUploadService
     raise ArgumentError, "at least one file is required" if files.empty?
 
     employee = find_employee!
+    document_requirement = find_document_requirement!(employee, files)
     validation_errors = validation_errors_for(files)
     raise ActiveRecord::RecordInvalid.new(validation_proxy(validation_errors)) if validation_errors.any?
 
     uploaded_keys = []
     documents = []
+    prepared_uploads = files.map do |file|
+      file_key = build_file_key(file.original_filename)
+      content_type = ClientDocument.detected_content_type(file)
+      @storage.upload(file_key, file.tempfile || file, content_type: content_type)
+      uploaded_keys << file_key
+      { file: file, file_key: file_key, content_type: content_type }
+    end
 
     ClientDocument.transaction do
-      files.each do |file|
-        file_key = build_file_key(file.original_filename)
-        content_type = ClientDocument.detected_content_type(file)
-        @storage.upload(file_key, file.tempfile || file, content_type: content_type)
-        uploaded_keys << file_key
+      if document_requirement
+        Company.lock.find(@company_id)
+        employee = find_employee!
+        document_requirement = find_document_requirement!(employee, files)
+      end
 
+      prepared_uploads.each do |prepared_upload|
+        file = prepared_upload.fetch(:file)
         documents << ClientDocument.create!(
           company_id: @company_id,
           employee: employee,
@@ -35,8 +45,8 @@ class ClientDocumentUploadService
           title: document_title_for(file, files.count),
           category: @params[:category].presence || "misc",
           file_name: file.original_filename,
-          file_key: file_key,
-          content_type: content_type,
+          file_key: prepared_upload.fetch(:file_key),
+          content_type: prepared_upload.fetch(:content_type),
           file_size: file.size,
           notes: @params[:notes],
           preview_status: ClientDocument.initial_preview_status_for(file),
@@ -44,9 +54,33 @@ class ClientDocumentUploadService
           shared_by_staff: shared_by_staff?
         )
       end
+
+      if document_requirement
+        document_requirement.with_lock do
+          prior_status = document_requirement.status
+          document_requirement.update!(
+            client_document: documents.first,
+            status: "received",
+            received_at: Time.current,
+            reviewed_by: nil,
+            reviewed_at: nil,
+            review_note: nil
+          )
+          document_requirement.events.create!(
+            company: document_requirement.company,
+            employee: document_requirement.employee,
+            client_document: documents.first,
+            document_title: documents.first.title,
+            actor: @current_user,
+            event_type: "document_received",
+            from_status: prior_status,
+            to_status: "received"
+          )
+        end
+      end
     end
 
-    Result.new(documents: documents, uploaded_keys: uploaded_keys)
+    Result.new(documents: documents, uploaded_keys: uploaded_keys, document_requirement: document_requirement)
   rescue StandardError
     uploaded_keys&.each { |key| @storage.delete(key) }
     raise
@@ -64,6 +98,18 @@ class ClientDocumentUploadService
     Employee.find_by(id: @params[:employee_id], company_id: @company_id).tap do |employee|
       raise ActiveRecord::RecordNotFound, "Employee not found" unless employee
     end
+  end
+
+  def find_document_requirement!(employee, files)
+    return nil if @params[:requirement_id].blank?
+    raise ArgumentError, "choose one file when attaching it to a readiness item" unless files.one?
+    raise ActiveRecord::RecordNotFound, "Employee not found" unless employee
+
+    EmployeeDocumentRequirement.find_by(
+      id: @params[:requirement_id],
+      company_id: @company_id,
+      employee_id: employee.id
+    ) || raise(ActiveRecord::RecordNotFound, "Document requirement not found")
   end
 
   def validation_errors_for(files)

@@ -54,9 +54,11 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
       address_line1: nil,
       configuration_source: "quickbooks_history",
       configuration_review_status: "needs_review",
+      document_readiness_required: false,
       roth_retirement_rate: 0.04.to_d,
       employer_roth_match_rate: 0.04.to_d
     )
+    expect(active.employee_document_requirements).to be_empty
     expect(active.employee_payroll_fields.joins(:payroll_field_definition).pluck("payroll_field_definitions.name", :amount)).to eq(
       [ [ "Health Insurance", 105.to_d ] ]
     )
