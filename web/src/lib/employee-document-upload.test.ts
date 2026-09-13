@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isCurrentEmployeeDocumentRequest,
+  isCurrentEmployeeDocumentScope,
   readinessUploadError,
   reconcileEmployeeDocumentLoads,
   selectReadinessItem,
@@ -53,5 +54,10 @@ describe('employee document readiness upload state', () => {
   it('rejects an employee-document response superseded by a newer request', () => {
     expect(isCurrentEmployeeDocumentRequest(8, 9)).toBe(false);
     expect(isCurrentEmployeeDocumentRequest(9, 9)).toBe(true);
+  });
+
+  it('rejects employee-document work captured for a different employee', () => {
+    expect(isCurrentEmployeeDocumentScope(17, 18)).toBe(false);
+    expect(isCurrentEmployeeDocumentScope(18, 18)).toBe(true);
   });
 });
