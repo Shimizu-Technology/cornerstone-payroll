@@ -7,7 +7,13 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
-import { isCurrentEmployeeDocumentRequest, readinessUploadError, reconcileEmployeeDocumentLoads, selectReadinessItem } from '@/lib/employee-document-upload';
+import {
+  isCurrentEmployeeDocumentRequest,
+  isCurrentEmployeeDocumentScope,
+  readinessUploadError,
+  reconcileEmployeeDocumentLoads,
+  selectReadinessItem,
+} from '@/lib/employee-document-upload';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -95,10 +101,15 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loadSequenceRef = useRef(0);
   const loadedEmployeeIdRef = useRef<number | null>(null);
+  const activeEmployeeIdRef = useRef(employeeId);
+  activeEmployeeIdRef.current = employeeId;
 
   const api = isClient ? clientDocumentsApi : adminClientDocumentsApi;
 
   const loadDocuments = useCallback(async () => {
+    const requestEmployeeId = employeeId;
+    if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+
     const requestId = loadSequenceRef.current + 1;
     loadSequenceRef.current = requestId;
     if (loadedEmployeeIdRef.current !== employeeId) {
@@ -107,6 +118,16 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       setRequirements([]);
       setReadyForPayroll(true);
       setRequirementDrafts({});
+      setSavingRequirementId(null);
+      setUploading(false);
+      setError(null);
+      setSuccess(null);
+      setPreviewDocument(null);
+      setPreviewOpen(false);
+      setPreviewLoading(false);
+      setPreviewPayload(null);
+      setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, requirement_id: '', files: [] });
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
 
     try {
@@ -118,7 +139,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
           ? clientEmployeeDocumentRequirementsApi.list(employeeId)
           : adminEmployeeDocumentRequirementsApi.list(employeeId),
       ]);
-      if (!isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)) return;
+      if (
+        !isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)
+        || !isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
+      ) return;
 
       const loaded = reconcileEmployeeDocumentLoads(documentsResult, requirementsResult);
       if (loaded.documents) {
@@ -140,7 +164,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       }
       setError(loaded.error);
     } finally {
-      if (isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)) setLoading(false);
+      if (
+        isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)
+        && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
+      ) setLoading(false);
     }
   }, [api, employeeId, isClient, onReadinessChange]);
 
@@ -156,6 +183,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
   const handleUpload = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const requestEmployeeId = employeeId;
     const uploadError = readinessUploadError(form.requirement_id, selectedFiles);
     if (uploadError) {
       setError(uploadError);
@@ -176,18 +204,23 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       if (form.notes.trim()) payload.append('notes', form.notes.trim());
 
       const response = await api.upload(payload);
+      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+
       setSuccess(response.message || 'Employee document uploaded');
       setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, requirement_id: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
       await loadDocuments();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload employee document');
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+        setError(err instanceof Error ? err.message : 'Failed to upload employee document');
+      }
     } finally {
-      setUploading(false);
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setUploading(false);
     }
   };
 
   const saveRequirement = async (requirement: EmployeeDocumentRequirement) => {
+    const requestEmployeeId = employeeId;
     const draft = requirementDrafts[requirement.id];
     if (!draft) return;
 
@@ -201,18 +234,23 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         review_note: draft.reviewNote.trim() || undefined,
         lock_version: requirement.lock_version,
       });
+      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+
       setRequirements(response.data);
       setReadyForPayroll(response.readiness.ready_for_payroll);
       setSuccess(`${requirement.label} readiness updated`);
       await loadDocuments();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update employee document readiness');
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+        setError(err instanceof Error ? err.message : 'Failed to update employee document readiness');
+      }
     } finally {
-      setSavingRequirementId(null);
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setSavingRequirementId(null);
     }
   };
 
   const handleDownload = async (document: ClientDocument) => {
+    const requestEmployeeId = employeeId;
     try {
       setError(null);
       const file = await api.download(document.id);
@@ -225,11 +263,14 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to download employee document');
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+        setError(err instanceof Error ? err.message : 'Failed to download employee document');
+      }
     }
   };
 
   const handlePreview = async (document: ClientDocument) => {
+    const requestEmployeeId = employeeId;
     try {
       setError(null);
       setPreviewDocument(document);
@@ -237,26 +278,36 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       setPreviewLoading(true);
       setPreviewPayload(null);
       const file = await api.preview(document.id);
-      setPreviewPayload(await prepareDocumentPreview(document, file.blob));
+      const payload = await prepareDocumentPreview(document, file.blob);
+      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+
+      setPreviewPayload(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to preview employee document');
-      setPreviewOpen(false);
-      setPreviewDocument(null);
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+        setError(err instanceof Error ? err.message : 'Failed to preview employee document');
+        setPreviewOpen(false);
+        setPreviewDocument(null);
+      }
     } finally {
-      setPreviewLoading(false);
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setPreviewLoading(false);
     }
   };
 
   const handleDelete = async (document: ClientDocument) => {
     if (!window.confirm(`Delete "${document.title}"?`)) return;
+    const requestEmployeeId = employeeId;
 
     try {
       setError(null);
       await api.delete(document.id);
+      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+
       setSuccess('Employee document deleted');
       await loadDocuments();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete employee document');
+      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+        setError(err instanceof Error ? err.message : 'Failed to delete employee document');
+      }
     }
   };
 

@@ -21,6 +21,10 @@ export function isCurrentEmployeeDocumentRequest(requestId: number, latestReques
   return requestId === latestRequestId;
 }
 
+export function isCurrentEmployeeDocumentScope(requestEmployeeId: number, activeEmployeeId: number): boolean {
+  return requestEmployeeId === activeEmployeeId;
+}
+
 export function reconcileEmployeeDocumentLoads<Documents, Readiness>(
   documentsResult: PromiseSettledResult<Documents>,
   readinessResult: PromiseSettledResult<Readiness>,
