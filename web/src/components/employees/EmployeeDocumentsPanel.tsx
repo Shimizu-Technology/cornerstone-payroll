@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Eye, FileText, UploadCloud, Trash2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Eye, FileText, ShieldCheck, UploadCloud, Trash2, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,8 +9,18 @@ import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModa
 import { prepareDocumentPreview } from '@/lib/documentPreview';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { adminClientDocumentsApi, clientDocumentsApi } from '@/services/api';
-import type { ClientDocument } from '@/services/api';
+import {
+  adminClientDocumentsApi,
+  adminEmployeeDocumentRequirementsApi,
+  clientDocumentsApi,
+  clientEmployeeDocumentRequirementsApi,
+} from '@/services/api';
+import type {
+  ClientDocument,
+  EmployeeDocumentReadinessResponse,
+  EmployeeDocumentRequirement,
+  EmployeeDocumentRequirementStatus,
+} from '@/services/api';
 
 const documentCategories = [
   { value: 'employee_onboarding', label: 'W-4 / W-9 / Onboarding' },
@@ -30,6 +40,13 @@ interface EmployeeDocumentsPanelProps {
   isClient: boolean;
   className?: string;
   headerAction?: React.ReactNode;
+  onReadinessChange?: (readiness: EmployeeDocumentReadinessResponse['readiness']) => void;
+}
+
+interface RequirementReviewDraft {
+  status: Exclude<EmployeeDocumentRequirementStatus, 'missing'>;
+  clientDocumentId: string;
+  reviewNote: string;
 }
 
 function formatFileSize(bytes: number) {
@@ -41,9 +58,23 @@ function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
 }
 
-export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, className, headerAction }: EmployeeDocumentsPanelProps) {
+function requirementStatusLabel(value: EmployeeDocumentRequirementStatus) {
+  return {
+    missing: 'Missing',
+    received: 'Received — review needed',
+    verified: 'Verified',
+    rejected: 'Rejected — replacement needed',
+    waived: 'Waived with reason',
+  }[value];
+}
+
+export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, className, headerAction, onReadinessChange }: EmployeeDocumentsPanelProps) {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [requirements, setRequirements] = useState<EmployeeDocumentRequirement[]>([]);
+  const [readyForPayroll, setReadyForPayroll] = useState(true);
+  const [requirementDrafts, setRequirementDrafts] = useState<Record<number, RequirementReviewDraft>>({});
+  const [savingRequirementId, setSavingRequirementId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +88,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
     category: 'employee_onboarding',
     notes: '',
     visible_to_client: true,
+    requirement_id: '',
     files: [] as File[],
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -67,14 +99,30 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
     try {
       setLoading(true);
       setError(null);
-      const response = await api.list({ employee_id: employeeId });
-      setDocuments(response.data);
+      const [documentsResponse, requirementsResponse] = await Promise.all([
+        api.list({ employee_id: employeeId }),
+        isClient
+          ? clientEmployeeDocumentRequirementsApi.list(employeeId)
+          : adminEmployeeDocumentRequirementsApi.list(employeeId),
+      ]);
+      setDocuments(documentsResponse.data);
+      setRequirements(requirementsResponse.data);
+      setReadyForPayroll(requirementsResponse.readiness.ready_for_payroll);
+      onReadinessChange?.(requirementsResponse.readiness);
+      setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
+        requirement.id,
+        {
+          status: requirement.status === 'missing' ? 'received' : requirement.status,
+          clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
+          reviewNote: requirement.review_note || '',
+        },
+      ])));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load employee documents');
     } finally {
       setLoading(false);
     }
-  }, [api, employeeId]);
+  }, [api, employeeId, isClient, onReadinessChange]);
 
   useEffect(() => {
     void loadDocuments();
@@ -98,19 +146,45 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       selectedFiles.forEach((file) => payload.append('files[]', file));
       payload.append('employee_id', String(employeeId));
       payload.append('category', form.category);
+      if (form.requirement_id) payload.append('requirement_id', form.requirement_id);
       if (!isClient) payload.append('visible_to_client', String(form.visible_to_client));
       if (supportsSingleTitle && form.title.trim()) payload.append('title', form.title.trim());
       if (form.notes.trim()) payload.append('notes', form.notes.trim());
 
       const response = await api.upload(payload);
       setSuccess(response.message || 'Employee document uploaded');
-      setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, files: [] });
+      setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, requirement_id: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
       await loadDocuments();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload employee document');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const saveRequirement = async (requirement: EmployeeDocumentRequirement) => {
+    const draft = requirementDrafts[requirement.id];
+    if (!draft) return;
+
+    try {
+      setSavingRequirementId(requirement.id);
+      setError(null);
+      setSuccess(null);
+      const response = await adminEmployeeDocumentRequirementsApi.update(employeeId, requirement.id, {
+        status: draft.status,
+        client_document_id: draft.clientDocumentId ? Number(draft.clientDocumentId) : undefined,
+        review_note: draft.reviewNote.trim() || undefined,
+        lock_version: requirement.lock_version,
+      });
+      setRequirements(response.data);
+      setReadyForPayroll(response.readiness.ready_for_payroll);
+      setSuccess(`${requirement.label} readiness updated`);
+      await loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update employee document readiness');
+    } finally {
+      setSavingRequirementId(null);
     }
   };
 
@@ -187,11 +261,165 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         {success && <div className="rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-sm text-success-700">{success}</div>}
 
+        <section aria-labelledby="employee-document-readiness-heading" className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 id="employee-document-readiness-heading" className="flex items-center gap-2 font-semibold text-neutral-950">
+                <ShieldCheck className="h-5 w-5 text-primary-700" aria-hidden="true" />
+                New-hire payroll readiness
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">
+                Uploads count as received first. Cornerstone staff must verify them, or record a reasoned waiver, before this employee can be included in an approved payroll.
+              </p>
+            </div>
+            {requirements.length > 0 && (
+              <span className={cn(
+                'inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold',
+                readyForPayroll ? 'bg-success-50 text-success-800' : 'bg-warning-50 text-warning-900',
+              )}>
+                {readyForPayroll ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                {readyForPayroll ? 'Ready for payroll' : 'Payroll approval blocked'}
+              </span>
+            )}
+          </div>
+
+          {requirements.length === 0 ? (
+            <p className="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-4 text-sm text-neutral-600">
+              No new-hire document checklist is required for this existing employee.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-4">
+              {requirements.map((requirement) => {
+                const draft = requirementDrafts[requirement.id];
+                return (
+                  <div key={requirement.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-neutral-950">{requirement.label}</p>
+                        <p className="mt-2 text-sm text-neutral-600">
+                          {requirement.document_title || (requirement.document_attached ? 'A staff-only file is attached' : 'No document attached')}
+                        </p>
+                      </div>
+                      <span className={cn(
+                        'inline-flex w-fit rounded-full px-4 py-2 text-xs font-semibold',
+                        requirement.status === 'verified' || requirement.status === 'waived'
+                          ? 'bg-success-50 text-success-800'
+                          : requirement.status === 'rejected'
+                            ? 'bg-danger-50 text-danger-700'
+                            : 'bg-warning-50 text-warning-900',
+                      )}>
+                        {requirementStatusLabel(requirement.status)}
+                      </span>
+                    </div>
+
+                    {!isClient && draft && (
+                      <>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
+                          <div>
+                            <label htmlFor={`requirement-status-${requirement.id}`} className="mb-2 block text-xs font-semibold text-neutral-700">Readiness outcome</label>
+                            <Select
+                              id={`requirement-status-${requirement.id}`}
+                              value={draft.status}
+                              onChange={(event) => {
+                                const status = event.target.value as RequirementReviewDraft['status'];
+                                setRequirementDrafts((current) => ({
+                                  ...current,
+                                  [requirement.id]: {
+                                    ...draft,
+                                    status,
+                                    reviewNote: status === 'received' ? '' : draft.reviewNote,
+                                  },
+                                }));
+                              }}
+                            >
+                              <option value="received">Received — review needed</option>
+                              <option value="verified">Verified</option>
+                              <option value="rejected">Rejected — replacement needed</option>
+                              <option value="waived">Waived with reason</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label htmlFor={`requirement-document-${requirement.id}`} className="mb-2 block text-xs font-semibold text-neutral-700">Attached document</label>
+                            <Select
+                              id={`requirement-document-${requirement.id}`}
+                              value={draft.clientDocumentId}
+                              disabled={draft.status === 'waived'}
+                              onChange={(event) => setRequirementDrafts((current) => ({
+                                ...current,
+                                [requirement.id]: { ...draft, clientDocumentId: event.target.value },
+                              }))}
+                            >
+                              <option value="">Choose a document</option>
+                              {documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
+                            </Select>
+                          </div>
+                          <div>
+                            <label htmlFor={`requirement-note-${requirement.id}`} className="mb-2 block text-xs font-semibold text-neutral-700">Review note</label>
+                            <Input
+                              id={`requirement-note-${requirement.id}`}
+                              value={draft.reviewNote}
+                              onChange={(event) => setRequirementDrafts((current) => ({
+                                ...current,
+                                [requirement.id]: { ...draft, reviewNote: event.target.value },
+                              }))}
+                              placeholder={draft.status === 'received' ? 'Optional until reviewed' : 'Required evidence or reason'}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            aria-label={`Save ${requirement.label} status`}
+                            onClick={() => void saveRequirement(requirement)}
+                            disabled={savingRequirementId === requirement.id}
+                          >
+                            {savingRequirementId === requirement.id ? 'Saving…' : 'Save status'}
+                          </Button>
+                        </div>
+                        {(requirement.history || []).length > 0 && (
+                          <details className="mt-4 border-t border-neutral-200 pt-4">
+                            <summary className="cursor-pointer text-xs font-semibold text-neutral-700">View retained readiness history</summary>
+                            <div className="mt-4 grid gap-2">
+                              {(requirement.history || []).map((event) => (
+                                <div key={event.id} className="rounded-lg bg-white px-4 py-2 text-xs leading-5 text-neutral-600">
+                                  <span className="font-semibold text-neutral-800">{requirementStatusLabel(event.to_status)}</span>
+                                  {event.actor_name ? ` by ${event.actor_name}` : ''} · {new Date(event.created_at).toLocaleString()}
+                                  {event.document_title ? ` · ${event.document_title}` : ''}
+                                  {event.note && <p className="mt-2 whitespace-pre-wrap">{event.note}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         <form onSubmit={handleUpload} className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-4">
           <div className="grid gap-4 md:grid-cols-2">
+            {requirements.length > 0 && (
+              <div className="md:col-span-2">
+                <label htmlFor={`employee-document-requirement-${employeeId}`} className="mb-2 block text-sm font-medium text-neutral-700">Readiness item</label>
+                <Select
+                  id={`employee-document-requirement-${employeeId}`}
+                  value={form.requirement_id}
+                  onChange={(event) => setForm((current) => ({ ...current, requirement_id: event.target.value }))}
+                >
+                  <option value="">General employee file</option>
+                  {requirements.map((requirement) => (
+                    <option key={requirement.id} value={requirement.id}>{requirement.label} · {requirementStatusLabel(requirement.status)}</option>
+                  ))}
+                </Select>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">Choose an item to mark the uploaded file as received and ready for staff review.</p>
+              </div>
+            )}
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
+              <label htmlFor={`employee-document-title-${employeeId}`} className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
               <Input
+                id={`employee-document-title-${employeeId}`}
                 value={form.title}
                 onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
                 placeholder={supportsSingleTitle ? 'Optional document title' : 'Each file keeps its filename'}
@@ -199,8 +427,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">Document type</label>
-              <Select value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
+              <label htmlFor={`employee-document-category-${employeeId}`} className="mb-1 block text-sm font-medium text-neutral-700">Document type</label>
+              <Select id={`employee-document-category-${employeeId}`} value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
                 {documentCategories.map((category) => (
                   <option key={category.value} value={category.value}>{category.label}</option>
                 ))}
@@ -218,19 +446,21 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
               </label>
             )}
             <div className={!isClient ? '' : 'md:col-span-2'}>
-              <label className="mb-1 block text-sm font-medium text-neutral-700">Files</label>
+              <label htmlFor={`employee-document-files-${employeeId}`} className="mb-1 block text-sm font-medium text-neutral-700">Files</label>
               <input
+                id={`employee-document-files-${employeeId}`}
                 ref={fileInputRef}
                 type="file"
-                multiple
+                multiple={!form.requirement_id}
                 accept={ACCEPTED_UPLOAD_TYPES}
                 onChange={(event) => setForm((current) => ({ ...current, files: Array.from(event.target.files || []) }))}
                 className="block w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
               />
             </div>
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-neutral-700">Notes</label>
+              <label htmlFor={`employee-document-notes-${employeeId}`} className="mb-1 block text-sm font-medium text-neutral-700">Notes</label>
               <Textarea
+                id={`employee-document-notes-${employeeId}`}
                 value={form.notes}
                 onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
                 rows={2}
@@ -297,7 +527,14 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                     <Download className="mr-1.5 h-4 w-4" /> Download
                   </Button>
                   {(!isClient || document.uploaded_by_id === user?.id) && (
-                    <Button type="button" variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:text-red-700"
+                      aria-label={`Delete ${document.title}`}
+                      onClick={() => void handleDelete(document)}
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   )}

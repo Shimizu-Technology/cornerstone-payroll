@@ -3140,6 +3140,47 @@ export interface ClientDocumentsUploadResponse {
   message?: string;
 }
 
+export type EmployeeDocumentRequirementStatus = 'missing' | 'received' | 'verified' | 'rejected' | 'waived';
+
+export interface EmployeeDocumentRequirement {
+  id: number;
+  employee_id: number;
+  requirement_type: 'identity_and_work_authorization' | 'withholding_election' | 'contractor_tax_form';
+  label: string;
+  status: EmployeeDocumentRequirementStatus;
+  required_for_payroll: boolean;
+  due_on?: string | null;
+  received_at?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_name?: string | null;
+  review_note?: string | null;
+  lock_version: number;
+  document_attached: boolean;
+  client_document_id?: number | null;
+  document_title?: string | null;
+  updated_at: string;
+  history?: Array<{
+    id: number;
+    event_type: 'document_received' | 'status_changed';
+    from_status?: EmployeeDocumentRequirementStatus | null;
+    to_status: EmployeeDocumentRequirementStatus;
+    document_title?: string | null;
+    actor_name?: string | null;
+    note?: string | null;
+    created_at: string;
+  }>;
+}
+
+export interface EmployeeDocumentReadinessResponse {
+  data: EmployeeDocumentRequirement[];
+  readiness: {
+    total: number;
+    required: number;
+    satisfied: number;
+    ready_for_payroll: boolean;
+  };
+}
+
 export interface ClientPortalMessage {
   id: number;
   thread_id: number;
@@ -3339,6 +3380,11 @@ export const clientDocumentsApi = {
     api.delete<void>(`/client/documents/${id}`),
 };
 
+export const clientEmployeeDocumentRequirementsApi = {
+  list: (employeeId: number) =>
+    api.get<EmployeeDocumentReadinessResponse>(`/client/employees/${employeeId}/document_requirements`),
+};
+
 export const clientPortalThreadsApi = {
   list: (params?: { status?: string }) =>
     api.get<{ data: ClientPortalThread[] }>('/client/portal_threads', params),
@@ -3365,6 +3411,24 @@ export const adminClientDocumentsApi = {
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
   delete: (id: number) =>
     api.delete<void>(`/admin/client_documents/${id}`),
+};
+
+export const adminEmployeeDocumentRequirementsApi = {
+  list: (employeeId: number) =>
+    api.get<EmployeeDocumentReadinessResponse>(`/admin/employees/${employeeId}/document_requirements`),
+  update: (
+    employeeId: number,
+    requirementId: number,
+    data: {
+      status: Exclude<EmployeeDocumentRequirementStatus, 'missing'>;
+      client_document_id?: number;
+      review_note?: string;
+      lock_version: number;
+    },
+  ) => api.patch<EmployeeDocumentReadinessResponse>(
+    `/admin/employees/${employeeId}/document_requirements/${requirementId}`,
+    { document_requirement: data },
+  ),
 };
 
 export const adminPortalThreadsApi = {

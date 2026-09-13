@@ -82,6 +82,7 @@ class EmployeeChangeRequest < ApplicationRecord
       employee.lock!
       verify_original_values!
       apply_proposed_changes!(actor: actor)
+      EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor) if request_kind == "create"
       update!(
         status: :approved,
         reviewed_by: actor,
