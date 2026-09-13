@@ -3089,6 +3089,7 @@ export interface CompanyDetail extends CompanyListItem {
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
   simple_payroll_register_enabled?: boolean;
+  require_distinct_check_print_confirmer?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
 }

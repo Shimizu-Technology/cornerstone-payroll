@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 const STATUS_LABELS: Record<CheckPaymentStatus, string> = {
   unprepared: 'Not prepared',
@@ -34,16 +35,11 @@ interface CheckRegisterProps {
   companyId: number | null;
 }
 
-function isoToday(): string {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function guamYearStart(): string {
+  return `${guamBusinessDate().slice(0, 4)}-01-01`;
 }
 
-function isoYearStart(): string {
-  return `${new Date().getFullYear()}-01-01`;
-}
-
-function formatCurrency(value: number): string {
+function formatCurrency(value: string | number): string {
   return Number(value).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
@@ -55,8 +51,8 @@ function formatDate(value: string | null): string {
 export function CheckRegister({ companyId }: CheckRegisterProps) {
   const navigate = useNavigate();
   const [register, setRegister] = useState<CheckRegisterData | null>(null);
-  const [from, setFrom] = useState(isoYearStart());
-  const [to, setTo] = useState(isoToday());
+  const [from, setFrom] = useState(guamYearStart());
+  const [to, setTo] = useState(guamBusinessDate());
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -209,7 +205,8 @@ function Summary({ label, value, tone = 'default' }: { label: string; value: num
 }
 
 function ReconciliationDialog({ row, action, onClose, onSaved }: { row: CheckRegisterRow; action: ReconciliationAction; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [effectiveOn, setEffectiveOn] = useState(isoToday());
+  const [effectiveOn, setEffectiveOn] = useState(guamBusinessDate());
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [evidenceType, setEvidenceType] = useState('bank_statement');
   const [evidenceReference, setEvidenceReference] = useState('');
   const [reason, setReason] = useState('');
@@ -229,7 +226,7 @@ function ReconciliationDialog({ row, action, onClose, onSaved }: { row: CheckReg
         evidence_type: action === 'cleared' ? evidenceType : undefined,
         evidence_reference: action === 'cleared' ? evidenceReference.trim() : undefined,
         reason: action === 'cleared' ? undefined : reason.trim(),
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: idempotencyKey,
       });
       await onSaved();
     } catch (err) {

@@ -1673,7 +1673,7 @@ export interface CheckRegisterRow {
   check_number: string;
   previous_check_numbers: string[];
   payee: string;
-  amount: number;
+  amount: string;
   register_date: string;
   status: CheckPaymentStatus;
   reconciliation_status: 'reconciled' | 'outstanding' | 'action_required';
@@ -1690,11 +1690,11 @@ export interface CheckRegister {
   rows: CheckRegisterRow[];
   summary: {
     count: number;
-    amount: number;
+    amount: string;
     reconciled_count: number;
     outstanding_count: number;
     action_required_count: number;
-    by_status: Record<CheckPaymentStatus, { count: number; amount: number }>;
+    by_status: Record<CheckPaymentStatus, { count: number; amount: string }>;
   };
 }
 

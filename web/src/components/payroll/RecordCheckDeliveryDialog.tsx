@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 interface RecordCheckDeliveryDialogProps {
   item: CheckItem;
@@ -12,13 +13,8 @@ interface RecordCheckDeliveryDialogProps {
   onComplete: () => Promise<void>;
 }
 
-function today(): string {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordCheckDeliveryDialogProps) {
-  const [deliveredOn, setDeliveredOn] = useState(today());
+  const [deliveredOn, setDeliveredOn] = useState(guamBusinessDate());
   const [deliveryMethod, setDeliveryMethod] = useState<'hand_delivery' | 'mail' | 'courier' | 'other'>('hand_delivery');
   const [evidenceReference, setEvidenceReference] = useState('');
   const [note, setNote] = useState('');

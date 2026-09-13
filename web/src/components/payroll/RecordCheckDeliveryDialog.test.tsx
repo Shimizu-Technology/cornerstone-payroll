@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckItem } from '@/types';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 const apiMocks = vi.hoisted(() => ({ markDelivered: vi.fn() }));
@@ -34,5 +35,9 @@ describe('RecordCheckDeliveryDialog', () => {
       evidence_reference: 'USPS receipt 123',
     })));
     expect(onComplete).toHaveBeenCalledOnce();
+  });
+
+  it('uses the Guam business date at the UTC day boundary', () => {
+    expect(guamBusinessDate(new Date('2026-08-31T16:30:00Z'))).toBe('2026-09-01');
   });
 });

@@ -1186,6 +1186,7 @@ export function CheckSettingsPage() {
               <button
                 type="button"
                 role="switch"
+                aria-label="Auto-create FIT tax deposit check"
                 aria-checked={autoCreateFitCheck}
                 onClick={() => setAutoCreateFitCheck(!autoCreateFitCheck)}
                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
@@ -1209,6 +1210,7 @@ export function CheckSettingsPage() {
               <button
                 type="button"
                 role="switch"
+                aria-label="Require a second person to confirm printing"
                 aria-checked={requireDistinctCheckPrintConfirmer}
                 onClick={() => setRequireDistinctCheckPrintConfirmer(!requireDistinctCheckPrintConfirmer)}
                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 ${

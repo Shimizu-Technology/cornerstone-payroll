@@ -45,7 +45,12 @@ class CheckRegisterService
     NonEmployeeCheck
       .where(company_id: company.id, payment_method: "check")
       .where.not(check_number: [ nil, "" ])
-      .where("COALESCE(payment_date, DATE(created_at)) BETWEEN ? AND ?", from, to)
+      .where(<<~SQL.squish, from, to)
+        COALESCE(
+          payment_date,
+          (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Pacific/Guam')::date
+        ) BETWEEN ? AND ?
+      SQL
       .includes(:pay_period, :paid_by, { check_reconciliation_events: :recorded_by })
       .map { |check| build_non_employee_row(check) }
   end
@@ -76,7 +81,7 @@ class CheckRegisterService
       source_type: "non_employee_check",
       payee: check.payable_to,
       amount: check.amount,
-      register_date: check.effective_payment_date,
+      register_date: check.payment_date || check.pay_period&.pay_date || PayrollBusinessClock.date_for(check.created_at),
       issued_on: check.payment_date,
       issued_by: check.paid_by&.name,
       issuance_method: "payment_confirmation",
@@ -98,7 +103,7 @@ class CheckRegisterService
       check_number: source.check_number,
       previous_check_numbers: previous_check_numbers,
       payee: payee,
-      amount: amount.to_d.round(2).to_f,
+      amount: amount.to_d.round(2),
       register_date: register_date,
       status: payment_status,
       reconciliation_status: reconciliation_status(payment_status),

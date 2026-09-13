@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckRegister as CheckRegisterData } from '@/types';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 import { CheckRegister } from './CheckRegister';
 
 const apiMocks = vi.hoisted(() => ({ get: vi.fn(), recordEvent: vi.fn(), exportCsv: vi.fn() }));
@@ -22,7 +23,7 @@ const register: CheckRegisterData = {
       check_number: '8200',
       previous_check_numbers: [],
       payee: 'Mo Shimizu',
-      amount: 1425.75,
+      amount: '1425.75',
       register_date: '2026-08-20',
       status: 'issued',
       reconciliation_status: 'outstanding',
@@ -35,17 +36,17 @@ const register: CheckRegisterData = {
   ],
   summary: {
     count: 1,
-    amount: 1425.75,
+    amount: '1425.75',
     reconciled_count: 0,
     outstanding_count: 1,
     action_required_count: 0,
     by_status: {
-      unprepared: { count: 0, amount: 0 },
-      prepared: { count: 0, amount: 0 },
-      issued: { count: 1, amount: 1425.75 },
-      cleared: { count: 0, amount: 0 },
-      replacement_required: { count: 0, amount: 0 },
-      voided: { count: 0, amount: 0 },
+      unprepared: { count: 0, amount: '0.0' },
+      prepared: { count: 0, amount: '0.0' },
+      issued: { count: 1, amount: '1425.75' },
+      cleared: { count: 0, amount: '0.0' },
+      replacement_required: { count: 0, amount: '0.0' },
+      voided: { count: 0, amount: '0.0' },
     },
   },
 };
@@ -82,5 +83,23 @@ describe('CheckRegister', () => {
       evidence_reference: 'August statement line 15',
       idempotency_key: 'event-key-1',
     })));
+  });
+
+  it('uses the Guam business date at the UTC day boundary', () => {
+    expect(guamBusinessDate(new Date('2026-08-31T16:30:00Z'))).toBe('2026-09-01');
+  });
+
+  it('reuses one idempotency key when a save is retried', async () => {
+    const user = userEvent.setup();
+    apiMocks.recordEvent.mockRejectedValueOnce(new Error('Temporary failure')).mockResolvedValueOnce({ event: {} });
+    render(<MemoryRouter><CheckRegister companyId={7} /></MemoryRouter>);
+    await screen.findByText('Mo Shimizu');
+    await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
+    await user.type(screen.getByLabelText('Evidence reference'), 'Statement reference');
+    await user.click(screen.getByRole('button', { name: 'Save Evidence' }));
+    await screen.findByText('Temporary failure');
+    await user.click(screen.getByRole('button', { name: 'Save Evidence' }));
+    await waitFor(() => expect(apiMocks.recordEvent).toHaveBeenCalledTimes(2));
+    expect(apiMocks.recordEvent.mock.calls.map(([payload]) => payload.idempotency_key)).toEqual(['event-key-1', 'event-key-1']);
   });
 });

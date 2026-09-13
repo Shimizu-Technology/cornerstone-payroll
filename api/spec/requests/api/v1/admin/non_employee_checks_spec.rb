@@ -628,6 +628,41 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("No printable")
     end
+
+    it "blocks pay-period PDFs when the verified package workflow is required" do
+      company.update!(require_distinct_check_print_confirmer: true)
+      check = create(:non_employee_check, company:, pay_period:, check_number: "7001",
+        payable_to: "Vendor One", amount: BigDecimal("35.00"))
+
+      post "/api/v1/admin/non_employee_checks/batch_pdf", params: { ids: [ check.id ] }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+    end
+  end
+
+  describe "verified package guards for a single non-employee check" do
+    let!(:check) do
+      create(:non_employee_check, company:, pay_period:, check_number: "7001",
+        payable_to: "Vendor One", amount: BigDecimal("35.00"))
+    end
+
+    before { company.update!(require_distinct_check_print_confirmer: true) }
+
+    it "blocks the legacy single-check PDF" do
+      get "/api/v1/admin/non_employee_checks/#{check.id}/check_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+    end
+
+    it "blocks marking one pay-period check printed" do
+      post "/api/v1/admin/non_employee_checks/#{check.id}/mark_printed"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("verified check print package")
+      expect(check.reload.printed_at).to be_nil
+    end
   end
 
   describe "POST /api/v1/admin/non_employee_checks/mark_all_printed" do
@@ -676,7 +711,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
     it "requires the verified package workflow for pay-period checks when second-person confirmation is enabled" do
       company.update!(require_distinct_check_print_confirmer: true)
       check = create(:non_employee_check, company: company, pay_period: pay_period,
-        check_number: "7001", payable_to: "Vendor One", amount: 35.00)
+        check_number: "7001", payable_to: "Vendor One", amount: BigDecimal("35.00"))
 
       post "/api/v1/admin/non_employee_checks/mark_all_printed",
         params: { pay_period_id: pay_period.id },

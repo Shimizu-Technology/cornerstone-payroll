@@ -64,6 +64,37 @@ RSpec.describe CheckReconciliationEventService do
     }.to raise_error(described_class::Error, /different reconciliation action/)
   end
 
+  it "recovers from a cross-source idempotency collision without leaving the transaction aborted" do
+    issue_employee_check!
+    payment = create(:non_employee_check, :with_check_number, company:, pay_period: period,
+      payment_period_type: "pay_period", payment_date: Date.new(2026, 8, 20))
+    payment.mark_printed!
+    payment.mark_paid!(actor:, payment_date: "2026-08-20")
+    key = SecureRandom.uuid
+    existing = company.check_reconciliation_events.create!(
+      pay_period: period, non_employee_check: payment, recorded_by: actor,
+      event_type: "cleared", check_number: payment.check_number, amount: payment.amount,
+      effective_on: Date.new(2026, 8, 24), evidence_type: "bank_portal",
+      evidence_reference: "Existing transaction", idempotency_key: key
+    )
+    events = company.check_reconciliation_events
+    allow(company).to receive(:check_reconciliation_events).and_return(events)
+    allow(events).to receive(:find_by).with(idempotency_key: key).and_return(nil)
+    allow(events).to receive(:create!) do
+      CheckReconciliationEvent.insert_all!([
+        existing.attributes.except("id", "created_at", "updated_at")
+      ])
+    end
+
+    expect {
+      perform(
+        source_type: "payroll_item", source_id: payroll_item.id, event_type: "cleared",
+        effective_on: "2026-08-24", evidence_type: "bank_portal",
+        evidence_reference: "New transaction", idempotency_key: key
+      )
+    }.to raise_error(described_class::Error, /different reconciliation action/)
+  end
+
   it "rejects a reused idempotency key when the evidence details differ" do
     issue_employee_check!
     key = SecureRandom.uuid

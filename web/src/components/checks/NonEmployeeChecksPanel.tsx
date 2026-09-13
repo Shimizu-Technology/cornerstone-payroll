@@ -118,6 +118,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
   const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
   const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
+  const requiresVerifiedPrintPackage = company?.require_distinct_check_print_confirmer === true;
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -679,7 +680,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:gap-1 [&>button]:w-full sm:[&>button]:w-auto">
-                      <Button
+                      {!requiresVerifiedPrintPackage && <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handlePreviewPdf(check)}
@@ -687,8 +688,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         className="text-xs px-2 py-1"
                       >
                         {pdfLoading === check.id ? '...' : 'Preview'}
-                      </Button>
-                      <Button
+                      </Button>}
+                      {!requiresVerifiedPrintPackage && <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handlePrintSingle(check)}
@@ -696,7 +697,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         className="text-xs px-2 py-1"
                       >
                         Print
-                      </Button>
+                      </Button>}
                       {!check.voided && (
                         <Button
                           size="sm"
@@ -707,7 +708,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                           Edit
                         </Button>
                       )}
-                      {!check.voided && !check.printed_at && (
+                      {!requiresVerifiedPrintPackage && !check.voided && !check.printed_at && (
                         <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
                           {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
                         </Button>

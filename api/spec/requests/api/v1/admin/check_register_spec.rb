@@ -48,7 +48,7 @@ RSpec.describe "Api::V1::Admin::CheckRegister", type: :request do
     register = response.parsed_body.fetch("check_register")
     expect(register.fetch("rows").map { |row| row.fetch("check_number") }).to eq(%w[8200 8201])
     expect(register.fetch("rows").map { |row| row.fetch("status") }).to contain_exactly("issued", "issued")
-    expect(register.dig("summary", "amount")).to eq(1856.0)
+    expect(register.dig("summary", "amount")).to eq("1856.0")
     expect(register.dig("summary", "outstanding_count")).to eq(2)
   end
 
@@ -73,9 +73,41 @@ RSpec.describe "Api::V1::Admin::CheckRegister", type: :request do
 
     expect(response).to have_http_status(:ok)
     expect(response.media_type).to eq("text/csv")
+    expect(response.headers.fetch("Cache-Control")).to include("no-store")
     expect(response.body).to include("Register Date,Check Number,Payee,Amount")
     expect(response.body).to include("8200,Mo Shimizu,1425.75")
     expect(response.body).to include("8201,Treasurer of Guam,430.25")
+  end
+
+  it "neutralizes spreadsheet formulas in user-controlled CSV cells" do
+    employee.update!(first_name: "=HYPERLINK", last_name: "+Injected")
+    other_payment.update!(payable_to: "@SUM(1+1)", confirmation_number: "-cmd")
+
+    get "/api/v1/admin/check_register/export", headers:, params: { from: "2026-08-01", to: "2026-08-31" }
+
+    expect(response.body).to include("'=HYPERLINK +Injected")
+    expect(response.body).to include("'@SUM(1+1)")
+    expect(response.body).to include("'-cmd")
+  end
+
+  it "uses the Guam business date for standalone checks created near the UTC boundary" do
+    standalone = create(:non_employee_check, company:, pay_period: nil, payment_period_type: "none",
+      payment_method: "check", check_number: "8300", payment_date: nil, payable_to: "Boundary Vendor")
+    standalone.update_column(:created_at, Time.utc(2026, 8, 31, 16, 30))
+
+    get "/api/v1/admin/check_register", headers:, params: { from: "2026-09-01", to: "2026-09-01" }
+
+    row = response.parsed_body.dig("check_register", "rows").find { |candidate| candidate.fetch("check_number") == "8300" }
+    expect(row.fetch("register_date")).to eq("2026-09-01")
+  end
+
+  it "reports every employee check in a voided pay period as voided" do
+    period.update!(correction_status: "voided", void_reason: "Entire payroll run was reversed")
+
+    get "/api/v1/admin/check_register", headers:, params: { from: "2026-08-01", to: "2026-08-31" }
+
+    row = response.parsed_body.dig("check_register", "rows").find { |candidate| candidate.fetch("check_number") == "8200" }
+    expect(row.fetch("status")).to eq("voided")
   end
 
   it "does not expose another company's checks" do

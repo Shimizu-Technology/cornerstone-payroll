@@ -31,6 +31,7 @@ module Api
 
         def export
           payload = register
+          response.headers["Cache-Control"] = "no-store"
           send_data generate_csv(payload),
                     filename: "check_register_#{payload[:from]}_through_#{payload[:to]}.csv",
                     type: "text/csv; charset=utf-8",
@@ -70,7 +71,7 @@ module Api
             source_id: event.payroll_item_id || event.non_employee_check_id,
             event_type: event.event_type,
             check_number: event.check_number,
-            amount: event.amount.to_f,
+            amount: event.amount.to_s("F"),
             effective_on: event.effective_on,
             evidence_type: event.evidence_type,
             evidence_reference: event.evidence_reference,
@@ -114,13 +115,19 @@ module Api
             ]
             payload[:rows].each do |row|
               event = row[:latest_reconciliation_event]
-              csv << [
+              csv << sanitize_csv_row([
                 row[:register_date], row[:check_number], row[:payee], format("%.2f", row[:amount]),
                 row[:source_type], row[:status], row[:reconciliation_status], row[:issued_on], row[:issued_by],
                 row[:issuance_method], row[:issuance_reference], event&.dig(:effective_on), event&.dig(:evidence_type),
                 event&.dig(:evidence_reference), event&.dig(:reason), row[:previous_check_numbers].join("; ")
-              ]
+              ])
             end
+          end
+        end
+
+        def sanitize_csv_row(row)
+          row.map do |value|
+            value.is_a?(String) && value.match?(/\A[=+\-@\t\r]/) ? "'#{value}" : value
           end
         end
       end

@@ -58,11 +58,15 @@ export function InlineCheckNumberField({
       {error && <p className="mt-1 max-w-40 text-xs leading-tight text-red-600">{error}</p>}
       {!error && dirty && <p className="mt-1 text-[11px] font-medium text-amber-700">Not saved</p>}
       <span className="sr-only">
-        {allowBlank
-          ? 'This check number may be left blank.'
-          : value.trim()
-            ? 'Check number assigned.'
-            : 'A check number is required.'}
+        {error
+          ? error
+          : dirty
+            ? 'This check number has unsaved changes.'
+            : allowBlank
+              ? 'This check number may be left blank.'
+              : value.trim()
+                ? 'Check number assigned.'
+                : 'A check number is required.'}
       </span>
     </div>
   );

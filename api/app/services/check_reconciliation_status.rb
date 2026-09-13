@@ -12,7 +12,7 @@ class CheckReconciliationStatus
   end
 
   def call
-    return "voided" if source.voided?
+    return "voided" if source.voided? || (source.is_a?(PayrollItem) && source.pay_period.voided?)
 
     event = latest_reconciliation_event
     return "cleared" if event&.event_type == "cleared"

@@ -77,6 +77,9 @@ module Api
           unless @pay_period.committed?
             return render json: { error: "Can only generate check PDF for committed pay periods" }, status: :unprocessable_entity
           end
+          if @pay_period.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
+          end
 
           items = @pay_period.payroll_items
                              .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
@@ -182,6 +185,9 @@ module Api
         def show
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+          if @payroll_item.company.require_distinct_check_print_confirmer?
+            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
 
           if @payroll_item.check_number.blank?

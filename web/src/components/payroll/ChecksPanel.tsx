@@ -542,7 +542,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                   )}
 
                   <MobileCardActions className="grid grid-cols-2">
-                    {item.check_number && (
+                    {item.check_number && !meta?.requires_verified_print_package && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -679,7 +679,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
                       {/* Preview check PDF */}
-                      {item.check_number && (
+                      {item.check_number && !meta?.requires_verified_print_package && (
                         <Button
                           size="sm"
                           variant="outline"

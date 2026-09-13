@@ -19,7 +19,7 @@ class CheckReconciliationEventService
     source.with_lock do
       status = CheckReconciliationStatus.for(source)
       validate_transition!(source, status)
-      event = create_event!(source)
+      event = ActiveRecord::Base.transaction(requires_new: true) { create_event!(source) }
     end
     event
   rescue ActiveRecord::RecordNotUnique
