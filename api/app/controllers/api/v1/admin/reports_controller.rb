@@ -1393,9 +1393,9 @@ module Api
               total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
               total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
               total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
-              total_straight_loan_deductions: w2_items.sum { |item| straight_loan_amount(item) },
-              total_installment_loan_payments: w2_items.sum { |item| installment_loan_amount(item) },
-              total_loan_payments: w2_items.sum { |item| straight_loan_amount(item) + installment_loan_amount(item) },
+              total_straight_loan_deductions: money(w2_items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+              total_installment_loan_payments: money(w2_items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+              total_loan_payments: money(w2_items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) + installment_loan_amount(item) }),
               total_employer_contributions: w2_items.sum { |item| employer_contributions_total(item) },
               total_employer_payroll_cost: w2_items.sum { |item| employer_payroll_cost(item) },
               total_deductions: w2_items.sum(&:total_deductions),
@@ -1845,8 +1845,8 @@ module Api
             tips: items.sum { |item| item.reported_tips.to_f },
             tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
             bonus: items.sum { |item| item.bonus.to_f },
-            straight_loan_deductions: items.sum { |item| straight_loan_amount(item) },
-            installment_loan_payments: items.sum { |item| installment_loan_amount(item) },
+            straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+            installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             employer_contributions: items.sum { |item| employer_contributions_total(item) },
             employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             total_deductions: custom_totals[:total_deductions],
@@ -1871,8 +1871,8 @@ module Api
             total_hours: items.sum { |item| item.hours_worked.to_f },
             total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
             bonus: items.sum { |item| item.bonus.to_f },
-            straight_loan_deductions: items.sum { |item| straight_loan_amount(item) },
-            installment_loan_payments: items.sum { |item| installment_loan_amount(item) },
+            straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+            installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             employer_contributions: items.sum { |item| employer_contributions_total(item) },
             employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
@@ -2012,8 +2012,8 @@ module Api
             total_employer_retirement_match: item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f,
             loan_deduction: item.loan_deduction.to_f,
             loan_payment: item.loan_payment.to_f,
-            straight_loan_deduction: straight_loan_amount(item),
-            installment_loan_payment: installment_loan_amount(item),
+            straight_loan_deduction: money(straight_loan_amount(item)),
+            installment_loan_payment: money(installment_loan_amount(item)),
             employer_contributions_total: employer_contributions_total(item),
             employer_payroll_cost: employer_payroll_cost(item),
             insurance_payment: item.insurance_payment.to_f,
@@ -2441,11 +2441,12 @@ module Api
         end
 
         def straight_loan_amount(item)
-          item[:loan_deduction].to_f
+          BigDecimal(item[:loan_deduction].to_s.presence || "0")
         end
 
         def installment_loan_amount(item)
-          [ item[:loan_payment].to_f - straight_loan_amount(item), 0.0 ].max
+          loan_payment = BigDecimal(item[:loan_payment].to_s.presence || "0")
+          [ loan_payment - straight_loan_amount(item), BigDecimal("0") ].max
         end
 
         def employer_contributions_total(item)
