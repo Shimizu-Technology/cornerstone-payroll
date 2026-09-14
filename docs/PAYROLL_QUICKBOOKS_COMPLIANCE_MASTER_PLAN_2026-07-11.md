@@ -1129,7 +1129,9 @@ This document governs priority and release readiness. Use the following document
 - [Quarterly Payroll Workflow Review](QUARTERLY_PAYROLL_TAX_WORKFLOW_FIRM_REVIEW_2026-04-29.md) — detailed Guam/federal workflow reasoning.
 - [Client Rollout Plan](CLIENT_ROLLOUT_PLAN.md) — parallel-run and cutover process.
 - [Rollout Runbooks](rollout/README.md) — operational templates that must be updated as this plan's corrections are implemented.
-- [Runbook](RUNBOOK.md) — operational reference; review dates and form naming before each filing cycle.
+- [MoSa payroll cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md) — current interface-based MoSa operating procedure.
+- [Operator and recovery acceptance](OPERATOR_AND_RECOVERY_ACCEPTANCE.md) — named operator, identity, restore, queue, monitoring, and signed cycle evidence.
+- [Historical runbook](RUNBOOK.md) — archived 2025 migration and supporting Form 941 notes; not a current payroll procedure.
 - [Invoice Maker Audit and Implementation Plan](INVOICE_MAKER_AUDIT_AND_IMPLEMENTATION_PLAN_2026-07-12.md) — current source of truth for invoice integrity, accounts receivable, document templates, delivery, payments, and AI boundaries.
 - [Tools Expansion Plan](TOOLS_INVOICE_AND_GENERAL_TRANSMITTAL_PLAN_2026-05-02.md) — historical implementation plan for the original native Invoice Maker and General Transmittal build; the dedicated Invoice Maker plan now governs future invoice work.
 

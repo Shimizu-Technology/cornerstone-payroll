@@ -2,6 +2,8 @@
 
 > **Planning note (2026-07-11):** This checklist is a useful feature inventory, but its older "Done" labels do not mean a return is filing-ready, filed, accepted, or correctable. Current priorities and release gates are defined in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md). This checklist covers Cornerstone's payroll use of QuickBooks; it does not claim complete QuickBooks accounting parity.
 
+> Direct payroll-row deletion described by the original prototype is not an approved rollback. Current operations use the audited unapprove, correction, void, and replacement lifecycles.
+
 **Purpose:** Track feature parity vs QuickBooks (Cornerstone's current system) to drive roadmap prioritization toward full QB replacement.  
 **Context:** Cornerstone uses QB primarily for check printing, tax calculations, and payroll reports. The goal is to fully replace QB — including the check-printing workflow — so Cornerstone can process payroll for internal staff and client companies without the QB overhead or Guam address workarounds.
 
@@ -110,7 +112,7 @@
 | Audit log CSV export | ✅ | ❌ **Missing** | Listed in `FUTURE_IMPROVEMENTS.md` | Add CSV export to `audit_logs_controller.rb` — 0.5 day |
 | Audit log retention policies | ✅ | ❌ **Missing** | Listed in `FUTURE_IMPROVEMENTS.md` | Define retention window (7 years per IRS); add archive/purge rake task |
 | Who-ran-payroll tracking | ✅ | ✅ **Done** | `current_user` on audit logs; import records linked to user session | — |
-| Rollback a pay period's import | limited | ✅ **Done** | `PayPeriod#payroll_items.destroy_all` — safe, documented in RUNBOOK | — |
+| Correct or reverse a payroll | limited | ✅ **Current audited lifecycle** | Use supported unapprove, correction, void, and replacement workflows; never delete payroll rows as rollback | — |
 
 ---
 
