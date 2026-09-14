@@ -44,10 +44,15 @@ This contract lets Chels schedule AIRE payroll from Cornerstone without making e
 The pay-run UI uses these authenticated staff endpoints:
 
 - `GET /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_calendar`
+- `GET /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_cockpit/manual_review`
 - `POST /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_calendar/publish`
 - `POST /api/v1/admin/pay_periods/:pay_period_id/aire_payroll_calendar/retry_delivery`
 
 Accountants may read the state. Publishing, revising, and manually retrying delivery require the existing client-configuration permission.
+
+The manual-review endpoint remains available when the local pay period predates calendar publication. It reads AIRE's current payable regular, overtime, and carryover hours for the exact local period dates, decorates employees with their Cornerstone mappings, and never changes either system. The pay-run page compares those totals with the operator's unsaved manual entries and identifies the exact adjustments and excluded hours before calculation. If AIRE is unavailable, manual payroll remains usable and the comparison shows a bounded warning.
+
+After the operator calculates, approves, and commits the run, they link the finalized AIRE batch before printing checks. Recording the checks as issued is the payment action: Cornerstone sends AIRE the corresponding payment acknowledgement automatically. There is no separate manual “mark paid” action in AIRE for a regular linked batch.
 
 AIRE sends finalization events to this service endpoint:
 

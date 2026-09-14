@@ -15,6 +15,7 @@ import { AirePayrollCockpit } from './AirePayrollCockpit';
 
 const apiMocks = vi.hoisted(() => ({
   overview: vi.fn(),
+  manualReview: vi.fn(),
   entries: vi.fn(),
   exceptions: vi.fn(),
   settlements: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/services/api', () => ({
   },
   payPeriodsApi: {
     airePayrollCockpit: apiMocks.overview,
+    airePayrollManualReview: apiMocks.manualReview,
     airePayrollTimeEntries: apiMocks.entries,
     airePayrollExceptions: apiMocks.exceptions,
     airePayrollSettlementCases: apiMocks.settlements,
@@ -213,6 +215,33 @@ function mockLoads(canCommand = true) {
   apiMocks.entries.mockResolvedValue(data.entries);
   apiMocks.exceptions.mockResolvedValue(data.exceptions);
   apiMocks.settlements.mockResolvedValue(data.settlements);
+  apiMocks.manualReview.mockResolvedValue({
+    start_date: period.start_date,
+    end_date: period.end_date,
+    generated_at: period.cutoff_at,
+    employees: [],
+    exclusions: [],
+    issues: {
+      missing_category_count: 0,
+      negative_adjustment_count: 0,
+      pending_approval_count: 0,
+      denied_approval_count: 0,
+      open_clock_count: 0,
+      pending_overtime_count: 0,
+      denied_overtime_count: 0,
+    },
+    summary: {
+      employee_count: 0,
+      adjustment_count: 0,
+      total_hours: 0,
+      regular_hours: 0,
+      overtime_hours: 0,
+      current_count: 0,
+      carryover_count: 0,
+      correction_count: 0,
+      exclusion_count: 0,
+    },
+  });
 }
 
 beforeEach(() => {

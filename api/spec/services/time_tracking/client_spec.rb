@@ -34,6 +34,27 @@ RSpec.describe TimeTracking::Client do
     end
     let(:external_id) { SecureRandom.uuid }
 
+    it "reads a manual payroll review by date range without requiring a published calendar ID" do
+      review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")
+        .with(
+          query: { "start_date" => "2026-08-16", "end_date" => "2026-08-31" },
+          headers: { "X-Payroll-Shared-Secret" => "secret" }
+        )
+        .to_return(
+          status: 200,
+          body: { summary: { total_hours: 42.5 }, employees: [] }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      result = client_for(source).payroll_cockpit_manual_review(
+        start_date: "2026-08-16",
+        end_date: "2026-08-31"
+      )
+
+      expect(result.dig("summary", "total_hours")).to eq(42.5)
+      expect(review_stub).to have_been_requested.once
+    end
+
     it "reads a period and literal time entries with bounded query parameters" do
       period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
         .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
