@@ -132,14 +132,20 @@ class PayrollRegisterPdfGenerator
 
     rows = [
       [ "Employee Count",       s[:employee_count].to_s ],
+      [ "Total Hours",          decimal(s[:total_hours]) ],
+      [ "Total OT Hours",       decimal(s[:total_overtime_hours]) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
+      [ "Bonus",                fmt(s[:total_bonus]) ],
       [ "Reported Tips",        fmt(s[:total_reported_tips]) ],
       [ "Tips Paid Out",        fmt(s[:total_tips_paid_out]) ],
       [ "Total Withholding",    fmt(s[:total_withholding]) ],
       [ "Total Social Security", fmt(s[:total_social_security]) ],
       [ "Total Medicare",       fmt(s[:total_medicare]) ],
       [ "Total Retirement",     fmt(s[:total_retirement]) ],
-      [ "Loan Payments",        fmt(s[:total_loan_payments]) ],
+      [ "Straight Loans",       fmt(s[:total_straight_loan_deductions]) ],
+      [ "Installment Loans",    fmt(s[:total_installment_loan_payments]) ],
+      [ "Employer Contributions", fmt(s[:total_employer_contributions]) ],
+      [ "Employer Payroll Cost", fmt(s[:total_employer_payroll_cost]) ],
       [ "Total Deductions",     fmt(s[:total_deductions]) ],
       [ "Total Net Pay",        fmt(s[:total_net]) ]
     ]
@@ -473,14 +479,18 @@ class PayrollRegisterPdfGenerator
       { key: :gross_pay, label: "Gross Pay", weight: 8, align: :right },
       { key: :reported_tips, label: "Tips", weight: 6, align: :right },
       { key: :tips_paid_out, label: "Tips Out", weight: 6, align: :right },
+      { key: :bonus, label: "Bonus", weight: 6, align: :right },
       { key: :withholding_tax, label: "Withholding", weight: 8, align: :right },
       { key: :additional_withholding, label: "Addtl W/H", weight: 7, align: :right },
       { key: :social_security_tax, label: "Soc Sec", weight: 7, align: :right },
       { key: :medicare_tax, label: "Medicare", weight: 7, align: :right },
       { key: :retirement_payment, label: "Retirement", weight: 7, align: :right },
-      { key: :loan_payment, label: "Loan", weight: 6, align: :right },
+      { key: :straight_loan_deduction, label: "Straight Loan", weight: 6, align: :right },
+      { key: :installment_loan_payment, label: "Installment Loan", weight: 7, align: :right },
       { key: :total_deductions, label: "Deductions", weight: 8, align: :right },
       { key: :net_pay, label: "Net Pay", weight: 8, align: :right },
+      { key: :employer_contributions_total, label: "Employer Contrib.", weight: 7, align: :right },
+      { key: :employer_payroll_cost, label: "Employer Cost", weight: 7, align: :right },
       { key: :check_number, label: "Check #", weight: 8 }
     ]
     columns.insert(5, { key: :custom_earnings_total, label: "Custom Earn", weight: 7, align: :right }) if custom_earnings_column?
@@ -505,6 +515,12 @@ class PayrollRegisterPdfGenerator
       "TOTALS"
     when :gross_pay
       fmt(summary[:total_gross])
+    when :hours_worked
+      decimal(summary[:total_hours])
+    when :overtime_hours
+      decimal(summary[:total_overtime_hours])
+    when :bonus
+      fmt(summary[:total_bonus])
     when :custom_earnings_total
       fmt(summary[:total_custom_earnings])
     when :reported_tips
@@ -521,14 +537,20 @@ class PayrollRegisterPdfGenerator
       fmt(summary[:total_medicare])
     when :retirement_payment
       fmt(summary[:total_retirement])
-    when :loan_payment
-      fmt(summary[:total_loan_payments])
+    when :straight_loan_deduction
+      fmt(summary[:total_straight_loan_deductions])
+    when :installment_loan_payment
+      fmt(summary[:total_installment_loan_payments])
     when :custom_deductions_total
       fmt(summary[:total_custom_deductions])
     when :total_deductions
       fmt(summary[:total_deductions])
     when :net_pay
       fmt(summary[:total_net])
+    when :employer_contributions_total
+      fmt(summary[:total_employer_contributions])
+    when :employer_payroll_cost
+      fmt(summary[:total_employer_payroll_cost])
     else
       ""
     end
@@ -557,5 +579,9 @@ class PayrollRegisterPdfGenerator
 
   def fmt(value)
     format("$%.2f", value.to_f)
+  end
+
+  def decimal(value)
+    format("%.2f", value.to_f)
   end
 end
