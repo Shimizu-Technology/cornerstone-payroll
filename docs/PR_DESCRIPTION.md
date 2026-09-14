@@ -1,5 +1,7 @@
 # PR: MoSa Payroll Import — Full-Year 2025 Implementation & Hardening
 
+> **Historical implementation record.** Its download, backfill, direct-apply, and deletion-based rollback instructions are retired. Use `docs/rollout/02-MOSA-CYCLE-RUNBOOK.md` for current operations.
+
 **Branch:** `feature/mosa-payroll-import`  
 **Target:** `main`  
 **Type:** Feature + Data Pipeline  
@@ -97,7 +99,7 @@ Implements a complete automated payroll import pipeline for **MoSa's Joint (comp
 
 4. **Revel PDF column layout varies.** The parser has a primary fixed-column path and a fallback flexible token-scan path (triggered when any employee parse is implausible — >200h). The 200h threshold matches the validation ceiling and has been verified across all 26 periods with zero regressions.
 
-5. **Gmail OAuth token requires periodic refresh.** If `scripts/mosa_run.sh download` fails with auth errors, run: `GOG_KEYRING_PASSWORD=clawdbot gog gmail auth refresh --account jerry.shimizutechnology@gmail.com --no-input`.
+5. **Historical Gmail OAuth dependency.** The original migration downloader required a locally authenticated OAuth account. That downloader is retired; no keyring password belongs in source control or operator documentation.
 
 6. **`data/mosa-2025/raw/` is git-ignored.** Raw PDF/Excel files contain PII and are not committed. They live locally at `~/work/cornerstone-payroll/data/mosa-2025/raw/` and must be present on any machine running validation.
 
@@ -112,7 +114,7 @@ Implements a complete automated payroll import pipeline for **MoSa's Joint (comp
 | `spec/services/payroll_import/revel_pdf_parser_spec.rb` | Fixed-column + fallback parser; implausible threshold edge cases |
 | Full-year validation (all 26 periods, live PDFs) | 26/26 OK, 0 financial diffs |
 | Backfill script idempotency | Re-run produces 0 new records (deduped on `last_name, first_name`) |
-| Rollback test | `PayPeriod#payroll_items.destroy_all` cleanly reverts a period |
+| Historical rollback test | Superseded. Current payroll corrections use the supported audited lifecycle; row deletion is not an approved rollback. |
 
 ---
 
