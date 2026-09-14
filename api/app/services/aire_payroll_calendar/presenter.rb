@@ -12,10 +12,11 @@ module AirePayrollCalendar
     end
 
     def call
-      source = @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+      calendar_period = @pay_period.aire_payroll_calendar_period
+      source = calendar_period&.time_tracking_source ||
+               @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
       return nil unless source
 
-      calendar_period = @pay_period.aire_payroll_calendar_period
       publication = calendar_period&.latest_publication
       event = calendar_period&.payroll_events&.order(occurred_at: :desc, id: :desc)&.first
       desired = desired_contract
@@ -88,7 +89,8 @@ module AirePayrollCalendar
 
     def eligibility_code(missed_unpublished_cutoff)
       return @eligibility_code if @eligibility_code
-      return "cutoff_passed" if missed_unpublished_cutoff
+
+      "cutoff_passed" if missed_unpublished_cutoff
     end
 
     def serialize_publication(publication)

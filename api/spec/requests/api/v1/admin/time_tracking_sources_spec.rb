@@ -111,6 +111,8 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     source = create(:time_tracking_source, company: company, source_type: "aire_services", shared_secret: "secret")
     client = instance_double(TimeTracking::Client)
     authenticate_as(manager)
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("FRONTEND_URL").and_return("https://payroll.shimizu-technology.com")
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:create_payroll_account_link_session).and_return(
       "authorization_url" => "https://aire.example.com/admin/payroll-link?token=request",
@@ -124,7 +126,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(client).to have_received(:create_payroll_account_link_session).with(
       external_actor_id: manager.id,
       external_actor_email: "chels@example.com",
-      return_url: "http://localhost:5173/time-tracking-sources?source_id=#{source.id}"
+      return_url: "https://payroll.shimizu-technology.com/time-tracking-sources?source_id=#{source.id}"
     )
   end
 

@@ -18,21 +18,21 @@ Ordinary clock and kiosk entries need no extra payroll approval. Manual and manu
 
 ## Trust and operator identity
 
-Read requests use the client connection's shared secret. Commands also use a personal AIRE delegation token. Cornerstone encrypts that token at rest and never returns it to the browser after it is saved.
+Read requests use the client connection's shared secret. Commands also require a durable link between the signed-in Cornerstone operator and an active AIRE administrator.
 
-Each operator must save their own token under **Settings → Time Tracking Source → Your AIRE payroll access**. The setting reports only whether a token exists. Removing it disables that operator's AIRE commands without affecting read-only visibility or another operator's access.
+Each operator selects **Connect my AIRE account** under **Settings → Time Tracking Source → Your AIRE payroll access**. Cornerstone opens AIRE, where the operator signs in, reviews both account identities and the allowed payroll actions, and confirms the link. AIRE then returns the operator to Cornerstone. The link has no timer-based expiration; it remains valid until the operator disconnects it or the AIRE account loses administrator, active-user, or personal sign-in access.
 
-Saving or removing delegated access writes a security audit event without recording the token. Removal permanently deletes the encrypted credential itself; the non-secret audit event remains as the access history.
+Connecting and disconnecting write security audit events in the same database transactions as the link changes. The ten-minute authorization request is single-use, and only its SHA-256 digest is stored. The long-lived connection contains no reusable bearer token.
 
 AIRE remains the authority for command permission. On every command it verifies that:
 
-- the token is valid, active, unexpired, and has the required capability;
+- the Cornerstone operator has an active account link;
 - the linked AIRE user is still active, has personal access, and is still an administrator; and
 - the submitted version is current.
 
-Cornerstone records the signed-in Cornerstone operator and command ID in its audit log. AIRE separately records the delegated AIRE administrator. This gives both businesses an independent, traceable record without treating the shared system credential as a person.
+Cornerstone records the signed-in Cornerstone operator and command ID in its audit log. AIRE separately records the linked AIRE administrator. This gives both businesses an independent, traceable record without treating the shared system credential as a person.
 
-Until AIRE has a grant-management screen, an AIRE administrator issues a token with `PayrollIntegrationGrant.issue!` from an authenticated Rails console. Use `time_approval` for time decisions and `payroll_finalization` for cutoff locking. Copy the one-time raw token directly into the intended operator's Cornerstone setting. Never place it in email, logs, tickets, or source control. Revoke the AIRE grant and remove the Cornerstone copy when access changes.
+The former expiring delegation-token path remains available only as a migration fallback for operators who have not connected yet. New setup does not require a Rails console, token copying, secret storage, or routine renewal. Disconnecting a new account link also removes any legacy Cornerstone delegation for that operator.
 
 ## Cornerstone endpoints
 
@@ -71,7 +71,7 @@ Before production promotion:
 
 - migrate up, down, and up on a disposable database, then load `schema.rb` into an empty database;
 - run the complete Rails and frontend gates;
-- run the two applications locally with an isolated shared secret, published period, AIRE admin grant, employee mapping, ordinary and manual time, and a due cutoff;
-- verify read-only access without a delegation, delegated approve and deny, stale-version conflict, cutoff lock, immutable batch verification, carryover visibility, and processing history;
+- run the two applications locally with an isolated shared secret, connected AIRE admin, published period, employee mapping, ordinary and manual time, and a due cutoff;
+- verify read-only access before linking, the full consent and return flow, linked approve and deny, disconnect behavior, stale-version conflict, cutoff lock, immutable batch verification, carryover visibility, and processing history;
 - inspect the desktop and narrow/mobile layouts in the signed-in black Chrome profile; and
 - verify the browser and both audit logs never expose either raw secret.

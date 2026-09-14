@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeTrackingSources } from './TimeTrackingSources';
 
@@ -39,24 +40,43 @@ const source = {
   last_synced_at: null,
 };
 
+afterEach(() => cleanup());
+
 describe('TimeTrackingSources AIRE account connection', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     Object.values(apiMocks).forEach((mock) => mock.mockReset());
     apiMocks.list.mockResolvedValue({ time_tracking_sources: [source] });
     window.history.replaceState({}, '', '/time-tracking-sources');
   });
 
   it('walks an unlinked operator through a one-time AIRE connection', async () => {
+    const user = userEvent.setup();
+    const navigateToAuthorization = vi.fn();
     apiMocks.getAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
+    apiMocks.createAireAccountLink.mockResolvedValue({
+      authorization_url: 'https://aire-services-guam.netlify.app/admin/payroll-link?token=request',
+      expires_at: '2026-09-15T08:10:00Z',
+    });
 
-    render(<TimeTrackingSources />);
+    render(<TimeTrackingSources navigateToAuthorization={navigateToAuthorization} />);
 
     expect(await screen.findByText('Connect once—no token copying or routine renewal')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Connect my AIRE account' }) as HTMLButtonElement).disabled).toBe(false);
+    const connect = screen.getByRole('button', { name: 'Connect my AIRE account' });
+    expect((connect as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByLabelText(/delegation token/i)).toBeNull();
+
+    await user.click(connect);
+
+    expect(apiMocks.createAireAccountLink).toHaveBeenCalledWith(4);
+    expect(navigateToAuthorization).toHaveBeenCalledWith(
+      'https://aire-services-guam.netlify.app/admin/payroll-link?token=request'
+    );
   });
 
   it('shows the linked AIRE identity and persistent connection behavior', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     apiMocks.getAireAccountLink.mockResolvedValue({
       account_link: {
         connected: true,
@@ -65,13 +85,20 @@ describe('TimeTrackingSources AIRE account connection', () => {
         linked_at: '2026-09-15T08:00:00Z',
       },
     });
+    apiMocks.disconnectAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
 
     render(<TimeTrackingSources />);
 
     expect(await screen.findByText('Connected as Chels Admin')).toBeTruthy();
     expect(screen.getByText('chels@aire.gu')).toBeTruthy();
     expect(screen.getByText(/does not expire on a timer/i)).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Disconnect' }) as HTMLButtonElement).disabled).toBe(false);
+    const disconnect = screen.getByRole('button', { name: 'Disconnect' });
+    expect((disconnect as HTMLButtonElement).disabled).toBe(false);
     await waitFor(() => expect(apiMocks.getAireAccountLink).toHaveBeenCalledWith(4));
+
+    await user.click(disconnect);
+
+    expect(apiMocks.disconnectAireAccountLink).toHaveBeenCalledWith(4);
+    expect(await screen.findByText('Connect once—no token copying or routine renewal')).toBeTruthy();
   });
 });

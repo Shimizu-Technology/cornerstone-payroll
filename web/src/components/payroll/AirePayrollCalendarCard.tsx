@@ -55,6 +55,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const distance = cutoffDistance(calendar.cutoff_at, now);
+  const cutoffPassed = calendar.cutoff_at
+    ? new Date(calendar.cutoff_at).getTime() <= now.getTime()
+    : false;
   const batch = calendar.finalized_batch;
   const batchCopy = lockedBatchCopy(batch);
 
@@ -117,7 +120,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 {busy === 'retry' ? 'Retrying…' : 'Retry sync'}
               </Button>
             )}
-            {isManager && calendar.can_publish && calendar.needs_revision && (
+            {isManager && !cutoffPassed && calendar.can_publish && calendar.needs_revision && (
               <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null}>
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : primaryAction}
@@ -171,7 +174,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         )}
 
-        {calendar.eligible && calendar.cutoff_state === 'unpublished' && (
+        {calendar.eligible && !cutoffPassed && calendar.cutoff_state === 'unpublished' && (
           <div className="flex flex-col gap-4 border-t border-primary-200 bg-primary-50/80 px-6 py-5 sm:flex-row sm:items-center sm:justify-between" role="status">
             <div className="max-w-3xl">
               <p className="font-semibold text-primary-950">Next: publish this cutoff to AIRE</p>

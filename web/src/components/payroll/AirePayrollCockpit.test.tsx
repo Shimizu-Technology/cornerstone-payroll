@@ -475,7 +475,7 @@ describe('AirePayrollCockpit', () => {
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock AIRE cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('link', { name: /connect my AIRE account/i }).getAttribute('href'))
-      .toBe('/time-tracking-sources');
+      .toBe('/time-tracking-sources?source_id=1');
   });
 
   it('does not let an older refresh overwrite a newer payroll view', async () => {

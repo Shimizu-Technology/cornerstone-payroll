@@ -175,9 +175,7 @@ module Api
         end
 
         def aire_account_link_return_url
-          frontend_url = ENV.fetch("FRONTEND_URL") do
-            ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip
-          end
+          frontend_url = ENV.fetch("FRONTEND_URL")
           "#{frontend_url.to_s.chomp('/')}/time-tracking-sources?source_id=#{@source.id}"
         end
 
