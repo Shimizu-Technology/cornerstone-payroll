@@ -35,4 +35,15 @@ RSpec.describe "operations:queue_probe" do
       .and output(a_string_including("TTL_HOURS must be between 1 and 168")).to_stderr
     expect(OperationalQueueProbe).not_to exist
   end
+
+  it "rejects a nonnumeric lifetime before creating a probe" do
+    ENV["PROBE_ID"] = SecureRandom.uuid
+    ENV["TTL_HOURS"] = "abc"
+    task = Rake::Task["operations:queue_probe:enqueue"]
+    task.reenable
+
+    expect { task.invoke }.to raise_error(SystemExit)
+      .and output(a_string_including("TTL_HOURS must be between 1 and 168")).to_stderr
+    expect(OperationalQueueProbe).not_to exist
+  end
 end

@@ -75,7 +75,7 @@ FROM (
 ) AS recovery_rows;"
 
 source_counts="$(psql -At -d "$SOURCE_DATABASE" -c "$count_query")"
-source_migrations="$(psql -At -d "$SOURCE_DATABASE" -c 'SELECT count(*) || chr(58) || max(version) FROM schema_migrations;')"
+source_migrations="$(psql -At -d "$SOURCE_DATABASE" -c "SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations;")"
 source_digest="$(psql -At -d "$SOURCE_DATABASE" -c "$digest_query")"
 
 pg_dump -Fc --no-owner --no-privileges -f "$BACKUP_PATH" "$SOURCE_DATABASE"
@@ -86,12 +86,16 @@ createdb "$RESTORE_DATABASE"
 pg_restore --no-owner --no-privileges -d "$RESTORE_DATABASE" "$BACKUP_PATH"
 
 restore_counts="$(psql -At -d "$RESTORE_DATABASE" -c "$count_query")"
-restore_migrations="$(psql -At -d "$RESTORE_DATABASE" -c 'SELECT count(*) || chr(58) || max(version) FROM schema_migrations;')"
+restore_migrations="$(psql -At -d "$RESTORE_DATABASE" -c "SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations;")"
 restore_digest="$(psql -At -d "$RESTORE_DATABASE" -c "$digest_query")"
 
 [[ "$source_counts" == "$restore_counts" ]] || fail "application record counts differ after restore"
 [[ "$source_migrations" == "$restore_migrations" ]] || fail "schema migration identity differs after restore"
 [[ "$source_digest" == "$restore_digest" ]] || fail "application record contents differ after restore"
+
+migration_count="$(psql -At -d "$SOURCE_DATABASE" -c 'SELECT count(*) FROM schema_migrations;')"
+migration_head="$(psql -At -d "$SOURCE_DATABASE" -c 'SELECT max(version) FROM schema_migrations;')"
+migration_set_sha="$(printf '%s' "$source_migrations" | shasum -a 256 | awk '{print $1}')"
 
 echo "LOCAL DATABASE RECOVERY CERTIFICATION PASSED"
 echo "backup_bytes=$backup_bytes"
@@ -99,4 +103,5 @@ echo "backup_sha256=$backup_sha"
 echo "source_counts=$source_counts"
 echo "restore_counts=$restore_counts"
 echo "record_digest=$source_digest"
-echo "schema_migrations=$source_migrations"
+echo "schema_migrations=$migration_count:$migration_head"
+echo "schema_migration_set_sha256=$migration_set_sha"

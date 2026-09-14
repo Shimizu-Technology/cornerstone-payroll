@@ -28,7 +28,11 @@ namespace :operations do
     desc "Enqueue a non-payroll durability probe (optional PROBE_ID, TTL_HOURS)"
     task enqueue: :environment do
       probe_id = QueueDurabilityProbeTasks.normalized_probe_id(ENV.fetch("PROBE_ID", SecureRandom.uuid))
-      ttl_hours = Integer(ENV.fetch("TTL_HOURS", "24"), 10)
+      begin
+        ttl_hours = Integer(ENV.fetch("TTL_HOURS", "24"), 10)
+      rescue ArgumentError
+        abort "TTL_HOURS must be between 1 and 168"
+      end
       abort "TTL_HOURS must be between 1 and 168" unless ttl_hours.between?(1, 168)
 
       probe = OperationalQueueProbe.create!(probe_id: probe_id, expires_at: ttl_hours.hours.from_now)

@@ -148,7 +148,7 @@ Only after the matrix passes:
 1. confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment;
 2. deploy the attestation change;
 3. run the complete deployed `production:readiness` task;
-4. require Cornerstone to pass 26 of 26 and AIRE to pass 23 of 23; and
+4. require Cornerstone to pass 29 of 29 and AIRE to pass 23 of 23; and
 5. keep production payroll paused until operator and recovery acceptance is complete.
 
 ## Rollback

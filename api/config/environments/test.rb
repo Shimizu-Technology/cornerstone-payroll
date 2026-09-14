@@ -25,7 +25,10 @@ Rails.application.configure do
   # The recovery drill opts into the production queue adapter while keeping the
   # application in the isolated test environment. Ordinary tests retain the
   # default test adapter.
-  config.active_job.queue_adapter = :solid_queue if ENV["SOLID_QUEUE_TEST_MODE"] == "true"
+  if ENV["SOLID_QUEUE_TEST_MODE"] == "true"
+    config.active_job.queue_adapter = :solid_queue
+    config.solid_queue.connects_to = { database: { writing: :primary } }
+  end
 
   # Render exception templates for rescuable exceptions and raise for other exceptions.
   config.action_dispatch.show_exceptions = :rescuable
