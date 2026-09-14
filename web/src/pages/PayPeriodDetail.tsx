@@ -1642,6 +1642,9 @@ export function PayPeriodDetail({
           <AirePayrollCockpit
             key={payPeriod.id}
             payPeriodId={payPeriod.id}
+            payPeriodStatus={payPeriod.status}
+            payrollHours={hoursMap}
+            aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
           />

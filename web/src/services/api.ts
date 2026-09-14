@@ -1080,6 +1080,10 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit`,
       { ...params, employee_per_page: 100 }
     ),
+  airePayrollManualReview: (id: number) =>
+    api.get<import('@/types').AirePayrollManualReview>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`
+    ),
   airePayrollTimeEntries: (id: number, params?: { employee_id?: string; approval_status?: string; page?: number }) =>
     api.get<import('@/types').AirePayrollTimeEntriesResponse>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/time_entries`,
