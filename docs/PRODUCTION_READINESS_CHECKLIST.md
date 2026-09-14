@@ -35,7 +35,7 @@ The command validates the effective Rails configuration rather than trusting fea
 
 The R2 and cache probes create random, non-customer test values and remove their exact keys in an `ensure` path. The command sends no email, creates no payroll/customer row, and never prints provider responses or secret-bearing exception messages. Its final `EVIDENCE` line is safe to retain with release artifacts.
 
-`REQUIRE_MFA=true` is an operational attestation: MFA must also be enforced and verified in the Clerk production dashboard. The application cannot prove a provider-side policy merely from an environment variable.
+`REQUIRE_MFA=true` is an operational attestation: MFA must also be enforced and verified in the Clerk production dashboard. `CLERK_MFA_ATTESTED_INSTANCE_ID` binds that attestation to the instance returned by Clerk's authenticated API, and `CLERK_MFA_EVIDENCE_REF` records the non-secret reference for the independently reviewed provider evidence. The application still cannot inspect Clerk's provider-side MFA policy directly, so missing independent evidence is a failed control even when the runtime check passes.
 
 ## Release evidence
 

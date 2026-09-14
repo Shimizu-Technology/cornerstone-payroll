@@ -109,7 +109,7 @@ class ProductionReadiness
       check("Solid Cache is the effective cache store") { Array(config.cache_store).first.to_sym == :solid_cache_store },
       check("Solid Queue is the effective job adapter") { job_adapter.class.name.include?("SolidQueue") },
       check("Solid Cable is the effective cable adapter") { cable_adapter == "solid_cable" },
-      check("MFA enforcement is attested") { env["REQUIRE_MFA"] == "true" },
+      check("MFA enforcement has instance-bound evidence") { mfa_attestation_recorded? },
       check("effective trusted proxies reject arbitrary public clients") { trusted_proxies_are_bounded? },
       check("allowed frontend origins are explicit production HTTPS origins") { production_origins_valid? },
       check("mailer URL is a production HTTPS URL") { production_https_url?(env["FRONTEND_URL"]) },
@@ -144,7 +144,7 @@ class ProductionReadiness
       check("Solid Cable database accepts a query") { select_one(cable_record) },
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
-      check("Clerk Backend API accepts the configured key") { clerk_ready? },
+      check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
     ]
   end
@@ -192,6 +192,17 @@ class ProductionReadiness
   def production_clerk_keys?
     env["CLERK_PUBLISHABLE_KEY"].to_s.start_with?("pk_live_") &&
       env["CLERK_SECRET_KEY"].to_s.start_with?("sk_live_")
+  end
+
+  def mfa_attestation_recorded?
+    instance_id = env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
+    evidence_ref = env["CLERK_MFA_EVIDENCE_REF"].to_s.strip
+
+    env["REQUIRE_MFA"] == "true" &&
+      instance_id.match?(/\Ains_[A-Za-z0-9]+\z/) &&
+      evidence_ref.present? &&
+      evidence_ref.bytesize <= 500 &&
+      !evidence_ref.match?(/[\r\n]/)
   end
 
   def r2_configuration_present?
@@ -265,7 +276,9 @@ class ProductionReadiness
 
   def clerk_ready?
     status, body = http_get.call(URI("https://api.clerk.com/v1/instance"), env.fetch("CLERK_SECRET_KEY"))
-    status == 200 && body["id"].present?
+    status == 200 &&
+      body["id"].present? &&
+      body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
   end
 
   def time_tracking_destinations_resolve?
