@@ -31,6 +31,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 - [Production readiness checklist](PRODUCTION_READINESS_CHECKLIST.md) — environment-specific evidence and release signoff.
 - [Production readiness evidence: August 24, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md) — current deployed remediation result: 24/26 automated controls pass; Clerk production identity, MFA, and manual operations evidence remain no-go blockers.
 - [Production readiness evidence: August 23, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-23.md) — preserved initial failed audit and remediation baseline.
+- [Payroll operator and recovery acceptance](OPERATOR_AND_RECOVERY_ACCEPTANCE.md) — named operator, identity, restore, object recovery, queue restart, monitoring, and live-cycle evidence record.
+- [MoSa payroll cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md) — current interface-based source intake, calculation, approval, parallel-run, and post-commit procedure.
 - [Cutover gate criteria](rollout/03-CUTOVER-GATE-CRITERIA.md) — per-client parallel-run and cutover evidence.
 
 ## Supporting implementation records

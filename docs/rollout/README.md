@@ -17,6 +17,10 @@
 | 05 | [05-ISSUE-REMEDIATION-LOG.md](05-ISSUE-REMEDIATION-LOG.md) | Issue log template + escalation rules |
 | 06 | [06-MANUAL-ENTRY-CYCLE-RUNBOOK.md](06-MANUAL-ENTRY-CYCLE-RUNBOOK.md) | Step-by-step runbook for ST / Cornerstone Internal / DDG / SPR manual-entry cycles |
 
+Operator identity, recovery exercises, and the final acceptance record are maintained in [Payroll operator and recovery acceptance](../OPERATOR_AND_RECOVERY_ACCEPTANCE.md).
+
+The MoSa runbook uses the Cornerstone interface. Retired Gmail-download, skeleton-employee, and direct database-apply scripts are not approved operator paths.
+
 ---
 
 ## Evidence Folder Structure

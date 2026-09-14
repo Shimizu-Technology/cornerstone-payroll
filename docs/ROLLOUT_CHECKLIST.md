@@ -1,4 +1,6 @@
-# MoSa Payroll Import — Rollout Checklist
+# Historical MoSa payroll-import rollout checklist
+
+> **Historical record — not a current rollout procedure.** The direct mailbox, backfill, database-apply, and row-deletion paths below were superseded by the retained source-package workflow and supported correction tools. Use [the current MoSa cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md), [the operator/recovery acceptance record](OPERATOR_AND_RECOVERY_ACCEPTANCE.md), and [the current cutover gates](rollout/03-CUTOVER-GATE-CRITERIA.md).
 
 **Target:** Production go-live of automated MoSa payroll import at Cornerstone Tax  
 **Status:** Pre-rollout (validation complete, ready for parallel run)  
@@ -137,16 +139,9 @@ This is a financial discrepancy — **do not apply to DB until resolved.**
 3. Run: `DEBUG=1 bundle exec rails runner scripts/mosa_full_year_validation.rb`
 4. Compare individual employee records against PDF manually.
 
-### Rollback (if production DB has bad data)
+### Historical rollback note
 
-The import creates `PayrollItem` records with a traceable `pay_period_id`. To roll back a specific period:
-
-```bash
-cd api
-rails runner "PayPeriod.find_by(start_date: 'YYYY-MM-DD').payroll_items.destroy_all"
-```
-
-This is safe and reversible — it doesn't touch Employee or Company records.
+Direct deletion of payroll rows is not an approved rollback and is not safely reversible. Use the supported unapprove, correction, void, replacement, and audit workflows. Escalate a committed-payroll error under the current incident procedure.
 
 ---
 
@@ -158,7 +153,7 @@ This is safe and reversible — it doesn't touch Employee or Company records.
 | New employee not in DB | Medium | Low | Backfill script catches unmatched names before apply |
 | Mislabeled email subject | Low | Low | Verified: PP20 found despite "September" subject label |
 | Pay rate data missing for backfilled employees | High | Medium | Backfilled with pay_rate=0; HR must update before payroll reports |
-| Gmail API token expiry | Low | Medium | Refresh via: `gog auth refresh --account jerry.shimizutechnology@gmail.com` |
+| Historical Gmail API token expiry | Low | Medium | Retired from the supported operator workflow. |
 | DB environment mismatch (staging vs prod) | Medium | High | Always confirm environment with `rails runner "puts Rails.env"` before applying |
 
 ---

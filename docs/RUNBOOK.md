@@ -1,10 +1,12 @@
-# MoSa Payroll Import — Operator Runbook
+# Historical MoSa import and Form 941 notes
+
+> **Historical record — do not use the MoSa commands below for a current payroll.** The script-based mailbox download, skeleton-employee backfill, and direct database apply tools were retired because they bypass the retained source-package, readiness, approval, and correction controls now built into Cornerstone. Use the current [MoSa payroll cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md). Never delete payroll rows as a rollback.
 
 ## Overview
 
 Production releases are governed by [PRODUCTION_READINESS_CHECKLIST.md](PRODUCTION_READINESS_CHECKLIST.md). Run its automated configuration gate and complete the manual evidence checklist before any payroll or filing workload is released.
 
-This runbook covers day-to-day operation of the MoSa payroll import pipeline for Cornerstone Tax.
+The MoSa sections below describe the original 2025 migration tooling and are retained only as historical context. The Federal Form 941 reference later in this file remains a separate supporting note.
 
 | Item | Value |
 |------|-------|
@@ -54,8 +56,7 @@ What it does:
 
 1. Get the new message ID from Gmail:
    ```bash
-   GOG_KEYRING_PASSWORD=clawdbot gog gmail search "payroll mosa" \
-     --account jerry.shimizutechnology@gmail.com --no-input
+   gog gmail search "payroll mosa" --account "$GOG_ACCOUNT" --no-input
    ```
 
 2. Add the message ID to `scripts/download_mosa_attachments.py` MESSAGES list.
@@ -180,9 +181,9 @@ ruby --version  # Should be 3.3.x
 # Install deps
 cd ~/work/cornerstone-payroll/api && bundle install
 
-# Configure Gmail access
-GOG_KEYRING_PASSWORD=clawdbot gog gmail search "test" \
-  --account jerry.shimizutechnology@gmail.com --no-input
+# Historical Gmail access used an explicitly selected OAuth account.
+# Do not place a keyring password in a command, script, or documentation.
+gog gmail search "test" --account "$GOG_ACCOUNT" --no-input
 ```
 
 ---
