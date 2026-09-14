@@ -195,14 +195,17 @@ class ProductionReadiness
   end
 
   def mfa_attestation_recorded?
-    instance_id = env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
-    evidence_ref = env["CLERK_MFA_EVIDENCE_REF"].to_s.strip
+    raw_instance_id = env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s
+    raw_evidence_ref = env["CLERK_MFA_EVIDENCE_REF"].to_s
+    return false if raw_instance_id.match?(/[\r\n]/) || raw_evidence_ref.match?(/[\r\n]/)
+
+    instance_id = raw_instance_id.strip
+    evidence_ref = raw_evidence_ref.strip
 
     env["REQUIRE_MFA"] == "true" &&
       instance_id.match?(/\Ains_[A-Za-z0-9]+\z/) &&
       evidence_ref.present? &&
-      evidence_ref.bytesize <= 500 &&
-      !evidence_ref.match?(/[\r\n]/)
+      evidence_ref.bytesize <= 500
   end
 
   def r2_configuration_present?
