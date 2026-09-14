@@ -1266,7 +1266,7 @@ function EmployeePayHistoryPanel() {
 
 // ─── YTD Summary Panel ────────────────────────────────────────────────────────
 
-function YtdSummaryPanel() {
+export function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);

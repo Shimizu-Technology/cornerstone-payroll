@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "bigdecimal"
 
 RSpec.describe PayrollRegisterCsvExporter do
   let(:report_data) do
@@ -36,11 +37,11 @@ RSpec.describe PayrollRegisterCsvExporter do
         total_employer_traditional_retirement: 30.00,
         total_employer_roth_retirement: 20.00,
         total_employer_retirement: 50.00,
-        total_straight_loan_deductions: 5.00,
-        total_installment_loan_payments: 15.00,
+        total_straight_loan_deductions: BigDecimal("5.00"),
+        total_installment_loan_payments: BigDecimal("15.00"),
         total_loan_payments: 20.00,
-        total_employer_contributions: 50.00,
-        total_employer_payroll_cost: 5_432.50,
+        total_employer_contributions: BigDecimal("50.00"),
+        total_employer_payroll_cost: BigDecimal("5432.50"),
         total_retirement: 200.00,
         total_deductions: 932.50,
         total_net: 4067.50
@@ -70,12 +71,12 @@ RSpec.describe PayrollRegisterCsvExporter do
           roth_retirement_payment: 30.00,
           employer_retirement_match: 10.00,
           employer_roth_retirement_match: 8.00,
-          loan_deduction: 5.00,
+          loan_deduction: BigDecimal("5.00"),
           loan_payment: 5.00,
-          straight_loan_deduction: 5.00,
-          installment_loan_payment: 0.00,
-          employer_contributions_total: 18.00,
-          employer_payroll_cost: 2_116.28,
+          straight_loan_deduction: BigDecimal("5.00"),
+          installment_loan_payment: BigDecimal("0.00"),
+          employer_contributions_total: BigDecimal("18.00"),
+          employer_payroll_cost: BigDecimal("2116.28"),
           total_deductions: 367.18,
           net_pay: 1582.82,
           check_number: "10001"
@@ -104,12 +105,12 @@ RSpec.describe PayrollRegisterCsvExporter do
           roth_retirement_payment: 45.00,
           employer_retirement_match: 20.00,
           employer_roth_retirement_match: 12.00,
-          loan_deduction: 0.00,
+          loan_deduction: BigDecimal("0.00"),
           loan_payment: 15.00,
-          straight_loan_deduction: 0.00,
-          installment_loan_payment: 15.00,
-          employer_contributions_total: 32.00,
-          employer_payroll_cost: 3_316.22,
+          straight_loan_deduction: BigDecimal("0.00"),
+          installment_loan_payment: BigDecimal("15.00"),
+          employer_contributions_total: BigDecimal("32.00"),
+          employer_payroll_cost: BigDecimal("3316.22"),
           total_deductions: 565.32,
           net_pay: 2484.68,
           check_number: "10002"
