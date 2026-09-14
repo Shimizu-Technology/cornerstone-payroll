@@ -1,387 +1,140 @@
-# MoSa Cycle Runbook — Step-by-Step (One Pay Cycle)
-**Cornerstone Payroll · QuickBooks Cutover Pack (CPR-72)**
+# MoSa payroll cycle runbook
 
-> **Scope:** This runbook covers one complete MoSa payroll cycle from source-file receipt
-> through commit + signoff in Cornerstone Payroll, **running in parallel with QuickBooks**
-> until MoSa passes cutover gates.
->
-> **Authoritative output during parallel mode:** QuickBooks remains the payout/filing source
-> until MoSa achieves 2 consecutive PASS cycles **and** receives explicit Leon + Ops signoff.
+This is Cornerstone's current operator procedure for one MoSa payroll cycle. It uses the Cornerstone Payroll interface. Legacy Gmail-download, employee-backfill, and database-apply scripts are not part of the live workflow.
 
----
+During the required parallel cycles, QuickBooks remains the payout and filing source. Cornerstone records a comparison run only. Do not distribute a payment from Cornerstone until the cutover record is signed.
+
+## Before opening the cycle
 
-## Prerequisites (confirm before starting)
+Confirm all of the following:
 
-- [ ] You have access to the MoSa payroll email (via Gmail / `gog`)
-- [ ] The API server is running and reachable (staging or production — confirm env)
-- [ ] You are logged into Cornerstone Payroll as an admin for MoSa's Joint
-- [ ] Last cycle's pay period is **committed** (or you have an explicit note if it's still open)
-- [ ] `scripts/mosa_run.sh` is present and executable
-- [ ] `data/mosa-2025/raw/` is writable
+- you are signed into Cornerstone Payroll with access to the clean, intended MoSa company;
+- the pay-period dates and pay date match MoSa's instructions;
+- the preceding period has no unresolved correction or blocking issue;
+- the current Revel payroll PDF is available;
+- the Cornerstone payroll-changes workbook is available when MoSa has tips, owner pay, one-time items, corrections, or other period-specific changes; and
+- the employee and company go-live review has no blocking setup item.
 
----
+Never use an email subject, attachment filename, employee name, or an old MoSa company as the sole identity for a payroll fact. The selected company, pay period, retained source-package revision, stable employee mapping, and review ID are the controls that matter.
+
+## 1. Open the correct payroll
 
-## Phase 1 — Source File Receipt & Validation
-_Estimated time: 15–30 min_
+1. Select the clean MoSa company in Cornerstone.
+2. Open **Pay Periods** and choose the expected dates.
+3. Confirm the company name, start date, end date, pay date, and run purpose before entering anything.
+4. Stop if the page is a migration rehearsal, parallel-only sandbox, archived company, or unexpected client.
 
-### Step 1.1 — Download source files from email
+## 2. Prepare the source package
 
-```bash
-cd <REPO_ROOT>
-scripts/mosa_run.sh download
-```
+1. Choose **Import (MoSa)**.
+2. If MoSa needs a workbook, choose **Download workbook**. Send that generated workbook for this pay period; do not reuse an old blank workbook.
+3. MoSa continues to provide the Revel PDF. The PDF supplies regular and overtime hours. Cornerstone ignores Revel pay rates and pay amounts.
+4. Use the generated workbook only for changes that Revel does not contain:
+   - Mo and Sara's separate period-pay amounts;
+   - tips and whether each employee already received those tips;
+   - one-time earnings or deductions;
+   - approved hour corrections;
+   - new hires, terminations, status changes, or wage changes that need review; and
+   - loan information or other exceptional instructions requested by the template.
+5. Recurring loans, 401(k) elections, employer-match rules, and other recurring setup belong in Cornerstone employee configuration. Do not silently recreate them as one-time workbook values.
 
-Expected output:
-- `data/mosa-2025/raw/PP<NN>-revel.pdf` — Revel POS PDF
-- `data/mosa-2025/raw/PP<NN>-loans-tips.xlsx` — Loan/tip Excel
+## 3. Upload and review every source row
 
-> **If email not found:** Check subject line manually. Common issue: "September" mislabeled.
-> `gog gmail search --query "MoSa payroll" --limit 5`
+1. Upload the current Revel PDF and, when used, the completed Cornerstone workbook.
+2. Review the retained package revision and verified-source count.
+3. Give every source row one explicit outcome:
+   - **Include in this payroll**;
+   - **Exclude from payroll**, with a reason;
+   - **Move to a future payroll**, with a reason and named future period; or
+   - **Informational only**, with a reason.
+4. Resolve every unmatched or duplicate employee. A suggested name match must be checked against the person, not accepted from spelling similarity alone.
+5. Confirm that Mo and Sara each have a separate period-pay amount. A combined owner amount is not acceptable.
+6. Review hours, overtime, payroll rate source, tips, loan deductions, one-time items, and warnings for every included row.
+7. Apply the package only when the interface reports no unresolved rows or blocking errors.
 
-- [ ] PDF file downloaded: `PP__-revel.pdf`
-- [ ] Excel file downloaded: `PP__-loans-tips.xlsx`
+The source files are retained with fingerprints. Do not rename, overwrite, or delete a retained source to fix an error.
 
-### Step 1.2 — Add pay period config
+## 4. Handle a corrected email or attachment
 
-Open `scripts/mosa_pay_periods.rb` (or equivalent config) and add the new period:
+If MoSa sends a replacement or says to disregard an earlier file:
 
-```ruby
-# Format: { id: "PP<NN>", start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD", pay_date: "YYYY-MM-DD" }
-{ id: "PP<NN>", start_date: "____-__-__", end_date: "____-__-__", pay_date: "____-__-__" },
-```
+1. Reopen **Import (MoSa)**.
+2. Select that the corrected package replaces the current revision.
+3. Record what changed in plain language.
+4. Upload the complete corrected PDF/workbook set, not only the changed page.
+5. Review and apply the new revision.
+6. Recalculate payroll and obtain a new client approval. An approval for the replaced revision is no longer valid.
 
-- [ ] Period config added with correct dates (verify against email / MoSa payroll calendar)
+Never edit a previously retained source package or keep an old calculation approved after the source changes.
 
-### Step 1.3 — Run validation
+## 5. Calculate and review
 
-```bash
-scripts/mosa_run.sh validate
-```
+1. Choose **Calculate Payroll**.
+2. Review every warning and blocker.
+3. Compare at least these employee-level facts with the authoritative parallel source:
+   - regular and overtime hours;
+   - pay rate or separate owner period pay;
+   - taxable tips and tips already paid out;
+   - recurring and one-time earnings;
+   - employee loans and remaining balances;
+   - employee 401(k) and employer contribution;
+   - other deductions and reimbursements;
+   - DRT withholding, Social Security, and Medicare; and
+   - gross and net pay.
+4. Generate the payroll register, tax summary, retirement/loan detail when applicable, checks or check register, and final-record preview.
+5. Complete [the parallel-run validation template](01-PARALLEL-RUN-VALIDATION-TEMPLATE.md). A company-level total is not a substitute for employee-level reconciliation.
 
-Check the output for all three gates:
+If any value exceeds the template tolerance, stop. Keep QuickBooks authoritative, record the discrepancy, and follow [the issue-remediation procedure](05-ISSUE-REMEDIATION-LOG.md).
 
-| Gate | Expected | Actual | PASS? |
-|------|----------|--------|-------|
-| Periods OK | N/N (all) | __ | |
-| Unmatched names | 0 | __ | |
-| Gross diff for new period | $0.00 | __ | |
+## 6. Record exact client approval
 
-> **If any gate fails → STOP. Do not proceed to import. See Section 8 (Troubleshooting).**
+1. Send or present the reports for the calculation revision shown in Cornerstone.
+2. Require an unambiguous approval of that payroll. “Received” or “thank you” is not approval.
+3. Use the client portal approval, or choose **Record Email Approval** and retain the exact approval evidence.
+4. Confirm the displayed review ID is still the same after approval.
 
-- [ ] `Periods OK: N/N`
-- [ ] `Unmatched names: 0`
-- [ ] `Gross diff: 0.0` for the new period
+Any source, setup, or calculation change invalidates the old approval and requires recalculation and a new approval.
 
-### Step 1.4 — Debug run (if outliers or mismatches exist)
+## 7. Parallel-cycle disposition
 
-```bash
-DEBUG=1 bundle exec rails runner scripts/mosa_full_year_validation.rb
-```
+For a required QuickBooks comparison cycle:
 
-Identify the specific employee/row with the discrepancy and resolve before continuing.
+1. Keep the Cornerstone period marked as a parallel comparison.
+2. Do not bypass the **Parallel comparison · cannot commit** control.
+3. Record every difference and finish the validation template.
+4. Obtain operator and second-reviewer signoff.
+5. Update the MoSa cutover record. Only two consecutive passing live periods count.
 
----
+For a post-cutover Cornerstone-primary cycle, follow the same source, calculation, approval, and second-review steps, then choose **Commit & Finalize**. A committed payroll is corrected through the supported correction/void/replacement workflows; it is never rolled back by deleting database rows.
 
-## Phase 2 — Import into Cornerstone Payroll
-_Estimated time: 5–10 min_
+## 8. After commitment
 
-### Step 2.1 — Apply the new period to the database
+1. Confirm the period shows **Committed / processed**.
+2. Prepare and print physical checks as applicable. Printing means prepared, not paid.
+3. Record check delivery only when the instrument is actually released to the employee.
+4. Record clearing only from reviewed bank evidence.
+5. Review liability obligations and record remittance evidence when Cornerstone makes the payment.
+6. Retain filing acceptance evidence after the government system accepts a filing. Generating a form is not filing it.
+7. Generate and retain the final payroll record and required client reports.
 
-```bash
-MOSA_APPLY=1 scripts/mosa_run.sh apply PP<NN>
-```
+Direct deposit is outside this implementation.
 
-> Apply **one period at a time**. Do not bulk-apply multiple periods unless performing a historical backfill under Leon's direct supervision.
+## Hard stops
 
-- [ ] Apply script completed without error
-- [ ] Confirm in Rails console (or admin UI) that payroll items were created:
+Do not approve, commit, or cut over when any of these is true:
 
-```bash
-cd api
-rails runner "pp = PayPeriod.find_by(start_date: 'YYYY-MM-DD'); abort('ERROR: PayPeriod not found — check start_date') if pp.nil?; puts pp.payroll_items.count"
-```
+- wrong company or pay-period dates;
+- an unresolved source row, duplicate, stale revision, or missing current attachment;
+- an unresolved employee setup or document-readiness blocker;
+- owner pay is combined or ambiguous;
+- a loan balance, repayment rule, or 401(k) election is not supported by reviewed setup evidence;
+- the client has not explicitly approved the current review ID;
+- a tax, gross, net, check, or employee-count difference exceeds tolerance;
+- a P1 or blocking correction remains open; or
+- the recovery and cutover gates have not been signed.
 
-Expected: matches MoSa employee count for this period.
+## Evidence to retain
 
-### Step 2.2 — Verify pay period in admin UI
+Save one completed validation record per cycle under `docs/rollout/evidence/mosa/` using the naming convention in [the rollout index](README.md). The record must identify the source-package revision, review ID, operator, reviewer, comparison result, discrepancies, reports produced, and whether QuickBooks or Cornerstone was authoritative for payout.
 
-1. Log into Cornerstone Payroll → MoSa's Joint → Pay Periods
-2. Find the new pay period — status should be `calculated` or `draft`
-3. Confirm:
-   - [ ] Correct start/end dates
-   - [ ] Correct employee count (compare to QB)
-   - [ ] No employees with $0.00 gross unexpectedly
-
----
-
-## Phase 3 — Pre-Approval Validation
-_Estimated time: 20–45 min_
-
-### Step 3.1 — Pull QB totals for this period
-
-From QuickBooks (Cornerstone Ops runs this side):
-- Export payroll detail report for this period
-- Record the following in the validation template:
-  - Total employees paid
-  - Total gross wages (regular + OT)
-  - Total tips
-  - Total loan deductions
-  - Total DRT withholding
-  - Total SS employee
-  - Total Medicare employee
-  - Total SS employer
-  - Total Medicare employer
-  - Total net pay
-
-### Step 3.2 — Pull Cornerstone Payroll totals
-
-From admin UI → Reports → Tax Summary / Payroll Register for this period.
-
-Record same fields as above.
-
-### Step 3.3 — Complete the PASS/FAIL validation template
-
-Open: `docs/rollout/01-PARALLEL-RUN-VALIDATION-TEMPLATE.md`
-Save a filled copy to: `docs/rollout/evidence/mosa/YYYYMMDD-mosa-cycle-<N>.md`
-
-Work through **all 10 sections**:
-
-- [ ] Section 1: Employee count ← compare to QB headcount
-- [ ] Section 2: Gross pay breakdown ← every line vs QB
-- [ ] Section 3: Employee tax withholdings (FIT/DRT, SS, Medicare) ← per employee
-- [ ] Section 4: Employer taxes (SS + Medicare) ← compare to QB
-- [ ] Section 5: Net pay ← per employee + total
-- [ ] Section 6: Check totals (if printing checks this cycle)
-- [ ] Section 7: Report artifacts generated
-- [ ] Section 8: Import exceptions (unmatched names, outliers, gross_diff)
-- [ ] Section 9: Workflow gate checks
-- [ ] Section 10: Discrepancy notes (document every Δ > tolerance with root cause)
-
-### Step 3.4 — Decision point
-
-| Outcome | Action |
-|---------|--------|
-| **All sections PASS** | Proceed to Phase 4 (Approval) |
-| **Any section FAIL** | STOP → go to Phase 7 (FAIL path) |
-
----
-
-## Phase 4 — Approval
-_Estimated time: 5 min_
-
-### Step 4.1 — Review in UI
-
-1. Open the pay period in the admin UI
-2. Click through each employee row — spot-check at least 3 employees
-3. Verify no red flags / exception markers on the payroll detail page
-
-### Step 4.2 — Approve
-
-1. Click **Approve** on the pay period
-2. Confirm status changes to `approved`
-
-- [ ] Pay period status: `approved`
-- [ ] No errors during approval action
-
-### Step 4.3 — Second-eyes check
-
-Have a second person (Leon or Ops lead) review the approved pay period before commit.
-
-- [ ] Second reviewer has confirmed totals match template
-
----
-
-## Phase 5 — Commit & Post-Processing
-_Estimated time: 10 min_
-
-> **Reminder:** During parallel mode, this commit is for **Cornerstone Payroll records only**.
-> QuickBooks remains the authoritative payout source until cutover is complete.
-
-### Step 5.1 — Commit
-
-1. Click **Commit** on the approved pay period
-2. Confirm status changes to `committed`
-
-- [ ] Pay period status: `committed`
-- [ ] No errors during commit action
-
-### Step 5.2 — Check number assignment (if printing checks)
-
-1. Verify check numbers were assigned sequentially from last cycle's ending check number
-2. No gaps, no duplicates
-3. Print check register — spot-check 3 random checks
-
-- [ ] Check numbers assigned: __ through __
-- [ ] No gaps or duplicates: Yes / N/A
-
-### Step 5.3 — Generate and save report artifacts
-
-| Report | Location Saved | Notes |
-|--------|---------------|-------|
-| Payroll register | `docs/rollout/evidence/mosa/YYYYMMDD-register.pdf` | |
-| Tax summary | `docs/rollout/evidence/mosa/YYYYMMDD-tax-summary.pdf` | |
-| YTD summary | `docs/rollout/evidence/mosa/YYYYMMDD-ytd.pdf` | |
-
-- [ ] All reports generated and saved to evidence folder
-
----
-
-## Phase 6 — Cycle Signoff & Gate Tracking
-
-### Step 6.1 — Complete signoff on validation template
-
-Fill in the **Signoff** section of the completed validation template:
-- Payroll operator name + date
-- Reviewer (Leon / Ops lead) name + date
-- Mark overall result: **PASS**
-
-### Step 6.2 — Update gate tracker
-
-Open: `docs/rollout/04-MULTI-CLIENT-SEQUENCING-PLAN.md`
-Update MoSa's consecutive PASS count and cycle log.
-
-### Step 6.3 — Log in Plane
-
-Add a comment to the active Cornerstone Payroll Plane ticket with:
-
-```text
-Cycle: MoSa <YYYY-MM-DD to YYYY-MM-DD>
-Mode: Import
-Result: PASS
-
-Checks:
-- Employee count: PASS
-- Gross/net totals: PASS
-- Tax totals: PASS
-- Approval/commit flow: PASS
-- Exceptions resolved: PASS
-- Reviewer signoff: <Name> | Complete
-
-Notes:
-- <key findings if any>
-```
-
-- [ ] Plane comment posted
-
-### Step 6.4 — Assess cutover gate
-
-| Status | Next Action |
-|--------|-------------|
-| Cycle 1 PASS | Continue parallel mode; schedule Cycle 2 |
-| Cycle 2 PASS (consecutive) | MoSa eligible for cutover — review `03-CUTOVER-GATE-CRITERIA.md` |
-| Any FAIL resets consecutive count | Restart count from 0 after remediation PASS |
-
----
-
-## Phase 7 — FAIL Path (if any section fails)
-_Follow this ONLY if the validation template yields any FAIL_
-
-### Step 7.1 — Do not commit
-
-- [ ] Pay period is **NOT committed** in Cornerstone Payroll
-- [ ] QuickBooks remains authoritative for this pay period
-
-### Step 7.2 — Document the failure
-
-Fill in the Discrepancy Notes section of the validation template with:
-- Every failing line item
-- Δ values
-- Initial hypothesis for root cause
-
-### Step 7.3 — Open a remediation ticket in Plane
-
-Title: `CPR-FAIL: MoSa PP<NN> <YYYY-MM-DD> — <short description>`
-Priority: **Urgent**
-Include:
-- Cycle date
-- Which sections failed
-- All Δ values
-- Owner + target fix date (must be before next pay period)
-
-### Step 7.4 — Escalate
-
-If the discrepancy involves:
-- **Gross diff ≠ $0.00:** Escalate immediately to Leon (dev team) — likely parser issue
-- **Tax mismatch > $1.00:** Escalate to Leon — likely calculator bug
-- **Employee count mismatch:** Escalate to Cornerstone Ops — likely HR data issue
-
-See `docs/rollout/05-ISSUE-REMEDIATION-LOG.md` for escalation matrix.
-
-### Step 7.5 — Re-run after fix
-
-After fix is deployed, re-run the **entire cycle runbook** from Phase 1.
-The FAIL cycle does NOT count toward the 2-consecutive-PASS gate.
-
----
-
-## Phase 8 — Troubleshooting Reference
-
-### Gross diff ≠ $0.00
-
-```bash
-DEBUG=1 bundle exec rails runner scripts/mosa_full_year_validation.rb
-```
-- Check if PDF has new column layout (Revel update)
-- Check if an employee has two rows (manager + server dual role)
-- Compare individual employee records manually against PDF
-
-### Unmatched employee names
-
-```bash
-bundle exec rails runner scripts/mosa_backfill_employees.rb --dry-run
-```
-- Review unmatched names
-- Either add an alias or create the employee record
-- Re-run validation after fix
-
-### Gmail token expired
-
-```bash
-gog auth refresh --account <YOUR_GMAIL_ACCOUNT>
-```
-
-### Wrong environment (staging vs prod)
-
-```bash
-cd api && rails runner "puts Rails.env"
-```
-Must match intended target before running `MOSA_APPLY=1`.
-
-### Check number sequence gap
-
-Query the DB (set COMPANY_ID first; non-numeric check numbers are ignored):
-```bash
-export COMPANY_ID=<MOSA_COMPANY_ID>
-rails runner '
-company_id = ENV.fetch("COMPANY_ID")
-company = Company.find(company_id)
-nums = PayrollItem.where(company_id: company.id)
-  .where.not(check_number: nil)
-  .pluck(:check_number)
-  .map(&:to_s)
-  .select { |n| n.match?(/\A\d+\z/) }
-  .map(&:to_i)
-  .uniq
-  .sort
-
-nums.each_cons(2)
-  .select { |a, b| b - a > 1 }
-  .each { |a, b| puts "Gap: #{a} -> #{b}" }
-'
-```
-
----
-
-## Timing Reference (MoSa Biweekly Schedule)
-
-| When | What |
-|------|------|
-| Payroll email arrives (Friday–Monday typically) | Run Phase 1 immediately |
-| Same day or next business day | Complete Phases 2–3 (import + validation) |
-| After validation PASS | Phase 4–5 (approve + commit) |
-| Same day as commit | Phase 6 (signoff + Plane log) |
-| After Cycle 2 PASS | Review cutover gate criteria |
-
----
-
-_Runbook version: CPR-72 · Last updated: 2026-03-12_
+MoSa becomes eligible to leave QuickBooks Payroll only after [every cutover gate](03-CUTOVER-GATE-CRITERIA.md) passes. Two passing totals without employee-level evidence, recovery readiness, operator acceptance, and signed approval do not qualify.
