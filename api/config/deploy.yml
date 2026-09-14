@@ -58,6 +58,8 @@ env:
     USE_SOLID_QUEUE: true
     USE_SOLID_CABLE: true
     ACTIVE_STORAGE_SERVICE: r2
+    FRONTEND_URL: https://payroll.shimizu-technology.com
+    CORS_ORIGINS: https://payroll.shimizu-technology.com
     # Change this to true only after independently reviewed Clerk enforcement
     # is bound to the exact instance and evidence reference below.
     REQUIRE_MFA: false

@@ -12,10 +12,11 @@ module AirePayrollCalendar
     end
 
     def call
-      source = @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+      calendar_period = @pay_period.aire_payroll_calendar_period
+      source = calendar_period&.time_tracking_source ||
+               @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
       return nil unless source
 
-      calendar_period = @pay_period.aire_payroll_calendar_period
       publication = calendar_period&.latest_publication
       event = calendar_period&.payroll_events&.order(occurred_at: :desc, id: :desc)&.first
       desired = desired_contract
@@ -30,6 +31,7 @@ module AirePayrollCalendar
         source_name: source.name,
         eligible: desired.present? && !missed_unpublished_cutoff,
         eligibility_error: eligibility_error(missed_unpublished_cutoff),
+        eligibility_code: eligibility_code(missed_unpublished_cutoff),
         external_pay_period_id: calendar_period&.external_pay_period_id,
         cutoff_at: cutoff_at,
         cutoff_state: cutoff_state(publication, event, cutoff_at, needs_revision),
@@ -49,6 +51,7 @@ module AirePayrollCalendar
       @desired_contract = Contract.new(@pay_period).payload
     rescue Contract::Error => e
       @eligibility_error = e.message
+      @eligibility_code = e.code
       @desired_contract = nil
     end
 
@@ -82,6 +85,12 @@ module AirePayrollCalendar
       return unless missed_unpublished_cutoff
 
       "This period's seven-day cutoff passed before it was published. Create a correction or supplemental run instead."
+    end
+
+    def eligibility_code(missed_unpublished_cutoff)
+      return @eligibility_code if @eligibility_code
+
+      "cutoff_passed" if missed_unpublished_cutoff
     end
 
     def serialize_publication(publication)

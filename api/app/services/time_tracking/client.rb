@@ -15,10 +15,15 @@ module TimeTracking
     MAX_REMOTE_ERROR_BYTES = 300
     MAX_COCKPIT_EMPLOYEES_PER_PAGE = 100
     MAX_COCKPIT_ENTRIES_PER_PAGE = 250
+    AIRE_ACCOUNT_LINK_HOSTS = %w[
+      aire-services-guam.netlify.app
+      app.aireservicesguam.com
+    ].freeze
 
-    def initialize(source, delegation: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+    def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
       @delegation = delegation
+      @actor = actor
       @destination_policy = destination_policy
       @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
       @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
@@ -52,6 +57,44 @@ module TimeTracking
 
     def payroll_calendar_period(external_pay_period_id:)
       request_json(payroll_calendar_period_uri(external_pay_period_id), validate_source: false)
+    end
+
+    def create_payroll_account_link_session(external_actor_id:, external_actor_email:, return_url:)
+      uri = payroll_account_link_sessions_uri
+      require_secure_payroll_transport!(uri)
+      payload = request_json(
+        uri,
+        validate_source: false,
+        method: :post,
+        body: {
+          external_actor_id: normalize_external_actor_id(external_actor_id),
+          external_actor_email: external_actor_email,
+          return_url: return_url
+        }
+      )
+      validate_account_link_authorization_url!(payload)
+      payload
+    end
+
+    def payroll_account_link(external_actor_id:)
+      uri = payroll_account_link_uri(external_actor_id)
+      require_secure_payroll_transport!(uri)
+      request_json(
+        uri,
+        validate_source: false,
+        surface_remote_error: true
+      )
+    end
+
+    def disconnect_payroll_account_link(external_actor_id:)
+      uri = payroll_account_link_uri(external_actor_id)
+      require_secure_payroll_transport!(uri)
+      request_json(
+        uri,
+        validate_source: false,
+        method: :delete,
+        surface_remote_error: true
+      )
     end
 
     def payroll_cockpit_period(external_pay_period_id:)
@@ -206,6 +249,7 @@ module TimeTracking
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
       when :put then Net::HTTP::Put.new(uri)
+      when :delete then Net::HTTP::Delete.new(uri)
       else raise ArgumentError, "Unsupported HTTP method"
       end
       request["Accept"] = "application/json"
@@ -278,6 +322,14 @@ module TimeTracking
       source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}")
     end
 
+    def payroll_account_link_sessions_uri
+      source_uri("/api/v1/payroll/account_link_sessions")
+    end
+
+    def payroll_account_link_uri(external_actor_id)
+      source_uri("/api/v1/payroll/account_links/#{normalize_external_actor_id(external_actor_id)}")
+    end
+
     def payroll_cockpit_finalize_uri(external_pay_period_id)
       uri = payroll_cockpit_period_uri(external_pay_period_id)
       uri.path = "#{uri.path}/finalize"
@@ -331,21 +383,54 @@ module TimeTracking
       normalized_id
     end
 
+    def normalize_external_actor_id(value)
+      normalized_id = value.to_s
+      raise Error, "Invalid Cornerstone account ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+
+      normalized_id
+    end
+
     def delegated_request_json(uri, body:)
-      token = @delegation&.token.to_s
-      raise Error, "Your AIRE payroll delegation is not configured" if token.blank?
-      unless uri.scheme == "https" || development_loopback?(uri)
-        raise Error, "Delegated AIRE payroll commands require HTTPS"
+      headers = if @actor.present?
+        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
+      else
+        token = @delegation&.token.to_s
+        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
+
+        { "X-Aire-Delegation-Token" => token }
       end
+      require_secure_payroll_transport!(uri)
 
       request_json(
         uri,
         validate_source: false,
         method: :post,
         body: body,
-        headers: { "X-Aire-Delegation-Token" => token },
+        headers: headers,
         surface_remote_error: true
       )
+    end
+
+    def require_secure_payroll_transport!(uri)
+      return if uri.scheme == "https" || development_loopback?(uri)
+
+      raise Error, "AIRE payroll actions and account linking require HTTPS"
+    end
+
+    def validate_account_link_authorization_url!(payload)
+      uri = URI.parse(payload["authorization_url"].to_s)
+      allowed_hosts = AIRE_ACCOUNT_LINK_HOSTS +
+                      ENV.fetch("AIRE_ACCOUNT_LINK_ALLOWED_HOSTS", "").split(",") +
+                      [ URI.parse(@source.base_url.to_s).host ]
+      allowed_hosts = allowed_hosts.filter_map { |host| DestinationPolicy.normalize_host(host) }.uniq
+      secure_url = uri.scheme == "https" && uri.port == 443 && uri.host.present? && uri.userinfo.blank?
+      approved_host = allowed_hosts.include?(DestinationPolicy.normalize_host(uri.host))
+      return if secure_url && approved_host
+      return if development_loopback?(uri)
+
+      raise Error, "#{@source.name} returned an unapproved account-link URL"
+    rescue URI::InvalidURIError
+      raise Error, "#{@source.name} returned an invalid account-link URL"
     end
 
     def development_loopback?(uri)

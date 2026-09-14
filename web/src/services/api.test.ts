@@ -261,6 +261,30 @@ describe('ApiClient company identity', (): void => {
     expect(calls[8].url.pathname).toContain('/admin/pay_periods/17/aire_payroll_cockpit/finalize');
   });
 
+  it('uses the guided AIRE account-link endpoints', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({ account_link: { connected: false } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ));
+
+    await timeTrackingSourcesApi.getAireAccountLink(4);
+    await timeTrackingSourcesApi.createAireAccountLink(4);
+    await timeTrackingSourcesApi.disconnectAireAccountLink(4);
+
+    const calls = fetchMock.mock.calls.map(([input, options]) => ({
+      url: new URL(String(input)),
+      method: options?.method,
+    }));
+    expect(calls.map((call) => call.url.pathname)).toEqual([
+      expect.stringContaining('/admin/time_tracking_sources/4/aire_account_link'),
+      expect.stringContaining('/admin/time_tracking_sources/4/aire_account_link'),
+      expect.stringContaining('/admin/time_tracking_sources/4/aire_account_link'),
+    ]);
+    expect(calls.map((call) => call.method)).toEqual(['GET', 'POST', 'DELETE']);
+  });
+
   it('prepares and confirms a payroll liability payment through the payment register', async (): Promise<void> => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
       new Response(JSON.stringify({ non_employee_check: {} }), {

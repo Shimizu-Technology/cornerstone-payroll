@@ -6,7 +6,14 @@ module AirePayrollCalendar
     TIME_ZONE = "Pacific/Guam"
     CUTOFF_DAYS_BEFORE = CompanyPaySchedule::PAYROLL_CUTOFF_DAYS_BEFORE
 
-    class Error < StandardError; end
+    class Error < StandardError
+      attr_reader :code
+
+      def initialize(message, code:)
+        @code = code
+        super(message)
+      end
+    end
 
     attr_reader :pay_period
 
@@ -38,12 +45,22 @@ module AirePayrollCalendar
     end
 
     def validate!
-      raise Error, "Only regular payroll runs can be published to AIRE" unless pay_period.regular_cycle? && pay_period.regular_run?
-      raise Error, "AIRE payroll periods require a confirmed semimonthly pay schedule" unless confirmed_semimonthly_schedule?
-      raise Error, "AIRE payroll cutoff must remain seven calendar days before pay date" unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
-      raise Error, "Confirm the legal overtime workweek before publishing this period" unless pay_period.resolved_company_workweek&.confirmed?
-      raise Error, "AIRE payroll periods must be the 1st–15th or 16th–month end" unless semimonthly_dates?
-      raise Error, "The pay date must be after the period end" unless pay_period.pay_date > pay_period.end_date
+      fail_contract!("Only regular payroll runs can be published to AIRE", "unsupported_run") unless pay_period.regular_cycle? && pay_period.regular_run?
+      unless confirmed_semimonthly_schedule?
+        future_schedule = next_confirmed_semimonthly_schedule
+        if future_schedule
+          fail_contract!(
+            "This pay period begins before the confirmed payroll setup takes effect on #{format_date(future_schedule.effective_on)}. " \
+            "AIRE scheduling starts with a regular semimonthly period on or after that date.",
+            "pay_schedule_not_effective"
+          )
+        end
+        fail_contract!("Confirm a semimonthly pay schedule before publishing this period to AIRE.", "pay_schedule_confirmation_required")
+      end
+      fail_contract!("AIRE payroll cutoff must remain seven calendar days before pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless pay_period.resolved_company_workweek&.confirmed?
+      fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
+      fail_contract!("The pay date must be after the period end", "pay_date_invalid") unless pay_period.pay_date > pay_period.end_date
 
       true
     end
@@ -52,11 +69,32 @@ module AirePayrollCalendar
 
     def confirmed_semimonthly_schedule?
       schedule = pay_schedule
-      schedule&.confirmed? && schedule.frequency == "semimonthly" && schedule.period_rule == "semimonthly" && schedule.timezone == TIME_ZONE
+      schedule&.confirmed? &&
+        schedule.frequency == "semimonthly" &&
+        schedule.period_rule == "semimonthly" &&
+        schedule.timezone == TIME_ZONE &&
+        schedule.effective_on <= pay_period.start_date &&
+        (schedule.ends_on.nil? || schedule.ends_on >= pay_period.end_date)
     end
 
     def pay_schedule
       @pay_schedule ||= pay_period.company_pay_schedule || CompanyPaySchedule.for_date(pay_period.company_id, pay_period.start_date)
+    end
+
+    def next_confirmed_semimonthly_schedule
+      pay_period.company.company_pay_schedules
+                .where(confirmation_status: "confirmed", frequency: "semimonthly", period_rule: "semimonthly", timezone: TIME_ZONE)
+                .where("effective_on > ?", pay_period.start_date)
+                .order(:effective_on, :id)
+                .first
+    end
+
+    def fail_contract!(message, code)
+      raise Error.new(message, code: code)
+    end
+
+    def format_date(date)
+      date.strftime("%B %-d, %Y")
     end
 
     def semimonthly_dates?

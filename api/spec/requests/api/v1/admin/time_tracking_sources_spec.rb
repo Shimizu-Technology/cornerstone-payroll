@@ -106,6 +106,67 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(TimeTrackingDelegation).not_to exist
   end
 
+  it "starts a one-time AIRE account connection for the current operator" do
+    manager = create(:user, company: company, organization: company.organization, role: "manager", email: "chels@example.com")
+    source = create(:time_tracking_source, company: company, source_type: "aire_services", shared_secret: "secret")
+    client = instance_double(TimeTracking::Client)
+    authenticate_as(manager)
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("FRONTEND_URL").and_return("https://payroll.shimizu-technology.com")
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:create_payroll_account_link_session).and_return(
+      "authorization_url" => "https://aire.example.com/admin/payroll-link?token=request",
+      "expires_at" => 10.minutes.from_now.iso8601
+    )
+
+    post "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
+
+    expect(response).to have_http_status(:created)
+    expect(response.parsed_body.fetch("authorization_url")).to include("aire.example.com")
+    expect(client).to have_received(:create_payroll_account_link_session).with(
+      external_actor_id: manager.id,
+      external_actor_email: "chels@example.com",
+      return_url: "https://payroll.shimizu-technology.com/time-tracking-sources?source_id=#{source.id}"
+    )
+  end
+
+  it "reads and disconnects only the current operator's AIRE account link" do
+    manager = create(:user, company: company, organization: company.organization, role: "manager")
+    source = create(:time_tracking_source, company: company, source_type: "aire_services", shared_secret: "secret")
+    create(:time_tracking_delegation, company: company, time_tracking_source: source, user: manager)
+    client = instance_double(TimeTracking::Client)
+    authenticate_as(manager)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_account_link).with(external_actor_id: manager.id).and_return(
+      "account_link" => { "connected" => true, "aire_user_name" => "Chels Admin" }
+    )
+    allow(client).to receive(:disconnect_payroll_account_link).with(external_actor_id: manager.id).and_return(
+      "account_link" => { "connected" => false }
+    )
+
+    get "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("account_link", "aire_user_name")).to eq("Chels Admin")
+
+    delete "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("account_link", "connected")).to be(false)
+    expect(source.delegation_for(manager)).to be_nil
+  end
+
+  it "does not offer AIRE account linking for another source type" do
+    manager = create(:user, company: company, organization: company.organization, role: "manager")
+    source = create(:time_tracking_source, company: company, source_type: "custom", shared_secret: "secret")
+    authenticate_as(manager)
+
+    post "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("only available for AIRE Services")
+  end
+
   it "keeps a successful source connection result when the optional cockpit probe is unavailable" do
     authenticate_as(create(:user, company: company, role: "admin"))
     source = create(:time_tracking_source, company: company, source_type: "aire_services")

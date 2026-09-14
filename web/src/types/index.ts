@@ -604,6 +604,16 @@ export interface AirePayrollCalendarState {
   source_name: string;
   eligible: boolean;
   eligibility_error?: string | null;
+  eligibility_code?:
+    | 'unsupported_run'
+    | 'pay_schedule_not_effective'
+    | 'pay_schedule_confirmation_required'
+    | 'cutoff_rule_invalid'
+    | 'workweek_confirmation_required'
+    | 'period_dates_invalid'
+    | 'pay_date_invalid'
+    | 'cutoff_passed'
+    | null;
   external_pay_period_id?: string | null;
   cutoff_at?: string | null;
   cutoff_state: AirePayrollCutoffState;
@@ -771,7 +781,13 @@ export interface AirePayrollCockpitOverview {
   carryovers: Record<string, number>;
   employees: AirePayrollCockpitEmployee[];
   employee_pagination: AirePayrollPagination;
-  command_access: { can_read: boolean; can_command: boolean; delegation_configured: boolean };
+  command_access: {
+    can_read: boolean;
+    can_command: boolean;
+    delegation_configured: boolean;
+    account_link_configured?: boolean;
+    legacy_delegation_configured?: boolean;
+  };
   routing_options: AirePayrollRoutingOption[];
 }
 

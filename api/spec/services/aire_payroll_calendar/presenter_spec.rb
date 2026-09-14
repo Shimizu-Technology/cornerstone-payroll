@@ -59,6 +59,50 @@ RSpec.describe AirePayrollCalendar::Presenter do
       cutoff_state: "cutoff_due"
     )
     expect(state.fetch(:eligibility_error)).to include("passed before it was published")
+    expect(state.fetch(:eligibility_code)).to eq("cutoff_passed")
+  end
+
+  it "explains when confirmed AIRE setup starts after an older pay period" do
+    schedule.update!(effective_on: Date.new(2026, 9, 16))
+    legacy_schedule = CompanyPaySchedule.create!(
+      company: company,
+      frequency: "semimonthly",
+      period_rule: "manual",
+      pay_date_rule: "manual",
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: Date.new(2026, 9, 15)
+    )
+    pay_period.update_columns(
+      start_date: Date.new(2026, 8, 16),
+      end_date: Date.new(2026, 8, 31),
+      pay_date: Date.new(2026, 9, 15),
+      company_pay_schedule_id: legacy_schedule.id
+    )
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 9, 1, 9))
+
+    expect(state).to include(
+      eligible: false,
+      can_publish: false,
+      eligibility_code: "pay_schedule_not_effective"
+    )
+    expect(state.fetch(:eligibility_error)).to include("takes effect on September 16, 2026")
+  end
+
+  it "rejects an attached schedule that no longer covers the pay period" do
+    schedule.update!(effective_on: Date.new(2026, 10, 16))
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(
+      eligible: false,
+      can_publish: false,
+      eligibility_code: "pay_schedule_not_effective"
+    )
+    expect(state.fetch(:eligibility_error)).to include("takes effect on October 16, 2026")
   end
 
   it "does not offer a schedule revision after the delivered cutoff has passed" do
@@ -87,5 +131,21 @@ RSpec.describe AirePayrollCalendar::Presenter do
       can_publish: false,
       cutoff_state: "schedule_changed"
     )
+  end
+
+  it "keeps the calendar period tied to its original source when that source is inactive" do
+    source.update!(active: false)
+    replacement = create(:time_tracking_source, company: company, source_type: "aire_services", name: "Replacement AIRE")
+    create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: pay_period
+    )
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(source_id: source.id, source_name: source.name)
+    expect(state.fetch(:source_id)).not_to eq(replacement.id)
   end
 end

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyRound, Link2, RefreshCw, Save, ShieldCheck, Trash2, X, Zap } from 'lucide-react';
+import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useCompany } from '@/contexts/CompanyContext';
 import { timeTrackingSourcesApi } from '@/services/api';
-import type { TimeTrackingSource, TimeTrackingSourceCreatePayload, TimeTrackingSourceTestResponse, TimeTrackingSourceUpdatePayload } from '@/services/api';
+import type { AireAccountLink, TimeTrackingSource, TimeTrackingSourceCreatePayload, TimeTrackingSourceTestResponse, TimeTrackingSourceUpdatePayload } from '@/services/api';
 
 interface FormState {
   id?: number;
@@ -14,7 +14,6 @@ interface FormState {
   source_type: TimeTrackingSource['source_type'];
   base_url: string;
   shared_secret: string;
-  delegation_token: string;
   active: boolean;
 }
 
@@ -23,7 +22,6 @@ const blankForm: FormState = {
   source_type: 'aire_services',
   base_url: '',
   shared_secret: '',
-  delegation_token: '',
   active: false,
 };
 
@@ -50,7 +48,6 @@ function normalizeForm(source?: TimeTrackingSource): FormState {
     source_type: source.source_type,
     base_url: source.base_url,
     shared_secret: '',
-    delegation_token: '',
     active: source.active,
   };
 }
@@ -64,18 +61,29 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}${cockpit}`;
 }
 
-export function TimeTrackingSources() {
+type TimeTrackingSourcesProps = {
+  navigateToAuthorization?: (url: string) => void;
+};
+
+const defaultAuthorizationNavigation = (url: string) => window.location.assign(url);
+
+export function TimeTrackingSources({
+  navigateToAuthorization = defaultAuthorizationNavigation,
+}: TimeTrackingSourcesProps = {}) {
   const { activeCompanyId } = useCompany();
-  return <ClientTimeTrackingSources key={activeCompanyId} />;
+  return <ClientTimeTrackingSources key={activeCompanyId} navigateToAuthorization={navigateToAuthorization} />;
 }
 
-function ClientTimeTrackingSources() {
+function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTrackingSourcesProps>) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [form, setForm] = useState<FormState>(() => normalizeForm());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [accountLink, setAccountLink] = useState<AireAccountLink | null>(null);
+  const [accountLinkLoading, setAccountLinkLoading] = useState(false);
+  const [accountLinkBusy, setAccountLinkBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const successTimerRef = useRef<number | null>(null);
@@ -88,8 +96,13 @@ function ClientTimeTrackingSources() {
     try {
       const res = await timeTrackingSourcesApi.list();
       const loadedSources = res.time_tracking_sources;
+      const requestedSourceId = Number(new URLSearchParams(window.location.search).get('source_id'));
       setSources(loadedSources);
-      setForm(normalizeForm(loadedSources.find((source) => source.active) || loadedSources[0]));
+      setForm(normalizeForm(
+        loadedSources.find((source) => source.id === requestedSourceId) ||
+        loadedSources.find((source) => source.active) ||
+        loadedSources[0]
+      ));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load time tracking source');
     } finally {
@@ -100,6 +113,45 @@ function ClientTimeTrackingSources() {
   useEffect(() => {
     loadSources();
   }, [loadSources]);
+
+  useEffect(() => {
+    if (!form.id || form.source_type !== 'aire_services') {
+      setAccountLink(null);
+      setAccountLinkLoading(false);
+      return;
+    }
+
+    let active = true;
+    setAccountLinkLoading(true);
+    timeTrackingSourcesApi.getAireAccountLink(form.id)
+      .then((response) => {
+        if (active) setAccountLink(response.account_link);
+      })
+      .catch((err) => {
+        if (active) {
+          setAccountLink(null);
+          setError(err instanceof Error ? err.message : 'Could not check your AIRE account connection.');
+        }
+      })
+      .finally(() => {
+        if (active) setAccountLinkLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [form.id, form.source_type]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get('aire_link');
+    if (!result) return;
+
+    if (result === 'connected') showSuccess('Your AIRE administrator account is connected. You can now manage AIRE payroll work here.');
+    if (result === 'cancelled') setError('AIRE account connection was cancelled. Nothing was changed.');
+    url.searchParams.delete('aire_link');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [loading]);
 
   useEffect(() => {
     return () => {
@@ -126,6 +178,7 @@ function ClientTimeTrackingSources() {
 
   const editSource = (source: TimeTrackingSource) => {
     setForm(normalizeForm(source));
+    setAccountLink(null);
     setError(null);
     setSuccess(null);
   };
@@ -168,9 +221,6 @@ function ClientTimeTrackingSources() {
       if (editing && form.id) {
         const payload: TimeTrackingSourceUpdatePayload = { ...basePayload };
         if (form.shared_secret.trim()) payload.shared_secret = form.shared_secret.trim();
-        if (form.source_type === 'aire_services' && form.delegation_token.trim()) {
-          payload.delegation_token = form.delegation_token.trim();
-        }
         const res = await timeTrackingSourcesApi.update(form.id, payload);
         const savedSource = res.time_tracking_source;
         setSources((prev) => reconcileSavedSource(prev, savedSource));
@@ -181,7 +231,6 @@ function ClientTimeTrackingSources() {
           ...basePayload,
           source_type: form.source_type,
           shared_secret: form.shared_secret.trim(),
-          delegation_token: form.source_type === 'aire_services' ? form.delegation_token.trim() || undefined : undefined,
         };
         const res = await timeTrackingSourcesApi.create(payload);
         setSources((prev) => reconcileSavedSource(prev, res.time_tracking_source));
@@ -195,42 +244,41 @@ function ClientTimeTrackingSources() {
     }
   };
 
-  const removeDelegation = async () => {
-    if (!form.id || !window.confirm('Remove your personal AIRE payroll access from Cornerstone? Read-only AIRE details will remain available.')) return;
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const res = await timeTrackingSourcesApi.removeDelegation(form.id);
-      setSources((prev) => reconcileSavedSource(prev, res.time_tracking_source));
-      setForm((previous) => ({ ...previous, delegation_token: '' }));
-      showSuccess('Your delegated AIRE payroll access was removed.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove delegated access');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveDelegationOnly = async () => {
-    if (!form.id || !form.delegation_token.trim()) {
-      setError('Paste your AIRE delegation token first.');
+  const connectAireAccount = async () => {
+    if (!form.id) {
+      setError('Save the AIRE source before connecting your account.');
       return;
     }
 
-    setSaving(true);
+    setAccountLinkBusy(true);
     setError(null);
     setSuccess(null);
     try {
-      const res = await timeTrackingSourcesApi.saveDelegation(form.id, form.delegation_token.trim());
-      setSources((prev) => reconcileSavedSource(prev, res.time_tracking_source));
-      setForm((previous) => ({ ...previous, delegation_token: '' }));
-      showSuccess('Your delegated AIRE payroll access is ready.');
+      const response = await timeTrackingSourcesApi.createAireAccountLink(form.id);
+      navigateToAuthorization(response.authorization_url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save delegated access');
+      setError(err instanceof Error ? err.message : 'Could not start the AIRE account connection.');
+      setAccountLinkBusy(false);
+    }
+  };
+
+  const disconnectAireAccount = async () => {
+    if (!form.id || !window.confirm('Disconnect your AIRE administrator account? Read-only AIRE details will remain available.')) return;
+
+    setAccountLinkBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await timeTrackingSourcesApi.disconnectAireAccountLink(form.id);
+      setAccountLink(response.account_link);
+      setSources((previous) => previous.map((source) => (
+        source.id === form.id ? { ...source, delegation_token_configured: false } : source
+      )));
+      showSuccess('Your AIRE administrator account was disconnected.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not disconnect your AIRE account.');
     } finally {
-      setSaving(false);
+      setAccountLinkBusy(false);
     }
   };
 
@@ -328,7 +376,6 @@ function ClientTimeTrackingSources() {
                   onChange={(e) => setForm((prev) => ({
                     ...prev,
                     source_type: e.target.value as TimeTrackingSource['source_type'],
-                    delegation_token: '',
                   }))}
                   disabled={editing}
                   className="mt-1 w-full rounded-md border px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
@@ -373,37 +420,47 @@ function ClientTimeTrackingSources() {
               {form.source_type === 'aire_services' && (
                 <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 lg:col-span-2">
                   <div className="flex items-start gap-3">
-                    <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />
+                    {accountLink?.connected
+                      ? <CheckCircle2 className="mt-2 h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
+                      : <Link2 className="mt-2 h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-neutral-950">Your AIRE payroll access</p>
                         {editing && (
-                          <Badge variant={sources.find((source) => source.id === form.id)?.delegation_token_configured ? 'success' : 'warning'}>
-                            {sources.find((source) => source.id === form.id)?.delegation_token_configured ? 'Connected' : 'Needed for approvals'}
+                          <Badge variant={accountLink?.connected ? 'success' : 'warning'}>
+                            {accountLinkLoading ? 'Checking…' : accountLink?.connected ? 'Connected' : 'Connection needed'}
                           </Badge>
                         )}
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-neutral-600">
-                        Paste the delegation token AIRE issued to you. It is encrypted, belongs only to your Cornerstone login, and lets AIRE record who approved time or locked a cutoff. Other payroll staff use their own token.
-                      </p>
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                        <input
-                          type="password"
-                          aria-label="AIRE delegation token"
-                          value={form.delegation_token}
-                          onChange={(event) => setForm((current) => ({ ...current, delegation_token: event.target.value }))}
-                          placeholder={editing ? 'Leave blank to keep your current access' : 'Paste your AIRE delegation token'}
-                          autoComplete="new-password"
-                          className="min-w-0 flex-1 rounded-md border border-primary-200 bg-white px-3 py-2 text-sm"
-                        />
-                        {editing && (
-                          <Button type="button" onClick={() => void saveDelegationOnly()} disabled={saving || !form.delegation_token.trim()}>
-                            Save my access
+                      <div className="mt-2 rounded-lg border border-primary-100 bg-white/80 px-4 py-2 text-xs leading-5 text-neutral-700">
+                        {accountLink?.connected ? (
+                          <>
+                            <p className="font-semibold text-neutral-900">Connected as {accountLink.aire_user_name || accountLink.aire_user_email || 'your AIRE administrator account'}</p>
+                            {accountLink.aire_user_email && <p className="mt-1 text-neutral-600">{accountLink.aire_user_email}</p>}
+                            <p className="mt-2 text-neutral-600">This connection does not expire on a timer. It stops if you disconnect it or your AIRE administrator access is disabled.</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold text-neutral-900">Connect once—no token copying or routine renewal</p>
+                            <p className="mt-1 text-neutral-600">Cornerstone will take you to AIRE to sign in and confirm the connection, then bring you straight back. After that, approvals, corrections, and payroll cutoff work stay in Cornerstone.</p>
+                            {sources.find((source) => source.id === form.id)?.delegation_token_configured && (
+                              <p className="mt-2 font-medium text-amber-800">Your legacy 90-day access still works. Connect now to replace it with the permanent account link.</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {!editing && <p className="text-xs text-neutral-600">Save this source first, then connect your AIRE administrator account.</p>}
+                        {editing && !accountLink?.connected && (
+                          <Button type="button" onClick={() => void connectAireAccount()} disabled={saving || accountLinkBusy || accountLinkLoading}>
+                            <Link2 className="mr-2 h-4 w-4" />
+                            {accountLinkBusy ? 'Opening AIRE…' : 'Connect my AIRE account'}
                           </Button>
                         )}
-                        {editing && sources.find((source) => source.id === form.id)?.delegation_token_configured && (
-                          <Button type="button" variant="outline" onClick={() => void removeDelegation()} disabled={saving}>
-                            Remove my access
+                        {editing && accountLink?.connected && (
+                          <Button type="button" variant="outline" onClick={() => void disconnectAireAccount()} disabled={saving || accountLinkBusy}>
+                            <Unplug className="mr-2 h-4 w-4" />
+                            {accountLinkBusy ? 'Disconnecting…' : 'Disconnect'}
                           </Button>
                         )}
                       </div>
@@ -479,8 +536,10 @@ function ClientTimeTrackingSources() {
                             <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
                             {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
                             {source.source_type === 'aire_services' && (
-                              <Badge variant={source.delegation_token_configured ? 'success' : 'warning'}>
-                                {source.delegation_token_configured ? 'My payroll access ready' : 'My payroll access needed'}
+                              <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
+                                {source.id === form.id && accountLink?.connected
+                                  ? 'My AIRE account connected'
+                                  : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
                               </Badge>
                             )}
                           </div>
