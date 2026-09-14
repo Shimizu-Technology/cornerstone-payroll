@@ -58,7 +58,11 @@ env:
     USE_SOLID_QUEUE: true
     USE_SOLID_CABLE: true
     ACTIVE_STORAGE_SERVICE: r2
-    REQUIRE_MFA: true
+    # Change this to true only after independently reviewed Clerk enforcement
+    # is bound to the exact instance and evidence reference below.
+    REQUIRE_MFA: false
+    # CLERK_MFA_ATTESTED_INSTANCE_ID: ins_xxx
+    # CLERK_MFA_EVIDENCE_REF: security-evidence/approved-record-id
 
     # Required by production:readiness. Set this to the exact Kamal proxy or
     # load-balancer network; do not trust arbitrary public address ranges.

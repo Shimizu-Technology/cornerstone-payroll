@@ -24,6 +24,8 @@ RSpec.describe ProductionReadiness do
     {
       "AUTH_ENABLED" => "true",
       "REQUIRE_MFA" => "true",
+      "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_live",
+      "CLERK_MFA_EVIDENCE_REF" => "security-evidence/cornerstone-mfa-cutover-2026-09-14",
       "CORS_ORIGINS" => "https://payroll.example.com",
       "FRONTEND_URL" => "https://payroll.example.com",
       "CLERK_PUBLISHABLE_KEY" => "pk_live_publishable",
@@ -188,6 +190,44 @@ RSpec.describe ProductionReadiness do
     expect(report.failures.map(&:name)).to contain_exactly(
       "allowed frontend origins are explicit production HTTPS origins",
       "production Clerk keys are configured"
+    )
+  end
+
+  it "requires instance-bound MFA evidence in addition to the attestation flag" do
+    env.delete("CLERK_MFA_EVIDENCE_REF")
+
+    report = readiness.run(live: false)
+
+    expect(report.failures.map(&:name)).to include("MFA enforcement has instance-bound evidence")
+  end
+
+  it "rejects malformed or multiline MFA evidence bindings" do
+    invalid_bindings = [
+      [ "not-a-clerk-instance", "security-evidence/cornerstone" ],
+      [ "ins_live", "security-evidence/cornerstone\nforged" ]
+    ]
+
+    invalid_bindings.each do |instance_id, evidence_ref|
+      env["CLERK_MFA_ATTESTED_INSTANCE_ID"] = instance_id
+      env["CLERK_MFA_EVIDENCE_REF"] = evidence_ref
+
+      report = readiness.run(live: false)
+
+      expect(report.failures.map(&:name)).to include("MFA enforcement has instance-bound evidence")
+    end
+  end
+
+  it "requires the authenticated Clerk instance to match the MFA evidence" do
+    allow(http_get).to receive(:call).and_wrap_original do |original, uri, token|
+      next [ 200, { "id" => "ins_different" } ] if uri.host == "api.clerk.com"
+
+      original.call(uri, token)
+    end
+
+    report = readiness.run(live: true)
+
+    expect(report.failures.map(&:name)).to include(
+      "Clerk Backend API accepts the configured key and matches MFA evidence"
     )
   end
 
