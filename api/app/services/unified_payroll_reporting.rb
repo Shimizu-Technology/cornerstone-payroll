@@ -35,7 +35,14 @@ class UnifiedPayrollReporting
       payroll_count: row.fetch(:payroll_count, 0).to_i + regular_period_count(paychecks),
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
+      total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f,
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
+      bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
+      straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
+      installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
+      employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
+      employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
       medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
@@ -51,7 +58,14 @@ class UnifiedPayrollReporting
   def add_historical_to_company_totals(row, paychecks, adjustments = [], native_employee_ids:)
     totals = historical_totals(paychecks, adjustments)
     row.merge(
+      total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f,
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
+      bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
+      straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
+      installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
+      employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
+      employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
       medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
@@ -203,7 +217,11 @@ class UnifiedPayrollReporting
   def historical_totals(paychecks, adjustments = [])
     rows = paychecks + adjustments
     {
+      total_hours: sum(rows, :hours_total),
       gross_pay: sum(rows, :gross_pay),
+      bonus: component_sum(rows, :earnings_breakdown, /bonus/i),
+      employer_contributions: sum(rows, :employer_contributions),
+      employer_payroll_cost: sum(rows, :total_payroll_cost),
       withholding_tax: sum(rows, :federal_income_tax),
       social_security_tax: sum(rows, :social_security_tax),
       medicare_tax: sum(rows, :medicare_tax),
