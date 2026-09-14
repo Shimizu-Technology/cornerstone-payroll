@@ -11,7 +11,9 @@ RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
 CORNERSTONE_DATABASE="cornerstone_aire_certification_${RUN_ID//-/_}"
 TEMP_PARENT="${TMPDIR:-/tmp}"
-TEMP_PARENT="${TEMP_PARENT%/}"
+while [[ "$TEMP_PARENT" != "/" && "$TEMP_PARENT" == */ ]]; do
+  TEMP_PARENT="${TEMP_PARENT%/}"
+done
 TEMP_DIR="$(mktemp -d "$TEMP_PARENT/cornerstone-aire-certification.XXXXXX")"
 AIRE_FIXTURE="$TEMP_DIR/aire.json"
 CORNERSTONE_FIXTURE="$TEMP_DIR/cornerstone.json"
