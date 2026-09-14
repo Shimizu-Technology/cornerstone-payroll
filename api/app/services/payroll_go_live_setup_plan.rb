@@ -151,7 +151,7 @@ class PayrollGoLiveSetupPlan
         "current_value" => current_value,
         "proposed_value" => proposed_value,
         "decision" => decision,
-        "requires_review" => source_value != current_value
+        "requires_review" => decision != "already_matches"
       }
     end
   end
