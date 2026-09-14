@@ -300,6 +300,29 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(employee.reload.configuration_review_status).to eq("needs_review")
     end
 
+    it "returns the retained source and effective date for a certified setup item" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      employee.update!(configuration_review_items: [ {
+        "code" => "certify_employee_profile",
+        "message" => "Certify employee profile",
+        "fields" => %w[hire_date pay_rate]
+      } ])
+
+      post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
+        code: "certify_employee_profile",
+        resolution_note: "Matched the current signed employee record.",
+        source_reference: "Signed employee profile dated 09/01/2026",
+        effective_on: "2026-09-01",
+        acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "configuration_review_resolutions", 0)).to include(
+        "source_reference" => "Signed employee profile dated 09/01/2026",
+        "effective_on" => "2026-09-01"
+      )
+    end
+
     it "returns forbidden without changing review evidence for an unauthorized actor" do
       inactive_accountant = create(
         :user,

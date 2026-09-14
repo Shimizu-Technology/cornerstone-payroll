@@ -38,6 +38,17 @@ RSpec.describe EmployeeConfigurationReviewResolution, type: :model do
     expect(resolution.errors[:resolution_note]).to include("can't be blank")
   end
 
+  it "requires source and effective-date evidence for certification items" do
+    resolution = described_class.new(attributes.merge(item_code: "certify_employee_profile"))
+
+    expect(resolution).not_to be_valid
+    expect(resolution.errors[:source_reference]).to include("can't be blank")
+    expect(resolution.errors[:effective_on]).to include("can't be blank")
+
+    resolution.assign_attributes(source_reference: "Signed employee profile", effective_on: Date.new(2026, 9, 1))
+    expect(resolution).to be_valid
+  end
+
   it "does not allow the same employee item to be resolved twice" do
     described_class.create!(attributes)
     duplicate = described_class.new(attributes)

@@ -65,6 +65,39 @@ RSpec.describe EmployeeConfigurationReviewService do
     expect(employee.configuration_review_items).to be_empty
   end
 
+  it "requires and retains authoritative evidence for a payroll certification" do
+    employee.update!(configuration_review_items: [ {
+      "code" => "certify_retirement_configuration",
+      "message" => "Confirm the current retirement election.",
+      "fields" => %w[retirement_rate]
+    } ])
+    service = described_class.new(employee:, actor:)
+
+    expect do
+      service.resolve!(
+        code: "certify_retirement_configuration",
+        resolution_note: "Confirmed the employee and employer elections.",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to raise_error(described_class::InvalidResolution, /source document or record/)
+
+    expect do
+      service.resolve!(
+        code: "certify_retirement_configuration",
+        resolution_note: "Confirmed the employee and employer elections.",
+        source_reference: "  Signed MoSa 401(k) election dated 09/01/2026  ",
+        effective_on: "2026-09-01",
+        acknowledgement: described_class::ACKNOWLEDGEMENT
+      )
+    end.to change(EmployeeConfigurationReviewResolution, :count).by(1)
+
+    expect(EmployeeConfigurationReviewResolution.last).to have_attributes(
+      source_reference: "Signed MoSa 401(k) election dated 09/01/2026",
+      effective_on: Date.new(2026, 9, 1)
+    )
+    expect(employee.reload.configuration_review_status).to eq("complete")
+  end
+
   it "requires missing source fields to be entered before resolution" do
     employee.update_columns(
       hire_date: nil,

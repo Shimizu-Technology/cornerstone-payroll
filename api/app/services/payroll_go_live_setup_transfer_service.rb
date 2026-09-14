@@ -7,7 +7,7 @@ class PayrollGoLiveSetupTransferService
     retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
     default_custom_earnings default_payroll_adjustments address_line1 address_line2 city state zip phone email
     contractor_type contractor_pay_type business_name contractor_ein w9_on_file
-    ssn_encrypted bank_routing_number_encrypted bank_account_number_encrypted
+    ssn_encrypted
   ].freeze
   DEDUCTION_TYPE_FIELDS = %w[
     name category sub_category default_amount is_percentage active generates_check payee_name reference_number reporting_group
@@ -16,6 +16,32 @@ class PayrollGoLiveSetupTransferService
     name description kind tax_treatment category amount_type default_amount default_percentage
     show_in_payroll_grid sort_order active payee_name reference_number reporting_group
   ].freeze
+  CERTIFICATION_ITEMS = {
+    "certify_employee_profile" => {
+      "message" => "Confirm the successor employee profile against an authoritative current record before live payroll.",
+      "fields" => %w[hire_date employment_type salary_type pay_rate]
+    },
+    "certify_variable_salary_pay" => {
+      "message" => "Confirm how this variable salary is determined for each pay period and who supplies the approved amount.",
+      "fields" => %w[salary_type pay_rate]
+    },
+    "certify_retirement_configuration" => {
+      "message" => "Confirm the employee and employer retirement elections, effective date, limits, and payroll treatment against the current plan record.",
+      "fields" => %w[retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate]
+    },
+    "certify_multiple_wage_rates" => {
+      "message" => "Confirm every active wage rate, its use, and overtime treatment before live payroll.",
+      "fields" => []
+    },
+    "certify_tipped_pay" => {
+      "message" => "Confirm tipped occupations, reported tips, paid-out tips, and the source used for each payroll. Tipped occupation history is not copied automatically.",
+      "fields" => []
+    },
+    "certify_contractor_setup" => {
+      "message" => "Confirm the contractor identity, W-9 status, payment method, and 1099 treatment before live payroll.",
+      "fields" => %w[employment_type contractor_type contractor_pay_type business_name contractor_ein w9_on_file]
+    }
+  }.freeze
 
   def self.preview!(company:, source_company:, batch:, effective_on:, actor:)
     authorize_preview!(actor, company, source_company)
@@ -90,7 +116,9 @@ class PayrollGoLiveSetupTransferService
   end
 
   def self.copy_company_settings!(review)
-    attributes = review.source_company.attributes.slice(*PayrollGoLiveSetupPlan::COMPANY_FIELDS)
+    attributes = review.setup_plan.fetch("company_field_proposals").to_h do |proposal|
+      [ proposal.fetch("field"), proposal["proposed_value"] ]
+    end
     attributes["check_layout_config"] = CheckLayoutConfigSanitizer.call(
       stock_type: attributes.fetch("check_stock_type"),
       config: attributes.fetch("check_layout_config")
@@ -154,13 +182,18 @@ class PayrollGoLiveSetupTransferService
         adjustment
       end
     end
-    target.update!(attributes.merge(department: source.department && department_map.fetch(source.department)))
+    target.update!(attributes.merge(
+      department: source.department && department_map.fetch(source.department),
+      configuration_source: "quickbooks_history"
+    ))
     flag_loan_reconciliation!(target) if held_loan_adjustments
     copy_w4!(source, target, review, actor)
+    copy_retirement!(source, target, review, actor)
     copy_wage_rates!(source, target)
     copy_deductions!(source, target, deduction_type_map)
     copy_payroll_fields!(source, target, definition_map)
     copy_work_profile!(source, target, review, actor)
+    flag_configuration_certifications!(source, target)
   end
 
   def self.copy_w4!(source, target, review, actor)
@@ -174,6 +207,22 @@ class PayrollGoLiveSetupTransferService
       attributes: election.profile_attributes.merge(w4_effective_on: review.effective_on),
       actor: actor,
       source: "staff",
+      reason: "Reviewed successor setup copied from #{review.source_company.name}"
+    ).call!
+  end
+
+  def self.copy_retirement!(source, target, review, actor)
+    return if target.contractor?
+
+    election = source.retirement_election_on(review.effective_on) ||
+      source.employee_retirement_elections.recent_first.first
+    return unless election
+
+    EmployeeRetirementElectionChangeService.new(
+      employee: target,
+      attributes: election.snapshot_attributes.merge(effective_on: review.effective_on),
+      actor: actor,
+      source: "quickbooks_history",
       reason: "Reviewed successor setup copied from #{review.source_company.name}"
     ).call!
   end
@@ -233,9 +282,37 @@ class PayrollGoLiveSetupTransferService
     items << {
       "code" => code,
       "message" => "A transferred loan deduction requires a verified successor obligation and repayment schedule. Copied loan deductions are inactive; existing successor loan schedules were retained. Reconcile in Employee Loans before payroll.",
-      "fields" => []
+      "fields" => [],
+      "requires_certification_evidence" => true
     }
     target.update!(configuration_review_status: "needs_review", configuration_review_items: items)
+  end
+
+  def self.flag_configuration_certifications!(source, target)
+    codes = [ "certify_employee_profile" ]
+    codes << "certify_variable_salary_pay" if source.variable_salary?
+    codes << "certify_retirement_configuration" if retirement_configuration?(source)
+    codes << "certify_multiple_wage_rates" if source.employee_wage_rates.active.count > 1
+    codes << "certify_tipped_pay" if source.employee_tipped_occupations.exists?
+    codes << "certify_contractor_setup" if source.contractor?
+
+    existing = Array(target.configuration_review_items).index_by { |item| item["code"] }
+    codes.each do |code|
+      existing[code] = CERTIFICATION_ITEMS.fetch(code).merge(
+        "code" => code,
+        "requires_certification_evidence" => true
+      )
+    end
+    target.update!(
+      configuration_review_status: "needs_review",
+      configuration_review_items: existing.values
+    )
+  end
+
+  def self.retirement_configuration?(employee)
+    employee.employee_retirement_elections.exists? ||
+      %i[retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate]
+        .any? { |field| employee.public_send(field).to_d.positive? }
   end
 
   def self.copy_work_profile!(source, target, review, actor)
@@ -272,5 +349,6 @@ class PayrollGoLiveSetupTransferService
 
   private_class_method :authorize_preview!, :authorize_apply!, :copy_company_settings!, :copy_schedule!,
     :copy_departments!, :copy_deduction_types!, :copy_payroll_field_definitions!, :copy_employee!,
-    :copy_w4!, :copy_wage_rates!, :copy_deductions!, :copy_payroll_fields!, :copy_work_profile!, :audit!
+    :copy_w4!, :copy_retirement!, :copy_wage_rates!, :copy_deductions!, :copy_payroll_fields!, :copy_work_profile!,
+    :flag_configuration_certifications!, :retirement_configuration?, :audit!
 end
