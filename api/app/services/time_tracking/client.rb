@@ -15,6 +15,10 @@ module TimeTracking
     MAX_REMOTE_ERROR_BYTES = 300
     MAX_COCKPIT_EMPLOYEES_PER_PAGE = 100
     MAX_COCKPIT_ENTRIES_PER_PAGE = 250
+    AIRE_ACCOUNT_LINK_HOSTS = %w[
+      aire-services-guam.netlify.app
+      app.aireservicesguam.com
+    ].freeze
 
     def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
@@ -56,8 +60,10 @@ module TimeTracking
     end
 
     def create_payroll_account_link_session(external_actor_id:, external_actor_email:, return_url:)
-      request_json(
-        payroll_account_link_sessions_uri,
+      uri = payroll_account_link_sessions_uri
+      require_secure_payroll_transport!(uri)
+      payload = request_json(
+        uri,
         validate_source: false,
         method: :post,
         body: {
@@ -66,19 +72,25 @@ module TimeTracking
           return_url: return_url
         }
       )
+      validate_account_link_authorization_url!(payload)
+      payload
     end
 
     def payroll_account_link(external_actor_id:)
+      uri = payroll_account_link_uri(external_actor_id)
+      require_secure_payroll_transport!(uri)
       request_json(
-        payroll_account_link_uri(external_actor_id),
+        uri,
         validate_source: false,
         surface_remote_error: true
       )
     end
 
     def disconnect_payroll_account_link(external_actor_id:)
+      uri = payroll_account_link_uri(external_actor_id)
+      require_secure_payroll_transport!(uri)
       request_json(
-        payroll_account_link_uri(external_actor_id),
+        uri,
         validate_source: false,
         method: :delete,
         surface_remote_error: true
@@ -387,9 +399,7 @@ module TimeTracking
 
         { "X-Aire-Delegation-Token" => token }
       end
-      unless uri.scheme == "https" || development_loopback?(uri)
-        raise Error, "AIRE payroll commands require HTTPS"
-      end
+      require_secure_payroll_transport!(uri)
 
       request_json(
         uri,
@@ -399,6 +409,28 @@ module TimeTracking
         headers: headers,
         surface_remote_error: true
       )
+    end
+
+    def require_secure_payroll_transport!(uri)
+      return if uri.scheme == "https" || development_loopback?(uri)
+
+      raise Error, "AIRE payroll actions and account linking require HTTPS"
+    end
+
+    def validate_account_link_authorization_url!(payload)
+      uri = URI.parse(payload["authorization_url"].to_s)
+      allowed_hosts = AIRE_ACCOUNT_LINK_HOSTS +
+                      ENV.fetch("AIRE_ACCOUNT_LINK_ALLOWED_HOSTS", "").split(",") +
+                      [ URI.parse(@source.base_url.to_s).host ]
+      allowed_hosts = allowed_hosts.filter_map { |host| DestinationPolicy.normalize_host(host) }.uniq
+      secure_url = uri.scheme == "https" && uri.port == 443 && uri.host.present? && uri.userinfo.blank?
+      approved_host = allowed_hosts.include?(DestinationPolicy.normalize_host(uri.host))
+      return if secure_url && approved_host
+      return if development_loopback?(uri)
+
+      raise Error, "#{@source.name} returned an unapproved account-link URL"
+    rescue URI::InvalidURIError
+      raise Error, "#{@source.name} returned an invalid account-link URL"
     end
 
     def development_loopback?(uri)

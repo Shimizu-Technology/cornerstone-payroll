@@ -612,7 +612,7 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
                       <p className="font-semibold">Live details are available, but actions need your AIRE access</p>
                       <p className="mt-1 leading-5">Connect your administrator account once so AIRE can verify and record your approvals. The connection stays active until you disconnect it or your AIRE access is disabled.</p>
                       <Link
-                        to="/time-tracking-sources"
+                        to={`/time-tracking-sources?source_id=${calendar.source_id}`}
                         className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2"
                       >
                         Connect my AIRE account

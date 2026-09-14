@@ -69,7 +69,12 @@ module AirePayrollCalendar
 
     def confirmed_semimonthly_schedule?
       schedule = pay_schedule
-      schedule&.confirmed? && schedule.frequency == "semimonthly" && schedule.period_rule == "semimonthly" && schedule.timezone == TIME_ZONE
+      schedule&.confirmed? &&
+        schedule.frequency == "semimonthly" &&
+        schedule.period_rule == "semimonthly" &&
+        schedule.timezone == TIME_ZONE &&
+        schedule.effective_on <= pay_period.start_date &&
+        (schedule.ends_on.nil? || schedule.ends_on >= pay_period.end_date)
     end
 
     def pay_schedule

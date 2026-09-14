@@ -92,6 +92,19 @@ RSpec.describe AirePayrollCalendar::Presenter do
     expect(state.fetch(:eligibility_error)).to include("takes effect on September 16, 2026")
   end
 
+  it "rejects an attached schedule that no longer covers the pay period" do
+    schedule.update!(effective_on: Date.new(2026, 10, 16))
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(
+      eligible: false,
+      can_publish: false,
+      eligibility_code: "pay_schedule_not_effective"
+    )
+    expect(state.fetch(:eligibility_error)).to include("takes effect on October 16, 2026")
+  end
+
   it "does not offer a schedule revision after the delivered cutoff has passed" do
     calendar_period = create(
       :aire_payroll_calendar_period,
@@ -118,5 +131,21 @@ RSpec.describe AirePayrollCalendar::Presenter do
       can_publish: false,
       cutoff_state: "schedule_changed"
     )
+  end
+
+  it "keeps the calendar period tied to its original source when that source is inactive" do
+    source.update!(active: false)
+    replacement = create(:time_tracking_source, company: company, source_type: "aire_services", name: "Replacement AIRE")
+    create(
+      :aire_payroll_calendar_period,
+      company: company,
+      time_tracking_source: source,
+      pay_period: pay_period
+    )
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(source_id: source.id, source_name: source.name)
+    expect(state.fetch(:source_id)).not_to eq(replacement.id)
   end
 end

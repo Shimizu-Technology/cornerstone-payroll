@@ -61,12 +61,20 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}${cockpit}`;
 }
 
-export function TimeTrackingSources() {
+type TimeTrackingSourcesProps = {
+  navigateToAuthorization?: (url: string) => void;
+};
+
+const defaultAuthorizationNavigation = (url: string) => window.location.assign(url);
+
+export function TimeTrackingSources({
+  navigateToAuthorization = defaultAuthorizationNavigation,
+}: TimeTrackingSourcesProps = {}) {
   const { activeCompanyId } = useCompany();
-  return <ClientTimeTrackingSources key={activeCompanyId} />;
+  return <ClientTimeTrackingSources key={activeCompanyId} navigateToAuthorization={navigateToAuthorization} />;
 }
 
-function ClientTimeTrackingSources() {
+function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTrackingSourcesProps>) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [form, setForm] = useState<FormState>(() => normalizeForm());
@@ -247,7 +255,7 @@ function ClientTimeTrackingSources() {
     setSuccess(null);
     try {
       const response = await timeTrackingSourcesApi.createAireAccountLink(form.id);
-      window.location.assign(response.authorization_url);
+      navigateToAuthorization(response.authorization_url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the AIRE account connection.');
       setAccountLinkBusy(false);
@@ -413,8 +421,8 @@ function ClientTimeTrackingSources() {
                 <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 lg:col-span-2">
                   <div className="flex items-start gap-3">
                     {accountLink?.connected
-                      ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
-                      : <Link2 className="mt-0.5 h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />}
+                      ? <CheckCircle2 className="mt-2 h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
+                      : <Link2 className="mt-2 h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-neutral-950">Your AIRE payroll access</p>
@@ -424,7 +432,7 @@ function ClientTimeTrackingSources() {
                           </Badge>
                         )}
                       </div>
-                      <div className="mt-2 rounded-lg border border-primary-100 bg-white/80 px-3 py-2.5 text-xs leading-5 text-neutral-700">
+                      <div className="mt-2 rounded-lg border border-primary-100 bg-white/80 px-4 py-2 text-xs leading-5 text-neutral-700">
                         {accountLink?.connected ? (
                           <>
                             <p className="font-semibold text-neutral-900">Connected as {accountLink.aire_user_name || accountLink.aire_user_email || 'your AIRE administrator account'}</p>
@@ -441,7 +449,7 @@ function ClientTimeTrackingSources() {
                           </>
                         )}
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-4 flex flex-wrap gap-2">
                         {!editing && <p className="text-xs text-neutral-600">Save this source first, then connect your AIRE administrator account.</p>}
                         {editing && !accountLink?.connected && (
                           <Button type="button" onClick={() => void connectAireAccount()} disabled={saving || accountLinkBusy || accountLinkLoading}>

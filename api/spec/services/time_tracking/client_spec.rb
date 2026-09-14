@@ -162,7 +162,7 @@ RSpec.describe TimeTracking::Client do
             "return_url" => "https://payroll.example.com/time-tracking-sources?source_id=4"
           }
         )
-        .to_return(status: 201, body: { authorization_url: "https://aire.example.com/connect" }.to_json,
+        .to_return(status: 201, body: { authorization_url: "https://aire-services-guam.netlify.app/admin/payroll-link?token=request" }.to_json,
                    headers: { "Content-Type" => "application/json" })
       status_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/account_links/17")
         .to_return(status: 200, body: { account_link: { connected: true } }.to_json,
@@ -180,12 +180,43 @@ RSpec.describe TimeTracking::Client do
       status = client.payroll_account_link(external_actor_id: 17)
       disconnected = client.disconnect_payroll_account_link(external_actor_id: 17)
 
-      expect(created.fetch("authorization_url")).to eq("https://aire.example.com/connect")
+      expect(created.fetch("authorization_url")).to eq("https://aire-services-guam.netlify.app/admin/payroll-link?token=request")
       expect(status.dig("account_link", "connected")).to be(true)
       expect(disconnected.dig("account_link", "connected")).to be(false)
       expect(create_stub).to have_been_requested.once
       expect(status_stub).to have_been_requested.once
       expect(disconnect_stub).to have_been_requested.once
+    end
+
+    it "rejects an account-link redirect to an unapproved host" do
+      stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/account_link_sessions")
+        .to_return(status: 201, body: { authorization_url: "https://lookalike.example/connect" }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      expect do
+        client_for(source).create_payroll_account_link_session(
+          external_actor_id: 17,
+          external_actor_email: "chels@example.com",
+          return_url: "https://payroll.example.com/time-tracking-sources?source_id=4"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /unapproved account-link URL/)
+    end
+
+    it "refuses every account-link request over non-loopback HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      client = client_for(source)
+
+      expect do
+        client.create_payroll_account_link_session(
+          external_actor_id: 17,
+          external_actor_email: "chels@example.com",
+          return_url: "https://payroll.example.com/time-tracking-sources?source_id=4"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect { client.payroll_account_link(external_actor_id: 17) }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect { client.disconnect_payroll_account_link(external_actor_id: 17) }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
     end
 
     it "sends delegated overtime decisions to the dedicated AIRE command" do
