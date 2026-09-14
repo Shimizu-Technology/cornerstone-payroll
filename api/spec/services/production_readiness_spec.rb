@@ -204,7 +204,11 @@ RSpec.describe ProductionReadiness do
   it "rejects malformed or multiline MFA evidence bindings" do
     invalid_bindings = [
       [ "not-a-clerk-instance", "security-evidence/cornerstone" ],
-      [ "ins_live", "security-evidence/cornerstone\nforged" ]
+      [ "ins_live", "security-evidence/cornerstone\nforged" ],
+      [ "\nins_live", "security-evidence/cornerstone" ],
+      [ "ins_live\r\n", "security-evidence/cornerstone" ],
+      [ "ins_live", "\nsecurity-evidence/cornerstone" ],
+      [ "ins_live", "security-evidence/cornerstone\r\n" ]
     ]
 
     invalid_bindings.each do |instance_id, evidence_ref|
