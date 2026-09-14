@@ -23,6 +23,7 @@ The following state was observed through provider consoles and safe deployed che
 - No AIRE Clerk production instance exists. Clerk rejected the `aire-services-guam.netlify.app` hostname because a `netlify.app` domain cannot be used for a production application.
 - `aireservicesguam.com` is the public Wix site. `app.aireservicesguam.com` was unassigned when inspected and is the proposed application hostname.
 - The Netlify account has an overdue $20 invoice. The dashboard currently blocks the custom-domain work needed for the AIRE production identity setup.
+- The development instance uses the same verified email-code and password settings as Cornerstone and also uses Google social sign-in through Clerk shared credentials. A production AIRE instance will require its own Google OAuth credentials if Google sign-in is retained.
 - The earlier inventory found 34 development Clerk users. Re-inventory immediately before cutover; do not use this count as the migration source of truth.
 
 ## Decisions and authority required
@@ -37,6 +38,8 @@ Record each decision before changing a domain, subscription, user, or live key. 
 | Cornerstone recovery administrators | Two named, active Cornerstone administrators | Pending |
 | AIRE recovery administrators | Two named, active AIRE administrators, including the regular payroll operator | Pending |
 | Cornerstone Google sign-in | Preserve it with production Google OAuth credentials for the least disruptive cutover | Pending |
+| AIRE Google sign-in | Preserve it with production Google OAuth credentials for the least disruptive cutover | Pending |
+| Password sign-in | Prefer Google plus email code and disable passwords; if retained, approve a stronger production password policy before invitations | Pending |
 | Maintenance window | A time when Cornerstone and AIRE operators are signed out and available to verify recovery | Pending |
 | Release operator and reviewer | Two different named people | Pending |
 | Rollback deadline | A precise ChST date and time after successful verification | Pending |
@@ -48,7 +51,8 @@ Do not begin the live key switch until every item below is true.
 - [ ] Netlify billing is current and `app.aireservicesguam.com` is attached to the AIRE site with valid TLS.
 - [ ] Separate production Clerk instances exist for Cornerstone and AIRE, and their application domains show verified.
 - [ ] Both instances are invite-only and reproduce the approved email, password, session, invitation, and organization policies.
-- [ ] The Cornerstone Google connection is either configured with production OAuth credentials and tested, or its removal has explicit written approval and affected users have a tested alternative.
+- [ ] Each Google connection is either configured with production OAuth credentials and tested, or its removal has explicit written approval and affected users have a tested alternative.
+- [ ] Password sign-in is disabled or has an explicitly approved production policy. Do not silently preserve the current eight-character minimum with minimum-strength enforcement off.
 - [ ] Clerk Pro is active and the approved MFA strategy is enabled in both production instances.
 - [ ] Two recovery administrators per application have enrolled MFA, stored backup codes separately, signed out, signed back in, and completed a recovery exercise.
 - [ ] Current development Clerk users and active application users have been reconciled by verified primary email. Disabled and cross-company accounts are called out explicitly.
@@ -79,7 +83,7 @@ For each application:
 6. Enable the selected MFA strategy. Authenticator applications plus recovery codes are the baseline for privileged users.
 7. Do not set application `REQUIRE_MFA=true` yet; it is an attestation that comes after provider-side enforcement and recovery have been proved.
 
-For Cornerstone Google sign-in:
+For Google sign-in in each application where it is retained:
 
 1. Create or select a production Google OAuth web client owned by Shimizu Technology.
 2. Use the exact authorized origin and redirect URI shown by the verified Clerk production connection. Do not copy the development `clerk.shared.lcl.dev` callback.
@@ -123,7 +127,7 @@ Use non-payroll actions wherever possible. Record result, timestamp in ChST, ope
 | Recovery administrator signs in with MFA | Pending | Pending |
 | Second recovery administrator signs in and completes recovery | Pending | Pending |
 | Email-code sign-in works | Pending | Pending |
-| Google sign-in works, if retained | Pending | N/A unless approved |
+| Google sign-in works, if retained | Pending | Pending |
 | Active staff account receives the correct local role | Pending | Pending |
 | Client or ordinary employee cannot enter an admin route | Pending | Pending |
 | Inactive local user is rejected despite a valid Clerk identity | Pending | Pending |
