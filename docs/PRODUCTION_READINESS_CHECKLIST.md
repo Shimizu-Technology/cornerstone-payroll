@@ -1,8 +1,8 @@
 # Production Readiness Checklist
 
-Last reviewed: `2026-09-03T09:26:38+10:00`
+Last reviewed: `2026-09-14T15:38:01+10:00`
 
-Current evidence: [August 24, 2026 production rerun](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md). The deployed command passes 24 of 26 controls. Clerk production keys and MFA remain failed, and the manual controls below remain no-go until their evidence is attached.
+Current evidence: [September 14, 2026 production rerun](PRODUCTION_READINESS_EVIDENCE_2026-09-14.md). The deployed Cornerstone command passes 26 of 29 controls, and the deployed AIRE command passes 20 of 23. Both fail only the expected production Clerk, instance-bound MFA evidence, and authenticated Clerk-instance checks. The manual controls below remain no-go until their evidence is attached.
 
 Current manual evidence record: [Payroll operator and recovery acceptance](OPERATOR_AND_RECOVERY_ACCEPTANCE.md). Use it to assign owners and retain the results of operator, identity, restore, object recovery, queue, monitoring, and real-cycle drills.
 
