@@ -59,6 +59,37 @@ RSpec.describe AirePayrollCalendar::Presenter do
       cutoff_state: "cutoff_due"
     )
     expect(state.fetch(:eligibility_error)).to include("passed before it was published")
+    expect(state.fetch(:eligibility_code)).to eq("cutoff_passed")
+  end
+
+  it "explains when confirmed AIRE setup starts after an older pay period" do
+    schedule.update!(effective_on: Date.new(2026, 9, 16))
+    legacy_schedule = CompanyPaySchedule.create!(
+      company: company,
+      frequency: "semimonthly",
+      period_rule: "manual",
+      pay_date_rule: "manual",
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: Date.new(2026, 9, 15)
+    )
+    pay_period.update_columns(
+      start_date: Date.new(2026, 8, 16),
+      end_date: Date.new(2026, 8, 31),
+      pay_date: Date.new(2026, 9, 15),
+      company_pay_schedule_id: legacy_schedule.id
+    )
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 9, 1, 9))
+
+    expect(state).to include(
+      eligible: false,
+      can_publish: false,
+      eligibility_code: "pay_schedule_not_effective"
+    )
+    expect(state.fetch(:eligibility_error)).to include("takes effect on September 16, 2026")
   end
 
   it "does not offer a schedule revision after the delivered cutoff has passed" do

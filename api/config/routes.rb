@@ -226,6 +226,9 @@ Rails.application.routes.draw do
             post :test_connection
             put :delegation, action: :save_delegation
             delete :delegation, action: :destroy_delegation
+            get :aire_account_link, action: :show_aire_account_link
+            post :aire_account_link, action: :create_aire_account_link
+            delete :aire_account_link, action: :destroy_aire_account_link
           end
         end
 

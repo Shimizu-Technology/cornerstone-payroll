@@ -16,9 +16,10 @@ module TimeTracking
     MAX_COCKPIT_EMPLOYEES_PER_PAGE = 100
     MAX_COCKPIT_ENTRIES_PER_PAGE = 250
 
-    def initialize(source, delegation: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+    def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
       @delegation = delegation
+      @actor = actor
       @destination_policy = destination_policy
       @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
       @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
@@ -52,6 +53,36 @@ module TimeTracking
 
     def payroll_calendar_period(external_pay_period_id:)
       request_json(payroll_calendar_period_uri(external_pay_period_id), validate_source: false)
+    end
+
+    def create_payroll_account_link_session(external_actor_id:, external_actor_email:, return_url:)
+      request_json(
+        payroll_account_link_sessions_uri,
+        validate_source: false,
+        method: :post,
+        body: {
+          external_actor_id: normalize_external_actor_id(external_actor_id),
+          external_actor_email: external_actor_email,
+          return_url: return_url
+        }
+      )
+    end
+
+    def payroll_account_link(external_actor_id:)
+      request_json(
+        payroll_account_link_uri(external_actor_id),
+        validate_source: false,
+        surface_remote_error: true
+      )
+    end
+
+    def disconnect_payroll_account_link(external_actor_id:)
+      request_json(
+        payroll_account_link_uri(external_actor_id),
+        validate_source: false,
+        method: :delete,
+        surface_remote_error: true
+      )
     end
 
     def payroll_cockpit_period(external_pay_period_id:)
@@ -206,6 +237,7 @@ module TimeTracking
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
       when :put then Net::HTTP::Put.new(uri)
+      when :delete then Net::HTTP::Delete.new(uri)
       else raise ArgumentError, "Unsupported HTTP method"
       end
       request["Accept"] = "application/json"
@@ -278,6 +310,14 @@ module TimeTracking
       source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}")
     end
 
+    def payroll_account_link_sessions_uri
+      source_uri("/api/v1/payroll/account_link_sessions")
+    end
+
+    def payroll_account_link_uri(external_actor_id)
+      source_uri("/api/v1/payroll/account_links/#{normalize_external_actor_id(external_actor_id)}")
+    end
+
     def payroll_cockpit_finalize_uri(external_pay_period_id)
       uri = payroll_cockpit_period_uri(external_pay_period_id)
       uri.path = "#{uri.path}/finalize"
@@ -331,11 +371,24 @@ module TimeTracking
       normalized_id
     end
 
+    def normalize_external_actor_id(value)
+      normalized_id = value.to_s
+      raise Error, "Invalid Cornerstone account ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+
+      normalized_id
+    end
+
     def delegated_request_json(uri, body:)
-      token = @delegation&.token.to_s
-      raise Error, "Your AIRE payroll delegation is not configured" if token.blank?
+      headers = if @actor.present?
+        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
+      else
+        token = @delegation&.token.to_s
+        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
+
+        { "X-Aire-Delegation-Token" => token }
+      end
       unless uri.scheme == "https" || development_loopback?(uri)
-        raise Error, "Delegated AIRE payroll commands require HTTPS"
+        raise Error, "AIRE payroll commands require HTTPS"
       end
 
       request_json(
@@ -343,7 +396,7 @@ module TimeTracking
         validate_source: false,
         method: :post,
         body: body,
-        headers: { "X-Aire-Delegation-Token" => token },
+        headers: headers,
         surface_remote_error: true
       )
     end

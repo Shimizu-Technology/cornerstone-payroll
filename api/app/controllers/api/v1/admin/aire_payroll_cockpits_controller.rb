@@ -242,7 +242,10 @@ module Api
         def cockpit_client(with_delegation: false)
           require_published_source!
           delegation = current_delegation if with_delegation
-          TimeTracking::Client.new(@source, delegation: delegation)
+          actor = current_user if with_delegation && account_link_connected?
+          options = { delegation: delegation }
+          options[:actor] = actor if actor
+          TimeTracking::Client.new(@source, **options)
         end
 
         def require_published_source!
@@ -256,11 +259,30 @@ module Api
 
         def command_access_payload
           delegation = current_delegation
+          account_link_configured = account_link_connected?
           {
             can_read: true,
-            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) && delegation.present?,
-            delegation_configured: delegation.present?
+            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&
+              (account_link_configured || delegation.present?),
+            delegation_configured: account_link_configured || delegation.present?,
+            account_link_configured: account_link_configured,
+            legacy_delegation_configured: delegation.present?
           }
+        end
+
+        def account_link_connected?
+          current_account_link.dig("account_link", "connected") == true
+        end
+
+        def current_account_link
+          return @current_account_link if defined?(@current_account_link)
+
+          @current_account_link = TimeTracking::Client.new(@source, delegation: nil).payroll_account_link(
+            external_actor_id: current_user.id
+          )
+        rescue TimeTracking::Client::Error => e
+          Rails.logger.info("AIRE account-link status unavailable: #{e.message}")
+          @current_account_link = {}
         end
 
         def current_delegation
