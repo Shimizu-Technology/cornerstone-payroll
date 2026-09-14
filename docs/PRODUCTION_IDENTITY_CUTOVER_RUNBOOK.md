@@ -24,6 +24,7 @@ The following state was observed through provider consoles and safe deployed che
 - `aireservicesguam.com` is the public Wix site. `app.aireservicesguam.com` was unassigned when inspected and is the proposed application hostname.
 - The Netlify account has an overdue $20 invoice. The dashboard currently blocks the custom-domain work needed for the AIRE production identity setup.
 - The development instance uses the same verified email-code and password settings as Cornerstone and also uses Google social sign-in through Clerk shared credentials. A production AIRE instance will require its own Google OAuth credentials if Google sign-in is retained.
+- The AIRE Netlify production environment does not define `VITE_CLERK_JWT_TEMPLATE`; the deployed frontend requests Clerk's default session token.
 - The earlier inventory found 34 development Clerk users. Re-inventory immediately before cutover; do not use this count as the migration source of truth.
 
 ## Decisions and authority required
@@ -111,7 +112,7 @@ The frontend and backend cannot accept different Clerk environments as a steady 
 
 ### AIRE
 
-- Netlify: replace `VITE_CLERK_PUBLISHABLE_KEY` with the AIRE production publishable key. Preserve `VITE_CLERK_JWT_TEMPLATE` only if that template exists and is verified in the production instance.
+- Netlify: replace `VITE_CLERK_PUBLISHABLE_KEY` with the AIRE production publishable key. Leave `VITE_CLERK_JWT_TEMPLATE` unset unless a separate reviewed change deliberately introduces and verifies a matching production template.
 - Render: replace `CLERK_SECRET_KEY`, `CLERK_JWKS_URL`, and any explicit `CLERK_ISSUER` or `CLERK_AUDIENCE` values as one prepared change.
 - Deploy from the same approved AIRE revision used by the readiness evidence.
 
