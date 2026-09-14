@@ -10,7 +10,9 @@ KEEP_RUNNING="${KEEP_RUNNING:-false}"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
 CORNERSTONE_DATABASE="cornerstone_aire_certification_${RUN_ID//-/_}"
-TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cornerstone-aire-certification.XXXXXX")"
+TEMP_PARENT="${TMPDIR:-/tmp}"
+TEMP_PARENT="${TEMP_PARENT%/}"
+TEMP_DIR="$(mktemp -d "$TEMP_PARENT/cornerstone-aire-certification.XXXXXX")"
 AIRE_FIXTURE="$TEMP_DIR/aire.json"
 CORNERSTONE_FIXTURE="$TEMP_DIR/cornerstone.json"
 AIRE_LOG="$TEMP_DIR/aire.log"
@@ -39,7 +41,13 @@ cleanup() {
 
   dropdb --if-exists "$CORNERSTONE_DATABASE" >/dev/null 2>&1 || true
   dropdb --if-exists "$AIRE_DATABASE" >/dev/null 2>&1 || true
-  /usr/bin/trash "$TEMP_DIR" 2>/dev/null || true
+  if [[ -d "$TEMP_DIR" ]] && ! /usr/bin/trash "$TEMP_DIR" 2>/dev/null; then
+    if [[ "$TEMP_DIR" == "$TEMP_PARENT"/cornerstone-aire-certification.* ]]; then
+      /bin/rm -rf -- "$TEMP_DIR"
+    else
+      echo "Refusing to remove an unexpected certification temporary path: $TEMP_DIR" >&2
+    fi
+  fi
   exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -94,6 +102,7 @@ json_value() {
 
 COMPANY_ID="$(json_value "$CORNERSTONE_FIXTURE" company_id)"
 PAY_PERIOD_ID="$(json_value "$CORNERSTONE_FIXTURE" pay_period_id)"
+NEXT_PAY_PERIOD_ID="$(json_value "$CORNERSTONE_FIXTURE" next_pay_period_id)"
 SOURCE_ID="$(json_value "$CORNERSTONE_FIXTURE" source_id)"
 EMPLOYEE_ID="$(json_value "$CORNERSTONE_FIXTURE" employee_id)"
 WAGE_RATE_ID="$(json_value "$CORNERSTONE_FIXTURE" employee_wage_rate_id)"
@@ -136,7 +145,7 @@ wait_for_health() {
   local name=$2
   local log=$3
   for _attempt in $(seq 1 60); do
-    if curl --silent --fail "$url/up" >/dev/null 2>&1; then
+    if curl --silent --fail --connect-timeout 3 --max-time 5 "$url/up" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -155,7 +164,8 @@ api_call() {
   local output=$5
   local body=${6:-}
   local status
-  local args=(--silent --show-error --output "$output" --write-out "%{http_code}" --request "$method" \
+  local args=(--silent --show-error --connect-timeout 5 --max-time 30 \
+    --output "$output" --write-out "%{http_code}" --request "$method" \
     --header "Accept: application/json" --header "Content-Type: application/json" \
     --header "X-E2E-User-Email: $ADMIN_EMAIL" --header "X-Company-Id: $COMPANY_ID")
   [[ -z "$body" ]] || args+=(--data-binary "@$body")
@@ -171,16 +181,22 @@ api_call() {
 PUBLISH_RESPONSE="$TEMP_DIR/publish.json"
 api_call 201 "publish the T-7 calendar from Cornerstone to AIRE" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_calendar/publish" "$PUBLISH_RESPONSE"
+NEXT_PUBLISH_RESPONSE="$TEMP_DIR/next-publish.json"
+api_call 201 "publish the next available AIRE payroll period" POST \
+  "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$NEXT_PAY_PERIOD_ID/aire_payroll_calendar/publish" "$NEXT_PUBLISH_RESPONSE"
 (
   cd "$ROOT_DIR/api"
   export PATH="$RBENV_ROOT/shims:$PATH"
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
-      publication = AirePayrollCalendarPublication.order(:id).last or abort "missing calendar publication"
-      result = AirePayrollCalendar::Delivery.new(publication_id: publication.id).call
-      abort "calendar delivery failed: #{result[:error]}" unless result.fetch(:status) == "delivered"
-      puts "PASS: the published calendar reached AIRE"
+      publications = AirePayrollCalendarPublication.where(delivery_status: %w[pending failed]).order(:id).to_a
+      abort "missing calendar publications" unless publications.size == 2
+      publications.each do |publication|
+        result = AirePayrollCalendar::Delivery.new(publication_id: publication.id).call
+        abort "calendar delivery failed: #{result[:error]}" unless result.fetch(:status) == "delivered"
+      end
+      puts "PASS: both published calendar periods reached AIRE"
     '
 )
 
@@ -325,7 +341,7 @@ PRINT_RESPONSE="$TEMP_DIR/print.json"
 api_call 200 "record the synthetic paper check as prepared" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/payroll_items/$PAYROLL_ITEM_ID/check/mark_printed" "$PRINT_RESPONSE"
 DELIVERY_BODY="$TEMP_DIR/delivery.json"
-ruby -rjson -rdate -e 'File.write(ARGV[0], JSON.generate(delivered_on: Date.today.iso8601, delivery_method: "hand_delivery", attestation: true, evidence_reference: "LOCAL-CERTIFICATION-ONLY", note: "Synthetic local delivery proof"))' "$DELIVERY_BODY"
+TZ=Pacific/Guam ruby -rjson -rdate -e 'File.write(ARGV[0], JSON.generate(delivered_on: Date.today.iso8601, delivery_method: "hand_delivery", attestation: true, evidence_reference: "LOCAL-CERTIFICATION-ONLY", note: "Synthetic local delivery proof"))' "$DELIVERY_BODY"
 DELIVERY_RESPONSE="$TEMP_DIR/delivery-response.json"
 api_call 200 "record synthetic check delivery as the payment event" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/payroll_items/$PAYROLL_ITEM_ID/check/mark_delivered" \
@@ -367,10 +383,25 @@ ruby -rjson -e '
 ' "$FINAL_ENTRIES"
 echo "PASS: four held hours remain visible and unpaid for the next available period"
 
+NEXT_SETTLEMENTS="$TEMP_DIR/next-settlements.json"
+api_call 200 "load held-time history in the next available pay period" GET \
+  "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$NEXT_PAY_PERIOD_ID/aire_payroll_cockpit/settlement_cases" "$NEXT_SETTLEMENTS"
+ruby -rjson -e '
+  cases=JSON.parse(File.read(ARGV[0])).fetch("settlement_cases")
+  held=cases.find { |settlement_case| settlement_case.fetch("source_time_entry_id") == ARGV[1] }
+  abort "held entry is missing from the next pay period" unless held
+  abort "held entry was not scheduled for the next regular payroll" unless held.fetch("status") == "scheduled" && held.dig("routing", "destination_kind") == "regular"
+  abort "held entry hours changed during carry-forward" unless held.dig("time", "held_total_hours").to_f == 4.0
+  abort "held entry no longer awaits approval" unless held.dig("time", "approval_status") == "pending"
+  abort "held entry was incorrectly marked as processed" if held["processing"] || held["included_payroll_batch_id"]
+' "$NEXT_SETTLEMENTS" "$MANUAL_HOLD_ID"
+echo "PASS: the next pay period shows all four held hours as scheduled and unpaid"
+
 echo "LOCAL AIRE PAYROLL CERTIFICATION PASSED"
 echo "Cornerstone API: $CORNERSTONE_BASE_URL"
 echo "AIRE API: $AIRE_BASE_URL"
 echo "Synthetic pay period ID: $PAY_PERIOD_ID"
+echo "Synthetic next pay period ID: $NEXT_PAY_PERIOD_ID"
 
 if [[ "$KEEP_RUNNING" == "true" ]]; then
   echo "Servers are being kept open for browser review. Press Ctrl-C to clean up."
