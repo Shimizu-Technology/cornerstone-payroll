@@ -47,7 +47,8 @@ RSpec.describe PayrollGoLiveSetupTransferService do
 
   it "copies reviewed live setup while leaving paid history and loan balances behind" do
     source = create(:employee, company: source_company, department: create(:department, company: source_company),
-      first_name: "Rosalaine", last_name: "Gumataotao", hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
+      first_name: "Rosalaine", last_name: "Gumataotao", hire_date: Date.new(1998, 5, 26), pay_rate: 22.50,
+      bank_routing_number_encrypted: "121000358", bank_account_number_encrypted: "123456789")
     target = create(:employee, company:, department: create(:department, company:),
       first_name: "Rosalaine", last_name: "Gumataotao", ssn_encrypted: source.ssn_digits, hire_date: Date.new(2026, 1, 1), pay_rate: 1)
     EmployeeW4Election.create!(
@@ -67,20 +68,35 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
     expect(review.validation_errors).to be_empty
     expect(review.setup_plan.to_json).not_to include(source.ssn_encrypted)
+    expect(review.setup_plan.fetch("company_field_proposals")).to include(include(
+      "field" => "email",
+      "proposed_value" => "new@example.com",
+      "decision" => "retain_successor",
+      "requires_review" => true
+    ))
+    expect(review.setup_plan.fetch("company_field_proposals")).to include(include(
+      "field" => "bank_name",
+      "decision" => "missing_in_both",
+      "requires_review" => true
+    ))
 
     expect do
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
     end.to change(EmployeeW4Election.where(employee: target), :count).by(1)
 
     expect(target.reload).to have_attributes(hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
+    expect(target.bank_routing_number_encrypted).to be_nil
+    expect(target.bank_account_number_encrypted).to be_nil
     expect(company.deduction_types.find_by!(name: "Employee loan")).to have_attributes(default_amount: 50.to_d)
     expect(target.employee_deductions.joins(:deduction_type).find_by!(deduction_types: { name: "Employee loan" })).to have_attributes(amount: 50.to_d)
     expect(target.employee_deductions.joins(:deduction_type).find_by!(deduction_types: { name: "Employee loan" })).not_to be_active
     expect(target.reload.configuration_review_items).to include(include("code" => "loan_balance_not_transferred"))
+    expect(target.configuration_review_items).to include(include("code" => "certify_employee_profile"))
+    expect(target.configuration_source).to eq("quickbooks_history")
     expect(company.employee_loans).to be_empty
     expect(company.pay_periods).to be_empty
     expect(company.historical_import_batches).to contain_exactly(batch)
-    expect(company.reload.email).to eq("old@example.com")
+    expect(company.reload.email).to eq("new@example.com")
     expect(company.company_pay_schedules.find_by!(effective_on: effective_on)).to be_confirmed
   end
 
@@ -104,32 +120,131 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     expect(target_loan.reload.current_balance).to eq(125)
   end
 
+  it "copies a retirement proposal but requires certification and leaves tipped history behind" do
+    source = create(
+      :employee,
+      company: source_company,
+      department: create(:department, company: source_company),
+      first_name: "Tiana",
+      last_name: "Server"
+    )
+    target = create(
+      :employee,
+      company: company,
+      first_name: "Tiana",
+      last_name: "Server",
+      ssn_encrypted: source.ssn_digits
+    )
+    source.employee_retirement_elections.create!(
+      company: source_company,
+      effective_on: Date.new(2026, 1, 1),
+      participating: true,
+      traditional_contribution_type: "percentage",
+      traditional_rate: 0.05,
+      source: "staff",
+      reason: "Signed election"
+    )
+    source.employee_tipped_occupations.create!(
+      occupation_code: "101",
+      effective_from: Date.new(2026, 1, 1)
+    )
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    election = target.reload.employee_retirement_elections.find_by!(effective_on: effective_on)
+    expect(election).to have_attributes(
+      traditional_rate: 0.05.to_d,
+      source: "quickbooks_history"
+    )
+    expect(target.employee_tipped_occupations).to be_empty
+    expect(target.configuration_review_items.pluck("code")).to include(
+      "certify_employee_profile",
+      "certify_retirement_configuration",
+      "certify_tipped_pay"
+    )
+    expect(target.configuration_review_items).to all(include("requires_certification_evidence" => true))
+  end
+
+  it "does not apply a retirement election before its source effective date" do
+    source = create(:employee, company: source_company, department: create(:department, company: source_company))
+    target = create(:employee, company:, department: create(:department, company:), ssn_encrypted: source.ssn_digits)
+    source.employee_retirement_elections.create!(
+      company: source_company,
+      effective_on: effective_on + 1.day,
+      participating: true,
+      traditional_contribution_type: "percentage",
+      traditional_rate: 0.05,
+      source: "staff",
+      reason: "Future signed election"
+    )
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(target.reload.employee_retirement_elections).to be_empty
+    expect(target.configuration_review_items).to include(include("code" => "certify_retirement_configuration"))
+  end
+
   it "refuses a same-name identity conflict before changing successor setup" do
     source = create(:employee, company: source_company, first_name: "Same", last_name: "Name", ssn_encrypted: "900-70-0101", pay_rate: 30)
     target = create(:employee, company: company, first_name: "Same", last_name: "Name", ssn_encrypted: "900-70-0202", pay_rate: 15)
     review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
 
-    expect(review.validation_errors).to include(/Social Security numbers conflict/)
+    expect(review.validation_errors).to include(/no active predecessor employee has the same verified payroll identity/)
     expect(review.setup_plan.fetch("employee_matches")).to be_empty
     expect(review.validation_errors.join).not_to include(source.ssn_digits, target.ssn_digits)
     expect {
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
-    }.to raise_error(ArgumentError, /Social Security numbers conflict/)
+    }.to raise_error(ArgumentError, /no active predecessor employee has the same verified payroll identity/)
     expect(target.reload.ssn_digits).to eq("900700202")
     expect(target.pay_rate).to eq(15)
     expect(company.reload.email).to eq("new@example.com")
     expect(company.employee_w4_elections).to be_empty
   end
 
-  it "retains the existing missing-identifier preview behavior" do
+  it "refuses to match employees by name alone when payroll identity is missing" do
     create(:employee, company: source_company, first_name: "Matching", last_name: "Name")
     target = create(:employee, company: company, first_name: "Matching", last_name: "Name")
     target.update_columns(ssn_encrypted: nil)
 
     review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
 
+    expect(review.validation_errors).to include(/enter a valid SSN or business EIN/)
+    expect(review.setup_plan.fetch("employee_matches")).to be_empty
+  end
+
+  it "matches a renamed business contractor by verified EIN" do
+    source = create(
+      :employee,
+      company: source_company,
+      employment_type: "contractor",
+      contractor_type: "business",
+      business_name: "Old Trade Name",
+      contractor_ein: "66-1234567",
+      first_name: "Old",
+      last_name: "Contact"
+    )
+    target = create(
+      :employee,
+      company: company,
+      employment_type: "contractor",
+      contractor_type: "business",
+      business_name: "Current Trade Name",
+      contractor_ein: "66-1234567",
+      first_name: "Current",
+      last_name: "Contact"
+    )
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
+
     expect(review.validation_errors).to be_empty
-    expect(review.setup_plan.fetch("employee_matches").size).to eq(1)
+    expect(review.setup_plan.fetch("employee_matches")).to contain_exactly(include(
+      "source_employee_id" => source.id,
+      "employee_id" => target.id,
+      "match_method" => "business_ein"
+    ))
+    expect(review.warnings).to include(/matched to predecessor Old Contact by verified payroll identity/)
   end
 
   it "holds copied generic loan defaults inactive while retaining a successor's verified repayment" do
@@ -176,10 +291,10 @@ RSpec.describe PayrollGoLiveSetupTransferService do
 
     review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
 
-    expect(review.validation_errors).to include(/no active source employee match/)
+    expect(review.validation_errors).to include(/no active predecessor employee has the same verified payroll identity/)
     expect do
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
-    end.to raise_error(ArgumentError, /no active source employee match/)
+    end.to raise_error(ArgumentError, /no active predecessor employee has the same verified payroll identity/)
   end
 
   it "rejects a stale preview after successor employee setup changes" do

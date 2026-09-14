@@ -247,7 +247,7 @@ export interface Employee {
   portal_pending_approval?: boolean;
   configuration_source?: 'quickbooks_history' | null;
   configuration_review_status?: 'complete' | 'needs_review';
-  configuration_review_items?: Array<{ code: string; message: string; fields: string[] }>;
+  configuration_review_items?: Array<{ code: string; message: string; fields: string[]; requires_certification_evidence?: boolean }>;
   document_readiness?: {
     total: number;
     required: number;
@@ -260,6 +260,8 @@ export interface Employee {
     item_message: string;
     item_fields: string[];
     resolution_note: string;
+    source_reference?: string | null;
+    effective_on?: string | null;
     reviewed_by_name: string;
     reviewed_by_email: string;
     reviewed_by_role: string;

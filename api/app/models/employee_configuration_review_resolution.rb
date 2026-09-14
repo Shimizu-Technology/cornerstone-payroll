@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 class EmployeeConfigurationReviewResolution < ApplicationRecord
+  CERTIFICATION_ITEM_CODES = %w[
+    certify_employee_profile certify_variable_salary_pay certify_retirement_configuration
+    certify_multiple_wage_rates certify_tipped_pay certify_contractor_setup
+    loan_balance_not_transferred
+  ].freeze
+
   belongs_to :company
   belongs_to :employee
   belongs_to :reviewed_by, class_name: "User", optional: true
@@ -9,6 +15,8 @@ class EmployeeConfigurationReviewResolution < ApplicationRecord
             :reviewed_by_name, :reviewed_by_email, :reviewed_by_role, :reviewed_at,
             presence: true
   validates :item_code, uniqueness: { scope: :employee_id }
+  validates :source_reference, length: { maximum: 255 }, allow_nil: true
+  validates :source_reference, :effective_on, presence: true, if: :certification_item?
   validate :employee_belongs_to_company
   validate :item_fields_are_strings
 
@@ -32,5 +40,9 @@ class EmployeeConfigurationReviewResolution < ApplicationRecord
   def prevent_change
     errors.add(:base, "Employee setup review resolutions are permanent")
     throw(:abort)
+  end
+
+  def certification_item?
+    CERTIFICATION_ITEM_CODES.include?(item_code)
   end
 end

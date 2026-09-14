@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -607,6 +607,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_050000) do
   create_table "employee_configuration_review_resolutions", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
+    t.date "effective_on"
     t.bigint "employee_id", null: false
     t.string "item_code", null: false
     t.jsonb "item_fields", default: [], null: false
@@ -617,14 +618,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_050000) do
     t.bigint "reviewed_by_id"
     t.string "reviewed_by_name", null: false
     t.string "reviewed_by_role", null: false
+    t.string "source_reference"
     t.datetime "updated_at", null: false
     t.index ["company_id", "reviewed_at"], name: "idx_employee_configuration_review_resolutions_company_time"
     t.index ["company_id"], name: "index_employee_configuration_review_resolutions_on_company_id"
     t.index ["employee_id", "item_code"], name: "idx_employee_configuration_review_resolutions_unique", unique: true
     t.index ["employee_id"], name: "index_employee_configuration_review_resolutions_on_employee_id"
     t.index ["reviewed_by_id"], name: "idx_employee_config_reviews_reviewer"
+    t.check_constraint "(item_code::text <> ALL (ARRAY['certify_employee_profile'::character varying, 'certify_variable_salary_pay'::character varying, 'certify_retirement_configuration'::character varying, 'certify_multiple_wage_rates'::character varying, 'certify_tipped_pay'::character varying, 'certify_contractor_setup'::character varying, 'loan_balance_not_transferred'::character varying]::text[])) OR source_reference IS NOT NULL AND btrim(source_reference::text) <> ''::text AND effective_on IS NOT NULL", name: "employee_config_review_certification_evidence"
     t.check_constraint "jsonb_typeof(item_fields) = 'array'::text", name: "employee_configuration_review_resolutions_fields_array"
+    t.check_constraint "source_reference IS NULL OR char_length(source_reference::text) <= 255", name: "employee_config_review_source_reference_length"
   end
+
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_employee_configuration_review_resolution_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'employee_configuration_review_resolutions are append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER employee_configuration_review_resolutions_append_only
+    BEFORE UPDATE OR DELETE ON employee_configuration_review_resolutions
+    FOR EACH ROW EXECUTE FUNCTION prevent_employee_configuration_review_resolution_mutation();
+  SQL
 
   create_table "employee_deductions", force: :cascade do |t|
     t.boolean "active", default: true

@@ -427,7 +427,7 @@ export const employeesApi = {
     ),
   resolveConfigurationReviewItem: (
     id: number,
-    input: { code: string; resolution_note: string; acknowledgement: string },
+    input: { code: string; resolution_note: string; source_reference?: string; effective_on?: string; acknowledgement: string },
   ) => api.post<{ data: Employee }>(`/admin/employees/${id}/resolve_configuration_review_item`, input),
 };
 
@@ -5005,7 +5005,22 @@ export interface PayrollGoLiveReview {
   effective_on: string;
   plan_digest: string;
   setup_summary: Record<string, number>;
-  setup_plan: { employee_matches?: Array<{ source_employee_id: number; employee_id: number; employee_name: string }> };
+  setup_plan: {
+    company_field_proposals?: Array<{
+      field: string;
+      source_value: unknown;
+      current_value: unknown;
+      proposed_value: unknown;
+      decision: 'already_matches' | 'retain_successor' | 'fill_blank_from_predecessor' | 'missing_in_both';
+      requires_review: boolean;
+    }>;
+    employee_matches?: Array<{
+      source_employee_id: number;
+      employee_id: number;
+      employee_name: string;
+      match_method: 'ssn' | 'business_ein';
+    }>;
+  };
   warnings: string[];
   errors: string[];
   setup_applied_at?: string | null;

@@ -173,6 +173,8 @@ module Api
           EmployeeConfigurationReviewService.new(employee: @employee, actor: current_user).resolve!(
             code: params.require(:code),
             resolution_note: params.fetch(:resolution_note, ""),
+            source_reference: params[:source_reference],
+            effective_on: params[:effective_on],
             acknowledgement: params.require(:acknowledgement)
           )
           render json: {

@@ -195,6 +195,16 @@ class E2eReleaseFixture
         pay_rate: 19.25,
         hire_date: Date.new(2026, 1, 1)
       )
+      other_employee.update!(
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [ {
+          "code" => "certify_employee_profile",
+          "message" => "Confirm the successor employee profile against an authoritative current record before live payroll.",
+          "fields" => %w[hire_date employment_type salary_type pay_rate],
+          "requires_certification_evidence" => true
+        } ]
+      )
       EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: admin)
       employee.employee_document_requirements.find_each do |requirement|
         EmployeeDocumentRequirementReviewService.new(
