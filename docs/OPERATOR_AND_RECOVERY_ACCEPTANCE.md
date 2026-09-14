@@ -7,6 +7,7 @@ Software tests prove the application contract. Operator and recovery acceptance 
 ## Current software evidence
 
 - [Local Cornerstone–AIRE payroll certification](LOCAL_AIRE_PAYROLL_CERTIFICATION.md) exercises the two real Rails applications over local HTTP with disposable databases and no production data.
+- [Local recovery certification](LOCAL_RECOVERY_CERTIFICATION.md) provides repeatable synthetic database-restore and durable-queue restart/replay drills. It is software evidence, not a substitute for provider and named-reviewer acceptance.
 - [MoSa cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md) is the current interface-based workflow.
 - [Production readiness checklist](PRODUCTION_READINESS_CHECKLIST.md) remains the release gate for infrastructure, identity, monitoring, filing, and recovery controls.
 - [Cutover gate criteria](rollout/03-CUTOVER-GATE-CRITERIA.md) requires two signed MoSa parallel cycles and explicit technical and operational approval.
@@ -110,9 +111,9 @@ Use isolated, access-controlled provider resources. Do not copy production payro
 | --- | --- | --- | --- | --- | --- |
 | Chels local AIRE workflow | | | | | Pending |
 | Clerk production identity and MFA | | | | | Pending |
-| Database restore | | | | | Pending |
+| Database restore | | | | `LOCAL_RECOVERY_CERTIFICATION.md` | Local procedure passed; isolated provider restore pending |
 | Payroll document recovery | | | | | Pending |
-| Queue restart and idempotency | | | | | Pending |
+| Queue restart and idempotency | | | | `LOCAL_RECOVERY_CERTIFICATION.md` | Local procedure passed; staging operator drill pending |
 | Monitoring and incident tabletop | | | | | Pending |
 | MoSa parallel cycle 1 | | | | | Pending |
 | MoSa parallel cycle 2 | | | | | Pending |
