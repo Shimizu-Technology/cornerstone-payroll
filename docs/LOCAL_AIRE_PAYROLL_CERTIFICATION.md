@@ -13,7 +13,7 @@ The drill fails closed unless both applications use Rails `test`, `E2E_TEST_MODE
 
 ## What a passing run proves
 
-1. Cornerstone publishes an exact semimonthly Guam T-7 calendar to AIRE.
+1. Cornerstone publishes the current and next exact semimonthly Guam T-7 calendar periods to AIRE.
 2. Ordinary kiosk time is eligible without separate approval.
 3. Manual time is held until Chels approves it from Cornerstone.
 4. Daily overtime is detected by AIRE and remains held until Chels separately approves it from Cornerstone.
@@ -22,7 +22,8 @@ The drill fails closed unless both applications use Rails `test`, `E2E_TEST_MODE
 7. AIRE creates an immutable Batch v2, retains excluded time, and delivers its finalized event to Cornerstone.
 8. Cornerstone applies the authoritative AIRE batch, preserves its 8 regular + 6 overtime split, calculates payroll, approves it, and commits it.
 9. Preparing a paper check does not mark time paid. The explicit synthetic delivery event does.
-10. AIRE receives imported, committed, and payment-issued acknowledgements while the held manual entry remains visible and unpaid for a later period.
+10. AIRE receives imported, committed, and payment-issued acknowledgements while the held manual entry remains visible and unpaid in the finalized period.
+11. The next published regular period shows that held entry as scheduled, still awaiting approval, and unpaid.
 
 No direct deposit, tax payment, filing, email, or production payroll action is part of this drill.
 

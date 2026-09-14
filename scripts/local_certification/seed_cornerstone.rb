@@ -26,6 +26,9 @@ start_date = Date.iso8601(aire.fetch("start_date"))
 end_date = Date.iso8601(aire.fetch("end_date"))
 pay_date = Date.iso8601(aire.fetch("pay_date"))
 cutoff_at = Time.iso8601(aire.fetch("cutoff_at"))
+next_start_date = end_date + 1.day
+next_end_date = next_start_date.day == 16 ? next_start_date.end_of_month : next_start_date.change(day: 15)
+next_pay_date = next_end_date + 7.days
 
 fixture = ApplicationRecord.transaction do
   organization = Organization.create!(
@@ -154,6 +157,16 @@ fixture = ApplicationRecord.transaction do
     status: "draft",
     notes: "Synthetic local AIRE integration certification; never production"
   )
+  next_pay_period = PayPeriod.create!(
+    company: company,
+    company_pay_schedule: schedule,
+    company_workweek: workweek,
+    start_date: next_start_date,
+    end_date: next_end_date,
+    pay_date: next_pay_date,
+    status: "draft",
+    notes: "Synthetic next AIRE period for held-time certification; never production"
+  )
 
   {
     schema_version: 1,
@@ -163,9 +176,13 @@ fixture = ApplicationRecord.transaction do
     employee_wage_rate_id: wage_rate.id,
     source_id: source.id,
     pay_period_id: pay_period.id,
+    next_pay_period_id: next_pay_period.id,
     start_date: start_date.iso8601,
     end_date: end_date.iso8601,
     pay_date: pay_date.iso8601,
+    next_start_date: next_start_date.iso8601,
+    next_end_date: next_end_date.iso8601,
+    next_pay_date: next_pay_date.iso8601,
     cutoff_at: cutoff_at.iso8601
   }
 end
