@@ -7,7 +7,6 @@ class PayrollGoLiveSetupTransferService
     retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
     default_custom_earnings default_payroll_adjustments address_line1 address_line2 city state zip phone email
     contractor_type contractor_pay_type business_name contractor_ein w9_on_file
-    ssn_encrypted
   ].freeze
   DEDUCTION_TYPE_FIELDS = %w[
     name category sub_category default_amount is_percentage active generates_check payee_name reference_number reporting_group
@@ -214,8 +213,7 @@ class PayrollGoLiveSetupTransferService
   def self.copy_retirement!(source, target, review, actor)
     return if target.contractor?
 
-    election = source.retirement_election_on(review.effective_on) ||
-      source.employee_retirement_elections.recent_first.first
+    election = source.retirement_election_on(review.effective_on)
     return unless election
 
     EmployeeRetirementElectionChangeService.new(

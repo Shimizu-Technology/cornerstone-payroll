@@ -74,6 +74,11 @@ RSpec.describe PayrollGoLiveSetupTransferService do
       "decision" => "retain_successor",
       "requires_review" => true
     ))
+    expect(review.setup_plan.fetch("company_field_proposals")).to include(include(
+      "field" => "bank_name",
+      "decision" => "missing_in_both",
+      "requires_review" => true
+    ))
 
     expect do
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
@@ -159,6 +164,26 @@ RSpec.describe PayrollGoLiveSetupTransferService do
       "certify_tipped_pay"
     )
     expect(target.configuration_review_items).to all(include("requires_certification_evidence" => true))
+  end
+
+  it "does not apply a retirement election before its source effective date" do
+    source = create(:employee, company: source_company, department: create(:department, company: source_company))
+    target = create(:employee, company:, department: create(:department, company:), ssn_encrypted: source.ssn_digits)
+    source.employee_retirement_elections.create!(
+      company: source_company,
+      effective_on: effective_on + 1.day,
+      participating: true,
+      traditional_contribution_type: "percentage",
+      traditional_rate: 0.05,
+      source: "staff",
+      reason: "Future signed election"
+    )
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(target.reload.employee_retirement_elections).to be_empty
+    expect(target.configuration_review_items).to include(include("code" => "certify_retirement_configuration"))
   end
 
   it "refuses a same-name identity conflict before changing successor setup" do
