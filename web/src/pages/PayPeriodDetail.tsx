@@ -1602,7 +1602,9 @@ export function PayPeriodDetail({
           <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">
-                <span className="font-semibold">Workweek confirmation needed:</span> {warning}
+                <span className="font-semibold">
+                  {payPeriod.confirmed_workweek_adoption?.available ? 'Confirmed workweek ready for this run:' : 'This run’s workweek needs attention:'}
+                </span>{' '}{warning}
               </p>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Link
@@ -1629,7 +1631,8 @@ export function PayPeriodDetail({
             </div>
             {payPeriod.confirmed_workweek_adoption?.available && (
               <p className="mt-2 max-w-4xl text-xs leading-5 text-amber-800">
-                A matching employer-confirmed workweek is now available. Applying it changes only this empty draft; it does not recalculate payroll or alter completed runs.
+                A matching employer-confirmed workweek is available. Applying it keeps entered hours and does not alter completed runs.
+                {payPeriod.calculated_at ? ' Because this run was already calculated, you will need to select Calculate Payroll again.' : ''}
               </p>
             )}
           </div>

@@ -24,6 +24,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_company).and_return(company)
     allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(admin)
     allow(TimeTracking::Client).to receive(:new).and_return(client)
+    allow(client).to receive(:payroll_account_link).and_return("account_link" => { "connected" => false })
   end
 
   def period_payload
@@ -270,6 +271,28 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       record_type: "AireTimeEntry"
     )
     expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Employee confirmed this was entered in error")
+  end
+
+  it "uses the current operator's linked AIRE account without a delegation token" do
+    linked_client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:payroll_account_link).and_return("account_link" => { "connected" => true })
+    allow(TimeTracking::Client).to receive(:new)
+      .with(source, delegation: nil, actor: admin)
+      .and_return(linked_client)
+    allow(linked_client).to receive(:approve_payroll_time_entry).and_return(
+      "time_entry" => { "id" => "42", "version" => 4 },
+      "command" => { "id" => SecureRandom.uuid, "replayed" => false }
+    )
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/time_entries/42/approval", params: {
+      command_id: SecureRandom.uuid,
+      expected_version: 3,
+      decision: "approve",
+      reason: "Verified by payroll"
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(linked_client).to have_received(:approve_payroll_time_entry)
   end
 
   it "uses the current operator's delegation for overtime decisions and records an audit event" do

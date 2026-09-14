@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AirePayrollCalendarState,
@@ -462,13 +463,19 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
   });
 
-  it('keeps the workspace readable but disables commands without a personal delegation', async () => {
+  it('keeps the workspace readable but disables commands without an AIRE account connection', async () => {
     mockLoads(false);
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await screen.findByText(/actions need your AIRE delegation/i);
+    render(
+      <MemoryRouter>
+        <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
+      </MemoryRouter>
+    );
+    await screen.findByText(/actions need your AIRE access/i);
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock AIRE cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('link', { name: /connect my AIRE account/i }).getAttribute('href'))
+      .toBe('/time-tracking-sources');
   });
 
   it('does not let an older refresh overwrite a newer payroll view', async () => {

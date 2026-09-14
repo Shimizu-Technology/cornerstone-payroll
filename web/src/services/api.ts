@@ -863,6 +863,18 @@ export interface TimeTrackingSourceUpdatePayload {
   active: boolean;
 }
 
+export interface AireAccountLink {
+  connected: boolean;
+  aire_user_name?: string;
+  aire_user_email?: string | null;
+  linked_at?: string;
+}
+
+export interface AireAccountLinkSession {
+  authorization_url: string;
+  expires_at: string;
+}
+
 export interface TimeTrackingWarning {
   code: string;
   message: string;
@@ -995,6 +1007,12 @@ export const timeTrackingSourcesApi = {
     }),
   removeDelegation: (id: number) =>
     api.delete<{ time_tracking_source: TimeTrackingSource }>(`/admin/time_tracking_sources/${id}/delegation`),
+  getAireAccountLink: (id: number) =>
+    api.get<{ account_link: AireAccountLink }>(`/admin/time_tracking_sources/${id}/aire_account_link`),
+  createAireAccountLink: (id: number) =>
+    api.post<AireAccountLinkSession>(`/admin/time_tracking_sources/${id}/aire_account_link`),
+  disconnectAireAccountLink: (id: number) =>
+    api.delete<{ account_link: AireAccountLink }>(`/admin/time_tracking_sources/${id}/aire_account_link`),
 };
 
 // Pay Periods (Admin API)

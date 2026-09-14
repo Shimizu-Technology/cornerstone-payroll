@@ -50,4 +50,33 @@ RSpec.describe PayPeriodConfirmedWorkweekAdoptionService do
 
     expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
   end
+
+  it "keeps entered payroll rows but clears a stale calculation after adoption" do
+    item = create(:payroll_item, pay_period: pay_period, company: company)
+    pay_period.update_columns(calculated_at: Time.current, calculated_by_id: actor.id)
+
+    described_class.call!(pay_period: pay_period, actor: actor)
+
+    expect(pay_period.reload).to have_attributes(
+      company_workweek: confirmed_workweek,
+      calculated_at: nil,
+      calculated_by_id: nil
+    )
+    expect(pay_period.payroll_items).to contain_exactly(item)
+    expect(AuditLog.last.metadata).to include("calculation_invalidated" => true)
+  end
+
+  it "still refuses to detach imported source evidence from its captured workweek" do
+    create(
+      :time_tracking_import,
+      pay_period: pay_period,
+      time_tracking_source: create(:time_tracking_source, company: company)
+    )
+
+    expect {
+      described_class.call!(pay_period: pay_period, actor: actor)
+    }.to raise_error(described_class::AdoptionError, /imported source evidence/)
+
+    expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+  end
 end
