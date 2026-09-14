@@ -10,7 +10,7 @@ The following state was observed through provider consoles and safe deployed che
 
 ### Cornerstone Payroll
 
-- The application still uses Clerk development keys in production. The deployed readiness gate passes 24 of 26 controls and fails only production Clerk keys and MFA attestation.
+- The application still uses Clerk development keys in production. The September 14 deployed readiness gate passes 26 of 29 controls and fails only production Clerk keys, instance-bound MFA evidence, and the authenticated Clerk-instance match that depends on those values.
 - A separate, unused Clerk production instance has been created for `payroll.shimizu-technology.com`. It is in invite-only mode. No production identity invitations have been sent and no application keys have been changed.
 - The staged instance allows verified email-code sign-up and sign-in. Password sign-up and sign-in are enabled with an eight-character minimum and compromised-password rejection. Phone, username, passkeys, mobile biometrics, and Web3 sign-in are off.
 - The development instance uses Google social sign-in through Clerk shared credentials. The production Google connection exists but reports `Setup required`; production requires custom Google OAuth credentials.
@@ -19,7 +19,7 @@ The following state was observed through provider consoles and safe deployed che
 
 ### AIRE
 
-- AIRE still uses a Clerk development instance in production. The deployed readiness gate passes 21 of 23 controls and fails only production Clerk identity and MFA attestation.
+- AIRE still uses a Clerk development instance in production. The September 14 deployed readiness gate passes 20 of 23 controls and fails only production Clerk credentials, instance-bound MFA evidence, and the authenticated Clerk-instance match that depends on those values.
 - No AIRE Clerk production instance exists. Clerk rejected the `aire-services-guam.netlify.app` hostname because a `netlify.app` domain cannot be used for a production application.
 - `aireservicesguam.com` is the public Wix site. `app.aireservicesguam.com` was unassigned when inspected and is the proposed application hostname.
 - The Netlify account has an overdue $20 invoice. The dashboard currently blocks the custom-domain work needed for the AIRE production identity setup.

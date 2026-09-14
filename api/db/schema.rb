@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1914,6 +1914,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_060000) do
     t.index ["primary_company_id"], name: "index_organizations_on_primary_company_id"
     t.index ["slug"], name: "index_organizations_on_slug", unique: true
     t.index ["status"], name: "index_organizations_on_status"
+  end
+
+  create_table "operational_queue_probes", force: :cascade do |t|
+    t.integer "attempt_count", default: 0, null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.integer "effect_count", default: 0, null: false
+    t.datetime "expires_at", null: false
+    t.uuid "probe_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["probe_id"], name: "index_operational_queue_probes_on_probe_id", unique: true
+    t.check_constraint "attempt_count >= 0", name: "operational_queue_probes_attempt_count_nonnegative"
+    t.check_constraint "(effect_count = 0 AND completed_at IS NULL) OR (effect_count = 1 AND completed_at IS NOT NULL)", name: "operational_queue_probes_completion_consistent"
+    t.check_constraint "effect_count >= 0 AND effect_count <= 1", name: "operational_queue_probes_effect_count_range"
   end
 
   create_table "pay_component_tax_rules", force: :cascade do |t|
