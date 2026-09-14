@@ -22,6 +22,7 @@ import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -51,6 +52,17 @@ import { parsePositiveRouteId } from '@/lib/route-params';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
+type ConfigurationReviewItem = NonNullable<Employee['configuration_review_items']>[number];
+
+const certificationReviewCodes = new Set([
+  'certify_employee_profile',
+  'certify_variable_salary_pay',
+  'certify_retirement_configuration',
+  'certify_multiple_wage_rates',
+  'certify_tipped_pay',
+  'certify_contractor_setup',
+  'loan_balance_not_transferred',
+]);
 
 const tabs: Array<{ id: EmployeeWorkspaceTab; label: string; icon: typeof UserRound }> = [
   { id: 'overview', label: 'Overview', icon: UserRound },
@@ -84,6 +96,8 @@ export function EmployeeWorkspace(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [reviewSourceReferences, setReviewSourceReferences] = useState<Record<string, string>>({});
+  const [reviewEffectiveDates, setReviewEffectiveDates] = useState<Record<string, string>>({});
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
@@ -141,6 +155,11 @@ export function EmployeeWorkspace(): ReactElement {
     setPayHistory(null);
     setPayHistoryError(null);
     setError(null);
+    setReviewNotes({});
+    setReviewSourceReferences({});
+    setReviewEffectiveDates({});
+    setReviewError(null);
+    setReviewNotice(null);
     setResolvedRouteKey(null);
     setLoading(true);
     void load();
@@ -158,23 +177,34 @@ export function EmployeeWorkspace(): ReactElement {
 
   const currentPath = currentAppPath(location.pathname, location.search);
 
-  const resolveConfigurationReview = async (code: string): Promise<void> => {
-    const note = reviewNotes[code]?.trim() || '';
+  const resolveConfigurationReview = async (item: ConfigurationReviewItem): Promise<void> => {
+    const note = reviewNotes[item.code]?.trim() || '';
     if (!note) {
       setReviewError('Add a short note describing what was verified or corrected.');
       return;
     }
+    const requiresCertificationEvidence = certificationReviewCodes.has(item.code);
+    const sourceReference = reviewSourceReferences[item.code]?.trim() || '';
+    const effectiveOn = reviewEffectiveDates[item.code] || '';
+    if (requiresCertificationEvidence && (!sourceReference || !effectiveOn)) {
+      setReviewError('Identify the source record and effective date used for this certification.');
+      return;
+    }
     try {
-      setReviewBusyCode(code);
+      setReviewBusyCode(item.code);
       setReviewError(null);
       setReviewNotice(null);
       const result = await employeesApi.resolveConfigurationReviewItem(employeeId, {
-        code,
+        code: item.code,
         resolution_note: note,
+        source_reference: requiresCertificationEvidence ? sourceReference : undefined,
+        effective_on: requiresCertificationEvidence ? effectiveOn : undefined,
         acknowledgement: 'MARK SETUP ITEM REVIEWED',
       });
       setEmployee(result.data);
-      setReviewNotes((current) => ({ ...current, [code]: '' }));
+      setReviewNotes((current) => ({ ...current, [item.code]: '' }));
+      setReviewSourceReferences((current) => ({ ...current, [item.code]: '' }));
+      setReviewEffectiveDates((current) => ({ ...current, [item.code]: '' }));
       setReviewNotice('Setup review item documented.');
     } catch (caught) {
       setReviewError(caught instanceof Error ? caught.message : 'Could not record this setup review.');
@@ -283,9 +313,13 @@ export function EmployeeWorkspace(): ReactElement {
             employee={employee}
             editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}
             reviewNotes={reviewNotes}
+            reviewSourceReferences={reviewSourceReferences}
+            reviewEffectiveDates={reviewEffectiveDates}
             reviewBusyCode={reviewBusyCode}
             onReviewNoteChange={(code, value) => setReviewNotes((current) => ({ ...current, [code]: value }))}
-            onResolveReview={(code) => void resolveConfigurationReview(code)}
+            onReviewSourceReferenceChange={(code, value) => setReviewSourceReferences((current) => ({ ...current, [code]: value }))}
+            onReviewEffectiveDateChange={(code, value) => setReviewEffectiveDates((current) => ({ ...current, [code]: value }))}
+            onResolveReview={(item) => void resolveConfigurationReview(item)}
             onEmployeeReload={load}
           />
         )}
@@ -365,13 +399,17 @@ interface PaySetupProps {
   employee: Employee;
   editHref: string;
   reviewNotes: Record<string, string>;
+  reviewSourceReferences: Record<string, string>;
+  reviewEffectiveDates: Record<string, string>;
   reviewBusyCode: string | null;
   onReviewNoteChange: (code: string, value: string) => void;
-  onResolveReview: (code: string) => void;
+  onReviewSourceReferenceChange: (code: string, value: string) => void;
+  onReviewEffectiveDateChange: (code: string, value: string) => void;
+  onResolveReview: (item: ConfigurationReviewItem) => void;
   onEmployeeReload: () => Promise<void>;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNoteChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -388,19 +426,48 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
             <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? `${employee.configuration_review_items?.length || 0} open` : 'Complete'}</Badge>
           </CardHeader>
           <CardContent className="space-y-4">
-            {(employee.configuration_review_items || []).map((item) => (
-              <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
-                <p className="font-semibold text-neutral-950">{item.message}</p>
-                {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
-                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                  <label className="block space-y-2">
-                    <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
-                    <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
-                  </label>
-                  <Button disabled={!reviewNotes[item.code]?.trim() || reviewBusyCode !== null} onClick={() => onResolveReview(item.code)}>{reviewBusyCode === item.code ? 'Recording…' : 'Mark reviewed'}</Button>
+            {(employee.configuration_review_items || []).map((item) => {
+              const requiresCertificationEvidence = item.requires_certification_evidence === true || certificationReviewCodes.has(item.code);
+              const readyToRecord = Boolean(reviewNotes[item.code]?.trim()) && (
+                !requiresCertificationEvidence || Boolean(reviewSourceReferences[item.code]?.trim() && reviewEffectiveDates[item.code])
+              );
+              return (
+                <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
+                  <p className="font-semibold text-neutral-950">{item.message}</p>
+                  {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
+                  {requiresCertificationEvidence && (
+                    <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50/60 p-4">
+                      <p className="text-sm font-semibold text-primary-950">Certification evidence</p>
+                      <p className="mt-1 text-sm leading-6 text-primary-800">Use the current signed plan, employee form, loan statement, employer confirmation, or other authoritative record—not the predecessor configuration by itself.</p>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,0.45fr)]">
+                        <Input
+                          id={`review-source-${item.code}`}
+                          label="Source document or record"
+                          maxLength={255}
+                          value={reviewSourceReferences[item.code] || ''}
+                          onChange={(event) => onReviewSourceReferenceChange(item.code, event.target.value)}
+                          placeholder="Example: Signed 401(k) election dated 09/01/2026"
+                        />
+                        <Input
+                          id={`review-effective-${item.code}`}
+                          label="Effective date"
+                          type="date"
+                          value={reviewEffectiveDates[item.code] || ''}
+                          onChange={(event) => onReviewEffectiveDateChange(item.code, event.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                    <label className="block space-y-2">
+                      <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
+                      <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
+                    </label>
+                    <Button disabled={!readyToRecord || reviewBusyCode !== null} onClick={() => onResolveReview(item)}>{reviewBusyCode === item.code ? 'Recording…' : requiresCertificationEvidence ? 'Record certification' : 'Mark reviewed'}</Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-neutral-600">Need to correct a date, address, W-4, rate, or recurring payroll item first?</p>
               <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
@@ -413,6 +480,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewBusyCode, onReviewNot
                     <div key={resolution.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm">
                       <p className="font-semibold text-neutral-900">{resolution.item_message}</p>
                       <p className="mt-1 leading-6 text-neutral-600">{resolution.resolution_note}</p>
+                      {(resolution.source_reference || resolution.effective_on) && <p className="mt-2 text-xs font-medium text-neutral-600">Source: {resolution.source_reference || 'Not recorded'} · Effective {resolution.effective_on ? formatDate(resolution.effective_on) : 'date not recorded'}</p>}
                       <p className="mt-2 text-xs text-neutral-500">Reviewed {formatGuamDateTime(resolution.reviewed_at)} by {resolution.reviewed_by_name}</p>
                     </div>
                   ))}

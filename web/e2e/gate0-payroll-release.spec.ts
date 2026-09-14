@@ -173,6 +173,35 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('heading', { name: /^Pay Period:/ })).toBeVisible();
   });
 
+  test('retains authoritative evidence when a migrated employee setup is certified', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.super_admin_email,
+        'X-Company-Id': String(fixture.other_company_id),
+      },
+    });
+    const page = await context.newPage();
+    await page.goto(`/companies/${fixture.other_company_id}/employees/${fixture.other_employee_id}/pay-setup`);
+
+    await expect(page.getByRole('heading', { name: 'Jordan Boundary' })).toBeVisible();
+    await expect(page.getByText('Certification evidence')).toBeVisible();
+    const recordButton = page.getByRole('button', { name: 'Record certification' });
+    await expect(recordButton).toBeDisabled();
+
+    await page.getByLabel('Source document or record').fill('Signed employee profile dated 09/01/2026');
+    await page.getByLabel('Effective date').fill('2026-09-01');
+    await page.getByLabel('What was verified or corrected?').fill('Confirmed current worker classification, hire date, and pay rate.');
+    await recordButton.click();
+
+    await expect(page.getByRole('status')).toContainText('Setup review item documented.');
+    await expect(page.getByText('Imported setup reviewed', { exact: true })).toBeVisible();
+    await expect(page.getByText('Source: Signed employee profile dated 09/01/2026 · Effective Sep 1, 2026')).toBeVisible();
+    await page.reload();
+    await expect(page.getByText('Source: Signed employee profile dated 09/01/2026 · Effective Sep 1, 2026')).toBeVisible();
+
+    await context.close();
+  });
+
   test('keeps the current payroll item visible when route loads resolve out of order', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       extraHTTPHeaders: {

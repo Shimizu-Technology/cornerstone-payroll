@@ -11,7 +11,7 @@ class PayrollGoLiveSetupPlan
   ].freeze
 
   attr_reader :company, :source_company, :batch, :effective_on, :employee_matches,
-    :errors, :warnings, :summary, :plan, :digest
+    :company_field_proposals, :errors, :warnings, :summary, :plan, :digest
 
   def initialize(company:, source_company:, batch:, effective_on:)
     @company = company
@@ -22,6 +22,7 @@ class PayrollGoLiveSetupPlan
 
   def call
     @employee_matches, match_errors = build_employee_matches
+    @company_field_proposals = build_company_field_proposals
     @errors = base_errors + match_errors
     @warnings = build_warnings
     @summary = build_summary
@@ -30,8 +31,14 @@ class PayrollGoLiveSetupPlan
       "company_id" => company.id,
       "historical_import_batch_id" => batch.id,
       "effective_on" => effective_on.iso8601,
+      "company_field_proposals" => company_field_proposals,
       "employee_matches" => employee_matches.map do |source, target|
-        { "source_employee_id" => source.id, "employee_id" => target.id, "employee_name" => target.full_name }
+        {
+          "source_employee_id" => source.id,
+          "employee_id" => target.id,
+          "employee_name" => target.full_name,
+          "match_method" => durable_identity_kind(target)
+        }
       end
     }
     @digest = Digest::SHA256.hexdigest(JSON.generate(fingerprint_payload))
@@ -73,44 +80,94 @@ class PayrollGoLiveSetupPlan
   def build_employee_matches
     source_index = Hash.new { |hash, key| hash[key] = [] }
     source_company.employees.active.find_each do |employee|
-      employee_name_keys(employee).each { |key| source_index[key] << employee }
+      key = durable_identity_key(employee)
+      source_index[key] << employee if key
     end
 
     matches = []
     errors = []
     matched_source_ids = Set.new
     company.employees.active.order(:last_name, :first_name, :id).each do |target|
-      candidates = employee_name_keys(target).flat_map { |key| source_index[key] }.uniq
+      key = durable_identity_key(target)
+      unless key
+        errors << "#{target.full_name}: enter a valid SSN or business EIN before matching predecessor setup"
+        next
+      end
+
+      candidates = source_index.fetch(key, [])
       if candidates.one?
         source = candidates.first
         if matched_source_ids.include?(source.id)
           errors << "#{target.full_name}: the source employee is already matched to another successor employee"
         elsif source.employment_type != target.employment_type
           errors << "#{target.full_name}: source and successor tax classifications do not match"
-        elsif source.individual_filer? && target.individual_filer? && source.valid_filing_ssn? && target.valid_filing_ssn? && source.ssn_digits != target.ssn_digits
-          errors << "#{target.full_name}: source and successor Social Security numbers conflict; verify employee identity before copying setup"
         else
           matches << [ source, target ]
           matched_source_ids << source.id
         end
       elsif candidates.empty?
-        errors << "#{target.full_name}: no active source employee match"
+        errors << "#{target.full_name}: no active predecessor employee has the same verified payroll identity"
       else
-        errors << "#{target.full_name}: multiple source employees have the same normalized name"
+        errors << "#{target.full_name}: multiple active predecessor employees share the same payroll identity"
       end
     end
 
     source_company.employees.active.where.not(id: matched_source_ids.to_a).find_each do |source|
-      errors << "#{source.full_name}: active source employee has no successor match"
+      message = if durable_identity_key(source)
+        "active predecessor employee has no successor identity match"
+      else
+        "active predecessor employee is missing a valid SSN or business EIN"
+      end
+      errors << "#{source.full_name}: #{message}"
     end
     [ matches, errors ]
   end
 
-  def employee_name_keys(employee)
-    [
-      [ employee.first_name, employee.middle_name, employee.last_name ],
-      [ employee.last_name, employee.first_name, employee.middle_name ]
-    ].map { |parts| QuickbooksHistory::NameNormalizer.call(parts.compact_blank.join(" ")) }.uniq
+  def durable_identity_key(employee)
+    if employee.business_contractor?
+      digits = employee.contractor_ein.to_s.gsub(/\D/, "")
+      return [ "business_ein", digits ] if digits.length == 9
+
+      return nil
+    end
+
+    return unless employee.valid_filing_ssn?
+
+    [ "ssn", employee.ssn_digits ]
+  end
+
+  def durable_identity_kind(employee)
+    employee.business_contractor? ? "business_ein" : "ssn"
+  end
+
+  def build_company_field_proposals
+    COMPANY_FIELDS.map do |field|
+      source_value = source_company.public_send(field)
+      current_value = company.public_send(field)
+      proposed_value, decision = proposed_company_value(source_value, current_value)
+      {
+        "field" => field,
+        "source_value" => source_value,
+        "current_value" => current_value,
+        "proposed_value" => proposed_value,
+        "decision" => decision,
+        "requires_review" => decision != "already_matches"
+      }
+    end
+  end
+
+  def proposed_company_value(source_value, current_value)
+    if value_present?(current_value)
+      [ current_value, source_value == current_value ? "already_matches" : "retain_successor" ]
+    elsif value_present?(source_value)
+      [ source_value, "fill_blank_from_predecessor" ]
+    else
+      [ current_value, "missing_in_both" ]
+    end
+  end
+
+  def value_present?(value)
+    value == false || value == 0 || value.present?
   end
 
   def current_source_schedule
@@ -128,18 +185,25 @@ class PayrollGoLiveSetupPlan
       "Balance-tracked and generic recurring loan deductions are copied inactive until the successor balance and repayment schedule are verified. Existing successor loan schedules are retained."
     ]
     values << "The source client has no EIN recorded" if source_company.ein.blank?
+    employee_matches.each do |source, target|
+      next if QuickbooksHistory::NameNormalizer.employee(source) == QuickbooksHistory::NameNormalizer.employee(target)
+
+      values << "#{target.full_name}: matched to predecessor #{source.full_name} by verified payroll identity; review the name difference"
+    end
     values
   end
 
   def build_summary
     {
       "employee_count" => employee_matches.size,
+      "company_fields_needing_review_count" => company_field_proposals.count { |proposal| proposal["requires_review"] },
       "department_count" => source_company.departments.active.count,
       "payroll_field_count" => source_company.payroll_field_definitions.active.count,
       "deduction_type_count" => source_company.deduction_types.active.count,
       "recurring_deduction_count" => EmployeeDeduction.active.joins(:employee).where(employees: { company_id: source_company.id }).count,
       "recurring_payroll_field_count" => EmployeePayrollField.active.joins(:employee).where(employees: { company_id: source_company.id }).count,
       "work_profile_count" => employee_matches.count { |source, _target| EmployeeWorkProfile.for_date(source.id, effective_on).present? },
+      "tipped_employee_count" => employee_matches.count { |source, _target| source.employee_tipped_occupations.exists? },
       "sensitive_profile_count" => employee_matches.count do |source, _target|
         source.ssn_encrypted.present? || source.bank_account_number_encrypted.present? || source.bank_routing_number_encrypted.present?
       end

@@ -9,6 +9,7 @@ class EmployeeConfigurationReviewService
   SOURCE_REQUIRED_CODES = %w[
     verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
   ].freeze
+  CERTIFICATION_CODES = EmployeeConfigurationReviewResolution::CERTIFICATION_ITEM_CODES
   REVIEWABLE_EMPLOYEE_FIELDS = %w[
     hire_date address_line1 city state zip allowances w4_form_version
     employment_type salary_type pay_rate
@@ -19,7 +20,7 @@ class EmployeeConfigurationReviewService
     @actor = actor
   end
 
-  def resolve!(code:, resolution_note:, acknowledgement:)
+  def resolve!(code:, resolution_note:, acknowledgement:, source_reference: nil, effective_on: nil)
     authorize!
     raise InvalidResolution, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
 
@@ -37,12 +38,15 @@ class EmployeeConfigurationReviewService
       raise InvalidResolution, "This setup review item is no longer open" unless item
 
       ensure_required_source_fields!(item)
+      evidence = certification_evidence(item, source_reference, effective_on)
       resolution = employee.employee_configuration_review_resolutions.create!(
         company: employee.company,
         item_code: item.fetch("code"),
         item_message: item.fetch("message"),
         item_fields: Array(item.fetch("fields")),
         resolution_note: note,
+        source_reference: evidence[:source_reference],
+        effective_on: evidence[:effective_on],
         reviewed_by: actor,
         reviewed_by_name: actor.name,
         reviewed_by_email: actor.email,
@@ -92,6 +96,19 @@ class EmployeeConfigurationReviewService
     return if missing.empty?
 
     raise InvalidResolution, "Enter the required employee values first: #{missing.map { |field| field.humanize }.join(', ')}"
+  end
+
+  def certification_evidence(item, source_reference, effective_on)
+    return { source_reference: nil, effective_on: nil } unless CERTIFICATION_CODES.include?(item.fetch("code"))
+
+    reference = source_reference.to_s.squish
+    raise InvalidResolution, "Identify the source document or record reviewed" if reference.blank?
+    raise InvalidResolution, "Source reference is too long" if reference.length > 255
+
+    date = Date.iso8601(effective_on.to_s)
+    { source_reference: reference, effective_on: date }
+  rescue Date::Error
+    raise InvalidResolution, "Enter the date the verified setup takes effect"
   end
 
   def authorize!
