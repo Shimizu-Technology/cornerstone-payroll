@@ -1328,7 +1328,7 @@ module Api
             return [ report, nil ]
           end
 
-          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: record_id)
+          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, { payroll_item_field_entries: :payroll_field_definition }, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: record_id)
 
           unless pay_period && pay_period.company_id == current_company_id
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
@@ -1363,6 +1363,8 @@ module Api
             summary: {
               employee_count: w2_items.size,
               contractor_count: contractor_items.size,
+              total_hours: w2_items.sum { |item| item.hours_worked.to_f },
+              total_overtime_hours: w2_items.sum { |item| item.overtime_hours.to_f },
               total_gross: w2_items.sum(&:gross_pay),
               total_reported_tips: w2_items.sum(&:reported_tips),
               total_tips_paid_out: w2_items.sum(&:tips_paid_out),
@@ -1391,7 +1393,11 @@ module Api
               total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
               total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
               total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
-              total_loan_payments: w2_items.sum(&:loan_payment),
+              total_straight_loan_deductions: money(w2_items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+              total_installment_loan_payments: money(w2_items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+              total_loan_payments: money(w2_items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) + installment_loan_amount(item) }),
+              total_employer_contributions: w2_items.sum { |item| employer_contributions_total(item) },
+              total_employer_payroll_cost: w2_items.sum { |item| employer_payroll_cost(item) },
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay),
               contractor_total_gross: contractor_items.sum(&:gross_pay),
@@ -1751,7 +1757,7 @@ module Api
 
         def reportable_payroll_items(period)
           PayrollItem.joins(:pay_period)
-                     .includes(:employee, :pay_period, :payroll_item_field_entries)
+                     .includes(:employee, :pay_period, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type)
                      .not_voided
                      .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
         end
@@ -1823,6 +1829,8 @@ module Api
             imported_payroll_count: 0,
             imported_opening_summary_count: 0,
             gross_pay: items.sum { |item| item.gross_pay.to_f },
+            total_hours: items.sum { |item| item.hours_worked.to_f },
+            total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
             custom_earnings_total: custom_totals[:custom_earnings_total],
             payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
@@ -1837,6 +1845,10 @@ module Api
             tips: items.sum { |item| item.reported_tips.to_f },
             tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
             bonus: items.sum { |item| item.bonus.to_f },
+            straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+            installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+            employer_contributions: items.sum { |item| employer_contributions_total(item) },
+            employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             total_deductions: custom_totals[:total_deductions],
             custom_deductions_total: custom_totals[:custom_deductions_total],
             net_pay: items.sum { |item| item.net_pay.to_f }
@@ -1856,6 +1868,13 @@ module Api
             end_date: period.end_date,
             period_basis: "pay_date",
             gross_pay: items.sum { |item| item.gross_pay.to_f },
+            total_hours: items.sum { |item| item.hours_worked.to_f },
+            total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
+            bonus: items.sum { |item| item.bonus.to_f },
+            straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
+            installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+            employer_contributions: items.sum { |item| employer_contributions_total(item) },
+            employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
             payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
@@ -1993,6 +2012,10 @@ module Api
             total_employer_retirement_match: item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f,
             loan_deduction: item.loan_deduction.to_f,
             loan_payment: item.loan_payment.to_f,
+            straight_loan_deduction: money(straight_loan_amount(item)),
+            installment_loan_payment: money(installment_loan_amount(item)),
+            employer_contributions_total: employer_contributions_total(item),
+            employer_payroll_cost: employer_payroll_cost(item),
             insurance_payment: item.insurance_payment.to_f,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
@@ -2417,6 +2440,28 @@ module Api
             end
         end
 
+        def straight_loan_amount(item)
+          BigDecimal(item[:loan_deduction].to_s.presence || "0")
+        end
+
+        def installment_loan_amount(item)
+          loan_payment = BigDecimal(item[:loan_payment].to_s.presence || "0")
+          [ loan_payment - straight_loan_amount(item), BigDecimal("0") ].max
+        end
+
+        def employer_contributions_total(item)
+          quickbooks_report_data_for(item).employer_contribution_total(item)
+        end
+
+        def employer_payroll_cost(item)
+          quickbooks_report_data_for(item).total_payroll_cost(item)
+        end
+
+        def quickbooks_report_data_for(item)
+          @quickbooks_report_data_by_pay_period_id ||= {}
+          @quickbooks_report_data_by_pay_period_id[item.pay_period_id] ||= QuickbooksPayrollReportData.new(item.pay_period)
+        end
+
         def consume_matching_field_contribution?(amounts_by_label, deduction)
           amounts = amounts_by_label[deduction.label.to_s]
           return false unless amounts
@@ -2573,32 +2618,34 @@ module Api
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Non-Taxable Pay",
           "Gross Pay", "FIT", "Additional W/H", "SS Tax", "Medicare Tax",
           "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
-          "Employer Match", "Employer Roth Match", "Loan Deduction", "Loan Payment",
-          "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
+          "Employer Match", "Employer Roth Match", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
+          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
         ].freeze
 
         CEO_PAYROLL_REGISTER_HINTS = [
           "", "", "", "Hourly rate", "", "",
           "For hourly employees only: Rate × Regular Hours + Rate × OT Hours × 1.5",
           "For salary employees only", "Hourly Pay + Salary", "", "", "Tips 1 + Tips 2",
-          "Total hourly/salary pay + total tips", "Tips paid out daily", "Stored calculated FIT", "Stored additional withholding",
-          "Stored calculated Social Security", "Stored calculated Medicare", "Employee retirement", "Loan deduction",
-          "Stored total deductions", "Stored net pay", ""
+          "One-time bonus", "Total hourly/salary pay + total tips + bonus", "Tips paid out daily",
+          "Stored calculated FIT", "Stored additional withholding", "Stored calculated Social Security", "Stored calculated Medicare",
+          "Employee retirement", "One-time loan deduction", "Recurring installment loan deduction",
+          "Employer-paid retirement and payroll-field contributions", "Stored total deductions", "Stored net pay",
+          "Gross pay + employer taxes + employer contributions", ""
         ].freeze
         CEO_PAYROLL_REGISTER_HEADERS = [
           "#", "Employee", "Type", "Rate", "Regular Hours", "OT Hours", "Hourly Pay", "Salary",
-          "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Gross Pay", "Tips Out",
+          "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Bonus", "Gross Pay", "Tips Out",
           "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (401k)",
-          "Loan", "Total Deductions", "Net Pay", "Check #"
+          "Straight Loan", "Installment Loan", "Employer Contributions", "Total Deductions", "Net Pay", "Employer Cost", "Check #"
         ].freeze
         CEO_PAYROLL_REGISTER_KEYS = %i[
           count employee type rate regular_hours overtime_hours hourly_pay salary_pay
-          total_hourly_salary tips_1 tips_2 total_tips gross_pay tips_out withholding
-          additional_withholding social_security medicare retirement loan total_deductions
-          net_pay check_number
+          total_hourly_salary tips_1 tips_2 total_tips bonus gross_pay tips_out withholding
+          additional_withholding social_security medicare retirement straight_loan installment_loan
+          employer_contributions total_deductions net_pay employer_cost check_number
         ].freeze
-        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12, 16, 14, 12 ].freeze
-        CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 12, 20, 21 ].freeze
+        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 14, 16, 18, 16, 14, 16, 12 ].freeze
+        CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 13, 23, 24, 25 ].freeze
 
         def payroll_register_sheets(report)
           employees = Array(report[:employees])
@@ -2717,7 +2764,7 @@ module Api
               total_row_index => 24
             },
             merged_cells: [
-              "A#{information_header_index + 1}:W#{information_header_index + 1}"
+              "A#{information_header_index + 1}:AA#{information_header_index + 1}"
             ],
             show_grid_lines: false,
             zoom_scale: 80
@@ -2753,7 +2800,7 @@ module Api
 
         def ceo_payroll_register_column_format(index)
           return :count if index.zero?
-          return :text if index.in?([ 1, 2, 22 ])
+          return :text if index.in?([ 1, 2, 26 ])
           return :number if index.in?([ 4, 5 ])
 
           :currency
@@ -2874,7 +2921,7 @@ module Api
             case index
             when 0 then :body_count
             when 1 then :body_text
-            when 2, 22 then :body_center
+            when 2, 26 then :body_center
             when 4, 5 then :body_number
             when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :body_calculated_currency
             else :body_currency
@@ -2888,7 +2935,7 @@ module Api
             when 1 then :total_text
             when 4, 5 then :total_number
             when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :total_calculated_currency
-            when 6..21 then :total_currency
+            when 6..25 then :total_currency
             else :total
             end
           end
@@ -2920,7 +2967,8 @@ module Api
           tips_1, tips_2 = ceo_tip_columns(emp)
           total_tips = money(tips_1.to_f + tips_2.to_f)
           retirement = money(emp[:total_retirement_payment].presence || emp[:retirement_payment].to_f + emp[:roth_retirement_payment].to_f)
-          loan = ceo_loan_amount(emp)
+          straight_loan = money(emp[:straight_loan_deduction])
+          installment_loan = money(emp[:installment_loan_payment])
 
           [
             count,
@@ -2935,6 +2983,7 @@ module Api
             tips_1,
             tips_2,
             total_tips,
+            money(emp[:bonus]),
             money(emp[:gross_pay]),
             money(emp[:tips_paid_out]),
             money(emp[:withholding_tax]),
@@ -2942,9 +2991,12 @@ module Api
             money(emp[:social_security_tax]),
             money(emp[:medicare_tax]),
             retirement,
-            loan,
+            straight_loan,
+            installment_loan,
+            money(emp[:employer_contributions_total]),
             money(emp[:total_deductions]),
             money(emp[:net_pay]),
+            money(emp[:employer_payroll_cost]),
             emp[:check_number]
           ]
         end
@@ -2970,6 +3022,10 @@ module Api
             sum_column(rows, 19),
             sum_column(rows, 20),
             sum_column(rows, 21),
+            sum_column(rows, 22),
+            sum_column(rows, 23),
+            sum_column(rows, 24),
+            sum_column(rows, 25),
             nil
           ]
         end
@@ -3052,13 +3108,6 @@ module Api
           nil
         end
 
-        def ceo_loan_amount(emp)
-          loan_payment = emp[:loan_payment].to_f
-          return money(loan_payment) if loan_payment.positive?
-
-          money(emp[:loan_deduction])
-        end
-
         def payroll_register_review_sheet(simple_register)
           rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + simple_register[:review].map do |row|
             [ row[:severity], row[:employee], row[:issue], row[:detail] ]
@@ -3074,7 +3123,7 @@ module Api
 
           Array(report[:employees]).each_with_index do |emp, index|
             row = ceo_rows[index]
-            displayed_gross = row[8].to_f + row[11].to_f
+            displayed_gross = row[8].to_f + row[11].to_f + row[12].to_f
             gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
             if gross_diff.abs > 0.01
               rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, recurring/manual adjustments, payroll fields, or non-taxable pay on detail sheets." ]
@@ -3108,7 +3157,7 @@ module Api
           money(
             emp[:tips_paid_out].to_f + emp[:withholding_tax].to_f + emp[:additional_withholding].to_f +
               emp[:social_security_tax].to_f + emp[:medicare_tax].to_f +
-              emp[:total_retirement_payment].to_f + ceo_loan_amount(emp).to_f
+              emp[:total_retirement_payment].to_f + emp[:straight_loan_deduction].to_f + emp[:installment_loan_payment].to_f
           )
         end
 
@@ -3292,7 +3341,8 @@ module Api
             emp[:social_security_tax], emp[:medicare_tax], emp[:employer_social_security_tax],
             emp[:employer_medicare_tax], emp[:retirement_payment], emp[:roth_retirement_payment],
             emp[:employer_retirement_match], emp[:employer_roth_retirement_match],
-            emp[:loan_deduction], emp[:loan_payment], emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
+            emp[:straight_loan_deduction], emp[:installment_loan_payment], emp[:employer_contributions_total], emp[:employer_payroll_cost],
+            emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
             emp[:net_pay], emp[:check_number], emp[:check_date]
           ]
         end
@@ -3523,19 +3573,21 @@ module Api
 
         def ytd_summary_sheets(report)
           rows = [ [
-            "Last Name", "First Name", "Employee Name", "Type", "Status", "Gross Pay",
+            "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
             "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
-            "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
+            "Tips", "Tips Paid Out", "Bonus", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
+            "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
           ] ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
-              emp[:gross_pay], emp[:custom_earnings_total], emp[:payroll_field_taxable_additions_total],
+              emp[:total_hours], emp[:total_overtime_hours], emp[:gross_pay], emp[:custom_earnings_total], emp[:payroll_field_taxable_additions_total],
               emp[:payroll_field_non_taxable_additions_total], emp[:payroll_field_pre_tax_deductions_total],
               emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
-              emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
+              emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
+              emp[:employer_contributions], emp[:employer_payroll_cost], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay]
             ]
           end
