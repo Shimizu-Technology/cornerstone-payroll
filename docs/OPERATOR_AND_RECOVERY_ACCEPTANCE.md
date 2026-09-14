@@ -49,6 +49,8 @@ A production shadow cycle and supervised first live cycle remain separate requir
 
 Do not replace Clerk keys as an isolated dashboard edit.
 
+Use [the Cornerstone and AIRE production identity cutover runbook](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md) for the current verified provider state, required decisions, no-lockout preconditions, coordinated key change, verification matrix, and rollback procedure.
+
 - [ ] Revoke and reauthenticate the historical `gog` Gmail OAuth credential, then replace its local keyring password. The embedded password was removed from the current tree but remains exposed in Git history until a separately approved history rewrite is completed.
 - [ ] Inventory every current Cornerstone and AIRE user.
 - [ ] Name at least two privileged recovery administrators for each production identity environment.
