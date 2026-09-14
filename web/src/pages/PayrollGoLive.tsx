@@ -37,6 +37,20 @@ const money = (value: string | number | undefined): string => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(parsed);
 };
 
+const proposalDecisionLabels: Record<string, string> = {
+  already_matches: 'Already matches',
+  retain_successor: 'Keep successor value',
+  fill_blank_from_predecessor: 'Fill blank from predecessor',
+  missing_in_both: 'Still missing',
+};
+
+function proposalValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'Not set';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return 'Configured';
+  return String(value);
+}
+
 const readinessLabels: Record<string, string> = {
   historical_import_locked: 'Historical import locked',
   historical_ytd_active: 'Historical YTD active',
@@ -217,9 +231,35 @@ export function PayrollGoLive(): ReactElement {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {Object.entries(review.setup_summary).map(([key, value]) => <Metric key={key} label={key.replaceAll('_', ' ')} value={String(value)} />)}
             </div>
+            {(review.setup_plan.company_field_proposals || []).length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-neutral-200">
+                <div className="border-b border-neutral-200 bg-neutral-50 px-5 py-4">
+                  <p className="font-semibold text-neutral-950">Company settings proposal</p>
+                  <p className="mt-1 text-sm leading-6 text-neutral-600">The successor stays authoritative. Existing successor values are retained; the predecessor only fills blanks. Review every highlighted difference before applying.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
+                    <thead className="bg-white text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                      <tr><th className="px-5 py-3">Setting</th><th className="px-5 py-3">Predecessor reference</th><th className="px-5 py-3">Current successor</th><th className="px-5 py-3">Will use</th><th className="px-5 py-3">Decision</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100 bg-white">
+                      {(review.setup_plan.company_field_proposals || []).map((proposal) => (
+                        <tr key={proposal.field} className={proposal.requires_review ? 'bg-warning-50/50' : ''}>
+                          <td className="px-5 py-3 font-semibold text-neutral-900">{proposal.field.replaceAll('_', ' ')}</td>
+                          <td className="max-w-64 break-words px-5 py-3 text-neutral-600">{proposalValue(proposal.source_value)}</td>
+                          <td className="max-w-64 break-words px-5 py-3 text-neutral-600">{proposalValue(proposal.current_value)}</td>
+                          <td className="max-w-64 break-words px-5 py-3 font-medium text-neutral-900">{proposalValue(proposal.proposed_value)}</td>
+                          <td className="px-5 py-3"><Badge variant={proposal.decision === 'missing_in_both' ? 'warning' : proposal.requires_review ? 'default' : 'success'}>{proposalDecisionLabels[proposal.decision]}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             {review.errors.length > 0 && <MessageList tone="danger" title="Resolve before applying" messages={review.errors} />}
             {review.warnings.length > 0 && <MessageList tone="warning" title="Boundaries to verify" messages={review.warnings} />}
-            {!review.setup_applied_at && review.errors.length === 0 && payload.permissions.can_apply_setup && <div className="rounded-2xl border border-primary-200 bg-primary-50 p-5"><p className="font-semibold text-primary-950">Apply the reviewed configuration</p><p className="mt-1 text-sm leading-6 text-primary-800">This copies employee profiles, W-4 elections, rates, departments, recurring definitions, schedule, workweek, and check settings. It does not move the EIN or loan balances.</p><Input className="mt-4 max-w-xl" label={`Type ${payload.acknowledgements.apply_setup}`} value={applyAcknowledgement} onChange={(event) => setApplyAcknowledgement(event.target.value)} /><Button className="mt-4" disabled={applyAcknowledgement !== payload.acknowledgements.apply_setup || busy !== null} onClick={() => void runAction('apply', () => payrollGoLiveApi.apply(applyAcknowledgement, companyId), 'Reviewed setup copied to the successor client.')}>{busy === 'apply' ? 'Applying…' : 'Apply reviewed setup'}</Button></div>}
+            {!review.setup_applied_at && review.errors.length === 0 && payload.permissions.can_apply_setup && <div className="rounded-2xl border border-primary-200 bg-primary-50 p-5"><p className="font-semibold text-primary-950">Apply the reviewed configuration</p><p className="mt-1 text-sm leading-6 text-primary-800">This retains existing successor company values, fills only blank settings from the proposal, and copies reviewed employee setup. It does not move the EIN, direct-deposit accounts, tipped occupation history, or loan balances.</p><Input className="mt-4 max-w-xl" label={`Type ${payload.acknowledgements.apply_setup}`} value={applyAcknowledgement} onChange={(event) => setApplyAcknowledgement(event.target.value)} /><Button className="mt-4" disabled={applyAcknowledgement !== payload.acknowledgements.apply_setup || busy !== null} onClick={() => void runAction('apply', () => payrollGoLiveApi.apply(applyAcknowledgement, companyId), 'Reviewed setup copied to the successor client.')}>{busy === 'apply' ? 'Applying…' : 'Apply reviewed setup'}</Button></div>}
           </>}
         </CardContent>
       </Card>
