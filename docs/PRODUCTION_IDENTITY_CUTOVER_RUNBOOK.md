@@ -56,6 +56,7 @@ Do not begin the live key switch until every item below is true.
 - [ ] Password sign-in is disabled or has an explicitly approved production policy. Do not silently preserve the current eight-character minimum with minimum-strength enforcement off.
 - [ ] Clerk Pro is active and the approved MFA strategy is enabled in both production instances.
 - [ ] Two recovery administrators per application have enrolled MFA, stored backup codes separately, signed out, signed back in, and completed a recovery exercise.
+- [ ] An independent reviewer has verified each provider policy and recorded an access-controlled evidence reference bound to the exact production Clerk instance ID.
 - [ ] Current development Clerk users and active application users have been reconciled by verified primary email. Disabled and cross-company accounts are called out explicitly.
 - [ ] Every intended production user has a migration or invitation disposition. No invitation is sent from an unattended script.
 - [ ] The current frontend and backend key values are retained in an access-controlled rollback record. Store values only in the approved secret manager, never in this repository or a ticket.
@@ -95,10 +96,12 @@ For Google sign-in in each application where it is retained:
 
 1. Export or inspect the complete development Clerk user inventory and the active application-user inventory without placing PII in source control.
 2. Reconcile by Clerk's verified primary email, not by display name or the first email address.
-3. Give every active user one disposition: migrate, invite/recreate, intentionally deactivate, or investigate. A blank disposition is a no-go.
-4. Invite or migrate the two recovery administrators first. Confirm that each links to the intended existing application user and receives the expected local role and company access.
-5. Enroll and recover both administrators before preparing the remaining users.
-6. Prepare the remaining invitations or migration in controlled batches. Confirm delivery and ownership; do not send them merely to make the provider user count match.
+3. Require an exact-one match between each development Clerk identity and local application user. Record the development Clerk user ID and local user ID in access-controlled evidence before any invitation, migration, or authorization change.
+4. Have an independent reviewer verify the exact-one match, intended local role, and company access. Changed, duplicate, or unmatched records remain `investigate` until resolved.
+5. Give every active user one disposition: migrate, invite/recreate, intentionally deactivate, or investigate. A blank disposition is a no-go.
+6. Invite or migrate the two recovery administrators first. Record each new production Clerk user ID against the already reviewed local user ID, then confirm that the account receives the expected local role and company access.
+7. Enroll and recover both administrators before preparing the remaining users.
+8. Prepare the remaining invitations or migration in controlled batches. Confirm delivery and ownership; do not send them merely to make the provider user count match.
 
 ## Coordinated application switch
 
@@ -108,12 +111,14 @@ The frontend and backend cannot accept different Clerk environments as a steady 
 
 - Netlify: replace `VITE_CLERK_PUBLISHABLE_KEY` with the production publishable key and publish the prepared frontend deploy.
 - Render web and worker: replace `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` together. If `CLERK_INSTANCE_ID`, `CLERK_ISSUER`, `CLERK_API_BASE`, or `CLERK_AUDIENCE` are explicitly configured, update or remove stale development values as required by the production instance.
+- Render web and worker: set `CLERK_MFA_ATTESTED_INSTANCE_ID` to the exact independently reviewed production Clerk instance and `CLERK_MFA_EVIDENCE_REF` to its non-secret, access-controlled evidence identifier.
 - Deploy the web and worker from the same approved Cornerstone revision.
 
 ### AIRE
 
 - Netlify: replace `VITE_CLERK_PUBLISHABLE_KEY` with the AIRE production publishable key. Leave `VITE_CLERK_JWT_TEMPLATE` unset unless a separate reviewed change deliberately introduces and verifies a matching production template.
 - Render: replace `CLERK_SECRET_KEY`, `CLERK_JWKS_URL`, and any explicit `CLERK_ISSUER` or `CLERK_AUDIENCE` values as one prepared change.
+- Render: set the AIRE equivalents of `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` after the independent provider-policy review.
 - Deploy from the same approved AIRE revision used by the readiness evidence.
 
 After both sides of an application are live, verify identity behavior before moving to the next application. Never paste keys into a command whose output will be retained.
@@ -140,7 +145,7 @@ Use non-payroll actions wherever possible. Record result, timestamp in ChST, ope
 
 Only after the matrix passes:
 
-1. set `REQUIRE_MFA=true` in the relevant backend environment;
+1. confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment;
 2. deploy the attestation change;
 3. run the complete deployed `production:readiness` task;
 4. require Cornerstone to pass 26 of 26 and AIRE to pass 23 of 23; and
@@ -172,6 +177,7 @@ Rollback immediately if both recovery administrators cannot sign in, a valid loc
 | Rollback deadline in ChST | |
 | User-inventory evidence | |
 | MFA enrollment/recovery evidence | |
+| MFA provider-policy evidence | |
 | Verification-matrix evidence | |
 | Cornerstone readiness result | |
 | AIRE readiness result | |
