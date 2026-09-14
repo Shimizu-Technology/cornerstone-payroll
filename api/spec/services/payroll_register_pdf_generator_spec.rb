@@ -17,11 +17,18 @@ RSpec.describe PayrollRegisterPdfGenerator do
       },
       summary: {
         employee_count: 1,
+        total_hours: 80.0,
+        total_overtime_hours: 2.0,
         total_gross: 2000.00,
+        total_bonus: 100.00,
         total_withholding: 150.00,
         total_social_security: 124.00,
         total_medicare: 29.00,
         total_retirement: 80.00,
+        total_straight_loan_deductions: 25.00,
+        total_installment_loan_payments: 50.00,
+        total_employer_contributions: 60.00,
+        total_employer_payroll_cost: 2_213.00,
         total_deductions: 383.00,
         total_net: 1617.00
       },
@@ -32,12 +39,17 @@ RSpec.describe PayrollRegisterPdfGenerator do
           employment_type: "hourly",
           pay_rate: 20.00,
           hours_worked: 80.0,
-          overtime_hours: 0.0,
+          overtime_hours: 2.0,
+          bonus: 100.00,
           gross_pay: 2000.00,
           withholding_tax: 150.00,
           social_security_tax: 124.00,
           medicare_tax: 29.00,
           retirement_payment: 80.00,
+          straight_loan_deduction: 25.00,
+          installment_loan_payment: 50.00,
+          employer_contributions_total: 60.00,
+          employer_payroll_cost: 2_213.00,
           total_deductions: 383.00,
           net_pay: 1617.00,
           check_number: "10001",
@@ -130,6 +142,14 @@ RSpec.describe PayrollRegisterPdfGenerator do
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
       expect(text).to include("Payroll Fields by Worker", "Alice Terlaje")
+    end
+
+    it "renders Mark's requested report totals and split loan labels" do
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Total Hours", "80.00", "Total OT Hours", "2.00", "Bonus", "$100.00")
+      expect(text).to include("Straight Loans", "$25.00", "Installment Loans", "$50.00")
+      expect(text).to include("Employer Contributions", "$60.00", "Employer Payroll Cost", "$2213.00")
     end
 
     it "renders source-aware recurring and manual adjustments by worker" do

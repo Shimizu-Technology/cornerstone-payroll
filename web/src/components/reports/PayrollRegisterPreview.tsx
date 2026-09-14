@@ -414,7 +414,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   const additionColumns = fieldColumns.filter((column) => column.group === 'addition');
   const deductionColumns = fieldColumns.filter((column) => column.group === 'deduction');
   const employerColumns = fieldColumns.filter((column) => column.group === 'employer');
-  const columnCount = 14 + fieldColumns.length + adjustmentColumns.length;
+  const columnCount = 19 + fieldColumns.length + adjustmentColumns.length;
   const total = (key: keyof PayrollWorker) => workers.reduce((sum, worker) => sum + Number(worker[key] || 0), 0);
   const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
     sum + (payrollFieldAmount(worker, column) || 0)
@@ -429,8 +429,15 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ?? report.contractors.reduce((total, contractor) => total + Number(contractor.net_pay ?? 0), 0);
   const summaryItems = [
     ['Workers', (report.summary.employee_count + contractorCount).toLocaleString()],
+    ['Total hours', decimal(report.summary.total_hours)],
+    ['Total OT hours', decimal(report.summary.total_overtime_hours)],
     ['W-2 gross', currency(report.summary.total_gross)],
     ['1099 gross', currency(contractorGross)],
+    ['Bonus', currency(report.summary.total_bonus)],
+    ['Straight loans', currency(report.summary.total_straight_loan_deductions)],
+    ['Installment loans', currency(report.summary.total_installment_loan_payments)],
+    ['Employer contributions', currency(report.summary.total_employer_contributions)],
+    ['Employer cost', currency(report.summary.total_employer_payroll_cost)],
     ['Withholding', currency(report.summary.total_withholding)],
     ['Deductions', currency(report.summary.total_deductions)],
     ['Total net', currency(Number(report.summary.total_net) + Number(contractorNet))],
@@ -468,13 +475,14 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
           )}
         </div>
         <div className="max-h-[60vh] overflow-auto">
-          <table className="text-xs" style={{ minWidth: `${1450 + (fieldColumns.length * 144) + (adjustmentColumns.length * 160)}px` }}>
+          <table className="text-xs" style={{ minWidth: `${2050 + (fieldColumns.length * 144) + (adjustmentColumns.length * 160)}px` }}>
             <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
               <tr>
                 <th className="sticky left-0 z-20 min-w-52 border-b border-r border-slate-200 bg-slate-100 px-3 py-2.5 font-bold">Employee</th>
                 {['Type', 'Hours', 'OT Hours', 'Reported Tips', 'Tips Out'].map((label) => (
                   <th key={label} className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">{label}</th>
                 ))}
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Bonus</th>
                 {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {additionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Gross Pay</th>
@@ -484,8 +492,12 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Medicare</th>
                 {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {deductionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Straight Loan</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Installment Loan</th>
                 <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Deductions</th>
                 <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Net Pay</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Employer Contributions</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Employer Cost</th>
                 {employerColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-slate-200 px-3 py-2.5 font-bold">Check #</th>
               </tr>
@@ -506,6 +518,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.overtime_hours)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.reported_tips)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.tips_paid_out)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.bonus)}</td>
                       {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {additionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
@@ -515,8 +528,12 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
                       {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {deductionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.straight_loan_deduction)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.installment_loan_payment)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_contributions_total)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_payroll_cost)}</td>
                       {employerColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-slate-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
                     </tr>
@@ -532,6 +549,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('overtime_hours'))}</td>
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('reported_tips'))}</td>
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('tips_paid_out'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('bonus'))}</td>
                 {adjustmentAdditionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-slate-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
                 ))}
@@ -547,8 +565,12 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 {deductionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('straight_loan_deduction'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('installment_loan_payment'))}</td>
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('total_deductions'))}</td>
                 <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('net_pay'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_contributions_total'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_payroll_cost'))}</td>
                 {employerColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}

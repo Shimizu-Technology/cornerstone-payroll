@@ -1266,7 +1266,7 @@ function EmployeePayHistoryPanel() {
 
 // ─── YTD Summary Panel ────────────────────────────────────────────────────────
 
-function YtdSummaryPanel() {
+export function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
@@ -1524,7 +1524,10 @@ function YtdSummaryPanel() {
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+                  <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
+                  <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
+                  <TotalBox label="Total Bonus" value={report.company_totals.bonus ?? 0} />
                   <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
                   <TotalBox label="Payroll Field Additions" value={(report.company_totals.payroll_field_taxable_additions_total ?? 0) + (report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
                   <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
@@ -1533,7 +1536,10 @@ function YtdSummaryPanel() {
                   <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
                   <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
                   <TotalBox label="Payroll Field Deductions" value={(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + (report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
-                  <TotalBox label="Employer Contributions" value={report.company_totals.payroll_field_employer_contributions_total ?? 0} />
+                  <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
+                  <TotalBox label="Installment Loans" value={report.company_totals.installment_loan_payments ?? 0} />
+                  <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
+                  <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
                   <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
                   <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
                 </div>
@@ -1553,7 +1559,10 @@ function YtdSummaryPanel() {
                     <SortableTh label="Employee" activeLabel={sortLabel('name')} onClick={() => updateSort('name')} />
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
+                    <th className="py-2 pr-4 text-right font-medium">Hours</th>
+                    <th className="py-2 pr-4 text-right font-medium">OT Hours</th>
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    <th className="py-2 pr-4 text-right font-medium">Bonus</th>
                     <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
                     <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
@@ -1562,7 +1571,10 @@ function YtdSummaryPanel() {
                     <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
                     <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
+                    <th className="py-2 pr-4 text-right font-medium">Installment Loan</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                   </tr>
@@ -1577,7 +1589,10 @@ function YtdSummaryPanel() {
                           {emp.status}
                         </Badge>
                       </td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_hours ?? 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_overtime_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.bonus ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_taxable_additions_total ?? 0) + (emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
@@ -1586,14 +1601,17 @@ function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_pre_tax_deductions_total ?? 0) + (emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.payroll_field_employer_contributions_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.straight_loan_deductions ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.installment_loan_payments ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={15} className="py-6 text-center text-gray-400">
+                      <td colSpan={22} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -3069,11 +3087,11 @@ function Form941GuPanel() {
   );
 }
 
-function TotalBox({ label, value }: { label: string; value: number }) {
+function TotalBox({ label, value, format = 'currency' }: { label: string; value: number; format?: 'currency' | 'number' }) {
   return (
     <div className="rounded-md border p-3">
       <p className="text-xs text-gray-500 leading-tight">{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums">{fmt(value)}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums">{format === 'number' ? value.toFixed(2) : fmt(value)}</p>
     </div>
   );
 }

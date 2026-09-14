@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "bigdecimal"
 
 RSpec.describe PayrollRegisterCsvExporter do
   let(:report_data) do
@@ -16,6 +17,8 @@ RSpec.describe PayrollRegisterCsvExporter do
       },
       summary: {
         employee_count: 2,
+        total_hours: 80.0,
+        total_overtime_hours: 5.0,
         total_gross: 5000.00,
         total_withholding: 350.00,
         total_social_security: 310.00,
@@ -34,7 +37,11 @@ RSpec.describe PayrollRegisterCsvExporter do
         total_employer_traditional_retirement: 30.00,
         total_employer_roth_retirement: 20.00,
         total_employer_retirement: 50.00,
+        total_straight_loan_deductions: BigDecimal("5.00"),
+        total_installment_loan_payments: BigDecimal("15.00"),
         total_loan_payments: 20.00,
+        total_employer_contributions: BigDecimal("50.00"),
+        total_employer_payroll_cost: BigDecimal("5432.50"),
         total_retirement: 200.00,
         total_deductions: 932.50,
         total_net: 4067.50
@@ -64,7 +71,12 @@ RSpec.describe PayrollRegisterCsvExporter do
           roth_retirement_payment: 30.00,
           employer_retirement_match: 10.00,
           employer_roth_retirement_match: 8.00,
+          loan_deduction: BigDecimal("5.00"),
           loan_payment: 5.00,
+          straight_loan_deduction: BigDecimal("5.00"),
+          installment_loan_payment: BigDecimal("0.00"),
+          employer_contributions_total: BigDecimal("18.00"),
+          employer_payroll_cost: BigDecimal("2116.28"),
           total_deductions: 367.18,
           net_pay: 1582.82,
           check_number: "10001"
@@ -93,7 +105,12 @@ RSpec.describe PayrollRegisterCsvExporter do
           roth_retirement_payment: 45.00,
           employer_retirement_match: 20.00,
           employer_roth_retirement_match: 12.00,
+          loan_deduction: BigDecimal("0.00"),
           loan_payment: 15.00,
+          straight_loan_deduction: BigDecimal("0.00"),
+          installment_loan_payment: BigDecimal("15.00"),
+          employer_contributions_total: BigDecimal("32.00"),
+          employer_payroll_cost: BigDecimal("3316.22"),
           total_deductions: 565.32,
           net_pay: 2484.68,
           check_number: "10002"
@@ -209,12 +226,18 @@ RSpec.describe PayrollRegisterCsvExporter do
       totals = rows[-1]
 
       expect(totals.fields.length).to eq(described_class::HEADERS.length)
+      expect(totals["Hours Worked"]).to eq("80.0")
+      expect(totals["Overtime Hours"]).to eq("5.0")
       expect(totals["Reported Tips"]).to eq("100.00")
-      expect(totals["PTO Hours"]).to eq("")
+      expect(totals["PTO Hours"]).to eq("0.0")
       expect(totals["401(k)"]).to eq("200.00")
       expect(totals["Roth 401(k)"]).to eq("75.00")
       expect(totals["Employer Match"]).to eq("30.00")
       expect(totals["Employer Roth Match"]).to eq("20.00")
+      expect(totals["Straight Loan (One-Time)"]).to eq("5.00")
+      expect(totals["Installment Loan (Recurring)"]).to eq("15.00")
+      expect(totals["Employer Contributions"]).to eq("50.00")
+      expect(totals["Employer Payroll Cost"]).to eq("5432.50")
       expect(totals["Custom Deductions"]).to eq("30.00")
       expect(totals["Total Deductions"]).to eq("932.50")
       expect(totals["Net Pay"]).to eq("4067.50")

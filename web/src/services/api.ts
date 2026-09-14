@@ -1876,6 +1876,8 @@ export interface PayrollRegisterReport {
     summary: {
       employee_count: number;
       contractor_count?: number;
+      total_hours?: number;
+      total_overtime_hours?: number;
       total_gross: number;
       total_reported_tips?: number;
       total_tips_paid_out?: number;
@@ -1894,7 +1896,12 @@ export interface PayrollRegisterReport {
       total_social_security: number;
       total_medicare: number;
       total_retirement: number;
+      total_bonus?: number;
+      total_straight_loan_deductions?: number;
+      total_installment_loan_payments?: number;
       total_loan_payments?: number;
+      total_employer_contributions?: number;
+      total_employer_payroll_cost?: number;
       total_custom_deductions?: number;
       total_deductions: number;
       total_net: number;
@@ -1903,8 +1910,20 @@ export interface PayrollRegisterReport {
     };
     payroll_fields?: PayrollFieldsDisclosure;
     payroll_adjustments?: PayrollAdjustmentsDisclosure;
-    employees: Array<PayrollItem & { total_retirement_payment?: number }>;
-    contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
+    employees: Array<PayrollItem & {
+      total_retirement_payment?: number;
+      straight_loan_deduction?: number;
+      installment_loan_payment?: number;
+      employer_contributions_total?: number;
+      employer_payroll_cost?: number;
+    }>;
+    contractors: Array<PayrollItem & {
+      total_retirement_payment?: number;
+      straight_loan_deduction?: number;
+      installment_loan_payment?: number;
+      employer_contributions_total?: number;
+      employer_payroll_cost?: number;
+    }>;
     simple_register?: {
       columns: Array<{
         key: string;
@@ -2136,7 +2155,14 @@ export interface YtdSummaryReport {
       employment_type: string;
       status: string;
       payroll_count?: number;
+      total_hours?: number;
+      total_overtime_hours?: number;
       gross_pay: number;
+      bonus?: number;
+      straight_loan_deductions?: number;
+      installment_loan_payments?: number;
+      employer_contributions?: number;
+      employer_payroll_cost?: number;
       custom_earnings_total?: number;
       payroll_field_taxable_additions_total?: number;
       payroll_field_non_taxable_additions_total?: number;
@@ -2153,7 +2179,14 @@ export interface YtdSummaryReport {
     }[];
     company_totals: null | {
       year: number;
+      total_hours?: number;
+      total_overtime_hours?: number;
       gross_pay: number;
+      bonus?: number;
+      straight_loan_deductions?: number;
+      installment_loan_payments?: number;
+      employer_contributions?: number;
+      employer_payroll_cost?: number;
       custom_earnings_total?: number;
       payroll_field_taxable_additions_total?: number;
       payroll_field_non_taxable_additions_total?: number;

@@ -1553,12 +1553,20 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         pay_period: pay_period,
         employee: employee,
         company: company,
+        hours_worked: 70,
+        overtime_hours: 4,
+        bonus: 100,
         gross_pay: 1_250.00,
         net_pay: 974.37,
         withholding_tax: 100.00,
         social_security_tax: 77.50,
         medicare_tax: 18.13,
         retirement_payment: 40.00,
+        employer_social_security_tax: 77.50,
+        employer_medicare_tax: 18.13,
+        employer_retirement_match: 40.00,
+        loan_deduction: 25.00,
+        loan_payment: 75.00,
         total_deductions: 275.63,
         custom_earnings: [ { "label" => "Certification Pay", "amount" => 50.00 } ],
         custom_deductions: [ { "label" => "Cash Advance", "amount" => 40.00 } ])
@@ -1572,10 +1580,28 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       employee_row = report.fetch("employees").find { |row| row.fetch("employee_id") == employee.id }
 
       expect(employee_row.fetch("custom_earnings_total").to_f).to eq(50.00)
+      expect(employee_row).to include(
+        "total_hours" => 70.0,
+        "total_overtime_hours" => 4.0,
+        "bonus" => 100.0,
+        "straight_loan_deductions" => 25.0,
+        "installment_loan_payments" => 50.0,
+        "employer_contributions" => 40.0,
+        "employer_payroll_cost" => 1_385.63
+      )
       expect(employee_row.fetch("custom_deductions_total").to_f).to eq(40.00)
       expect(employee_row.fetch("total_deductions").to_f).to eq(275.63)
       expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.00)
       expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(40.00)
+      expect(report.fetch("company_totals")).to include(
+        "total_hours" => 70.0,
+        "total_overtime_hours" => 4.0,
+        "bonus" => 100.0,
+        "straight_loan_deductions" => 25.0,
+        "installment_loan_payments" => 50.0,
+        "employer_contributions" => 40.0,
+        "employer_payroll_cost" => 1_385.63
+      )
     end
 
     it "surfaces custom totals in employee pay history reports" do
@@ -2396,9 +2422,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       total = simple_register.fetch("total")
       information = simple_register.fetch("pay_period_information").index_by { |row| row.fetch("label") }
 
-      expect(columns.map { |column| column.fetch("key") }).to include("tips_1", "tips_2", "total_tips", "net_pay")
+      expect(columns.map { |column| column.fetch("key") }).to include(
+        "tips_1", "tips_2", "total_tips", "bonus", "straight_loan", "installment_loan",
+        "employer_contributions", "employer_cost", "net_pay"
+      )
       expect(columns.find { |column| column.fetch("key") == "total_tips" }).to include("calculated" => true, "format" => "currency")
-      expect(hourly_row).to include("tips_1" => 100.0, "tips_2" => 50.0, "gross_pay" => 1900.0, "net_pay" => 1409.65)
+      expect(hourly_row).to include(
+        "tips_1" => 100.0,
+        "tips_2" => 50.0,
+        "gross_pay" => 1900.0,
+        "straight_loan" => 0.0,
+        "installment_loan" => 25.0,
+        "net_pay" => 1409.65
+      )
       expect(salary_row).to include("regular_hours" => 80.0, "salary_pay" => 2000.0)
       expect(total).to include("total_tips" => 150.0, "gross_pay" => 3900.0, "net_pay" => 3056.65)
       expect(information.fetch("Processed By").fetch("value")).to include("Payroll Processor")
@@ -2447,12 +2483,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(hourly_row[0].to_i).to eq(1)
       expect(hourly_row[9].to_f).to eq(100.00)
       expect(hourly_row[10].to_f).to eq(50.00)
-      expect(hourly_row[12].to_f).to eq(1900.00)
-      expect(hourly_row[20].to_f).to eq(490.35)
-      expect(hourly_row[21].to_f).to eq(1409.65)
+      expect(hourly_row[13].to_f).to eq(1900.00)
+      expect(hourly_row[21].to_f).to eq(25.00)
+      expect(hourly_row[23].to_f).to eq(490.35)
+      expect(hourly_row[24].to_f).to eq(1409.65)
       expect(salary_row[4].to_f).to eq(80.0)
       expect(salary_row[7].to_f).to eq(2000.00)
-      expect(total_row[21].to_f).to eq(3056.65)
+      expect(total_row[24].to_f).to eq(3056.65)
     end
 
     it "recovers split tips from an existing applied intake row when payroll metadata predates the register" do
@@ -2544,7 +2581,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       salary_row = register_rows.find { |row| row[1] == salary_employee.full_name }
 
       expect(salary_row[7].to_f).to eq(2_000.00)
-      expect(review_rows).to include(include("Review", salary_employee.full_name, "Gross pay includes components outside hourly/salary/tips columns"))
+      expect(salary_row[12].to_f).to eq(200.00)
+      expect(salary_row[13].to_f).to eq(2_200.00)
+      expect(review_rows).not_to include(include("Review", salary_employee.full_name, "Gross pay includes components outside hourly/salary/tips columns"))
     end
   end
 
