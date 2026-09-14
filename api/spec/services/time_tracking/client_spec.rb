@@ -11,10 +11,11 @@ RSpec.describe TimeTracking::Client do
     )
   end
 
-  def client_for(source, delegation: nil, policy: destination_policy, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+  def client_for(source, delegation: nil, actor: nil, policy: destination_policy, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
     described_class.new(
       source,
       delegation: delegation,
+      actor: actor,
       destination_policy: policy,
       http_factory: http_factory,
       monotonic_clock: monotonic_clock,
@@ -123,6 +124,99 @@ RSpec.describe TimeTracking::Client do
 
       expect(result.dig("time_entry", "id")).to eq("42")
       expect(stub).to have_been_requested.once
+    end
+
+    it "uses a linked Cornerstone actor for payroll commands without a copied token" do
+      actor = create(:user, company: source.company, organization: source.company.organization, role: "manager")
+      command_id = SecureRandom.uuid
+      stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries/42/approval")
+        .with(
+          headers: {
+            "X-Payroll-Shared-Secret" => "secret",
+            "X-Cornerstone-Actor-Id" => actor.id.to_s
+          },
+          body: hash_including("command_id" => command_id, "decision" => "approve")
+        )
+        .to_return(status: 200, body: { time_entry: { id: "42" } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      result = client_for(source, actor: actor).approve_payroll_time_entry(
+        entry_id: 42,
+        command_id: command_id,
+        expected_version: 3,
+        decision: "approve",
+        reason: "Verified by payroll"
+      )
+
+      expect(result.dig("time_entry", "id")).to eq("42")
+      expect(stub).to have_been_requested.once
+    end
+
+    it "creates, reads, and disconnects a durable AIRE account link" do
+      create_stub = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/account_link_sessions")
+        .with(
+          headers: { "X-Payroll-Shared-Secret" => "secret" },
+          body: {
+            "external_actor_id" => "17",
+            "external_actor_email" => "chels@example.com",
+            "return_url" => "https://payroll.example.com/time-tracking-sources?source_id=4"
+          }
+        )
+        .to_return(status: 201, body: { authorization_url: "https://aire-services-guam.netlify.app/admin/payroll-link?token=request" }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+      status_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/account_links/17")
+        .to_return(status: 200, body: { account_link: { connected: true } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+      disconnect_stub = stub_request(:delete, "https://time.example.com/client-a/api/v1/payroll/account_links/17")
+        .to_return(status: 200, body: { account_link: { connected: false } }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      client = client_for(source)
+      created = client.create_payroll_account_link_session(
+        external_actor_id: 17,
+        external_actor_email: "chels@example.com",
+        return_url: "https://payroll.example.com/time-tracking-sources?source_id=4"
+      )
+      status = client.payroll_account_link(external_actor_id: 17)
+      disconnected = client.disconnect_payroll_account_link(external_actor_id: 17)
+
+      expect(created.fetch("authorization_url")).to eq("https://aire-services-guam.netlify.app/admin/payroll-link?token=request")
+      expect(status.dig("account_link", "connected")).to be(true)
+      expect(disconnected.dig("account_link", "connected")).to be(false)
+      expect(create_stub).to have_been_requested.once
+      expect(status_stub).to have_been_requested.once
+      expect(disconnect_stub).to have_been_requested.once
+    end
+
+    it "rejects an account-link redirect to an unapproved host" do
+      stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/account_link_sessions")
+        .to_return(status: 201, body: { authorization_url: "https://lookalike.example/connect" }.to_json,
+                   headers: { "Content-Type" => "application/json" })
+
+      expect do
+        client_for(source).create_payroll_account_link_session(
+          external_actor_id: 17,
+          external_actor_email: "chels@example.com",
+          return_url: "https://payroll.example.com/time-tracking-sources?source_id=4"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /unapproved account-link URL/)
+    end
+
+    it "refuses every account-link request over non-loopback HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      client = client_for(source)
+
+      expect do
+        client.create_payroll_account_link_session(
+          external_actor_id: 17,
+          external_actor_email: "chels@example.com",
+          return_url: "https://payroll.example.com/time-tracking-sources?source_id=4"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect { client.payroll_account_link(external_actor_id: 17) }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect { client.disconnect_payroll_account_link(external_actor_id: 17) }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
     end
 
     it "sends delegated overtime decisions to the dedicated AIRE command" do
@@ -319,7 +413,7 @@ RSpec.describe TimeTracking::Client do
           expected_version: 1,
           reason: "Cutoff review complete"
         )
-      end.to raise_error(TimeTracking::Client::Error, /delegation is not configured/)
+      end.to raise_error(TimeTracking::Client::Error, /Connect your AIRE administrator account/)
     end
 
     it "surfaces only bounded JSON operator errors from cockpit endpoints" do

@@ -9,7 +9,6 @@ class PayPeriodConfirmedWorkweekAdoptionService
 
   def self.candidate_for(pay_period)
     return unless pay_period.draft?
-    return if pay_period.payroll_items.exists?
     return if pay_period.time_tracking_imports.exists?
     return if pay_period.payroll_intake_sessions.exists?
 
@@ -34,7 +33,7 @@ class PayPeriodConfirmedWorkweekAdoptionService
 
   def call!
     pay_period.with_lock do
-      validate_empty_draft!
+      validate_draft!
 
       candidate = self.class.candidate_for(pay_period)
       unless candidate
@@ -43,8 +42,12 @@ class PayPeriodConfirmedWorkweekAdoptionService
       end
 
       previous_workweek_id = pay_period.resolved_company_workweek&.id
+      calculation_was_current = pay_period.calculated_at.present? || pay_period.payroll_review_packages.current.exists?
       pay_period.update!(company_workweek: candidate)
-      record_audit!(previous_workweek_id, candidate)
+      pay_period.invalidate_calculation!(
+        reason: "The pay period adopted the employer-confirmed legal workweek. Recalculate payroll before approval."
+      ) if calculation_was_current
+      record_audit!(previous_workweek_id, candidate, calculation_invalidated: calculation_was_current)
     end
 
     pay_period
@@ -54,16 +57,16 @@ class PayPeriodConfirmedWorkweekAdoptionService
 
   attr_reader :pay_period, :actor
 
-  def validate_empty_draft!
+  def validate_draft!
     raise AdoptionError, "Only a draft pay period can adopt a confirmed workweek." unless pay_period.draft?
 
-    if pay_period.payroll_items.exists? || pay_period.time_tracking_imports.exists? || pay_period.payroll_intake_sessions.exists?
+    if pay_period.time_tracking_imports.exists? || pay_period.payroll_intake_sessions.exists?
       raise AdoptionError,
-            "This draft already contains payroll or import evidence. Reconfirm the workweek before entering payroll data, or create a clean draft."
+            "This draft already contains imported source evidence. Create a clean draft so the confirmed workweek and source evidence stay aligned."
     end
   end
 
-  def record_audit!(previous_workweek_id, candidate)
+  def record_audit!(previous_workweek_id, candidate, calculation_invalidated:)
     AuditLog.record!(
       user: actor,
       company_id: pay_period.company_id,
@@ -77,7 +80,8 @@ class PayPeriodConfirmedWorkweekAdoptionService
         starts_on_weekday: candidate.starts_on_weekday,
         starts_at_minutes: candidate.starts_at_minutes,
         timezone: candidate.timezone,
-        confirmed_at: candidate.confirmed_at&.iso8601
+        confirmed_at: candidate.confirmed_at&.iso8601,
+        calculation_invalidated: calculation_invalidated
       }
     )
   end

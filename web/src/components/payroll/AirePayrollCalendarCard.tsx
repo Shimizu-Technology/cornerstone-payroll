@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import {
   AlertTriangle,
+  ArrowRight,
   CalendarClock,
   CheckCircle2,
   Clock3,
@@ -53,6 +55,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const distance = cutoffDistance(calendar.cutoff_at, now);
+  const cutoffPassed = calendar.cutoff_at
+    ? new Date(calendar.cutoff_at).getTime() <= now.getTime()
+    : false;
   const batch = calendar.finalized_batch;
   const batchCopy = lockedBatchCopy(batch);
 
@@ -77,6 +82,12 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
 
   const primaryAction = calendar.needs_revision ? 'Update AIRE schedule' : 'Publish cutoff to AIRE';
   const transitionInProgress = calendar.cutoff_state === 'publishing' || calendar.cutoff_state === 'batch_verifying';
+  const scheduleSetupNeeded = [
+    'pay_schedule_not_effective',
+    'pay_schedule_confirmation_required',
+    'cutoff_rule_invalid',
+    'workweek_confirmation_required',
+  ].includes(calendar.eligibility_code || '');
 
   return (
     <Card className="overflow-hidden border-primary-200 bg-gradient-to-br from-primary-50/90 via-white to-white">
@@ -109,7 +120,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 {busy === 'retry' ? 'Retrying…' : 'Retry sync'}
               </Button>
             )}
-            {isManager && calendar.can_publish && (calendar.cutoff_state === 'unpublished' || calendar.needs_revision) && (
+            {isManager && !cutoffPassed && calendar.can_publish && calendar.needs_revision && (
               <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null}>
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : primaryAction}
@@ -147,7 +158,38 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
         {!calendar.eligible && calendar.eligibility_error && (
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <div><p className="font-semibold">This run is not ready for AIRE scheduling</p><p className="mt-2 leading-6 text-warning-800">{calendar.eligibility_error}</p></div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">This run is not ready for AIRE scheduling</p>
+              <p className="mt-2 leading-6 text-warning-800">{calendar.eligibility_error}</p>
+              {scheduleSetupNeeded && (
+                <Link
+                  to="/pay-schedule-settings"
+                  className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2"
+                >
+                  Open pay schedule and workweek
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+
+        {calendar.eligible && !cutoffPassed && calendar.cutoff_state === 'unpublished' && (
+          <div className="flex flex-col gap-4 border-t border-primary-200 bg-primary-50/80 px-6 py-5 sm:flex-row sm:items-center sm:justify-between" role="status">
+            <div className="max-w-3xl">
+              <p className="font-semibold text-primary-950">Next: publish this cutoff to AIRE</p>
+              <p className="mt-1 text-sm leading-6 text-primary-800">
+                This sends the pay-period dates and cutoff to AIRE so it can lock time automatically at {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}. It does not lock hours now or run payroll.
+              </p>
+            </div>
+            {isManager ? (
+              <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null} className="shrink-0">
+                <Send className="mr-2 h-4 w-4" />
+                {busy === 'publish' ? 'Publishing…' : 'Publish cutoff to AIRE'}
+              </Button>
+            ) : (
+              <p className="shrink-0 text-xs font-semibold text-primary-800">A manager can publish this cutoff.</p>
+            )}
           </div>
         )}
 

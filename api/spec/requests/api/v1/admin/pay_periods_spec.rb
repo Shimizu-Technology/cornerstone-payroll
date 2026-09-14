@@ -219,14 +219,21 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       )
     end
 
-    it "refuses to move a draft that already contains payroll evidence" do
-      create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+    it "adopts the confirmed workweek for a populated draft and invalidates its prior calculation" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      pay_period.update_columns(calculated_at: Time.current, calculated_by_id: admin_user.id)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("already contains payroll or import evidence")
-      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to have_attributes(
+        company_workweek: confirmed_workweek,
+        calculated_at: nil,
+        calculated_by_id: nil
+      )
+      expect(pay_period.payroll_items).to contain_exactly(item)
+      expect(response.parsed_body.dig("pay_period", "compliance_warnings")).to be_empty
+      expect(AuditLog.last.metadata).to include("calculation_invalidated" => true)
     end
 
     it "refuses a confirmed workweek whose legal boundary does not match" do

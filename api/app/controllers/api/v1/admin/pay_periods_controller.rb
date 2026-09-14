@@ -57,10 +57,11 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/adopt_confirmed_workweek
         #
-        # Repairs the narrow ordering case where an empty draft was created
+        # Repairs the narrow ordering case where a draft was created
         # immediately before the employer confirmed the same legal workweek.
-        # The service refuses populated or non-draft runs and only accepts an
-        # exact weekday/time/timezone match, so no payroll inputs or math move.
+        # The service refuses imported source evidence and non-draft runs, and
+        # only accepts an exact weekday/time/timezone match. Entered hours stay
+        # in place; any prior calculation is invalidated and must be rerun.
         def adopt_confirmed_workweek
           PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: @pay_period, actor: current_user)
           render json: { pay_period: pay_period_json(@pay_period.reload, include_items: true) }

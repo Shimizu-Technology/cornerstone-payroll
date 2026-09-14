@@ -4,8 +4,26 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourcesController < BaseController
-        before_action :require_admin!, except: [ :index, :show, :save_delegation, :destroy_delegation ]
-        before_action :set_source, only: [ :show, :update, :destroy, :test_connection, :save_delegation, :destroy_delegation ]
+        before_action :require_admin!, except: [
+          :index,
+          :show,
+          :save_delegation,
+          :destroy_delegation,
+          :show_aire_account_link,
+          :create_aire_account_link,
+          :destroy_aire_account_link
+        ]
+        before_action :set_source, only: [
+          :show,
+          :update,
+          :destroy,
+          :test_connection,
+          :save_delegation,
+          :destroy_delegation,
+          :show_aire_account_link,
+          :create_aire_account_link,
+          :destroy_aire_account_link
+        ]
         before_action :disable_http_caching
 
         def index
@@ -86,6 +104,31 @@ module Api
           render json: { time_tracking_source: source_json(@source) }
         end
 
+        def show_aire_account_link
+          render json: account_link_client.payroll_account_link(external_actor_id: current_user.id)
+        rescue TimeTracking::Client::Error => e
+          render json: { error: e.message }, status: e.response_status || :unprocessable_entity
+        end
+
+        def create_aire_account_link
+          payload = account_link_client.create_payroll_account_link_session(
+            external_actor_id: current_user.id,
+            external_actor_email: current_user.email,
+            return_url: aire_account_link_return_url
+          )
+          render json: payload, status: :created
+        rescue TimeTracking::Client::Error => e
+          render json: { error: e.message }, status: e.response_status || :unprocessable_entity
+        end
+
+        def destroy_aire_account_link
+          payload = account_link_client.disconnect_payroll_account_link(external_actor_id: current_user.id)
+          source_configuration(@source).remove_delegation! if @source.delegation_for(current_user).present?
+          render json: payload
+        rescue TimeTracking::Client::Error => e
+          render json: { error: e.message }, status: e.response_status || :unprocessable_entity
+        end
+
         def destroy
           @source.update!(active: false)
           head :no_content
@@ -118,6 +161,22 @@ module Api
 
         def test_connection_date
           Date.current.iso8601
+        end
+
+        def account_link_client
+          unless @source.source_type == "aire_services"
+            raise TimeTracking::Client::Error.new("Account linking is only available for AIRE Services", response_status: 422)
+          end
+          unless @source.shared_secret_configured?
+            raise TimeTracking::Client::Error.new("Save the AIRE shared secret before connecting your account", response_status: 422)
+          end
+
+          TimeTracking::Client.new(@source)
+        end
+
+        def aire_account_link_return_url
+          frontend_url = ENV.fetch("FRONTEND_URL")
+          "#{frontend_url.to_s.chomp('/')}/time-tracking-sources?source_id=#{@source.id}"
         end
 
         def render_one_active_source_error

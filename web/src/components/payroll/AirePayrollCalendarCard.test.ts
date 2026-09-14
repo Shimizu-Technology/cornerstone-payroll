@@ -2,6 +2,7 @@
 
 import { createElement } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cutoffDistance, lockedBatchCopy } from '@/lib/aire-payroll-calendar';
@@ -38,11 +39,15 @@ const baseCalendar: AirePayrollCalendarState = {
 };
 
 function renderCard(calendar: AirePayrollCalendarState, onRefresh = vi.fn()) {
-  return render(createElement(AirePayrollCalendarCard, {
-    payPeriodId: 42,
-    calendar,
-    onRefresh,
-  }));
+  return render(createElement(
+    MemoryRouter,
+    null,
+    createElement(AirePayrollCalendarCard, {
+      payPeriodId: 42,
+      calendar,
+      onRefresh,
+    })
+  ));
 }
 
 beforeEach(() => {
@@ -109,6 +114,24 @@ describe('AirePayrollCalendarCard', () => {
     expect(screen.getByText('Cutoff reached')).toBeTruthy();
   });
 
+  it('removes both publish controls when the cutoff passes while the page is open', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-18T06:59:00Z'));
+    renderCard(baseCalendar);
+    expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('button', { name: /publish cutoff to aire/i })).toBeNull();
+
+    cleanup();
+    vi.setSystemTime(new Date('2026-10-18T06:59:00Z'));
+    renderCard({ ...baseCalendar, cutoff_state: 'schedule_changed', needs_revision: true });
+    expect(screen.getByRole('button', { name: /update aire schedule/i })).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.queryByRole('button', { name: /update aire schedule/i })).toBeNull();
+  });
+
   it('shows the publish action only to managers when the calendar is eligible', () => {
     renderCard(baseCalendar);
     expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
@@ -117,6 +140,28 @@ describe('AirePayrollCalendarCard', () => {
     authState.isManager = false;
     renderCard(baseCalendar);
     expect(screen.queryByRole('button', { name: /publish cutoff to aire/i })).toBeNull();
+  });
+
+  it('explains the unpublished state and makes publishing the next step', () => {
+    renderCard(baseCalendar);
+
+    expect(screen.getByText(/next: publish this cutoff to aire/i)).toBeTruthy();
+    expect(screen.getByText(/does not lock hours now or run payroll/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
+  });
+
+  it('links an ineligible period directly to pay schedule setup', () => {
+    renderCard({
+      ...baseCalendar,
+      eligible: false,
+      can_publish: false,
+      eligibility_code: 'pay_schedule_not_effective',
+      eligibility_error: 'This pay period begins before the confirmed payroll setup takes effect on September 16, 2026.',
+    });
+
+    const link = screen.getByRole('link', { name: /open pay schedule and workweek/i });
+    expect(link.getAttribute('href')).toBe('/pay-schedule-settings');
+    expect(screen.getByText(/takes effect on september 16, 2026/i)).toBeTruthy();
   });
 
   it('shows a direct retry action and the delivery error for a failed publication', () => {
