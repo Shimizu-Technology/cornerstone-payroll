@@ -791,6 +791,70 @@ export interface AirePayrollCockpitOverview {
   routing_options: AirePayrollRoutingOption[];
 }
 
+export interface AirePayrollManualReviewAdjustment {
+  source_time_entry_id: string;
+  source_kind: 'current' | 'carryover' | 'correction';
+  original_work_date: string;
+  category?: { id?: string | number; key?: string | null; name?: string | null } | null;
+  total_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
+}
+
+export interface AirePayrollManualReviewEmployee {
+  source_user_id: string;
+  source_user_uuid?: string | null;
+  display_name: string;
+  email?: string | null;
+  total_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
+  adjustments: AirePayrollManualReviewAdjustment[];
+  cornerstone: AirePayrollCockpitMapping;
+}
+
+export interface AirePayrollManualReviewExclusion {
+  source_time_entry_id: string;
+  source_user_id: string;
+  source_user_uuid?: string | null;
+  display_name: string;
+  original_work_date: string;
+  category?: { id?: string | number; key?: string | null; name?: string | null } | null;
+  reason: string;
+  held_total_hours: number;
+  held_regular_hours?: number;
+  held_overtime_hours?: number;
+  cornerstone: AirePayrollCockpitMapping;
+}
+
+export interface AirePayrollManualReview {
+  start_date: string;
+  end_date: string;
+  generated_at: string;
+  employees: AirePayrollManualReviewEmployee[];
+  exclusions: AirePayrollManualReviewExclusion[];
+  issues: {
+    missing_category_count: number;
+    negative_adjustment_count: number;
+    pending_approval_count: number;
+    denied_approval_count: number;
+    open_clock_count: number;
+    pending_overtime_count: number;
+    denied_overtime_count: number;
+  };
+  summary: {
+    employee_count: number;
+    adjustment_count: number;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+    current_count: number;
+    carryover_count: number;
+    correction_count: number;
+    exclusion_count: number;
+  };
+}
+
 export interface AirePayrollRoutingOption {
   external_pay_period_id: string;
   pay_period_id: number;

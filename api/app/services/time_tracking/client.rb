@@ -101,6 +101,16 @@ module TimeTracking
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
     end
 
+    def payroll_cockpit_manual_review(start_date:, end_date:)
+      uri = payroll_cockpit_uri("/manual_review", start_date: start_date, end_date: end_date)
+      require_secure_payroll_transport!(uri)
+      request_json(
+        uri,
+        validate_source: false,
+        surface_remote_error: true
+      )
+    end
+
     def payroll_cockpit_employees(page: 1, per_page: 100, active: nil)
       query = bounded_pagination(page, per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
       query[:active] = active unless active.nil?
