@@ -118,7 +118,9 @@ class CheckNumberBatchCorrectionService
     targets = {}
     payroll_items.each_value do |item|
       raise Error, "Cannot change the number on a voided payroll check" if item.voided?
-      raise Error, "Reissue prepared or issued payroll checks instead of changing their numbers" if item.check_printed_at.present?
+      if %w[issued cleared replacement_required].include?(CheckReconciliationStatus.for(item))
+        raise Error, "Payroll check numbers cannot be changed after a check is issued or enters reconciliation"
+      end
       raise Error, "No check number is assigned to #{item.employee&.full_name || 'a payroll check'}" if item.check_number.blank?
       targets[[ "payroll_item", item.id ]] = item
     end

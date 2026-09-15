@@ -112,15 +112,36 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(NonEmployeeCheckEdit.all).to be_empty
   end
 
-  it "does not renumber checks after physical preparation has started" do
+  it "renumbers prepared checks before they are issued" do
     item_a.mark_printed!(user: admin_user)
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        reason: "Actual physical check stock used",
+        changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
+      }
+    }.to change { CheckEvent.where(event_type: "renumbered").count }.by(1)
+
+    expect(response).to have_http_status(:ok)
+    expect(item_a.reload.check_number).to eq("3100")
+    expect(item_a.check_printed_at).to be_present
+  end
+
+  it "does not renumber checks after they are issued" do
+    item_a.mark_printed!(user: admin_user)
+    item_a.mark_delivered!(
+      user: admin_user,
+      delivered_on: Date.current,
+      delivery_method: "hand_delivery",
+      attestation: true
+    )
 
     patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
       changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
     }
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to include("Reissue prepared or issued")
+    expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
     expect(item_a.reload.check_number).to eq("3000")
   end
 end

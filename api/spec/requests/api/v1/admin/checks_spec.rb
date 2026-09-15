@@ -435,14 +435,31 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(item_a.reload.check_number).to eq("3010")
     end
 
-    it "requires the reissue workflow once a check has been prepared" do
+    it "allows a prepared check number to be corrected before issuance" do
       item_a.mark_printed!(user: admin_user)
 
       patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
         params: { check_number: "3010", reason: "Wrong stock was loaded" }
 
+      expect(response).to have_http_status(:ok)
+      expect(item_a.reload.check_number).to eq("3010")
+      expect(item_a.check_printed_at).to be_present
+    end
+
+    it "requires the reissue workflow after a check has been issued" do
+      item_a.mark_printed!(user: admin_user)
+      item_a.mark_delivered!(
+        user: admin_user,
+        delivered_on: Date.current,
+        delivery_method: "hand_delivery",
+        attestation: true
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Wrong stock was loaded" }
+
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("Reissue a prepared or issued check")
+      expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
       expect(item_a.reload.check_number).to eq("3000")
     end
 

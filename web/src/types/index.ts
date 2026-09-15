@@ -1634,6 +1634,7 @@ export interface CheckItem {
   net_pay: number;
   gross_pay: number;
   check_status: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
+  reconciliation_status: 'unprepared' | 'prepared' | 'issued' | 'cleared' | 'replacement_required' | 'voided';
   check_printed_at: string | null;
   check_print_count: number;
   voided: boolean;
