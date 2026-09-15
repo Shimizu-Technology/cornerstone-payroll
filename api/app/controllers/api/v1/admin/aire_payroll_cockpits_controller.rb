@@ -30,6 +30,17 @@ module Api
           render_source_error(e)
         end
 
+        def manual_review
+          require_aire_source!
+          payload = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_manual_review(
+            start_date: @pay_period.start_date.iso8601,
+            end_date: @pay_period.end_date.iso8601
+          )
+          render json: cockpit_presenter.manual_review(payload)
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def time_entries
           payload = cockpit_client.payroll_cockpit_time_entries(
             external_pay_period_id: external_pay_period_id,
@@ -222,7 +233,8 @@ module Api
 
         def set_pay_period_and_source
           @pay_period = PayPeriod.find_by!(id: params[:pay_period_id], company_id: current_company_id)
-          @source = @pay_period.aire_payroll_calendar_period&.time_tracking_source
+          @source = @pay_period.aire_payroll_calendar_period&.time_tracking_source ||
+            @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
         end
 
         def external_pay_period_id
@@ -253,6 +265,15 @@ module Api
 
           raise TimeTracking::Client::Error.new(
             "Publish this pay period to AIRE before opening its payroll cockpit",
+            response_status: 422
+          )
+        end
+
+        def require_aire_source!
+          return if @source
+
+          raise TimeTracking::Client::Error.new(
+            "Connect AIRE Services before reviewing manual payroll hours",
             response_status: 422
           )
         end

@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
+import { AireManualHoursReview } from './AireManualHoursReview';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,6 +44,9 @@ import type {
 
 type Props = {
   payPeriodId: number;
+  payPeriodStatus?: import('@/types').PayPeriodStatus;
+  payrollHours?: Record<string, { regular: number; overtime: number }>;
+  aireRecordLinked?: boolean;
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
 };
@@ -276,7 +280,14 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   );
 }
 
-export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) {
+export function AirePayrollCockpit({
+  payPeriodId,
+  payPeriodStatus = 'draft',
+  payrollHours = {},
+  aireRecordLinked = false,
+  calendar,
+  onRefresh,
+}: Props) {
   const [overview, setOverview] = useState<AirePayrollCockpitOverview | null>(null);
   const [timeEntries, setTimeEntries] = useState<AirePayrollTimeEntriesResponse | null>(null);
   const [exceptions, setExceptions] = useState<AirePayrollExceptionsResponse | null>(null);
@@ -532,6 +543,13 @@ export function AirePayrollCockpit({ payPeriodId, calendar, onRefresh }: Props) 
         await onRefresh();
         await load();
       }} />
+
+      <AireManualHoursReview
+        payPeriodId={payPeriodId}
+        payPeriodStatus={payPeriodStatus}
+        payrollHours={payrollHours}
+        aireRecordLinked={aireRecordLinked}
+      />
 
       {calendar.external_pay_period_id && cockpitPublished && (
         <Card className="overflow-hidden">

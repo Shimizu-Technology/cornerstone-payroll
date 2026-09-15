@@ -95,6 +95,66 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(cockpit.dig("command_access", "can_command")).to be(false)
   end
 
+  it "compares manual-entry hours even when the pay period was never published to AIRE" do
+    unpublished = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 8, 16),
+      end_date: Date.new(2026, 8, 31),
+      pay_date: Date.new(2026, 9, 15)
+    )
+    employee = create(:employee, company: company, department: create(:department, company: company))
+    employee_uuid = SecureRandom.uuid
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: "91",
+      source_user_uuid: employee_uuid
+    )
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(
+      "start_date" => "2026-08-16",
+      "end_date" => "2026-08-31",
+      "generated_at" => "2026-09-15T09:00:00+10:00",
+      "employees" => [
+        {
+          "source_user_id" => "91",
+          "source_user_uuid" => employee_uuid,
+          "display_name" => "AIRE Employee",
+          "regular_hours" => 27.2,
+          "overtime_hours" => 1.0,
+          "total_hours" => 28.2,
+          "adjustments" => [ { "source_kind" => "carryover", "total_hours" => 6.1 } ]
+        }
+      ],
+      "exclusions" => [
+        {
+          "source_time_entry_id" => "44",
+          "source_user_id" => "91",
+          "source_user_uuid" => employee_uuid,
+          "display_name" => "AIRE Employee",
+          "reason" => "pending_approval",
+          "held_total_hours" => 1.5
+        }
+      ],
+      "issues" => {},
+      "summary" => { "total_hours" => 28.2 }
+    )
+
+    get "/api/v1/admin/pay_periods/#{unpublished.id}/aire_payroll_cockpit/manual_review"
+
+    expect(response).to have_http_status(:ok)
+    expect(client).to have_received(:payroll_cockpit_manual_review).with(
+      start_date: "2026-08-16",
+      end_date: "2026-08-31"
+    )
+    expect(response.parsed_body.dig("employees", 0, "cornerstone")).to include(
+      "status" => "mapped",
+      "employee_id" => employee.id
+    )
+    expect(response.parsed_body.dig("exclusions", 0, "cornerstone", "employee_id")).to eq(employee.id)
+  end
+
   it "uses the exact AIRE source that published the pay period" do
     source.update!(active: false)
     create(

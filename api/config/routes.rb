@@ -238,6 +238,7 @@ Rails.application.routes.draw do
             post :retry_delivery
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
+            get :manual_review
             get :time_entries
             get :exceptions
             get :settlement_cases

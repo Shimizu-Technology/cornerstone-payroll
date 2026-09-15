@@ -39,6 +39,27 @@ module AirePayrollCockpit
       )
     end
 
+    def manual_review(payload)
+      payload.merge(
+        "employees" => payload.fetch("employees", []).map do |employee|
+          employee.merge(
+            "cornerstone" => mapping_payload(
+              employee["source_user_uuid"] || employee["payroll_integration_id"],
+              required: true
+            )
+          )
+        end,
+        "exclusions" => payload.fetch("exclusions", []).map do |exclusion|
+          exclusion.merge(
+            "cornerstone" => mapping_payload(
+              exclusion["source_user_uuid"] || exclusion["payroll_integration_id"],
+              required: true
+            )
+          )
+        end
+      )
+    end
+
     private
 
     def required(payload, key)
