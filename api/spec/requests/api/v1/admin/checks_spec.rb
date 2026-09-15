@@ -61,6 +61,29 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       total_deductions: 200.00)
   end
 
+  def reconcile_item!(item, status)
+    item.mark_printed!(user: admin_user)
+    item.mark_delivered!(
+      user: admin_user,
+      delivered_on: Date.current,
+      delivery_method: "hand_delivery",
+      attestation: true
+    )
+    attributes = {
+      source_type: "payroll_item",
+      source_id: item.id,
+      event_type: status,
+      effective_on: Date.current,
+      idempotency_key: SecureRandom.uuid
+    }
+    if status == "cleared"
+      attributes.merge!(evidence_type: "bank_statement", evidence_reference: "Test statement line 12")
+    else
+      attributes[:reason] = "Employee reported the issued check lost"
+    end
+    CheckReconciliationEventService.new(company: company, actor: admin_user, attributes: attributes).call
+  end
+
   # -----------------------------------------------------------------------
   # GET /checks (index)
   # -----------------------------------------------------------------------
@@ -461,6 +484,23 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
       expect(item_a.reload.check_number).to eq("3000")
+    end
+
+    %w[cleared replacement_required].each do |status|
+      it "rejects corrections for #{status.humanize.downcase} checks without writing audits" do
+        reconcile_item!(item_a, status)
+        renumbered_event_count = CheckEvent.where(event_type: "renumbered").count
+        correction_audit_count = AuditLog.where(action: "checks#check_number_updated").count
+
+        patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+          params: { check_number: "3010", reason: "Wrong stock was loaded" }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
+        expect(item_a.reload.check_number).to eq("3000")
+        expect(CheckEvent.where(event_type: "renumbered").count).to eq(renumbered_event_count)
+        expect(AuditLog.where(action: "checks#check_number_updated").count).to eq(correction_audit_count)
+      end
     end
 
     it "records a renumbered audit event" do
