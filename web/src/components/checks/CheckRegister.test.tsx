@@ -73,7 +73,9 @@ describe('CheckRegister', () => {
 
     await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
     await user.type(screen.getByLabelText('Evidence reference'), 'August statement line 15');
-    await user.click(screen.getByRole('button', { name: 'Save Evidence' }));
+    const saveButton = screen.getByRole('button', { name: 'Save Evidence' });
+    await waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
+    await user.click(saveButton);
 
     await waitFor(() => expect(apiMocks.recordEvent).toHaveBeenCalledWith(expect.objectContaining({
       source_type: 'payroll_item',
@@ -96,7 +98,9 @@ describe('CheckRegister', () => {
     await screen.findByText('Mo Shimizu');
     await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
     await user.type(screen.getByLabelText('Evidence reference'), 'Statement reference');
-    await user.click(screen.getByRole('button', { name: 'Save Evidence' }));
+    const saveButton = screen.getByRole('button', { name: 'Save Evidence' });
+    await waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
+    await user.click(saveButton);
     await screen.findByText('Temporary failure');
     await user.click(screen.getByRole('button', { name: 'Save Evidence' }));
     await waitFor(() => expect(apiMocks.recordEvent).toHaveBeenCalledTimes(2));

@@ -740,6 +740,7 @@ module Api
             net_pay: item.net_pay,
             gross_pay: item.gross_pay,
             check_status: item.check_status,
+            reconciliation_status: CheckReconciliationStatus.for(item),
             aire_linked: item.time_tracking_entry_allocations.any?,
             check_printed_at: item.check_printed_at,
             check_print_count: item.check_print_count,
