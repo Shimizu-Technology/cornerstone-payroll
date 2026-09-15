@@ -21,6 +21,29 @@ RSpec.describe "Check-number worksheet", type: :request do
       .to receive(:current_user).and_return(admin_user)
   end
 
+  def reconcile_item!(item, status)
+    item.mark_printed!(user: admin_user)
+    item.mark_delivered!(
+      user: admin_user,
+      delivered_on: Date.current,
+      delivery_method: "hand_delivery",
+      attestation: true
+    )
+    attributes = {
+      source_type: "payroll_item",
+      source_id: item.id,
+      event_type: status,
+      effective_on: Date.current,
+      idempotency_key: SecureRandom.uuid
+    }
+    if status == "cleared"
+      attributes.merge!(evidence_type: "bank_statement", evidence_reference: "Test statement line 12")
+    else
+      attributes[:reason] = "Employee reported the issued check lost"
+    end
+    CheckReconciliationEventService.new(company: company, actor: admin_user, attributes: attributes).call
+  end
+
   it "saves a mixed worksheet atomically and supports swapping payroll numbers" do
     expect {
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
@@ -112,15 +135,54 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(NonEmployeeCheckEdit.all).to be_empty
   end
 
-  it "does not renumber checks after physical preparation has started" do
+  it "renumbers prepared checks before they are issued" do
     item_a.mark_printed!(user: admin_user)
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        reason: "Actual physical check stock used",
+        changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
+      }
+    }.to change { CheckEvent.where(event_type: "renumbered").count }.by(1)
+
+    expect(response).to have_http_status(:ok)
+    expect(item_a.reload.check_number).to eq("3100")
+    expect(item_a.check_printed_at).to be_present
+  end
+
+  it "does not renumber checks after they are issued" do
+    item_a.mark_printed!(user: admin_user)
+    item_a.mark_delivered!(
+      user: admin_user,
+      delivered_on: Date.current,
+      delivery_method: "hand_delivery",
+      attestation: true
+    )
 
     patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
       changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
     }
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to include("Reissue prepared or issued")
+    expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
     expect(item_a.reload.check_number).to eq("3000")
+  end
+
+  %w[cleared replacement_required].each do |status|
+    it "does not renumber #{status.humanize.downcase} checks or write correction audits" do
+      reconcile_item!(item_a, status)
+      renumbered_event_count = CheckEvent.where(event_type: "renumbered").count
+      correction_audit_count = AuditLog.where(action: "checks#check_number_updated").count
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        changes: [ { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" } ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
+      expect(item_a.reload.check_number).to eq("3000")
+      expect(CheckEvent.where(event_type: "renumbered").count).to eq(renumbered_event_count)
+      expect(AuditLog.where(action: "checks#check_number_updated").count).to eq(correction_audit_count)
+    end
   end
 end

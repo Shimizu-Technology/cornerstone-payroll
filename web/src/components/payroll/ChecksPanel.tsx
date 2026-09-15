@@ -14,6 +14,7 @@ import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
 import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
+import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 interface ChecksPanelProps {
@@ -532,7 +533,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                       <InlineCheckNumberField
                         value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                         ariaLabel={`Check number for ${item.employee_name}`}
-                        disabled={savingCheckNumbers || Boolean(item.check_printed_at)}
+                        disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                         dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                         error={checkNumberErrors[item.id]}
                         onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -628,7 +629,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         <InlineCheckNumberField
                           value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                           ariaLabel={`Check number for ${item.employee_name}`}
-                          disabled={savingCheckNumbers || Boolean(item.check_printed_at)}
+                          disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                           dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                           error={checkNumberErrors[item.id]}
                           onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
