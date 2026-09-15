@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AireManualHoursReview } from './AireManualHoursReview';
@@ -106,6 +106,41 @@ describe('AireManualHoursReview', () => {
 
     expect(screen.getAllByText('Matches')).toHaveLength(2);
     expect(screen.getByText('Regular and OT totals match')).toBeTruthy();
+  });
+
+  it('requires an exact hundredth-hour match', async () => {
+    render(
+      <AireManualHoursReview
+        payPeriodId={67}
+        payPeriodStatus="draft"
+        payrollHours={{ '7': { regular: 27.19, overtime: 1 } }}
+        aireRecordLinked={false}
+      />
+    );
+
+    expect(await screen.findByText('Update needed')).toBeTruthy();
+    expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
+  });
+
+  it('counts negative corrections that need attention without double-counting exclusions', async () => {
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      exclusions: [],
+      issues: { ...review.issues, pending_approval_count: 0, negative_adjustment_count: 1 },
+      summary: { ...review.summary, exclusion_count: 0 },
+    });
+    render(
+      <AireManualHoursReview
+        payPeriodId={67}
+        payPeriodStatus="draft"
+        payrollHours={{ '7': { regular: 27.2, overtime: 1 } }}
+        aireRecordLinked={false}
+      />
+    );
+
+    const attentionCard = (await screen.findByText('Needs attention')).parentElement;
+    expect(attentionCard).not.toBeNull();
+    expect(within(attentionCard as HTMLElement).getByText('1')).toBeTruthy();
   });
 
   it('refreshes live AIRE totals and explains automatic paid-state sync for a linked run', async () => {

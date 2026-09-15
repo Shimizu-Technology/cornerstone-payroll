@@ -55,6 +55,19 @@ RSpec.describe TimeTracking::Client do
       expect(review_stub).to have_been_requested.once
     end
 
+    it "refuses to send the shared secret over insecure HTTP for a manual review" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      request = stub_request(:get, %r{time\.example\.com/client-a/api/v1/payroll/cockpit/manual_review})
+
+      expect do
+        client_for(source).payroll_cockpit_manual_review(
+          start_date: "2026-08-16",
+          end_date: "2026-08-31"
+        )
+      end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect(request).not_to have_been_requested
+    end
+
     it "reads a period and literal time entries with bounded query parameters" do
       period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
         .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
