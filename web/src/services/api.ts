@@ -2002,7 +2002,7 @@ export interface PayrollFieldDisclosureEntry {
   source?: string;
   employee_paid: boolean;
   employer_paid: boolean;
-  amount: number;
+  amount: number | string;
   employee_count?: number;
   pay_period_count?: number;
 }
@@ -2010,7 +2010,7 @@ export interface PayrollFieldDisclosureEntry {
 export interface PayrollFieldsDisclosure {
   totals: PayrollFieldDisclosureEntry[];
   entries?: PayrollFieldDisclosureEntry[];
-  treatment_totals: Record<string, number>;
+  treatment_totals: Record<string, number | string>;
 }
 
 export interface PayrollAdjustmentDisclosureEntry {
@@ -2028,7 +2028,7 @@ export interface PayrollAdjustmentDisclosureEntry {
   source: 'employee_default' | 'manual' | 'legacy_snapshot';
   employee_paid: boolean;
   employer_paid: false;
-  amount: number;
+  amount: number | string;
   notes?: string | null;
   employee_count?: number;
   pay_period_count?: number;
@@ -2037,7 +2037,7 @@ export interface PayrollAdjustmentDisclosureEntry {
 export interface PayrollAdjustmentsDisclosure {
   totals: PayrollAdjustmentDisclosureEntry[];
   entries?: PayrollAdjustmentDisclosureEntry[];
-  treatment_totals: Record<string, number>;
+  treatment_totals: Record<string, number | string>;
 }
 
 export interface PayrollSourceSummary {
@@ -2207,7 +2207,7 @@ export interface YtdSummaryReport {
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
-      component_values?: Record<string, number>;
+      component_values?: Record<string, number | string>;
     }[];
     company_totals: null | {
       year: number;

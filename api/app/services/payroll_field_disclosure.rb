@@ -39,7 +39,7 @@ class PayrollFieldDisclosure
           source: entry.source,
           employee_paid: entry.employee_paid,
           employer_paid: entry.employer_paid,
-          amount: entry.amount.to_f
+          amount: BigDecimal(entry.amount.to_s.presence || "0")
         }
       end
     end.sort_by do |row|
@@ -66,7 +66,7 @@ class PayrollFieldDisclosure
         reporting_group: reporting_group,
         employee_paid: employee_paid,
         employer_paid: employer_paid,
-        amount: grouped.sum { |row| row[:amount].to_f },
+        amount: grouped.sum(BigDecimal("0")) { |row| row[:amount] },
         employee_count: grouped.map { |row| row[:employee_id] }.compact.uniq.length,
         pay_period_count: grouped.map { |row| row[:pay_period_id] }.compact.uniq.length
       }
@@ -75,7 +75,7 @@ class PayrollFieldDisclosure
 
   def treatment_totals
     TREATMENTS.index_with do |treatment|
-      rows.select { |row| row[:tax_treatment] == treatment }.sum { |row| row[:amount].to_f }
+      rows.select { |row| row[:tax_treatment] == treatment }.sum(BigDecimal("0")) { |row| row[:amount] }
     end
   end
 

@@ -37,8 +37,8 @@ const QUARTERLY_PREPARATION_STATUSES = ['not_started', 'in_progress', 'needs_rev
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+function fmt(n: number | string) {
+  return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
 function extractErrorMessage(err: unknown): string {

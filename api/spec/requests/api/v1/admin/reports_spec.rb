@@ -2389,10 +2389,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         [ "Employee loan", "post_tax_deduction", "manual", 40.0 ]
       )
       expect(report.fetch("payroll_adjustments").fetch("treatment_totals")).to include(
-        "taxable_addition" => 10.0,
-        "non_taxable_addition" => 20.0,
-        "pre_tax_deduction" => 30.0,
-        "post_tax_deduction" => 40.0
+        "taxable_addition" => "10.0",
+        "non_taxable_addition" => "20.0",
+        "pre_tax_deduction" => "30.0",
+        "post_tax_deduction" => "40.0"
       )
       expect(item.reload.slice(:gross_pay, :total_deductions, :net_pay)).to eq(original_totals)
 

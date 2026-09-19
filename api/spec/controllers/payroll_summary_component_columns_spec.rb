@@ -19,4 +19,18 @@ RSpec.describe Api::V1::Admin::ReportsController do
     expect(controller.send(:period_summary_component_values, columns, 1).values).to contain_exactly(25, 5)
     expect(controller.send(:period_summary_component_values, columns, 2).values).to eq([ 30 ])
   end
+
+  it "sums fractional component values exactly for a YTD employee column" do
+    entries = [ "0.10", "0.20" ].map do |amount|
+      {
+        employee_id: 1, label: "Allowance", tax_treatment: "taxable_addition",
+        payroll_field_definition_id: 10, amount: BigDecimal(amount)
+      }
+    end
+
+    columns = controller.send(:period_summary_component_columns, entries, [ 1 ])
+    values = controller.send(:period_summary_component_values, columns, 1)
+
+    expect(values).to eq("field:definition:10" => BigDecimal("0.30"))
+  end
 end
