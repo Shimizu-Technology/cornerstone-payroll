@@ -141,6 +141,47 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
     expect(response.parsed_body.fetch("data").sole.fetch("id")).to eq(first.id)
   end
 
+  it "limits register choices to locked imports and non-voided committed live payroll" do
+    draft = create(:pay_period, company: company, pay_date: Date.new(2026, 8, 7))
+    calculated = create(:pay_period, :calculated, company: company, pay_date: Date.new(2026, 8, 14))
+    approved = create(:pay_period, :approved, company: company, pay_date: Date.new(2026, 8, 21))
+    committed = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 8, 28))
+    voided = create(:pay_period, :voided, company: company, pay_date: Date.new(2026, 9, 4))
+    batch = create_batch(company: company, status: "locked", suffix: "register-live")
+    imported = create_historical_period(batch: batch, suffix: "register-live", pay_date: Date.new(2026, 9, 11))
+
+    get "/api/v1/admin/payroll_history", params: { register_eligible: true }
+
+    expect(response).to have_http_status(:ok)
+    keys = response.parsed_body.fetch("data").pluck("key")
+    expect(keys).to contain_exactly("imported:#{imported.id}", "native:#{committed.id}")
+    expect(keys).not_to include(*[ draft, calculated, approved, voided ].map { |period| "native:#{period.id}" })
+  end
+
+  it "includes calculated and approved rehearsal runs but not drafts or voided runs" do
+    source_company = create(:company, organization: company.organization)
+    source_batch = create_batch(company: source_company, status: "locked", suffix: "register-source")
+    company.update!(
+      payroll_environment: "migration_rehearsal",
+      migration_source_company: source_company,
+      migration_source_batch: source_batch,
+      migration_rehearsal_status: "ready"
+    )
+    draft = create(:pay_period, company: company, pay_date: Date.new(2026, 8, 7))
+    calculated = create(:pay_period, :calculated, company: company, pay_date: Date.new(2026, 8, 14))
+    approved = create(:pay_period, :approved, company: company, pay_date: Date.new(2026, 8, 21))
+    batch = create_batch(company: company, status: "locked", suffix: "register-test")
+    imported = create_historical_period(batch: batch, suffix: "register-test", pay_date: Date.new(2026, 8, 28))
+
+    get "/api/v1/admin/payroll_history", params: { register_eligible: true }
+
+    expect(response).to have_http_status(:ok)
+    keys = response.parsed_body.fetch("data").pluck("key")
+    expect(keys).to contain_exactly("imported:#{imported.id}", "native:#{calculated.id}", "native:#{approved.id}")
+    expect(keys).not_to include("native:#{draft.id}")
+    expect(response.parsed_body.dig("meta", "total_count")).to eq(3)
+  end
+
   it "shows a paginated imported detail without exposing private source metadata" do
     employee = create(:employee, company: company, first_name: "Linked", last_name: "Worker")
     batch = create_batch(company: company, status: "locked", suffix: "detail")

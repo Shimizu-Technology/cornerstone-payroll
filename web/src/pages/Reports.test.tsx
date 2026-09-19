@@ -3,17 +3,22 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YtdSummaryReport } from '@/services/api';
-import { YtdSummaryPanel } from './Reports';
+import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
 
 const apiMocks = vi.hoisted(() => ({
   ytdSummary: vi.fn(),
+  payrollHistoryList: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
   reportsApi: { ytdSummary: apiMocks.ytdSummary },
-  payrollHistoryApi: {},
+  payrollHistoryApi: { list: apiMocks.payrollHistoryList },
   employeesApi: {},
   ApiError: class ApiError extends Error {},
+}));
+
+vi.mock('@/contexts/CompanyContext', () => ({
+  useCompany: () => ({ activeCompanyId: 42 }),
 }));
 
 const report = {
@@ -154,5 +159,33 @@ describe('YtdSummaryPanel', () => {
     expect(employeeRow?.textContent).toContain('$15.75');
     expect(employeeRow?.textContent).toContain('$5.75');
     expect(employeeRow?.textContent).not.toContain('NaN');
+  });
+});
+
+describe('PayrollRegisterPanel', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.payrollHistoryList.mockImplementation(async ({ page }: { page: number }) => ({
+      data: page === 1 ? [{
+        key: 'imported:19', status: 'locked', source: { label: 'QuickBooks import' },
+        start_date: '2026-08-01', end_date: '2026-08-14', pay_date: '2026-08-21',
+      }] : [{
+        key: 'native:27', status: 'approved', source: { label: 'Cornerstone' },
+        start_date: '2026-08-24', end_date: '2026-09-06', pay_date: '2026-09-10',
+      }],
+      meta: { total_pages: 2 },
+    }));
+  });
+
+  it('loads every reportable page and labels approved rehearsal runs as test-only', async () => {
+    render(<PayrollRegisterPanel />);
+
+    const select = await screen.findByRole('combobox', { name: 'Pay Period' });
+    expect(await screen.findByRole('option', { name: /TEST ONLY · Cornerstone/ })).toBeTruthy();
+    expect(apiMocks.payrollHistoryList).toHaveBeenCalledTimes(2);
+    expect(apiMocks.payrollHistoryList).toHaveBeenCalledWith(expect.objectContaining({ register_eligible: true, page: 2 }), 42);
+    expect(select.querySelectorAll('option')).toHaveLength(2);
   });
 });
