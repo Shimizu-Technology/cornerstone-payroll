@@ -109,6 +109,21 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(meta["printed"]).to eq(0)
     end
 
+    it "lists direct-deposit stubs separately from paper checks" do
+      deposit_employee = create(:employee, company: company, first_name: "Dina", last_name: "Deposit", payment_delivery_method: "direct_deposit")
+      deposit_item = create(:payroll_item, pay_period: pay_period, employee: deposit_employee,
+        payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 600, net_pay: 500)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("checks").map { |item| item.fetch("id") }).not_to include(deposit_item.id)
+      expect(response.parsed_body.fetch("direct_deposit_items")).to include(
+        a_hash_including("id" => deposit_item.id, "employee_name" => "Dina Deposit", "net_pay" => 500.0)
+      )
+      expect(response.parsed_body.dig("meta", "direct_deposit_count")).to eq(1)
+    end
+
     it "keeps a stable employee order instead of re-sorting by edited check number" do
       item_a.update!(check_number: "9999")
 

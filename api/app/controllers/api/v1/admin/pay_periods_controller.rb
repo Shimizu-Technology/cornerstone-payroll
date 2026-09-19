@@ -327,6 +327,7 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.hours_worked = 0
               end
+              payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
 
               sync_pay_rate_from_employee(payroll_item, employee)
               payroll_item.sync_default_custom_earnings!(employee)
@@ -450,6 +451,7 @@ module Api
             end
             @pay_period.update!(calculation_attributes)
             PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
+            @pay_period.invalidate_later_rehearsal_calculations!
           end
 
           render json: {
@@ -1214,6 +1216,9 @@ module Api
             department_name: item.employee&.department&.name,
             custom_earnings: item.custom_earnings || [],
             check_number: item.check_number,
+            payment_delivery_method: item.payment_delivery_method,
+            effective_payment_delivery_method: item.effective_payment_delivery_method,
+            employee_payment_delivery_method: item.employee&.payment_delivery_method,
             check_printed_at: item.check_printed_at,
             check_print_count: item.check_print_count,
             check_status: item.check_status,
@@ -1623,8 +1628,7 @@ module Api
           year = pay_period.pay_date.year
           eids = employees.map(&:id)
 
-          committed_period_ids = PayPeriod.reportable_committed
-                                          .where(company_id: current_company_id)
+          committed_period_ids = PayPeriod.reportable_for_company(pay_period.company)
                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                           .where("(pay_date < ?) OR (pay_date = ? AND id < ?)",
                                                  pay_period.pay_date, pay_period.pay_date, pay_period.id)

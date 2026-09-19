@@ -1088,7 +1088,7 @@ module Api
           report = build_period_summary_report(period)
 
           send_spreadsheet!(
-            filename: "payroll_summary_#{period.filename_token}.xlsx",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.xlsx",
             sheets: ytd_summary_sheets(report)
           )
         rescue ArgumentError => e
@@ -1099,9 +1099,9 @@ module Api
           period = payroll_reporting_period
           report = build_period_summary_report(period)
           send_tabular_pdf!(
-            title: "Payroll Summary by Period",
-            subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}",
-            filename: "payroll_summary_#{period.filename_token}.pdf",
+            title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Period" : "Payroll Summary by Period",
+            subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}#{report.dig(:meta, :provisional) ? ' — calculated, not paid' : ''}",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.pdf",
             sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
               index.zero? ? sheet.merge(pdf_frozen_columns: 3, pdf_max_columns: 9) : sheet
             end
@@ -1114,7 +1114,7 @@ module Api
           period = payroll_reporting_period
           report = build_period_summary_report(period)
           send_tabular_csv!(
-            filename: "payroll_summary_#{period.filename_token}.csv",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.csv",
             sheet: ytd_summary_sheets(report).first
           )
         rescue ArgumentError => e
@@ -1169,7 +1169,7 @@ module Api
             query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%"
             employees = employees.where(
               "first_name ILIKE :query OR last_name ILIKE :query OR CONCAT(first_name, ' ', last_name) ILIKE :query",
-              query:
+              query: query
             )
           end
 
@@ -1753,8 +1753,8 @@ module Api
         end
 
         def reportable_pay_periods(period)
-          PayPeriod.reportable_committed
-                   .where(company_id: current_company_id, pay_date: period.range)
+          PayPeriod.reportable_for_company(Company.find(current_company_id))
+                   .where(pay_date: period.range)
         end
 
         def reportable_payroll_items(period)
@@ -2403,8 +2403,7 @@ module Api
         end
 
         def employee_reportable_ytd_items(employee, year)
-          reportable_period_ids = PayPeriod.reportable_committed
-                                           .where(company_id: current_company_id)
+          reportable_period_ids = PayPeriod.reportable_for_company(Company.find(current_company_id))
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
@@ -2418,8 +2417,7 @@ module Api
         end
 
         def ytd_custom_totals_by_employee(year)
-          reportable_period_ids = PayPeriod.reportable_committed
-                                           .where(company_id: current_company_id)
+          reportable_period_ids = PayPeriod.reportable_for_company(Company.find(current_company_id))
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
@@ -2576,7 +2574,9 @@ module Api
             company_id: company&.id,
             company_name: company&.name,
             generated_at: Time.current.iso8601,
-            report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil)
+            report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil),
+            provisional: company&.migration_rehearsal? || false,
+            payroll_status_note: company&.migration_rehearsal? ? "TEST ONLY — calculated rehearsal payroll, not committed or paid" : nil
           }
         end
 
@@ -2593,6 +2593,7 @@ module Api
             [ "Pay Date", report_value(pp, :pay_date) ],
             [ "Source", report_value(source, :label) ],
             [ "Source handling", report_value(source, :statement) ],
+            [ "Payroll status", report_value(meta, :payroll_status_note) ],
             [ "Generated At", report_value(meta, :generated_at) ]
           ].reject { |_, value| value.blank? }
 
@@ -3637,6 +3638,7 @@ module Api
 
         def ytd_summary_sheets(report)
           component_columns = Array(report[:component_columns])
+          provisional_column = report.dig(:meta, :provisional) ? [ "Payroll status" ] : []
           rows = [ [
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
@@ -3644,7 +3646,7 @@ module Api
             "Tips", "Tips Paid Out", "Bonus", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
             "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
-          ] + component_columns.map { |column| column[:label] } ]
+          ] + component_columns.map { |column| column[:label] } + provisional_column ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
@@ -3654,7 +3656,8 @@ module Api
               emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
               emp[:employer_contributions], emp[:employer_payroll_cost], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
-              *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] }
+              *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] },
+              *(provisional_column.empty? ? [] : [ "TEST ONLY — calculated, not paid" ])
             ]
           end
           [

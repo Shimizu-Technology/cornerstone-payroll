@@ -2,6 +2,7 @@
 
 require "rails_helper"
 require "combine_pdf"
+require "pdf/reader"
 
 RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
   let!(:company) { create(:company, name: "Staff HQ") }
@@ -178,7 +179,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to eq("Selected employees were not paid in this pay period")
+      expect(response.parsed_body.fetch("error")).to eq("Selected employees have no printable net-pay stub in this pay period")
       expect(response.parsed_body.fetch("details")).to include(unpaid_employee.full_name)
     end
 
@@ -207,6 +208,34 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to eq("Voided checks do not have printable pay stubs")
       expect(response.parsed_body.fetch("details")).to include(voided_employee.full_name)
+    end
+  end
+
+  describe "POST /api/v1/admin/pay_stubs/direct_deposit_stubs_pdf" do
+    let!(:deposit_employee) { create(:employee, company: company, department: department, first_name: "Dina", last_name: "Deposit", payment_delivery_method: "direct_deposit") }
+    let!(:deposit_item) do
+      create(:payroll_item, pay_period: pay_period, employee: deposit_employee,
+        payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 600, net_pay: 500)
+    end
+
+    it "prints only direct-deposit employees on the existing earnings stub" do
+      post "/api/v1/admin/pay_stubs/direct_deposit_stubs_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Content-Disposition"]).to include("direct_deposit_stubs_2026-04-15.pdf")
+      expect(CombinePDF.parse(response.body).pages.count).to eq(1)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+      expect(text).to include("EARNINGS STATEMENT", "Dina Deposit", "Direct deposit")
+      expect(text).not_to include("Pat Stub", "Alex Ledger")
+    end
+
+    it "rejects a paper-check item in an explicit stub selection" do
+      post "/api/v1/admin/pay_stubs/direct_deposit_stubs_pdf", params: {
+        pay_period_id: pay_period.id, payroll_item_ids: [ deposit_item.id, payroll_item.id ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("only direct-deposit")
     end
   end
 end

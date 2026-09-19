@@ -92,7 +92,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
                 )}
               </div>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                One Cornerstone-native record tying approved payroll to its balanced journal, employee checks, liabilities, YTD continuity, and source evidence.
+                One Cornerstone-native record tying approved payroll to its balanced journal, employee payments, liabilities, YTD continuity, and source evidence.
               </p>
             </div>
           </div>
@@ -129,7 +129,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
             <div className="border-r border-slate-200 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Employee checks</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">{record.employee_payments.reconciled_count} of {record.employee_payments.required_count} reconciled</p>
-              <p className="mt-1 text-xs text-slate-500">{record.employee_payments.outstanding_count} still open</p>
+              <p className="mt-1 text-xs text-slate-500">{record.employee_payments.outstanding_count} checks open · {record.employee_payments.direct_deposit_count} direct deposit</p>
             </div>
             <div className="p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Liabilities</p>
@@ -187,7 +187,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
               </section>
 
               <div className="grid gap-6 lg:grid-cols-2">
-                <section aria-labelledby="checks-heading"><h4 id="checks-heading" className="font-semibold text-slate-950">Employee checks</h4><div className="mt-3 space-y-2">{record.employee_payments.rows.map(row => <div key={row.payroll_item_id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{row.employee_name}</p><p className="text-xs text-slate-500">Check {row.check_number || 'not assigned'} · {humanize(row.issuance_status)}</p></div><div className="text-right"><p className="font-mono text-sm font-semibold">{money(row.amount)}</p><p className="text-xs text-slate-500">{humanize(row.reconciliation_status)}</p></div></div>)}</div></section>
+                <section aria-labelledby="checks-heading"><h4 id="checks-heading" className="font-semibold text-slate-950">Employee payments</h4><div className="mt-3 space-y-2">{record.employee_payments.rows.map(row => <div key={row.payroll_item_id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{row.employee_name}</p><p className="text-xs text-slate-500">{row.payment_delivery_method === 'direct_deposit' ? 'Direct deposit · earnings stub ready' : `Check ${row.check_number || 'not assigned'} · ${humanize(row.issuance_status)}`}</p></div><div className="text-right"><p className="font-mono text-sm font-semibold">{money(row.amount)}</p><p className="text-xs text-slate-500">{row.payment_delivery_method === 'direct_deposit' ? 'Bank transfer not tracked here' : humanize(row.reconciliation_status)}</p></div></div>)}</div></section>
                 <section aria-labelledby="liabilities-heading"><h4 id="liabilities-heading" className="font-semibold text-slate-950">Payroll liabilities</h4><div className="mt-3 space-y-2">{record.liabilities.obligations.length === 0 ? <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">No active liability obligations are posted for this payroll.</p> : record.liabilities.obligations.map(row => <div key={row.key} className="rounded-lg border border-slate-200 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-medium text-slate-900">{row.authority}</p><p className="font-mono text-sm font-semibold">{money(row.outstanding_amount)} open</p></div><p className="mt-1 text-xs text-slate-500">{money(row.paid_amount)} of {money(row.calculated_amount)} paid · {humanize(row.status)}</p></div>)}</div></section>
               </div>
 

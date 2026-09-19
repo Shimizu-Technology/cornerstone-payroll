@@ -114,7 +114,9 @@ class PayStubGenerator
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
-        [ "Check #:", payroll_item.check_number.presence || "No check issued" ]
+        payroll_item.effective_payment_delivery_method == "direct_deposit" ?
+          [ "Payment:", "Direct deposit (stub only; transfer not confirmed)" ] :
+          [ "Check #:", payroll_item.check_number.presence || "No check issued" ]
       ]
 
       pdf.table(data, cell_style: { borders: [], padding: [ 2, 10, 2, 0 ] }) do
@@ -643,7 +645,7 @@ class PayStubGenerator
   def ytd_source_items
     @ytd_source_items ||= begin
       pay_date = pay_period.pay_date
-      prior_periods = PayPeriod.reportable_committed.where(company_id: company.id,
+      prior_periods = PayPeriod.reportable_for_company(company).where(
         pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
           pay_date: pay_date, period_id: pay_period.id)

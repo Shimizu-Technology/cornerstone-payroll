@@ -35,6 +35,15 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(json.dig("payroll_item", "component_disclosure", "reconciliation", "net_pay")).to eq(payroll_item.net_pay.to_f)
     end
 
+    it "returns the committed payment method with the exact payroll item" do
+      payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payroll_item", "payment_delivery_method")).to eq("direct_deposit")
+    end
+
     it "returns immutable source evidence for imported period pay and typed one-time items" do
       payroll_item.update!(
         salary_override: 9_000,

@@ -8,6 +8,7 @@ class Employee < ApplicationRecord
   CONFIGURATION_REVIEW_STATUSES = %w[complete needs_review].freeze
   CONFIGURATION_SOURCES = %w[quickbooks_history].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
+  PAYMENT_DELIVERY_METHODS = %w[paper_check direct_deposit].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
   MIN_SUPPORTED_W4_FORM_VERSION = 2020
@@ -120,6 +121,7 @@ class Employee < ApplicationRecord
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }
+  validates :payment_delivery_method, inclusion: { in: PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
   validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
   validate :plausible_hire_date, if: :will_save_change_to_hire_date?
@@ -403,8 +405,8 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .not_voided
       .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
+        id: PayPeriod.reportable_for_company(company)
+          .where(pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
       .sum(:gross_pay)
@@ -427,8 +429,8 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .not_voided
       .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
+        id: PayPeriod.reportable_for_company(company)
+          .where(pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
       .sum(:social_security_tax)
@@ -624,8 +626,8 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .not_voided
       .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
+        id: PayPeriod.reportable_for_company(company)
+          .where(pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
 

@@ -54,11 +54,20 @@ module Api
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
+          deposit_items = @pay_period.payroll_items
+            .includes(:employee)
+            .where(payment_delivery_method: "direct_deposit", voided: false)
+            .where("net_pay > 0")
+            .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
 
           render json: {
             checks: loaded_items.map { |item| check_item_json(item) },
+            direct_deposit_items: deposit_items.map do |item|
+              { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f }
+            end,
             meta: {
               total: loaded_items.size,
+              direct_deposit_count: deposit_items.size,
               delivered: loaded_items.count { |i| i.check_status == "delivered" },
               printed: loaded_items.count { |i| i.check_status == "printed" },
               unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
