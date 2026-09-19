@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -72,7 +72,7 @@ describe('CheckRegister', () => {
     expect(screen.getByText('$1,425.75 · Register date 8/20/2026')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
-    await user.type(screen.getByLabelText('Evidence reference'), 'August statement line 15');
+    fireEvent.change(screen.getByLabelText('Evidence reference'), { target: { value: 'August statement line 15' } });
     const saveButton = screen.getByRole('button', { name: 'Save Evidence' });
     await waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     await user.click(saveButton);
@@ -97,7 +97,7 @@ describe('CheckRegister', () => {
     render(<MemoryRouter><CheckRegister companyId={7} /></MemoryRouter>);
     await screen.findByText('Mo Shimizu');
     await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
-    await user.type(screen.getByLabelText('Evidence reference'), 'Statement reference');
+    fireEvent.change(screen.getByLabelText('Evidence reference'), { target: { value: 'Statement reference' } });
     const saveButton = screen.getByRole('button', { name: 'Save Evidence' });
     await waitFor(() => expect((saveButton as HTMLButtonElement).disabled).toBe(false));
     await user.click(saveButton);
