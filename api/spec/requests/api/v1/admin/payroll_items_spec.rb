@@ -176,6 +176,41 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/payment_method" do
+    let(:path) { "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/payment_method" }
+
+    it "changes only this calculated run through the HTTP endpoint" do
+      original_net = payroll_item.net_pay
+
+      patch path, params: { payment_delivery_method: "direct_deposit" }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payroll_item", "effective_payment_delivery_method")).to eq("direct_deposit")
+      expect(response.parsed_body.fetch("pay_period_status")).to eq("calculated")
+      expect(payroll_item.reload).to have_attributes(payment_delivery_method: "direct_deposit", net_pay: original_net)
+      expect(employee.reload.payment_delivery_method).to be_nil
+    end
+
+    it "rejects an unsupported method without changing the run" do
+      patch path, params: { payment_delivery_method: "wire" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Choose paper check or direct deposit")
+      expect(payroll_item.reload.payment_delivery_method).to be_nil
+    end
+
+    it "rejects a committed switch without a no-payment attestation" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+
+      patch path, params: { payment_delivery_method: "direct_deposit", reason: "No payment was issued" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Confirm that no payment has been issued")
+      expect(payroll_item.reload).to have_attributes(payment_delivery_method: "paper_check", check_number: "2000")
+    end
+  end
+
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items" do
     let(:create_params) do
       {

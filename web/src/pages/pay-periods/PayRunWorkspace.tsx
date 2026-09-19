@@ -38,7 +38,7 @@ import {
 } from '@/lib/routes';
 import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
 import { parsePositiveRouteId } from '@/lib/route-params';
-import { payPeriodsApi, payrollItemsApi } from '@/services/api';
+import { checksApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { PayPeriod, PayrollItem, PaymentDeliveryMethod } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
@@ -259,12 +259,24 @@ interface PayRunChecksProps {
 function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, onChanged }: PayRunChecksProps): ReactElement {
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
+  const [hasNonEmployeeChecks, setHasNonEmployeeChecks] = useState<boolean | null>(null);
   const [switchItem, setSwitchItem] = useState<PayrollItem | null>(null);
   const [switchReason, setSwitchReason] = useState('');
   const [confirmNotPaid, setConfirmNotPaid] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const nextMethod: PaymentDeliveryMethod = switchItem?.effective_payment_delivery_method === 'direct_deposit' ? 'paper_check' : 'direct_deposit';
+
+  useEffect(() => {
+    if (payRun.status !== 'committed') return;
+    let active = true;
+    void checksApi.printQueue(payRun.id).then((queue) => {
+      if (active) setHasNonEmployeeChecks(queue.items.some((item) => item.kind === 'non_employee' && item.status !== 'voided'));
+    }).catch(() => {
+      if (active) setHasNonEmployeeChecks(null);
+    });
+    return () => { active = false; };
+  }, [payRun.id, payRun.status, checkPrintRefreshToken]);
 
   const switchPaymentMethod = async () => {
     if (!switchItem || switchReason.trim().length < 10 || !confirmNotPaid) return;
@@ -297,7 +309,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             <p className="mt-2 text-sm text-neutral-500">Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.</p>
           </div>
           {payRun.status === 'committed' && (
-            <Button onClick={() => setCheckPrintOpen(true)} disabled={countActivePayrollChecks(items) === 0}>
+            <Button onClick={() => setCheckPrintOpen(true)} disabled={countActivePayrollChecks(items) === 0 && hasNonEmployeeChecks === false}>
               <Printer className="mr-2 h-4 w-4" />Print checks
             </Button>
           )}

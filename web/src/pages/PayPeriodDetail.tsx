@@ -3389,7 +3389,7 @@ export function PayPeriodDetail({
               <h3 className="font-semibold text-gray-900">Checks & direct deposit</h3>
               <div className="flex items-center gap-3">
                 <Link to="/check-settings" className="text-xs text-blue-600 hover:underline">Check Settings ›</Link>
-                <Button size="sm" onClick={() => setCheckPrintOpen(true)} disabled={paperCheckCount === 0}>Print checks</Button>
+                <Button size="sm" onClick={() => setCheckPrintOpen(true)} disabled={paperCheckCount === 0 && !nonEmployeeChecks.some((check) => !check.voided)}>Print checks</Button>
               </div>
             </div>
             <div className="p-4">
