@@ -80,6 +80,7 @@ class StaffRolePolicy
     "api/v1/admin/payroll_fields#create" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#update" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#destroy" => :manage_client_configuration,
+    "api/v1/admin/employee_payroll_fields#create_personal" => :payroll_operations,
     "api/v1/admin/payroll_reminder_configs#update" => :manage_client_configuration,
     "api/v1/admin/payroll_reminder_configs#test" => :manage_client_configuration,
     "api/v1/admin/checks#update_check_settings" => :manage_client_configuration,

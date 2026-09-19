@@ -96,7 +96,9 @@ const payrollAdjustmentTypeLabels: Record<string, string> = {
 };
 
 function payrollAdjustmentIdentity(entry: PayrollAdjustmentEntry): string {
-  return [entry.label, entry.treatment, entry.source || 'legacy_snapshot'].join(':');
+  return entry.payroll_item_id != null && entry.position != null
+    ? `item:${entry.payroll_item_id}:adjustment:${entry.position}`
+    : [entry.label, entry.treatment, entry.source || 'legacy_snapshot'].join(':');
 }
 
 function payrollAdjustmentColumns(workers: PayrollWorker[]): PayrollAdjustmentColumn[] {
@@ -107,7 +109,7 @@ function payrollAdjustmentColumns(workers: PayrollWorker[]): PayrollAdjustmentCo
       if (columns.has(key)) return;
       columns.set(key, {
         key,
-        label: entry.label,
+        label: entry.payroll_item_id != null && entry.position != null ? `${entry.label} [${entry.payroll_item_id}/${entry.position + 1}]` : entry.label,
         treatment: payrollFieldTreatmentLabels[entry.treatment] || entry.treatment,
         group: entry.treatment.endsWith('_deduction') ? 'deduction' : 'addition',
         source: payrollFieldSourceLabels[entry.source || 'legacy_snapshot'] || 'Snapshot',
@@ -157,6 +159,8 @@ function payrollFieldGroup(entry: PayrollFieldEntry): PayrollFieldGroup {
 }
 
 function payrollFieldIdentity(entry: PayrollFieldEntry) {
+  if (entry.payroll_field_definition_id != null) return `definition:${entry.payroll_field_definition_id}`;
+  if (entry.id != null) return `entry:${entry.id}`;
   return [
     entry.label,
     entry.kind,
@@ -174,7 +178,7 @@ function payrollFieldColumns(workers: PayrollWorker[]): PayrollFieldColumn[] {
       if (columns.has(key)) return;
       columns.set(key, {
         key,
-        label: entry.label,
+        label: entry.payroll_field_definition_id != null ? `${entry.label} [field #${entry.payroll_field_definition_id}]` : entry.id != null ? `${entry.label} [entry #${entry.id}]` : entry.label,
         treatment: payrollFieldTreatmentLabels[entry.tax_treatment] || entry.tax_treatment,
         group: payrollFieldGroup(entry),
         kind: entry.kind,
@@ -591,8 +595,9 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
       .filter((entry) => entry.active !== false)
       .map((entry) => ({
         worker: worker.employee_name,
-        componentType: 'Company payroll field',
-        label: entry.label,
+        componentType: 'Payroll field',
+        identity: payrollFieldIdentity(entry),
+        label: entry.payroll_field_definition_id != null ? `${entry.label} [field #${entry.payroll_field_definition_id}]` : entry.id != null ? `${entry.label} [entry #${entry.id}]` : entry.label,
         treatment: payrollFieldTreatmentLabels[entry.tax_treatment] || entry.tax_treatment,
         source: payrollFieldSourceLabels[entry.source || ''] || entry.source || 'Calculated',
         effect: entry.employer_paid && !entry.employee_paid
@@ -609,7 +614,8 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
       .map((entry) => ({
         worker: worker.employee_name,
         componentType: payrollAdjustmentTypeLabels[entry.source || 'legacy_snapshot'] || 'Payroll adjustment',
-        label: entry.label,
+        identity: payrollAdjustmentIdentity(entry),
+        label: entry.payroll_item_id != null && entry.position != null ? `${entry.label} [${entry.payroll_item_id}/${entry.position + 1}]` : entry.label,
         treatment: payrollFieldTreatmentLabels[entry.treatment] || entry.treatment,
         source: payrollFieldSourceLabels[entry.source || 'legacy_snapshot'] || 'Snapshot',
         effect: entry.treatment.endsWith('_deduction') ? 'Employee deduction' : 'Employee earnings',
@@ -621,13 +627,13 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
   if (rows.length === 0) return null;
 
   const totals = Array.from(rows.reduce((summary, row) => {
-    const key = `${row.componentType}:${row.label}:${row.treatment}:${row.effect}`;
+    const key = `${row.componentType}:${row.identity}`;
     const existing = summary.get(key);
     summary.set(key, existing
       ? { ...existing, amount: existing.amount + row.amount }
-      : { componentType: row.componentType, label: row.label, treatment: row.treatment, effect: row.effect, amount: row.amount });
+      : { identity: row.identity, componentType: row.componentType, label: row.label, treatment: row.treatment, effect: row.effect, amount: row.amount });
     return summary;
-  }, new Map<string, { componentType: string; label: string; treatment: string; effect: string; amount: number }>()).values());
+  }, new Map<string, { identity: string; componentType: string; label: string; treatment: string; effect: string; amount: number }>()).values());
 
   return (
     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
@@ -641,7 +647,7 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
 
       <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
         {totals.map((total) => (
-          <div key={`${total.componentType}:${total.label}:${total.treatment}:${total.effect}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 shadow-sm">
+          <div key={`${total.componentType}:${total.identity}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 shadow-sm">
             <p className="truncate text-sm font-bold text-neutral-950" title={total.label}>{total.label}</p>
             <p className="mt-2 text-xs text-neutral-500">{total.componentType} · {total.treatment} · {total.effect}</p>
             <p className="mt-2 text-lg font-bold tabular-nums text-neutral-950">{currency(total.amount)}</p>
@@ -682,7 +688,10 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
 }
 
 export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegister }) {
-  const register = report.simple_payroll_register_enabled && report.simple_register
+  const hasNamedItems = [...report.employees, ...report.contractors].some((worker) =>
+    (worker.payroll_field_entries?.length || 0) > 0 || (worker.payroll_adjustments?.length || 0) > 0,
+  );
+  const register = report.simple_payroll_register_enabled && report.simple_register && !hasNamedItems
     ? <SimpleRegisterPreview report={report} simple={report.simple_register} />
     : <DetailedRegisterPreview report={report} />;
 

@@ -126,6 +126,70 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       names = response.parsed_body.fetch("payroll_fields").map { |field| field["name"] }
       expect(names).to contain_exactly("Rent")
     end
+
+    it "keeps employee-only fields off the client-wide list and shows them only to their owner" do
+      coworker = create(:employee, company: company, department: department)
+      personal = PayrollFieldDefinition.create!(company: company, owner_employee: employee, name: "Phone allowance", kind: "addition", tax_treatment: "taxable_addition")
+      PayrollFieldDefinition.create!(company: company, owner_employee: coworker, name: "Phone allowance", kind: "addition", tax_treatment: "taxable_addition")
+
+      get "/api/v1/admin/payroll_fields"
+      expect(response.parsed_body.fetch("payroll_fields")).to be_empty
+
+      get "/api/v1/admin/payroll_fields", params: { employee_id: employee.id }
+      expect(response.parsed_body.fetch("payroll_fields").map { |field| field.fetch("id") }).to eq([ personal.id ])
+    end
+  end
+
+  describe "POST /api/v1/admin/employees/:employee_id/payroll_fields/create_personal" do
+    let(:payload) do
+      {
+        payroll_field: { name: "Phone allowance", kind: "addition", tax_treatment: "taxable_addition", category: "phone", amount_type: "fixed" },
+        employee_payroll_field: { amount: 35, start_date: "2026-09-21", notes: "Approved by payroll admin" }
+      }
+    end
+
+    it "atomically creates an employee-only definition and dated assignment" do
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: payload
+
+      expect(response).to have_http_status(:created)
+      field = PayrollFieldDefinition.find(response.parsed_body.dig("payroll_field", "id"))
+      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
+      expect(field.owner_employee_id).to eq(employee.id)
+      expect(assignment.amount.to_f).to eq(35.0)
+      expect(assignment.start_date).to eq(Date.new(2026, 9, 21))
+      expect(assignment.effective_amount_for(100)).to eq(35)
+    end
+
+    it "lets a payroll accountant add a one-person item without changing client-wide definitions" do
+      accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::EmployeePayrollFieldsController)
+        .to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: payload
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("payroll_field", "owner_employee_id")).to eq(employee.id)
+    end
+
+    it "does not leave an orphan definition when the payday range is invalid" do
+      invalid = payload.deep_merge(employee_payroll_field: { end_date: "2026-09-20" })
+      expect { post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: invalid }
+        .not_to change(PayrollFieldDefinition, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "prevents assigning an employee-only definition to another worker" do
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: payload
+      field_id = response.parsed_body.dig("payroll_field", "id")
+      coworker = create(:employee, company: company, department: department)
+
+      post "/api/v1/admin/employees/#{coworker.id}/payroll_fields", params: {
+        employee_payroll_field: { payroll_field_definition_id: field_id, amount: 35 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(coworker.employee_payroll_fields).to be_empty
+    end
   end
 
   describe "POST /api/v1/admin/employees/:employee_id/payroll_fields" do
