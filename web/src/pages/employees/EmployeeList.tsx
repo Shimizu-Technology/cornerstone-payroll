@@ -625,6 +625,7 @@ function EmployeeMobileCard({
             <MobileField label="Pay" value={payRateLabel} />
             <MobileField label="Paid by" value={employeePaymentDelivery(employee).label} />
           </div>
+          {!employee.payment_delivery_method && <p className="mt-2 text-xs font-medium text-amber-700">Payment method not reviewed</p>}
           {hasMultipleRates && (
             <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
               {activeWageRates.map((rate, index) => (

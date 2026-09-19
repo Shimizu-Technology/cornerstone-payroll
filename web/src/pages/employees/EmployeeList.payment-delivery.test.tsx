@@ -40,6 +40,7 @@ describe('EmployeeList payment delivery', () => {
     expect((await screen.findAllByText('Direct deposit')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Paper check (default)').length).toBeGreaterThan(0);
     expect(screen.getByText('Not reviewed')).toBeTruthy();
+    expect(screen.getByText('Payment method not reviewed')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Dina Deposit' })[0]);
     expect(await screen.findByText('Employee overview route')).toBeTruthy();
   });
