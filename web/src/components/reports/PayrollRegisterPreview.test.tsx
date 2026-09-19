@@ -84,4 +84,14 @@ describe('PayrollRegisterPreviewContent', () => {
     expect(screen.getAllByText('Straight Loan').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Installment Loan').length).toBeGreaterThan(0);
   });
+
+  it('makes rehearsal registers visibly test-only without labeling locked imports that way', () => {
+    render(<PayrollRegisterPreviewContent report={{
+      ...report,
+      meta: { ...report.meta, provisional: true, payroll_status_note: 'TEST ONLY — calculated rehearsal payroll, not committed or paid' },
+    }} />);
+
+    expect(screen.getByRole('status').textContent).toContain('not committed or paid');
+    expect(screen.getByText('Test-only payroll register')).toBeTruthy();
+  });
 });

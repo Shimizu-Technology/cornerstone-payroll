@@ -30,6 +30,8 @@ class PayrollHistoryQuery
     @sort = SORT_COLUMNS.key?(params[:sort].to_s) ? params[:sort].to_s : "pay_period"
     @direction = params[:direction].to_s == "asc" ? "ASC" : "DESC"
     @source = SOURCES.include?(params[:source].to_s) ? params[:source].to_s : "all"
+    @register_eligible = ActiveModel::Type::Boolean.new.cast(params[:register_eligible]) == true
+    @migration_rehearsal = @register_eligible && Company.where(id: @company_id).pick(:payroll_environment) == "migration_rehearsal"
   end
 
   def call
@@ -131,6 +133,14 @@ class PayrollHistoryQuery
 
   def filtered_sql(include_status: true)
     clauses = []
+    if @register_eligible
+      native_statuses = @migration_rehearsal ? "'committed', 'calculated', 'approved'" : "'committed'"
+      clauses << <<~SQL.squish
+        (record_type = 'imported' OR
+          (record_type = 'native' AND status IN (#{native_statuses})
+            AND COALESCE(correction_status, '') <> 'voided'))
+      SQL
+    end
     clauses << "status = #{connection.quote(@status)}" if include_status && STATUSES.include?(@status)
     clauses << "EXTRACT(YEAR FROM pay_date)::integer = #{@year}" if @year
     clauses << "source_system = 'cornerstone'" if @source == "cornerstone"

@@ -38,6 +38,7 @@ class PayrollRegisterPdfGenerator
     start_d = pp[:start_date].to_s.gsub(/[^0-9\-]/, "")
     end_d   = pp[:end_date].to_s.gsub(/[^0-9\-]/, "")
     prefix = report.dig(:source, :system) == "quickbooks_online" ? "quickbooks_payroll_register" : "payroll_register"
+    prefix = "test_only_#{prefix}" if report.dig(:meta, :provisional)
     if start_d.present? && end_d.present?
       "#{prefix}_#{start_d}_to_#{end_d}.pdf"
     else
@@ -60,7 +61,7 @@ class PayrollRegisterPdfGenerator
     pp = report[:pay_period] || {}
     company_name = report.dig(:meta, :company_name).presence
     render_with_footer(pdf,
-      [ company_name, "Payroll Register", "Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
+      [ company_name, (report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Register" : "Payroll Register"), "Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
       font_size: 7
     )
   end
@@ -73,7 +74,7 @@ class PayrollRegisterPdfGenerator
     pdf.fill_color "FFFFFF"
 
     pdf.bounding_box([ pdf.bounds.left + 12, pdf.bounds.top - 10 ], width: pdf.bounds.width - 24) do
-      pdf.font_size(18) { pdf.text "Payroll Register", style: :bold }
+      pdf.font_size(18) { pdf.text(report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Register" : "Payroll Register", style: :bold) }
       pp = report[:pay_period] || {}
       company_name = report.dig(:meta, :company_name)
       subtitle = [ company_name, "Pay Period: #{pp[:start_date]} – #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "Status: #{pp[:status]&.capitalize}" ].compact.join("  |  ")

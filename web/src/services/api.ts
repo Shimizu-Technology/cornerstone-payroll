@@ -1882,6 +1882,8 @@ export interface PayrollRegisterReport {
       company_name?: string;
       generated_at?: string;
       report_description?: string;
+      provisional?: boolean;
+      payroll_status_note?: string | null;
     };
     source?: {
       system: 'cornerstone' | 'quickbooks_online';
@@ -5039,7 +5041,7 @@ export interface ClientPayrollHistoryResponse {
 
 export const payrollHistoryApi = {
   list: (
-    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' },
+    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks'; register_eligible?: boolean },
     companyId: number,
   ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
     api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),

@@ -2,6 +2,8 @@
 
 require "rails_helper"
 require "csv"
+require "pdf/reader"
+require "roo"
 
 RSpec.describe "Migration rehearsal payroll projection", type: :request do
   let!(:source_company) { create(:company) }
@@ -65,5 +67,50 @@ RSpec.describe "Migration rehearsal payroll projection", type: :request do
     rows = CSV.parse(response.body, headers: true)
     expect(rows.headers).to include("Payroll status")
     expect(rows.first.fetch("Payroll status")).to include("TEST ONLY")
+  end
+
+  it "serves the calculated run in the register as provisional without changing its payroll status" do
+    get "/api/v1/admin/reports/payroll_register", params: { pay_run_key: "native:#{first_period.id}" }
+
+    expect(response).to have_http_status(:ok)
+    report = response.parsed_body.fetch("report")
+    expect(report.dig("pay_period", "status")).to eq("calculated")
+    expect(report.dig("meta", "provisional")).to be(true)
+    expect(report.dig("source", "locked")).to be(false)
+    expect(report.dig("source", "statement")).to include("TEST ONLY", "not committed or paid")
+    expect(report.dig("summary", "total_gross").to_f).to eq(100.0)
+    expect(first_period.reload).to be_calculated
+  end
+
+  it "labels the rehearsal register in CSV, PDF, and Excel without changing official pay" do
+    key = "native:#{first_period.id}"
+
+    get "/api/v1/admin/reports/payroll_register_csv", params: { pay_run_key: key }
+    expect(response).to have_http_status(:ok)
+    expect(response.headers.fetch("Content-Disposition")).to include("test_only_payroll_register")
+    csv = CSV.parse(response.body, headers: true)
+    expect(csv.headers.first).to eq("Payroll Status")
+    expect(csv.first.fetch("Payroll Status")).to include("TEST ONLY")
+    expect(csv.first.fetch("Gross Pay")).to eq("100.00")
+
+    get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_run_key: key }
+    expect(response).to have_http_status(:ok)
+    expect(response.headers.fetch("Content-Disposition")).to include("test_only_payroll_register")
+    expect(PDF::Reader.new(StringIO.new(response.body)).pages.first.text).to include("TEST ONLY")
+
+    get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_run_key: key }
+    expect(response).to have_http_status(:ok)
+    expect(response.headers.fetch("Content-Disposition")).to include("test_only_payroll_register")
+    file = Tempfile.new([ "test_only_payroll_register", ".xlsx" ])
+    file.binmode
+    file.write(response.body)
+    file.close
+    workbook = Roo::Excelx.new(file.path)
+    expect(workbook.sheet("Employees").row(1).first).to eq("Payroll Status")
+    expect(workbook.sheet("Employees").row(2).first).to include("TEST ONLY")
+    expect(workbook.sheet("Report Info").to_a.flatten).to include(a_string_matching(/TEST ONLY/))
+    expect(first_period.reload).to be_calculated
+  ensure
+    file&.unlink
   end
 end
