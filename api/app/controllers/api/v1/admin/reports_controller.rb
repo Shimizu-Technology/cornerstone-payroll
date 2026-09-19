@@ -1102,7 +1102,9 @@ module Api
             title: "Payroll Summary by Period",
             subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}",
             filename: "payroll_summary_#{period.filename_token}.pdf",
-            sheets: ytd_summary_sheets(report)
+            sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
+              index.zero? ? sheet.merge(pdf_frozen_columns: 3, pdf_max_columns: 9) : sheet
+            end
           )
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -1782,21 +1784,31 @@ module Api
           historical_adjustments = unified.historical_adjustments
           adjustments_by_employee = historical_adjustments.group_by { |adjustment| adjustment.historical_paycheck.employee_id }
           disclosure = PayrollFieldDisclosure.new(items)
+          adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
+          employee_rows = sort_ytd_rows(employees.map do |employee|
+            payroll_period_employee_row(
+              employee,
+              items_by_employee[employee.id] || [],
+              historical_by_employee[employee.id] || [],
+              adjustments_by_employee[employee.id] || [],
+              unified: unified
+            )
+          end)
+          component_columns = period_summary_component_columns(
+            disclosure.rows + adjustment_disclosure.rows,
+            employee_rows.map { |row| row[:employee_id] }
+          )
+          employee_rows.each do |row|
+            row[:component_values] = period_summary_component_values(component_columns, row[:employee_id])
+          end
 
           {
             type: "ytd_summary",
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
-            employees: sort_ytd_rows(employees.map do |employee|
-              payroll_period_employee_row(
-                employee,
-                items_by_employee[employee.id] || [],
-                historical_by_employee[employee.id] || [],
-                adjustments_by_employee[employee.id] || [],
-                unified: unified
-              )
-            end),
+            employees: employee_rows,
+            component_columns: component_columns.map { |column| column.except(:entries) },
             company_totals: payroll_period_company_totals(
               items, period, historical_paychecks, historical_adjustments, unified: unified
             ),
@@ -1810,8 +1822,50 @@ module Api
               totals: disclosure.totals,
               entries: disclosure.rows,
               treatment_totals: disclosure.treatment_totals
+            },
+            payroll_adjustments: {
+              totals: adjustment_disclosure.totals,
+              entries: adjustment_disclosure.rows,
+              treatment_totals: adjustment_disclosure.treatment_totals
             }
           }
+        end
+
+        def period_summary_component_columns(entries, employee_ids)
+          entries.select { |entry| employee_ids.include?(entry[:employee_id]) }
+            .group_by do |entry|
+              if entry.key?(:tax_treatment)
+                entry[:payroll_field_definition_id] ? "field:definition:#{entry[:payroll_field_definition_id]}" : "field:entry:#{entry[:payroll_item_field_entry_id]}"
+              else
+                "adjustment:item:#{entry[:payroll_item_id]}:#{entry[:position]}"
+              end
+            end
+            .map do |key, grouped|
+              first = grouped.first
+              field = first.key?(:tax_treatment)
+              treatment = field ? first[:tax_treatment] : first[:treatment]
+              identity = if field
+                first[:payroll_field_definition_id] ? "field ##{first[:payroll_field_definition_id]}" : "entry ##{first[:payroll_item_field_entry_id]}"
+              else
+                "#{first[:employee_name]}, item ##{first[:payroll_item_id]}/#{first[:position].to_i + 1}"
+              end
+              {
+                key: key,
+                label: "#{field ? 'Payroll Field' : 'Payroll Adjustment'} - #{first[:label]} (#{treatment.to_s.humanize}; #{identity})",
+                short_label: first[:label],
+                identity_label: identity,
+                treatment: treatment,
+                entries: grouped
+              }
+            end
+            .sort_by { |column| [ column[:treatment].to_s, column[:short_label].to_s, column[:key] ] }
+        end
+
+        def period_summary_component_values(columns, employee_id)
+          columns.each_with_object({}) do |column, values|
+            matches = column[:entries].select { |entry| entry[:employee_id] == employee_id }
+            values[column[:key]] = matches.sum { |entry| entry[:amount].to_f } if matches.any?
+          end
         end
 
         def payroll_period_employee_row(employee, items, historical_paychecks = [], historical_adjustments = [], unified: nil)
@@ -2323,6 +2377,7 @@ module Api
         def payroll_field_entry_rows(item)
           active_payroll_field_entries(item).map do |entry|
             {
+              id: entry.id,
               payroll_field_definition_id: entry.payroll_field_definition_id,
               label: entry.label,
               kind: entry.kind,
@@ -2691,7 +2746,11 @@ module Api
         end
 
         def payroll_field_export_key(entry)
-          [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+          if entry[:payroll_field_definition_id].present?
+            [ :definition, entry[:payroll_field_definition_id] ]
+          else
+            [ :entry, entry[:id] || entry[:payroll_item_id], entry[:label], entry[:kind], entry[:tax_treatment] ]
+          end
         end
 
         def payroll_field_export_group(entry)
@@ -2708,7 +2767,8 @@ module Api
 
         def payroll_field_export_header(column)
           effect = { addition: "in gross", deduction: "in deductions", employer: "employer only" }.fetch(column[:group])
-          "Payroll Field - #{column[:label]} (#{column[:treatment].humanize}; #{effect})"
+          identity = column[:key][0] == :definition ? "field ##{column[:key][1]}" : "entry ##{column[:key][1]}"
+          "Payroll Field - #{column[:label]} (#{column[:treatment].humanize}; #{effect}; #{identity})"
         end
 
         def payroll_field_export_values(worker, columns)
@@ -3415,9 +3475,10 @@ module Api
 
         def payroll_field_totals_sheet(report)
           entries = (Array(report[:employees]) + Array(report[:contractors])).flat_map { |emp| Array(emp[:payroll_field_entries]) }
-          rows = [ [ "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
-          entries.group_by { |entry| [ entry[:kind], entry[:tax_treatment], entry[:category], entry[:reporting_group], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }.sort_by { |key, _| key.map(&:to_s) }.each do |(kind, treatment, category, reporting_group, label, employee_paid, employer_paid), grouped|
-            rows << [ kind, treatment, category, report_group_label(reporting_group), label, employee_paid, employer_paid, grouped.sum { |entry| entry[:amount].to_f } ]
+          rows = [ [ "Field ID", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
+          entries.group_by { |entry| payroll_field_export_key(entry) }.sort_by { |key, _| key.map(&:to_s) }.each do |key, grouped|
+            entry = grouped.first
+            rows << [ key.join(":"), entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], grouped.sum { |item| item[:amount].to_f } ]
           end
           { name: "Payroll Fields Totals", rows: rows }
         end
@@ -3572,6 +3633,7 @@ module Api
         end
 
         def ytd_summary_sheets(report)
+          component_columns = Array(report[:component_columns])
           rows = [ [
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
@@ -3579,7 +3641,7 @@ module Api
             "Tips", "Tips Paid Out", "Bonus", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
             "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
-          ] ]
+          ] + component_columns.map { |column| column[:label] } ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
@@ -3588,7 +3650,8 @@ module Api
               emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
               emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
               emp[:employer_contributions], emp[:employer_payroll_cost], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
-              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay]
+              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
+              *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] }
             ]
           end
           [
@@ -3744,10 +3807,11 @@ module Api
         end
 
         def payroll_field_totals_for_report_sheet(report)
-          rows = [ [ "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Employees", "Pay Periods", "Amount" ] ]
+          rows = [ [ "Field ID", "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Employees", "Pay Periods", "Amount" ] ]
           Array(report.dig(:payroll_fields, :totals)).each do |entry|
             paid_by = entry[:employer_paid] ? "Employer" : "Employee"
             rows << [
+              entry[:payroll_field_definition_id] ? "definition:#{entry[:payroll_field_definition_id]}" : "entry:#{entry[:payroll_item_field_entry_id]}",
               entry[:label], entry[:kind], entry[:tax_treatment], entry[:category],
               report_group_label(entry[:reporting_group]), paid_by, entry[:employee_count],
               entry[:pay_period_count], entry[:amount]

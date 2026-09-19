@@ -29,6 +29,7 @@ class PayrollFieldDisclosure
           employee_id: item.employee_id,
           employee_name: item.employee&.full_name,
           employment_type: item.employment_type,
+          payroll_item_field_entry_id: entry.id,
           payroll_field_definition_id: entry.payroll_field_definition_id,
           label: entry.label,
           kind: entry.kind,
@@ -49,12 +50,15 @@ class PayrollFieldDisclosure
   def totals
     rows.group_by do |row|
       [
+        row[:payroll_field_definition_id] ? "definition:#{row[:payroll_field_definition_id]}" : "entry:#{row[:payroll_item_field_entry_id]}",
         row[:label], row[:kind], row[:tax_treatment], row[:category],
         row[:reporting_group], row[:employee_paid], row[:employer_paid]
       ]
     end.map do |key, grouped|
-      label, kind, treatment, category, reporting_group, employee_paid, employer_paid = key
+      _identity, label, kind, treatment, category, reporting_group, employee_paid, employer_paid = key
       {
+        payroll_field_definition_id: grouped.first[:payroll_field_definition_id],
+        payroll_item_field_entry_id: grouped.first[:payroll_item_field_entry_id],
         label: label,
         kind: kind,
         tax_treatment: treatment,

@@ -253,8 +253,9 @@ class PayrollRegisterPdfGenerator
     active_payroll_adjustments_by_worker
       .group_by { |entry| payroll_adjustment_column_key(entry) }
       .sort_by { |key, _| key.map(&:to_s) }
-      .map do |(label, treatment, source), grouped|
-        [ treatment.to_s.humanize, label, adjustment_source_label(source), fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+      .map do |_key, grouped|
+        first = grouped.first
+        [ first[:treatment].to_s.humanize, first[:label], adjustment_source_label(first[:source]), fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
       end
   end
 
@@ -273,7 +274,7 @@ class PayrollRegisterPdfGenerator
         entry = entries.first
         {
           key: key,
-          label: entry[:label].to_s,
+          label: key[0] == :item ? "#{entry[:label]} [#{key[1]}/#{key[2].to_i + 1}]" : entry[:label].to_s,
           treatment: entry[:treatment].to_s.humanize,
           source: adjustment_source_label(entry[:source])
         }
@@ -282,7 +283,11 @@ class PayrollRegisterPdfGenerator
   end
 
   def payroll_adjustment_column_key(entry)
-    [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+    if entry[:payroll_item_id].present? && !entry[:position].nil?
+      [ :item, entry[:payroll_item_id], entry[:position] ]
+    else
+      [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+    end
   end
 
   def payroll_adjustment_amount(worker, column)
@@ -342,10 +347,12 @@ class PayrollRegisterPdfGenerator
 
   def payroll_field_total_rows
     entries = payroll_workers.flat_map { |emp| active_payroll_field_entries(emp) }
-    entries.group_by { |entry| [ entry[:tax_treatment], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }
+    entries.group_by { |entry| payroll_field_column_key(entry) }
       .sort_by { |key, _| key.map(&:to_s) }
-      .map do |(treatment, label, employee_paid, employer_paid), grouped|
-        [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+      .map do |key, grouped|
+        entry = grouped.first
+        label = payroll_field_label(entry, key)
+        [ entry[:tax_treatment].to_s.humanize, label, entry[:employee_paid] ? "Yes" : "No", entry[:employer_paid] ? "Yes" : "No", fmt(grouped.sum { |item| item[:amount].to_f }) ]
       end
   end
 
@@ -364,7 +371,7 @@ class PayrollRegisterPdfGenerator
         entry = entries.first
         {
           key: key,
-          label: entry[:label].to_s,
+          label: payroll_field_label(entry, key),
           treatment: entry[:tax_treatment].to_s.humanize,
           group: payroll_field_group(entry)
         }
@@ -377,7 +384,17 @@ class PayrollRegisterPdfGenerator
   end
 
   def payroll_field_column_key(entry)
-    [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+    if entry[:payroll_field_definition_id].present?
+      [ :definition, entry[:payroll_field_definition_id] ]
+    else
+      [ :entry, entry[:id] || entry[:payroll_item_id], entry[:label], entry[:kind], entry[:tax_treatment] ]
+    end
+  end
+
+  def payroll_field_label(entry, key)
+    return entry[:label].to_s if key[1].blank?
+
+    "#{entry[:label]} [#{key[0] == :definition ? 'field' : 'entry'} ##{key[1]}]"
   end
 
   def payroll_field_group(entry)

@@ -17,11 +17,12 @@ class PayrollFieldDefinition < ApplicationRecord
   REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :company
+  belongs_to :owner_employee, class_name: "Employee", optional: true
   has_many :employee_payroll_fields, dependent: :destroy
   has_many :employees, through: :employee_payroll_fields
   has_many :payroll_item_field_entries, dependent: :nullify
 
-  validates :name, presence: true, uniqueness: { scope: :company_id }
+  validates :name, presence: true, uniqueness: { scope: [ :company_id, :owner_employee_id ] }
   validates :kind, inclusion: { in: KINDS }
   validates :tax_treatment, inclusion: { in: TAX_TREATMENTS }
   validates :category, inclusion: { in: CATEGORIES }
@@ -30,8 +31,10 @@ class PayrollFieldDefinition < ApplicationRecord
   validates :default_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :default_percentage, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :kind_matches_tax_treatment
+  validate :owner_belongs_to_company
 
   scope :active, -> { where(active: true) }
+  scope :client_wide, -> { where(owner_employee_id: nil) }
   scope :visible_in_payroll_grid, -> { where(show_in_payroll_grid: true) }
   scope :ordered, -> { order(:sort_order, :name) }
 
@@ -57,6 +60,10 @@ class PayrollFieldDefinition < ApplicationRecord
     employer_contribution?
   end
 
+  def employee_only?
+    owner_employee_id.present?
+  end
+
   private
 
   def normalize_blank_amounts
@@ -80,5 +87,11 @@ class PayrollFieldDefinition < ApplicationRecord
     end
 
     errors.add(:tax_treatment, "does not match field type") unless valid
+  end
+
+  def owner_belongs_to_company
+    return if owner_employee.blank? || owner_employee.company_id == company_id
+
+    errors.add(:owner_employee, "must belong to the same client")
   end
 end

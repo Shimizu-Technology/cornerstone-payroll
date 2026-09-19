@@ -2358,8 +2358,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         when "employer_contribution" then "employer only"
         else "in gross"
         end
-        header = "Payroll Field - #{label} (#{treatment.humanize}; #{effect})"
-        column = headers.index(header)
+        column = headers.index { |header| header.to_s.start_with?("Payroll Field - #{label} (#{treatment.humanize}; #{effect}; field #") }
 
         expect(column).not_to be_nil
         expect(hourly_row[column]).to eq(amount)
@@ -2406,7 +2405,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       end
       expect(detail_rows).to include(include(hourly_employee.full_name, "Employee loan", "manual", 40.0))
       employee_headers = workbook.sheet("Employees").row(1)
-      expect(employee_headers).to include("Payroll Adjustment - Employee loan (Post tax deduction; manual pay-period entry)")
+      expect(employee_headers).to include(a_string_matching(/Payroll Adjustment - Employee loan \(Post tax deduction; manual pay-period entry; item #\d+\/4\)/))
     end
 
     it "returns the canonical simple register payload used by the browser preview and workbook" do

@@ -68,4 +68,16 @@ RSpec.describe PayrollAdjustmentDisclosure do
     expect(disclosure.treatment_totals["post_tax_deduction"]).to eq(80.0)
     expect(disclosure.totals.map { |row| row[:source] }).to contain_exactly("employee_default", "manual")
   end
+
+  it "keeps two same-name entries on one saved paycheck separate" do
+    item = item_with([
+      { "label" => "Loan", "amount" => 12, "treatment" => "post_tax_deduction" },
+      { "label" => "Loan", "amount" => 7, "treatment" => "post_tax_deduction" }
+    ], source: "manual")
+
+    totals = described_class.new([ item ]).totals
+
+    expect(totals.map { |row| row[:amount] }).to contain_exactly(12.0, 7.0)
+    expect(totals.map { |row| row[:position] }).to contain_exactly(0, 1)
+  end
 end
