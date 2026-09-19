@@ -1721,6 +1721,37 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event).to be_present
       expect(assigned_event.check_number).to eq(item.reload.check_number)
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
+      expect(item.payment_delivery_method).to eq("paper_check")
+    end
+
+    it "defaults an unreviewed employee to paper check without blocking payroll" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to be_committed
+      expect(pay_period.payroll_items.first.reload.payment_delivery_method).to eq("paper_check")
+      expect(pay_period.payroll_items.first.check_number).to be_present
+    end
+
+    it "snapshots direct deposit without assigning a paper check number" do
+      employee.update!(payment_delivery_method: "direct_deposit")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      item = pay_period.payroll_items.first.reload
+      expect(item.payment_delivery_method).to eq("direct_deposit")
+      expect(item.check_number).to be_nil
+      expect(item.check_events.where(event_type: "assigned")).to be_empty
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("pay_period", "payroll_items", 0, "payment_delivery_method")).to eq("direct_deposit")
+      expect(response.parsed_body.dig("pay_period", "payroll_items", 0, "employee_payment_delivery_method")).to eq("direct_deposit")
+
+      employee.update!(payment_delivery_method: "paper_check")
+      expect(item.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(item.check_number).to be_nil
     end
 
     it "blocks commit while an included new hire has unresolved required documents" do

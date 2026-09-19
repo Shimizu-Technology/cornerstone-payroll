@@ -56,6 +56,26 @@ RSpec.describe PayrollFinalRecordService do
     expect(result.dig(:liabilities, :payment_tracking_status)).to eq("tracked_in_liability_center")
   end
 
+  it "treats direct deposit as a payment record, not a missing paper check" do
+    item.update!(check_number: nil, payment_delivery_method: "direct_deposit")
+
+    result = described_class.new(pay_period: period).call
+
+    expect(result[:employee_payments]).to include(
+      required_count: 0,
+      direct_deposit_count: 1,
+      assigned_count: 0,
+      outstanding_count: 0
+    )
+    expect(result.dig(:employee_payments, :rows, 0)).to include(
+      payment_delivery_method: "direct_deposit",
+      issuance_status: "transfer_not_confirmed",
+      reconciliation_status: "not_tracked"
+    )
+    expect(result.dig(:completion, :blockers).join).not_to include("check number")
+    expect(result.dig(:completion, :open_items).join).not_to include("employee check")
+  end
+
   it "rejects a draft because it is not an official payroll record" do
     period.update!(status: "draft", committed_at: nil)
 

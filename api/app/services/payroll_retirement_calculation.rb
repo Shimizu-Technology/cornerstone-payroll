@@ -397,7 +397,7 @@ class PayrollRetirementCalculation
     @prior_employer_match ||= begin
       period = payroll_item.pay_period
       live = employee.payroll_items.joins(:pay_period).not_voided
-        .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: period.company_id, pay_date: Date.new(period.pay_date.year, 1, 1)..period.pay_date).select(:id) })
+        .where(pay_periods: { id: PayPeriod.reportable_for_company(period.company).where(pay_date: Date.new(period.pay_date.year, 1, 1)..period.pay_date).select(:id) })
         .where("pay_periods.pay_date < ? OR (pay_periods.pay_date = ? AND pay_periods.id < ?)", period.pay_date, period.pay_date, period.id)
         .sum("payroll_items.employer_retirement_match + payroll_items.employer_roth_retirement_match").to_d
       effective_on = election[:effective_on].presence&.to_date

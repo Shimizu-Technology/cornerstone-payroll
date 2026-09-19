@@ -131,26 +131,30 @@ class PayrollFinalRecordService
   def employee_payment_payload
     payable_items = items.select { |item| item.net_pay.to_d.positive? }
     rows = payable_items.map do |item|
-      reconciliation_status = item.check_number.present? ? CheckReconciliationStatus.for(item) : "not_assigned"
+      direct_deposit = item.effective_payment_delivery_method == "direct_deposit"
+      reconciliation_status = direct_deposit ? "not_tracked" : (item.check_number.present? ? CheckReconciliationStatus.for(item) : "not_assigned")
       {
         payroll_item_id: item.id,
         employee_id: item.employee_id,
         employee_name: item.employee.full_name,
         amount: money(item.net_pay),
+        payment_delivery_method: item.effective_payment_delivery_method,
         check_number: item.check_number,
-        issuance_status: item.check_status || "not_assigned",
+        issuance_status: direct_deposit ? "transfer_not_confirmed" : (item.check_status || "not_assigned"),
         reconciliation_status:
       }
     end
+    check_rows = rows.reject { |row| row[:payment_delivery_method] == "direct_deposit" }
     status_counts = rows.group_by { |row| row[:reconciliation_status] }.transform_values(&:length)
 
     {
-      required_count: rows.length,
-      assigned_count: rows.count { |row| row[:check_number].present? },
-      printed_count: rows.count { |row| row[:issuance_status].in?(%w[printed delivered]) },
-      delivered_count: rows.count { |row| row[:issuance_status] == "delivered" },
-      reconciled_count: rows.count { |row| row[:reconciliation_status].in?(%w[cleared voided]) },
-      outstanding_count: rows.count { |row| !row[:reconciliation_status].in?(%w[cleared voided]) },
+      required_count: check_rows.length,
+      direct_deposit_count: rows.length - check_rows.length,
+      assigned_count: check_rows.count { |row| row[:check_number].present? },
+      printed_count: check_rows.count { |row| row[:issuance_status].in?(%w[printed delivered]) },
+      delivered_count: check_rows.count { |row| row[:issuance_status] == "delivered" },
+      reconciled_count: check_rows.count { |row| row[:reconciliation_status].in?(%w[cleared voided]) },
+      outstanding_count: check_rows.count { |row| !row[:reconciliation_status].in?(%w[cleared voided]) },
       total_amount: money(rows.sum(0.to_d) { |row| row[:amount].to_d }),
       by_status: status_counts,
       rows:

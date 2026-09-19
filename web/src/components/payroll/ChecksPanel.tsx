@@ -68,6 +68,7 @@ function eventLabel(eventType: string): string {
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
+  const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +94,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       setError(null);
       const data = await checksApi.list(payPeriod.id);
       setChecks(data.checks);
+      setDirectDepositItems(data.direct_deposit_items || []);
       setMeta(data.meta);
       setCheckNumberDrafts(Object.fromEntries(data.checks.map((item) => [item.id, item.check_number || ''])));
       setSelectedStubIds((current) => current.filter((id) => data.checks.some((item) => item.id === id && !item.voided)));
@@ -192,7 +194,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const selectedStubIdSet = new Set(selectedStubIds);
 
   const selectedStubRequestIds = () =>
-    selectedStubIds.length > 0 ? selectedStubIds : undefined;
+    selectedStubIds.length > 0 ? selectedStubIds : checks.filter((item) => !item.voided).map((item) => item.id);
 
   const notifySkippedPayStubs = (skippedCount?: number) => {
     if (!skippedCount || selectedStubIds.length > 0) return;
@@ -240,6 +242,38 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to print pay stubs');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
+    }
+  };
+
+  const handleDirectDepositStubs = async (print: boolean) => {
+    setBatchLoading(true);
+    setBatchAction(print ? 'Opening direct-deposit stubs...' : 'Downloading direct-deposit stubs...');
+    try {
+      const result = await payStubsApi.directDepositStubsPdf(payPeriod.id);
+      const url = URL.createObjectURL(result.blob);
+      if (print) {
+        const printWindow = window.open(url);
+        if (!printWindow) {
+          URL.revokeObjectURL(url);
+          alert('Pop-up blocked. Please allow pop-ups to print direct-deposit stubs.');
+          return;
+        }
+        printWindow.addEventListener('load', () => {
+          printWindow.print();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        });
+      } else {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = result.filename || `direct_deposit_stubs_${payPeriod.pay_date ?? 'undated'}.pdf`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to generate direct-deposit stubs');
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -388,7 +422,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
           {meta && (
             <>
-              <span><span className="font-medium text-gray-900">{meta.total}</span> total</span>
+              <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
+              {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
               <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> unprinted</span>
               <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
               <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
@@ -431,7 +466,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
             onClick={() => void handlePrintPayStubs()}
             disabled={batchLoading || !hasPrintableStub}
           >
-            {selectedStubIds.length > 0 ? `Print ${selectedStubIds.length} Stub${selectedStubIds.length === 1 ? '' : 's'}` : 'Print All Stubs'}
+            {selectedStubIds.length > 0 ? `Print ${selectedStubIds.length} Stub${selectedStubIds.length === 1 ? '' : 's'}` : 'Print Paper-Check Stubs'}
           </Button>
           <Button
             size="sm"
@@ -439,7 +474,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
             onClick={() => void handleDownloadPayStubs()}
             disabled={batchLoading || !hasPrintableStub}
           >
-            {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download All Stubs'}
+            {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download Paper-Check Stubs'}
           </Button>
         </div>
       </div>
@@ -455,6 +490,29 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
         {meta?.requires_verified_print_package && ' This client requires the verified print package and a different operator’s confirmation.'}
       </div>
+
+      {directDepositItems.length > 0 && (
+        <section className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-950">Direct deposit</h3>
+              <p className="mt-1 max-w-2xl text-sm text-slate-600">Print the existing earnings stubs on plain paper. Printing a stub does not initiate or confirm a bank transfer.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download all stubs</Button>
+              <Button size="sm" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print all stubs</Button>
+            </div>
+          </div>
+          <ul className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            {directDepositItems.filter((item) => !normalizedSearch || item.employee_name.toLowerCase().includes(normalizedSearch)).map((item) => (
+              <li key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                <span className="font-medium text-slate-800">{item.employee_name}</span>
+                <span className="tabular-nums text-slate-600">{formatCurrency(item.net_pay)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {checkNumberChanges.length > 0 && (
         <div className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
