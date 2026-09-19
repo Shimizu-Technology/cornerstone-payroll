@@ -39,7 +39,7 @@ class PayrollAdjustmentDisclosure
           source: self.class.source_for(item),
           employee_paid: deduction?(treatment),
           employer_paid: false,
-          amount: adjustment.fetch("amount").to_f,
+          amount: BigDecimal(adjustment.fetch("amount").to_s.presence || "0"),
           notes: adjustment["notes"].presence
         }
       end
@@ -61,7 +61,7 @@ class PayrollAdjustmentDisclosure
         source: first[:source],
         employee_paid: first[:employee_paid],
         employer_paid: false,
-        amount: grouped.sum { |row| row[:amount].to_f },
+        amount: grouped.sum(BigDecimal("0")) { |row| row[:amount] },
         employee_count: grouped.map { |row| row[:employee_id] }.compact.uniq.length,
         pay_period_count: grouped.map { |row| row[:pay_period_id] }.compact.uniq.length
       }
@@ -70,7 +70,7 @@ class PayrollAdjustmentDisclosure
 
   def treatment_totals
     TREATMENTS.index_with do |treatment|
-      rows.select { |row| row[:treatment] == treatment }.sum { |row| row[:amount].to_f }
+      rows.select { |row| row[:treatment] == treatment }.sum(BigDecimal("0")) { |row| row[:amount] }
     end
   end
 

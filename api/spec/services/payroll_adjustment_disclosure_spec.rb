@@ -80,4 +80,17 @@ RSpec.describe PayrollAdjustmentDisclosure do
     expect(totals.map { |row| row[:amount] }).to contain_exactly(12.0, 7.0)
     expect(totals.map { |row| row[:position] }).to contain_exactly(0, 1)
   end
+
+  it "retains exact decimal adjustment amounts in rows and treatment totals" do
+    item = item_with([
+      { "label" => "Allowance", "amount" => 0.10, "treatment" => "taxable_addition" },
+      { "label" => "Allowance", "amount" => 0.20, "treatment" => "taxable_addition" }
+    ], source: "manual")
+
+    disclosure = described_class.new([ item ])
+
+    expect(disclosure.rows.map { |row| row[:amount] }).to eq([ BigDecimal("0.10"), BigDecimal("0.20") ])
+    expect(disclosure.totals.sum(BigDecimal("0")) { |row| row[:amount] }).to eq(BigDecimal("0.30"))
+    expect(disclosure.treatment_totals["taxable_addition"]).to eq(BigDecimal("0.30"))
+  end
 end
