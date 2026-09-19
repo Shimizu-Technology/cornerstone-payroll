@@ -52,14 +52,16 @@ class PayrollAdjustmentExport
   def grouped_totals
     workers.flat_map { |worker| entries_for(worker) }
       .group_by { |entry| key(entry) }
-      .sort_by { |entry_key, _| entry_key.map(&:to_s) }
-      .map do |(label, treatment, source), entries|
+      .sort_by { |_entry_key, entries| [ entries.first[:treatment].to_s, entries.first[:label].to_s, entries.first[:source].to_s ] }
+      .map do |entry_key, entries|
+        first = entries.first
         {
-          kind: entries.first[:kind],
-          treatment: treatment,
-          label: label,
-          source: source,
-          amount: entries.sum { |entry| entry[:amount].to_f }
+          identity: entry_key[0] == :item ? "item:#{entry_key[1]}:#{entry_key[2]}" : "legacy:#{entry_key.join(':')}",
+          kind: first[:kind],
+          treatment: first[:treatment],
+          label: first[:label],
+          source: first[:source],
+          amount: entries.sum(BigDecimal("0")) { |entry| BigDecimal(entry[:amount].to_s.presence || "0") }
         }
       end
   end
@@ -68,7 +70,8 @@ class PayrollAdjustmentExport
 
   def header(column)
     source = SOURCE_LABELS.fetch(column[:source], "snapshot")
-    "Payroll Adjustment - #{column[:label]} (#{column[:treatment].humanize}; #{source})"
+    identity = column[:key][0] == :item ? "; item ##{column[:key][1]}/#{column[:key][2].to_i + 1}" : ""
+    "Payroll Adjustment - #{column[:label]} (#{column[:treatment].humanize}; #{source}#{identity})"
   end
 
   def amount_for(worker, column)
@@ -79,7 +82,11 @@ class PayrollAdjustmentExport
   end
 
   def key(entry)
-    [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+    if entry[:payroll_item_id].present? && !entry[:position].nil?
+      [ :item, entry[:payroll_item_id], entry[:position] ]
+    else
+      [ entry[:label].to_s, entry[:treatment].to_s, entry[:source].to_s ]
+    end
   end
 
   def treatment_rank(treatment)

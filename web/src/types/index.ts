@@ -111,6 +111,7 @@ export type PayrollFieldAmountType = 'manual' | 'fixed' | 'percentage';
 export interface PayrollFieldDefinition {
   id: number;
   company_id: number;
+  owner_employee_id?: number | null;
   name: string;
   description?: string | null;
   kind: PayrollFieldKind;
@@ -183,6 +184,8 @@ export interface PayrollItemFieldEntry {
 }
 
 export interface PayrollAdjustment {
+  payroll_item_id?: number;
+  position?: number;
   label: string;
   amount: number;
   treatment: PayrollAdjustmentTreatment;

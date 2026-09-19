@@ -39,7 +39,7 @@ class PayrollAdjustmentDisclosure
           source: self.class.source_for(item),
           employee_paid: deduction?(treatment),
           employer_paid: false,
-          amount: adjustment.fetch("amount").to_f,
+          amount: BigDecimal(adjustment.fetch("amount").to_s.presence || "0"),
           notes: adjustment["notes"].presence
         }
       end
@@ -50,24 +50,27 @@ class PayrollAdjustmentDisclosure
   end
 
   def totals
-    rows.group_by { |row| [ row[:label], row[:treatment], row[:source] ] }.map do |(label, treatment, source), grouped|
+    rows.group_by { |row| [ row[:payroll_item_id], row[:position] ] }.map do |(payroll_item_id, position), grouped|
+      first = grouped.first
       {
-        label: label,
-        treatment: treatment,
-        kind: grouped.first[:kind],
-        source: source,
-        employee_paid: grouped.first[:employee_paid],
+        payroll_item_id: payroll_item_id,
+        position: position,
+        label: first[:label],
+        treatment: first[:treatment],
+        kind: first[:kind],
+        source: first[:source],
+        employee_paid: first[:employee_paid],
         employer_paid: false,
-        amount: grouped.sum { |row| row[:amount].to_f },
+        amount: grouped.sum(BigDecimal("0")) { |row| row[:amount] },
         employee_count: grouped.map { |row| row[:employee_id] }.compact.uniq.length,
         pay_period_count: grouped.map { |row| row[:pay_period_id] }.compact.uniq.length
       }
-    end.sort_by { |row| [ treatment_rank(row[:treatment]), row[:label].to_s.downcase, row[:source] ] }
+    end.sort_by { |row| [ treatment_rank(row[:treatment]), row[:label].to_s.downcase, row[:payroll_item_id], row[:position] ] }
   end
 
   def treatment_totals
     TREATMENTS.index_with do |treatment|
-      rows.select { |row| row[:treatment] == treatment }.sum { |row| row[:amount].to_f }
+      rows.select { |row| row[:treatment] == treatment }.sum(BigDecimal("0")) { |row| row[:amount] }
     end
   end
 

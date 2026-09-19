@@ -37,8 +37,8 @@ const QUARTERLY_PREPARATION_STATUSES = ['not_started', 'in_progress', 'needs_rev
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+function fmt(n: number | string) {
+  return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
 function extractErrorMessage(err: unknown): string {
@@ -1577,6 +1577,9 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
+                    {(report.component_columns || []).map((column) => (
+                      <th key={column.key} title={column.label} className="min-w-36 py-2 pr-4 text-right font-medium">{column.short_label}<span className="block text-xs font-normal">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span></th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -1607,11 +1610,14 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
+                      {(report.component_columns || []).map((column) => (
+                        <td key={column.key} className="py-2 pr-4 text-right tabular-nums">{emp.component_values?.[column.key] == null ? '—' : fmt(emp.component_values[column.key])}</td>
+                      ))}
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={22} className="py-6 text-center text-gray-400">
+                      <td colSpan={22 + (report.component_columns?.length || 0)} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -3109,7 +3115,7 @@ function PayrollFieldTotalsTable({ disclosure }: { disclosure?: PayrollFieldsDis
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-4 py-2">Field</th><th className="px-4 py-2">Treatment</th><th className="px-4 py-2">Paid by</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
-          <tbody>{rows.map((row, index) => <tr key={`${row.label}-${row.tax_treatment}-${index}`} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}</td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
+          <tbody>{rows.map((row, index) => <tr key={JSON.stringify([row.payroll_field_definition_id == null ? 'entry' : 'definition', row.payroll_field_definition_id ?? row.payroll_item_field_entry_id ?? index, row.label, row.kind, row.tax_treatment, row.category, row.reporting_group, row.employee_paid, row.employer_paid])} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}<span className="ml-2 text-xs font-normal text-gray-500">{row.payroll_field_definition_id ? `#${row.payroll_field_definition_id}` : row.payroll_item_field_entry_id ? `entry #${row.payroll_item_field_entry_id}` : ''}</span></td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
         </table>
       </div>
     </div>

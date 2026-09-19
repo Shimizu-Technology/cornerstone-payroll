@@ -21,6 +21,45 @@ module Api
           render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
+        # A one-person field is created and assigned together so an interrupted
+        # request cannot leave a client-wide or unassigned payroll definition.
+        def create_personal
+          field_attrs = params.require(:payroll_field).permit(
+            :name, :description, :kind, :tax_treatment, :category, :reporting_group,
+            :amount_type, :default_amount, :default_percentage, :payee_name, :reference_number
+          )
+          assignment_attrs = params.require(:employee_payroll_field).permit(
+            :amount, :percentage, :start_date, :end_date, :notes
+          )
+
+          field = nil
+          assignment = nil
+          PayrollFieldDefinition.transaction do
+            field = PayrollFieldDefinition.create!(field_attrs.merge(
+              company_id: current_company_id,
+              owner_employee: @employee,
+              show_in_payroll_grid: true
+            ))
+            assignment = @employee.employee_payroll_fields.create!(
+              assignment_attrs.merge(payroll_field_definition: field, active: true)
+            )
+          end
+
+          render json: {
+            payroll_field: field.as_json(only: [
+              :id, :company_id, :owner_employee_id, :name, :description, :kind,
+              :tax_treatment, :category, :reporting_group, :amount_type,
+              :default_amount, :default_percentage, :show_in_payroll_grid,
+              :active, :sort_order, :payee_name, :reference_number
+            ]),
+            employee_payroll_field: assignment_json(assignment)
+          }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        end
+
         def update
           if @assignment.update(assignment_params)
             render json: { employee_payroll_field: assignment_json(@assignment) }
