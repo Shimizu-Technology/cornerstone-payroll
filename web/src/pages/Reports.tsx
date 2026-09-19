@@ -959,7 +959,6 @@ function W2GuPanel() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Employee Detail</CardTitle>
-              <CardDescription>Saved employee-specific and client-wide pay items appear in separate columns at the right. A dash means the item did not apply to that employee.</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -3116,7 +3115,7 @@ function PayrollFieldTotalsTable({ disclosure }: { disclosure?: PayrollFieldsDis
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-4 py-2">Field</th><th className="px-4 py-2">Treatment</th><th className="px-4 py-2">Paid by</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
-          <tbody>{rows.map((row, index) => <tr key={`${row.payroll_field_definition_id || row.payroll_item_field_entry_id || index}-${row.tax_treatment}`} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}<span className="ml-2 text-xs font-normal text-gray-500">{row.payroll_field_definition_id ? `#${row.payroll_field_definition_id}` : row.payroll_item_field_entry_id ? `entry #${row.payroll_item_field_entry_id}` : ''}</span></td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
+          <tbody>{rows.map((row, index) => <tr key={JSON.stringify([row.payroll_field_definition_id == null ? 'entry' : 'definition', row.payroll_field_definition_id ?? row.payroll_item_field_entry_id ?? index, row.label, row.kind, row.tax_treatment, row.category, row.reporting_group, row.employee_paid, row.employer_paid])} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}<span className="ml-2 text-xs font-normal text-gray-500">{row.payroll_field_definition_id ? `#${row.payroll_field_definition_id}` : row.payroll_item_field_entry_id ? `entry #${row.payroll_item_field_entry_id}` : ''}</span></td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
         </table>
       </div>
     </div>

@@ -20,7 +20,7 @@ RSpec.describe PayrollFieldDisclosure do
     definitions.each_with_index do |definition, index|
       item.payroll_item_field_entries.create!(
         payroll_field_definition: definition, label: "Allowance", kind: "addition",
-        tax_treatment: "taxable_addition", category: "other", amount: (index + 1) * 10
+        tax_treatment: "taxable_addition", category: "other", amount: BigDecimal("10") * (index + 1)
       )
     end
 

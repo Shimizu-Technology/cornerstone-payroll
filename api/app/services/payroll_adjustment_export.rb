@@ -53,14 +53,15 @@ class PayrollAdjustmentExport
     workers.flat_map { |worker| entries_for(worker) }
       .group_by { |entry| key(entry) }
       .sort_by { |_entry_key, entries| [ entries.first[:treatment].to_s, entries.first[:label].to_s, entries.first[:source].to_s ] }
-      .map do |_key, entries|
+      .map do |entry_key, entries|
         first = entries.first
         {
+          identity: entry_key[0] == :item ? "item:#{entry_key[1]}:#{entry_key[2]}" : "legacy:#{entry_key.join(':')}",
           kind: first[:kind],
           treatment: first[:treatment],
           label: first[:label],
           source: first[:source],
-          amount: entries.sum { |entry| entry[:amount].to_f }
+          amount: entries.sum(BigDecimal("0")) { |entry| BigDecimal(entry[:amount].to_s.presence || "0") }
         }
       end
   end

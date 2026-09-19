@@ -1864,7 +1864,9 @@ module Api
         def period_summary_component_values(columns, employee_id)
           columns.each_with_object({}) do |column, values|
             matches = column[:entries].select { |entry| entry[:employee_id] == employee_id }
-            values[column[:key]] = matches.sum { |entry| entry[:amount].to_f } if matches.any?
+            values[column[:key]] = matches.sum(BigDecimal("0")) do |entry|
+              BigDecimal(entry[:amount].to_s.presence || "0")
+            end if matches.any?
           end
         end
 
@@ -3462,9 +3464,9 @@ module Api
         end
 
         def payroll_adjustment_totals_sheet(report)
-          rows = [ [ "Kind", "Tax Treatment", "Adjustment", "Source", "Amount" ] ]
+          rows = [ [ "Adjustment ID", "Kind", "Tax Treatment", "Adjustment", "Source", "Amount" ] ]
           payroll_adjustment_export(report).grouped_totals.each do |entry|
-            rows << [ entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:amount] ]
+            rows << [ entry[:identity], entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:amount] ]
           end
           { name: "Payroll Adjustments Totals", rows: rows }
         end
@@ -3478,7 +3480,8 @@ module Api
           rows = [ [ "Field ID", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
           entries.group_by { |entry| payroll_field_export_key(entry) }.sort_by { |key, _| key.map(&:to_s) }.each do |key, grouped|
             entry = grouped.first
-            rows << [ key.join(":"), entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], grouped.sum { |item| item[:amount].to_f } ]
+            amount = grouped.sum(BigDecimal("0")) { |item| BigDecimal(item[:amount].to_s.presence || "0") }
+            rows << [ key.join(":"), entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], amount ]
           end
           { name: "Payroll Fields Totals", rows: rows }
         end

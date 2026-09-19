@@ -140,8 +140,8 @@ RSpec.describe PayrollRegisterPdfGenerator do
 
     it "keeps distinct same-name payroll fields separate in PDF totals" do
       report_data[:employees].first[:payroll_field_entries] = [
-        { id: 11, payroll_field_definition_id: 21, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: 12, employee_paid: true, employer_paid: false },
-        { id: 12, payroll_field_definition_id: 22, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: 7, employee_paid: true, employer_paid: false }
+        { id: 11, payroll_field_definition_id: 21, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: BigDecimal("12"), employee_paid: true, employer_paid: false },
+        { id: 12, payroll_field_definition_id: 22, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: BigDecimal("7"), employee_paid: true, employer_paid: false }
       ]
 
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
@@ -168,6 +168,17 @@ RSpec.describe PayrollRegisterPdfGenerator do
 
       expect(text).to include("Recurring and Manual Adjustments by Worker", "Employee Loan")
       expect(text).to include("Employee setup", "Post tax deduction", "$50.00")
+    end
+
+    it "labels same-name adjustment totals with their saved payroll item identity" do
+      report_data[:employees].first[:payroll_adjustments] = [
+        { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "manual", amount: BigDecimal("12") },
+        { payroll_item_id: 11, position: 0, label: "Allowance", treatment: "taxable_addition", source: "manual", amount: BigDecimal("7") }
+      ]
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Allowance [10/1]", "Allowance [11/1]", "$12.00", "$7.00")
     end
 
     it "distinguishes an assigned zero amount from a field that was not assigned" do
