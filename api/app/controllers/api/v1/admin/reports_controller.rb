@@ -1753,7 +1753,7 @@ module Api
         end
 
         def reportable_pay_periods(period)
-          PayPeriod.reportable_for_company(Company.find(current_company_id))
+          PayPeriod.reportable_for_company(current_company)
                    .where(pay_date: period.range)
         end
 
@@ -2403,7 +2403,7 @@ module Api
         end
 
         def employee_reportable_ytd_items(employee, year)
-          reportable_period_ids = PayPeriod.reportable_for_company(Company.find(current_company_id))
+          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
@@ -2417,7 +2417,7 @@ module Api
         end
 
         def ytd_custom_totals_by_employee(year)
-          reportable_period_ids = PayPeriod.reportable_for_company(Company.find(current_company_id))
+          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
