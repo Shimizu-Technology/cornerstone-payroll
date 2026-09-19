@@ -40,4 +40,21 @@ RSpec.describe TabularReportPdfGenerator do
     expect(text).to include("Payroll Fields")
     expect(text).to include("Certification Pay")
   end
+
+  it "paginates wide summary columns while repeating employee identity" do
+    headers = [ "Last Name", "First Name", "Employee Name" ] + (1..12).map { |number| "Distinct Field #{number}" }
+    values = [ "Perez", "Ana", "Ana Perez" ] + (1..12).map { |number| number * 10 }
+    pdf = described_class.new(
+      title: "Payroll Summary",
+      subtitle: "2026",
+      filename: "summary.pdf",
+      sheets: [ { name: "Payroll Summary", rows: [ headers, values ], pdf_frozen_columns: 3, pdf_max_columns: 9 } ]
+    ).generate
+    reader = PDF::Reader.new(StringIO.new(pdf))
+
+    expect(reader.page_count).to eq(2)
+    expect(reader.pages.map(&:text)).to all(include("Ana Perez"))
+    expect(reader.pages.first.text).to include("Distinct Field 1")
+    expect(reader.pages.last.text).to include("Distinct Field 12")
+  end
 end

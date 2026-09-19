@@ -333,6 +333,24 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Client Bonus")
     end
 
+    it "applies employee-only and client-wide same-name fields once each on recalculation" do
+      client_field = PayrollFieldDefinition.create!(
+        company: company, name: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan"
+      )
+      personal_field = PayrollFieldDefinition.create!(
+        company: company, owner_employee: employee, name: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan"
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: client_field, amount: 12)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: personal_field, amount: 7)
+
+      2.times { described_class.for(employee, payroll_item).calculate }
+
+      entries = payroll_item.payroll_item_field_entries.active.order(:payroll_field_definition_id)
+      expect(entries.pluck(:payroll_field_definition_id, :amount).map { |id, amount| [ id, amount.to_f ] })
+        .to contain_exactly([ client_field.id, 12.0 ], [ personal_field.id, 7.0 ])
+      expect(payroll_item.post_tax_payroll_field_entries_total.to_f).to eq(19.0)
+    end
+
     it "does not compound percentage-based taxable additions across recalculations" do
       field = PayrollFieldDefinition.create!(
         company: company,

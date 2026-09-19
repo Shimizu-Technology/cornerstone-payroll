@@ -519,7 +519,7 @@ export const employeeBulkImportApi = {
 };
 
 export const payrollFieldsApi = {
-  list: (params?: { active?: boolean }) =>
+  list: (params?: { active?: boolean; employee_id?: number }) =>
     api.get<{ payroll_fields: PayrollFieldDefinition[] }>('/admin/payroll_fields', params),
   create: (data: Partial<PayrollFieldDefinition>) =>
     api.post<{ payroll_field: PayrollFieldDefinition }>('/admin/payroll_fields', { payroll_field: data }),
@@ -534,6 +534,12 @@ export const employeePayrollFieldsApi = {
     api.get<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields`),
   create: (employeeId: number, data: Partial<EmployeePayrollField>) =>
     api.post<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields`, { employee_payroll_field: data }),
+  createPersonal: (employeeId: number, field: Partial<PayrollFieldDefinition>, assignment: Partial<EmployeePayrollField>, companyId?: number) =>
+    api.post<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
+      `/admin/employees/${employeeId}/payroll_fields/create_personal`,
+      { payroll_field: field, employee_payroll_field: assignment },
+      { companyId },
+    ),
   update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>) =>
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
@@ -1979,6 +1985,8 @@ export interface PayrollReportPeriod {
 }
 
 export interface PayrollFieldDisclosureEntry {
+  payroll_item_field_entry_id?: number | null;
+  payroll_field_definition_id?: number | null;
   payroll_item_id?: number;
   pay_period_id?: number;
   pay_date?: string;
@@ -2007,6 +2015,7 @@ export interface PayrollFieldsDisclosure {
 
 export interface PayrollAdjustmentDisclosureEntry {
   payroll_item_id?: number;
+  position?: number;
   pay_period_id?: number;
   pay_date?: string;
   period_description?: string;
@@ -2198,6 +2207,7 @@ export interface YtdSummaryReport {
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
+      component_values?: Record<string, number>;
     }[];
     company_totals: null | {
       year: number;
@@ -2226,6 +2236,8 @@ export interface YtdSummaryReport {
     };
     source_summary: PayrollSourceSummary;
     payroll_fields: PayrollFieldsDisclosure;
+    payroll_adjustments?: PayrollAdjustmentsDisclosure;
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; treatment: string }>;
   };
 }
 

@@ -59,21 +59,35 @@ class TabularReportPdfGenerator
     rows = Array(sheet[:rows]).map { |row| Array(row).map { |value| display_value(value) } }
     return if rows.empty?
 
-    pdf.font_size(13) { pdf.text sheet[:name].to_s, style: :bold, color: TEXT_DARK }
-    pdf.move_down 8
+    frozen = sheet[:pdf_frozen_columns].to_i
+    max_columns = sheet[:pdf_max_columns].to_i
+    panes = if max_columns.positive? && rows.first.length > max_columns && frozen < max_columns
+      detail_indices = (frozen...rows.first.length).to_a
+      detail_indices.each_slice(max_columns - frozen).map { |slice| (0...frozen).to_a + slice }
+    else
+      [ (0...rows.first.length).to_a ]
+    end
 
-    font_size = rows.first.length > 12 ? 6 : (rows.first.length > 8 ? 7 : 8)
-    pdf.table(rows, width: pdf.bounds.width, header: true, cell_style: {
-      size: font_size,
-      padding: [ 4, 4 ],
-      border_color: BORDER,
-      overflow: :shrink_to_fit,
-      min_font_size: 5
-    }) do
-      row(0).background_color = SUBHEADER_BG
-      row(0).font_style = :bold
-      row(0).text_color = TEXT_DARK
-      cells.text_color = TEXT_DARK
+    panes.each_with_index do |indices, pane_index|
+      pdf.start_new_page if pane_index.positive?
+      heading = panes.length > 1 ? "#{sheet[:name]} — columns #{pane_index + 1} of #{panes.length}" : sheet[:name].to_s
+      pdf.font_size(13) { pdf.text heading, style: :bold, color: TEXT_DARK }
+      pdf.move_down 8
+
+      pane_rows = rows.map { |row| indices.map { |index| row[index] } }
+      font_size = pane_rows.first.length > 8 ? 7 : 8
+      pdf.table(pane_rows, width: pdf.bounds.width, header: true, cell_style: {
+        size: font_size,
+        padding: [ 4, 4 ],
+        border_color: BORDER,
+        overflow: :shrink_to_fit,
+        min_font_size: 5
+      }) do
+        row(0).background_color = SUBHEADER_BG
+        row(0).font_style = :bold
+        row(0).text_color = TEXT_DARK
+        cells.text_color = TEXT_DARK
+      end
     end
   end
 

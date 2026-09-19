@@ -109,6 +109,9 @@ interface QuickPayrollFieldDraft {
   amount_type: PayrollFieldAmountType;
   default_amount: number;
   default_percentage: number;
+  start_date: string;
+  end_date: string;
+  notes: string;
 }
 
 type W4MonetaryField =
@@ -156,6 +159,9 @@ const initialQuickPayrollFieldDraft = (): QuickPayrollFieldDraft => ({
   amount_type: 'fixed',
   default_amount: 0,
   default_percentage: 0,
+  start_date: '',
+  end_date: '',
+  notes: '',
 });
 
 const toCurrencyDraft = (value: number | null | undefined): string =>
@@ -420,12 +426,12 @@ export function EmployeeForm() {
     );
 
     try {
-      const response = await payrollFieldsApi.list({ active: true });
+      const response = await payrollFieldsApi.list({ active: true, ...(id ? { employee_id: Number(id) } : {}) });
       if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
     } catch (err) {
       if (isCurrentRequest()) console.error('Failed to load payroll fields:', err);
     }
-  }, [companyId, isClient]);
+  }, [companyId, id, isClient]);
 
   const fetchEmployeePayrollFields = useCallback(async () => {
     if (!id || isClient) return;
@@ -607,7 +613,7 @@ export function EmployeeForm() {
     setLegacyCustomEarnings((prev) => prev.filter((earning) => earning.temp_id !== tempId));
   };
 
-  const availablePayrollFields = payrollFields.filter((field) => !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
+  const availablePayrollFields = payrollFields.filter((field) => !field.owner_employee_id && !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
 
   const defaultAssignmentValuesForField = (field?: PayrollFieldDefinition) => ({
     amount: field?.amount_type === 'fixed' ? toNumberOrZero(field.default_amount) : 0,
@@ -662,7 +668,11 @@ export function EmployeeForm() {
   };
 
   const createQuickPayrollField = async (): Promise<void> => {
-    if (!quickPayrollField.name.trim()) return;
+    if (!quickPayrollField.name.trim() || !id) return;
+    if (quickPayrollField.start_date && quickPayrollField.end_date && quickPayrollField.end_date < quickPayrollField.start_date) {
+      setGeneralError('Last payday must be on or after first payday.');
+      return;
+    }
 
     const requestId = ++quickPayrollFieldRequestIdRef.current;
     const requestedCompanyId = companyId;
@@ -672,18 +682,35 @@ export function EmployeeForm() {
     );
     setQuickPayrollFieldSaving(true);
     try {
-      const payload = {
+      const payload: Partial<PayrollFieldDefinition> = {
         ...quickPayrollField,
         name: quickPayrollField.name.trim(),
-        default_amount: quickPayrollField.amount_type === 'fixed' ? roundCurrencyValue(quickPayrollField.default_amount) : null,
+        default_amount: null,
         reporting_group: quickPayrollField.reporting_group || null,
-        default_percentage: quickPayrollField.amount_type === 'percentage' ? Number(quickPayrollField.default_percentage) || 0 : null,
+        default_percentage: null,
         show_in_payroll_grid: true,
       };
-      const response = await payrollFieldsApi.create(payload);
+      const response = await employeePayrollFieldsApi.createPersonal(Number(id), payload, {
+        amount: quickPayrollField.amount_type === 'fixed' ? roundCurrencyValue(quickPayrollField.default_amount) : null,
+        percentage: quickPayrollField.amount_type === 'percentage' ? Number(quickPayrollField.default_percentage) || 0 : null,
+        start_date: quickPayrollField.start_date || null,
+        end_date: quickPayrollField.end_date || null,
+        notes: quickPayrollField.notes.trim(),
+      }, requestedCompanyId);
       if (!isCurrentRequest()) return;
       setPayrollFields((prev) => [...prev, response.payroll_field]);
-      addEmployeePayrollField(response.payroll_field);
+      setEmployeePayrollFields((prev) => [...prev, {
+        temp_id: crypto.randomUUID(),
+        id: response.employee_payroll_field.id,
+        payroll_field_definition_id: response.payroll_field.id,
+        amount: toNumberOrZero(response.employee_payroll_field.amount),
+        percentage: toNumberOrZero(response.employee_payroll_field.percentage),
+        active: true,
+        notes: response.employee_payroll_field.notes || '',
+        start_date: response.employee_payroll_field.start_date || '',
+        end_date: response.employee_payroll_field.end_date || '',
+        dirty: false,
+      }]);
       setQuickPayrollField(initialQuickPayrollFieldDraft());
       setShowQuickPayrollField(false);
     } catch (err) {
@@ -1540,15 +1567,23 @@ export function EmployeeForm() {
           </Card>
         )}
 
+        {!isClient && !isEditing && (
+          <Card className="mb-6 border-blue-200 bg-blue-50/40">
+            <CardHeader>
+              <CardTitle>Pay adjustments for this employee</CardTitle>
+              <CardDescription>Every employee can have their own additions, deductions, and employer contributions. Save the employee first, then add items on their pay setup page.</CardDescription>
+            </CardHeader>
+          </Card>
+        )}
+
         {!isClient && isEditing && (
           <Card className="mb-6 border-blue-200 bg-blue-50/40">
             <CardHeader>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Assigned Payroll Fields</CardTitle>
+                  <CardTitle>Pay adjustments for this employee</CardTitle>
                   <CardDescription>
-                    Assign reusable client-wide fields for loans, 401(k), insurance, rent, reimbursements, and employer contributions.
-                    Field definitions are managed once for the whole client, then assigned to employees here.
+                    Add an employee-only earning or deduction, or assign a reusable client-wide field. Each item has its own tax treatment and payday range.
                   </CardDescription>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
@@ -1564,7 +1599,7 @@ export function EmployeeForm() {
               )}
               {payrollFields.length === 0 ? (
                 <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800 sm:flex-row sm:items-center sm:justify-between">
-                  <span>No client-wide payroll fields exist yet. Create reusable fields first, then assign them here.</span>
+                  <span>No client-wide payroll fields exist yet. You can still add an employee-only item below.</span>
                   <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
                     Create payroll fields
                   </Button>
@@ -1575,7 +1610,7 @@ export function EmployeeForm() {
                     const selectedField = payrollFields.find((field) => field.id === row.payroll_field_definition_id);
                     const rowAvailablePayrollFields = payrollFields.filter((field) =>
                       field.id === row.payroll_field_definition_id ||
-                      !employeePayrollFields.some((candidate) => candidate.temp_id !== row.temp_id && candidate.active !== false && candidate.payroll_field_definition_id === field.id)
+                      (!field.owner_employee_id && !employeePayrollFields.some((candidate) => candidate.temp_id !== row.temp_id && candidate.active !== false && candidate.payroll_field_definition_id === field.id))
                     );
                     return (
                       <div key={row.temp_id} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -1645,7 +1680,7 @@ export function EmployeeForm() {
                         </p>
                         {selectedField && (
                           <p className="mt-2 text-xs text-blue-800">
-                            {selectedField.kind.replace(/_/g, ' ')} · {selectedField.tax_treatment.replace(/_/g, ' ')} · {selectedField.category.replace(/_/g, ' ')}
+                            {selectedField.owner_employee_id ? 'Employee-only' : 'Client-wide'} · {selectedField.kind.replace(/_/g, ' ')} · {selectedField.tax_treatment.replace(/_/g, ' ')} · {selectedField.category.replace(/_/g, ' ')}
                           </p>
                         )}
                       </div>
@@ -1660,7 +1695,7 @@ export function EmployeeForm() {
                 </Button>
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowQuickPayrollField(true)}>
                   <Plus className="mr-1 h-4 w-4" />
-                  Create client-wide field
+                  Add employee-only item
                 </Button>
               </div>
 
@@ -1668,9 +1703,9 @@ export function EmployeeForm() {
                 <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">Create reusable client-wide payroll field</h3>
+                      <h3 className="text-base font-semibold text-slate-950">Add an employee-only pay item</h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
-                        This creates a field for the whole client and immediately assigns it to this employee.
+                        This item belongs only to this employee. It saves immediately; save the employee form separately for any other changes.
                       </p>
                     </div>
                     <Button type="button" variant="ghost" size="sm" onClick={closeQuickPayrollField}>
@@ -1743,6 +1778,17 @@ export function EmployeeForm() {
                         Amount starts blank/zero and is filled during payroll review.
                       </div>
                     )}
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="text-xs font-medium text-gray-600">First payday (optional)
+                      <Input type="date" value={quickPayrollField.start_date} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, start_date: event.target.value }))} />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600">Last payday (optional)
+                      <Input type="date" min={quickPayrollField.start_date || undefined} value={quickPayrollField.end_date} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, end_date: event.target.value }))} />
+                    </label>
+                    <label className="text-xs font-medium text-gray-600 md:col-span-2">Source or setup notes (optional)
+                      <Input value={quickPayrollField.notes} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Why this item applies" />
+                    </label>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim()}>

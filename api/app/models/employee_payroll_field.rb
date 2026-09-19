@@ -37,6 +37,9 @@ class EmployeePayrollField < ApplicationRecord
     if payroll_field_definition.company_id != employee.company_id
       errors.add(:payroll_field_definition, "must belong to the employee's company")
     end
+    if payroll_field_definition.owner_employee_id.present? && payroll_field_definition.owner_employee_id != employee.id
+      errors.add(:payroll_field_definition, "is reserved for another employee")
+    end
   end
 
   def loan_matches_assignment

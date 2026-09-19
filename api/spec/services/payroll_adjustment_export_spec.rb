@@ -37,4 +37,16 @@ RSpec.describe PayrollAdjustmentExport do
       hash_including(label: "Mileage", source: "manual", amount: 20.0)
     )
   end
+
+  it "keeps separately saved same-label adjustments in separate columns" do
+    rows = [
+      { payroll_adjustments: [ { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: 10 } ] },
+      { payroll_adjustments: [ { payroll_item_id: 11, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: 20 } ] }
+    ]
+    distinct = described_class.new(rows)
+
+    expect(distinct.headers.length).to eq(2)
+    expect(distinct.column_totals).to contain_exactly(10, 20)
+    expect(distinct.headers).to all(include("item #"))
+  end
 end

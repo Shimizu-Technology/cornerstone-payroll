@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2079,6 +2079,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_070000) do
     t.text "description"
     t.string "kind", null: false
     t.string "name", null: false
+    t.bigint "owner_employee_id"
     t.string "payee_name"
     t.string "reference_number"
     t.string "reporting_group"
@@ -2087,9 +2088,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_070000) do
     t.string "tax_treatment", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "active", "sort_order"], name: "idx_payroll_fields_company_active_order"
-    t.index ["company_id", "name"], name: "idx_payroll_fields_company_name", unique: true
+    t.index ["company_id", "name"], name: "idx_payroll_fields_company_name", unique: true, where: "(owner_employee_id IS NULL)"
     t.index ["company_id", "reporting_group"], name: "idx_payroll_fields_company_reporting_group"
     t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
+    t.index ["owner_employee_id", "name"], name: "idx_payroll_fields_employee_name", unique: true, where: "(owner_employee_id IS NOT NULL)"
+    t.index ["owner_employee_id"], name: "index_payroll_field_definitions_on_owner_employee_id"
   end
 
   create_table "payroll_filing_events", force: :cascade do |t|
@@ -3441,6 +3444,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_070000) do
   add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
+  add_foreign_key "payroll_field_definitions", "employees", column: "owner_employee_id"
   add_foreign_key "payroll_filing_events", "client_documents", column: "evidence_document_id", on_delete: :restrict
   add_foreign_key "payroll_filing_events", "client_documents", column: ["evidence_document_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_payroll_filing_events_document_tenant"
   add_foreign_key "payroll_filing_events", "companies", on_delete: :restrict

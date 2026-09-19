@@ -138,6 +138,17 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).to include("Employer Benefit", "Employer contribution", "$50.00")
     end
 
+    it "keeps distinct same-name payroll fields separate in PDF totals" do
+      report_data[:employees].first[:payroll_field_entries] = [
+        { id: 11, payroll_field_definition_id: 21, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: 12, employee_paid: true, employer_paid: false },
+        { id: 12, payroll_field_definition_id: 22, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: 7, employee_paid: true, employer_paid: false }
+      ]
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Loan [field #21]", "Loan [field #22]", "$12.00", "$7.00")
+    end
+
     it "renders named payroll fields beside each worker before the reconciliation summary" do
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
