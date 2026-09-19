@@ -168,3 +168,69 @@ test('payroll summary explains combined sources and any excluded unlinked record
   await expect(page.getByText(/1 QuickBooks record was excluded/)).toBeVisible();
   await expect(page.getByText(/Payroll field reconciliation below covers Cornerstone records only/)).toBeVisible();
 });
+
+test('payroll summary can show or hide active employees with $0 pay', async ({ page }) => {
+  await mockShell(page, 'admin');
+  const requestedVisibility: string[] = [];
+  await page.route('**/api/v1/admin/reports/ytd_summary**', (route) => {
+    const includeZeroPay = new URL(route.request().url()).searchParams.get('include_zero_pay');
+    requestedVisibility.push(includeZeroPay ?? 'default');
+    const paidEmployee = {
+      employee_id: 1, first_name: 'Paid', last_name: 'Worker', name: 'Paid Worker',
+      employment_type: 'hourly', status: 'active', gross_pay: 100, net_pay: 80,
+      withholding_tax: 10, social_security_tax: 6, medicare_tax: 1, retirement: 0,
+    };
+    const unpaidEmployee = { ...paidEmployee, employee_id: 2, first_name: 'Unpaid', last_name: 'Worker', name: 'Unpaid Worker', gross_pay: 0, net_pay: 0 };
+    return fulfillJson(route, { report: {
+      type: 'ytd_summary', year: 2026,
+      period: { label: '2026', start_date: '2026-01-01', end_date: '2026-12-31', basis: 'pay_date' },
+      employees: includeZeroPay === 'false' ? [paidEmployee] : [paidEmployee, unpaidEmployee],
+      employee_visibility: { include_zero_pay: includeZeroPay !== 'false', active_zero_pay_count: 1, displayed_count: includeZeroPay === 'false' ? 1 : 2 },
+      company_totals: { gross_pay: 100, net_pay: 80, payroll_count: 1 },
+      payroll_fields: { totals: [], entries: [], treatment_totals: {} },
+    } });
+  });
+
+  await page.goto('/reports?report=ytd-summary');
+  const checkbox = page.getByRole('checkbox', { name: 'Include active employees with $0 pay' });
+  await expect(checkbox).toBeChecked();
+  await page.getByRole('button', { name: 'View Report' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toBeVisible();
+
+  await checkbox.uncheck();
+  await page.getByRole('button', { name: 'View Report' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toHaveCount(0);
+  await expect(page.getByText('1 active $0-pay employee hidden')).toBeVisible();
+  await expect(page.getByText('Only employee rows are filtered; company totals still include all payroll activity.')).toBeVisible();
+  expect(requestedVisibility).toEqual(['true', 'false']);
+});
+
+test('client summary keeps the latest $0-pay selection when an older request finishes later', async ({ page }) => {
+  await mockShell(page, 'client');
+  await page.route('**/api/v1/client/pay_periods**', (route) => fulfillJson(route, { pay_periods: [] }));
+  await page.route('**/api/v1/client/reports/annual_payroll_summary', (route) => fulfillJson(route, { report: { years: [], totals: {} } }));
+  let releaseFirstRequest!: () => void;
+  const firstRequestGate = new Promise<void>((resolve) => { releaseFirstRequest = resolve; });
+  await page.route('**/api/v1/client/reports/ytd_summary**', async (route) => {
+    const includeZeroPay = new URL(route.request().url()).searchParams.get('include_zero_pay');
+    if (includeZeroPay === 'true') await firstRequestGate;
+    const employee = { employee_id: 1, name: 'Paid Worker', gross_pay: 100, net_pay: 80, withholding_tax: 10 };
+    return fulfillJson(route, { report: {
+      employees: includeZeroPay === 'false' ? [employee] : [employee, { ...employee, employee_id: 2, name: 'Unpaid Worker', gross_pay: 0, net_pay: 0 }],
+      employee_visibility: { include_zero_pay: includeZeroPay !== 'false', active_zero_pay_count: 1, displayed_count: includeZeroPay === 'false' ? 1 : 2 },
+      payroll_fields: { totals: [], entries: [], treatment_totals: {} },
+    } });
+  });
+
+  await page.goto('/reports');
+  const checkbox = page.getByRole('checkbox', { name: 'Include active employees with $0 pay' });
+  await checkbox.uncheck();
+  await expect(page.getByRole('row').filter({ hasText: 'Paid Worker' })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toHaveCount(0);
+
+  const olderResponse = page.waitForResponse((response) => response.url().includes('/client/reports/ytd_summary?') && new URL(response.url()).searchParams.get('include_zero_pay') === 'true');
+  releaseFirstRequest();
+  await olderResponse;
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toHaveCount(0);
+  await expect(page.getByText(/1 active \$0-pay employee hidden from detail/)).toBeVisible();
+});

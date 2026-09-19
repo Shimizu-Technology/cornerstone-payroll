@@ -1088,7 +1088,7 @@ module Api
           report = build_period_summary_report(period)
 
           send_spreadsheet!(
-            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.xlsx",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.xlsx",
             sheets: ytd_summary_sheets(report)
           )
         rescue ArgumentError => e
@@ -1101,7 +1101,7 @@ module Api
           send_tabular_pdf!(
             title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Period" : "Payroll Summary by Period",
             subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}#{report.dig(:meta, :provisional) ? ' — calculated, not paid' : ''}",
-            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.pdf",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.pdf",
             sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
               index.zero? ? sheet.merge(pdf_frozen_columns: 3, pdf_max_columns: 9) : sheet
             end
@@ -1114,7 +1114,7 @@ module Api
           period = payroll_reporting_period
           report = build_period_summary_report(period)
           send_tabular_csv!(
-            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}.csv",
+            filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.csv",
             sheet: ytd_summary_sheets(report).first
           )
         rescue ArgumentError => e
@@ -1192,6 +1192,18 @@ module Api
           end
 
           direction == "desc" ? sorted.reverse : sorted
+        end
+
+        def include_zero_pay_employees?
+          !params.key?(:include_zero_pay) || ActiveModel::Type::Boolean.new.cast(params[:include_zero_pay])
+        end
+
+        def period_summary_visibility_suffix
+          include_zero_pay_employees? ? "" : "_exclude_zero_pay"
+        end
+
+        def active_zero_pay_employee?(row)
+          row[:status] == "active" && row[:gross_pay].to_d.zero? && row[:net_pay].to_d.zero?
         end
 
         def transmittal_options
@@ -1805,9 +1817,12 @@ module Api
               unified: unified
             )
           end)
+          zero_pay_count = employee_rows.count { |row| active_zero_pay_employee?(row) }
+          employee_rows.reject! { |row| active_zero_pay_employee?(row) } unless include_zero_pay_employees?
+          visible_employee_ids = employee_rows.map { |row| row[:employee_id] }
           component_columns = period_summary_component_columns(
             disclosure.rows + adjustment_disclosure.rows,
-            employee_rows.map { |row| row[:employee_id] }
+            visible_employee_ids
           )
           employee_rows.each do |row|
             row[:component_values] = period_summary_component_values(component_columns, row[:employee_id])
@@ -1819,6 +1834,11 @@ module Api
             year: period.year,
             period: period.payload,
             employees: employee_rows,
+            employee_visibility: {
+              include_zero_pay: include_zero_pay_employees?,
+              active_zero_pay_count: zero_pay_count,
+              displayed_count: employee_rows.length
+            },
             component_columns: component_columns.map { |column| column.except(:entries) },
             company_totals: payroll_period_company_totals(
               items, period, historical_paychecks, historical_adjustments, unified: unified
@@ -1831,12 +1851,12 @@ module Api
             ),
             payroll_fields: {
               totals: disclosure.totals,
-              entries: disclosure.rows,
+              entries: disclosure.rows.select { |entry| visible_employee_ids.include?(entry[:employee_id]) },
               treatment_totals: disclosure.treatment_totals
             },
             payroll_adjustments: {
               totals: adjustment_disclosure.totals,
-              entries: adjustment_disclosure.rows,
+              entries: adjustment_disclosure.rows.select { |entry| visible_employee_ids.include?(entry[:employee_id]) },
               treatment_totals: adjustment_disclosure.treatment_totals
             }
           }
@@ -2595,6 +2615,7 @@ module Api
           meta = report_value(report, :meta) || {}
           pp = report_value(report, :pay_period) || {}
           source = report_value(report, :source) || {}
+          visibility = report_value(report, :employee_visibility)
           rows = [
             [ "Field", "Value" ],
             [ "Report", title ],
@@ -2605,6 +2626,8 @@ module Api
             [ "Source", report_value(source, :label) ],
             [ "Source handling", report_value(source, :statement) ],
             [ "Payroll status", report_value(meta, :payroll_status_note) ],
+            [ "Active $0-pay employees", visibility.nil? ? nil : (visibility[:include_zero_pay] ? "Included" : "Excluded") ],
+            [ "Active $0-pay employees in selection", report_value(report, :employee_visibility, :active_zero_pay_count) ],
             [ "Generated At", report_value(meta, :generated_at) ]
           ].reject { |_, value| value.blank? }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -1298,6 +1298,7 @@ export function YtdSummaryPanel() {
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
+  const [includeZeroPay, setIncludeZeroPay] = useState(true);
   const [sortBy, setSortBy] = useState<NonNullable<YtdSummaryParams['sort_by']>>('name');
   const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
@@ -1306,6 +1307,7 @@ export function YtdSummaryPanel() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
+  const reportRequestSequence = useRef(0);
 
   function calendarRange(mode: 'quarter' | 'month'): { start_date: string; end_date: string } {
     const startMonth = mode === 'quarter' ? ((quarter - 1) * 3) + 1 : month;
@@ -1345,6 +1347,7 @@ export function YtdSummaryPanel() {
       ...(search.trim() ? { search: search.trim() } : {}),
       ...(employmentType !== 'all' ? { employment_type: employmentType } : {}),
       ...(status !== 'all' ? { status } : {}),
+      include_zero_pay: includeZeroPay,
       ...overrides,
     };
   }
@@ -1375,16 +1378,17 @@ export function YtdSummaryPanel() {
   }
 
   async function loadReport(overrides: Partial<YtdSummaryParams> = {}) {
+    const requestSequence = ++reportRequestSequence.current;
     setLoading(true);
     setError(null);
     setReport(null);
     try {
       const res = await reportsApi.ytdSummary(reportParams(overrides));
-      setReport(res.report);
+      if (requestSequence === reportRequestSequence.current) setReport(res.report);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (requestSequence === reportRequestSequence.current) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (requestSequence === reportRequestSequence.current) setLoading(false);
     }
   }
 
@@ -1528,6 +1532,15 @@ export function YtdSummaryPanel() {
                 <option value="terminated">Terminated</option>
               </select>
             </div>
+            <label className="flex min-h-12 items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={includeZeroPay}
+                onChange={(e) => { reportRequestSequence.current += 1; setIncludeZeroPay(e.target.checked); setReport(null); setLoading(false); }}
+                className="h-4 w-4 accent-primary"
+              />
+              Include active employees with $0 pay
+            </label>
             <Button onClick={() => loadReport()} disabled={loading}>
               {loading ? 'Loading…' : 'View Report'}
             </Button>
@@ -1552,10 +1565,16 @@ export function YtdSummaryPanel() {
                 {report.company_totals?.payroll_count != null && (
                   <> &bull; {report.company_totals.payroll_count} payroll{report.company_totals.payroll_count !== 1 ? 's' : ''}</>
                 )}
+                {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
+                  <> &bull; {report.employee_visibility.active_zero_pay_count} active $0-pay employee{report.employee_visibility.active_zero_pay_count !== 1 ? 's' : ''} hidden</>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
+              {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
+                <p className="text-xs text-gray-600">Only employee rows are filtered; company totals still include all payroll activity.</p>
+              )}
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
