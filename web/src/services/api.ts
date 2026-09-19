@@ -2103,6 +2103,7 @@ export interface EmployeePayHistoryRecord {
   total_deductions: number;
   net_pay: number;
   check_number: string | null;
+  payment_delivery_method?: import('@/types').PaymentDeliveryMethod;
   reason?: string;
   source: {
     system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';

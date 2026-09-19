@@ -49,6 +49,7 @@ import {
 import { employeesApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
+import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
@@ -275,6 +276,7 @@ export function EmployeeWorkspace(): ReactElement {
             {statusConfig?.label || employee.status}
           </Badge>
           <Badge variant="default">{employee.tax_classification?.toUpperCase() || (employee.employment_type === 'contractor' ? '1099' : 'W-2')}</Badge>
+          <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{employeePaymentDelivery(employee).label}</Badge>
           {employee.configuration_source === 'quickbooks_history' && <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? 'Imported setup review' : 'Imported setup reviewed'}</Badge>}
           <span className="text-sm font-medium text-neutral-500">Employee #{employee.id}</span>
         </div>
@@ -347,11 +349,12 @@ function EmployeeOverview({
   summary,
   returnTo,
 }: EmployeeOverviewProps): ReactElement {
+  const variableSalary = employee.employment_type === 'salary' && employee.salary_type === 'variable';
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric icon={BadgeDollarSign} label="Current pay rate" value={formatCurrency(Number(employee.pay_rate) || 0)} detail={employee.employment_type === 'hourly' ? 'per hour' : employee.salary_type === 'per_period' ? 'per pay period' : employee.employment_type === 'contractor' ? 'contract rate' : 'annual salary'} />
-        <Metric icon={Banknote} label="Recent gross" value={latestPay ? formatCurrency(latestPay.gross_pay) : 'No payroll yet'} detail={latestPay ? `Paid ${formatDate(latestPay.pay_date)}` : 'No committed payroll records'} />
+        <Metric icon={BadgeDollarSign} label="Current pay rate" value={variableSalary ? 'Set each pay period' : formatCurrency(Number(employee.pay_rate) || 0)} detail={variableSalary ? 'Variable salary' : employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly') ? 'per hour' : employee.salary_type === 'per_period' || employee.employment_type === 'contractor' ? 'per pay period' : 'annual salary'} />
+        <Metric icon={Banknote} label="Recent gross" value={latestPay ? formatCurrency(latestPay.gross_pay) : 'No payroll yet'} detail={latestPay ? `Pay date ${formatDate(latestPay.pay_date)}` : 'No committed payroll records'} />
         <Metric icon={ReceiptText} label="Recorded gross" value={formatCurrency(numericValue(summary, 'gross_pay'))} detail={`${numericValue(summary, 'payroll_count')} payroll record${numericValue(summary, 'payroll_count') === 1 ? '' : 's'}`} />
         <Metric icon={CalendarDays} label="Recorded net" value={formatCurrency(numericValue(summary, 'net_pay'))} detail="Across imported and Cornerstone payroll" />
       </div>
@@ -367,7 +370,7 @@ function EmployeeOverview({
               <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
                 <div>
                   <div className="flex flex-wrap items-center gap-2"><p className="font-display text-lg font-bold text-neutral-950">{latestPay.period_description}</p><Badge variant={latestPay.record_type === 'native' ? 'default' : 'warning'}>{latestPay.source.label}</Badge></div>
-                  <p className="mt-2 text-sm text-neutral-500">Pay date {formatDate(latestPay.pay_date)} · {formatCurrency(latestPay.net_pay)} net</p>
+                  <p className="mt-2 text-sm text-neutral-500">Pay date {formatDate(latestPay.pay_date)} · {formatCurrency(latestPay.net_pay)} net{latestPay.record_type === 'native' && latestPay.payment_delivery_method ? ` · ${latestPay.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'}` : ''}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={payHistoryRunPath(companyId, latestPay, returnTo)}>{latestPay.record_type === 'native' ? 'Pay run' : 'Imported pay run'} <ArrowRight className="h-4 w-4" /></Link>
@@ -384,6 +387,10 @@ function EmployeeOverview({
             <ContextRow label="Department" value={employee.department?.name || 'Not assigned'} />
             <ContextRow label="Job title" value={employee.job_title || 'Not recorded'} />
             <ContextRow label="Pay frequency" value={payFrequencyLabels[employee.pay_frequency] || employee.pay_frequency} />
+            <div className="border-t border-neutral-100 pt-3">
+              <ContextRow label="Paid by" value={employeePaymentDelivery(employee).label} />
+              <p className="mt-2 text-xs leading-5 text-neutral-600">{employeePaymentDelivery(employee).detail} Each pay run can use a different method.</p>
+            </div>
             <ContextRow
               label="Tax filing"
               value={filingStatusLabels[employee.current_w4_election?.filing_status || employee.filing_status] || employee.current_w4_election?.filing_status || employee.filing_status}
@@ -495,8 +502,9 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
         <CardHeader><CardTitle>Payroll setup</CardTitle><p className="mt-2 text-sm text-neutral-500">A readable summary of the values used when this employee enters a pay run.</p></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <ContextRow label="Worker type" value={employmentTypeLabels[employee.employment_type] || employee.employment_type} />
-          <ContextRow label="Pay rate" value={formatCurrency(Number(employee.pay_rate) || 0)} />
+          <ContextRow label="Pay rate" value={employee.employment_type === 'salary' && employee.salary_type === 'variable' ? 'Set each pay period' : formatCurrency(Number(employee.pay_rate) || 0)} />
           <ContextRow label="Pay frequency" value={payFrequencyLabels[employee.pay_frequency] || employee.pay_frequency} />
+          <ContextRow label="Paid by" value={employeePaymentDelivery(employee).label} />
           <ContextRow label="Salary treatment" value={employee.salary_type?.replace('_', ' ') || 'Not applicable'} />
           <ContextRow label="Active wage rates" value={String(wageRateCount || 1)} />
           <ContextRow label="Recurring adjustments" value={String(adjustmentCount)} />
@@ -619,7 +627,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
           <p className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records match these filters.</p>
         ) : (
           <Table>
-            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Check</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
             <TableBody striped>
               {visibleHistory.map((item) => (
                 <TableRow key={item.key}>
@@ -629,7 +637,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell>{item.check_number || 'Not assigned'}</TableCell>
+                  <TableCell>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
                   <TableCell className="text-right"><Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
                 </TableRow>
               ))}

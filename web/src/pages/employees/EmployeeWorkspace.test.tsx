@@ -107,4 +107,50 @@ describe('EmployeeWorkspace imported setup certification', () => {
     }));
     expect(await screen.findByText('Setup review item documented.')).toBeTruthy();
   });
+
+  it('shows direct deposit and its external transfer limitation on the overview', async () => {
+    apiMocks.get.mockResolvedValue({ data: { ...employee, payment_delivery_method: 'direct_deposit' } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Cornerstone prepares an earnings stub; the bank transfer is handled and confirmed outside the app/)).toBeTruthy();
+    expect(screen.getAllByText('Direct deposit').length).toBeGreaterThan(0);
+  });
+
+  it('identifies an unreviewed payment method as a paper check default', async () => {
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Payment method has not been reviewed/)).toBeTruthy();
+    expect(screen.getAllByText('Paper check (default)').length).toBeGreaterThan(0);
+    expect(screen.getByText('Set each pay period')).toBeTruthy();
+  });
+
+  it('shows direct deposit in pay history instead of an unassigned check', async () => {
+    apiMocks.employeePayHistory.mockResolvedValue({ report: {
+      summary: {},
+      history: [{
+        key: 'native:4', record_type: 'native', payroll_item_id: 4, pay_period_id: 5,
+        pay_date: '2026-09-19', period_description: 'September payroll',
+        source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+        gross_pay: 900, total_deductions: 100, net_pay: 800,
+        payment_delivery_method: 'direct_deposit', check_number: null,
+      }],
+    } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/pay-history']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Direct deposit' })).toBeTruthy();
+    expect(screen.queryByText('Not assigned')).toBeNull();
+  });
 });

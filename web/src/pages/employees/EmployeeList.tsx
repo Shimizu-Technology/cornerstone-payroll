@@ -36,8 +36,9 @@ import {
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { currentAppPath, employeeEditPath, employeePath, newEmployeePath } from '@/lib/routes';
+import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
+import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
@@ -63,9 +64,7 @@ export function EmployeeList() {
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
     void navigate(
-      isClient
-        ? employeeEditPath(companyId, employeeId, { returnTo })
-        : employeePath(companyId, employeeId, 'overview', { returnTo })
+      employeePath(companyId, employeeId, 'overview', { returnTo })
     );
   };
   
@@ -458,7 +457,7 @@ export function EmployeeList() {
                               key={employee.id}
                               employee={employee}
                               departments={companyDepartments}
-                              actionLabel={isClient ? 'Edit employee' : 'Open employee'}
+                              actionLabel="Open employee"
                               onOpen={() => openEmployee(employee.id)}
                             />
                           ))}
@@ -492,6 +491,7 @@ export function EmployeeList() {
                                 onToggle={toggleSort}
                                 className="bg-gray-50"
                               />
+                              <TableHead className="bg-gray-50">Paid by</TableHead>
                               <SortableHead
                                 label="Status"
                                 column="status"
@@ -510,7 +510,7 @@ export function EmployeeList() {
                                 employee={employee}
                                 departments={companyDepartments}
                                 rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
-                                actionLabel={isClient ? 'Edit' : 'Open'}
+                                actionLabel="Open"
                                 onOpen={() => openEmployee(employee.id)}
                               />
                             ))}
@@ -623,6 +623,7 @@ function EmployeeMobileCard({
           <div className="mt-4 grid grid-cols-2 gap-3">
             <MobileField label="Department" value={deptName || '—'} />
             <MobileField label="Pay" value={payRateLabel} />
+            <MobileField label="Paid by" value={employeePaymentDelivery(employee).label} />
           </div>
           {hasMultipleRates && (
             <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
@@ -719,6 +720,10 @@ function EmployeeTableRow({
             </p>
           )}
         </div>
+      </TableCell>
+      <TableCell>
+        <span className="text-sm font-medium text-neutral-900">{employeePaymentDelivery(employee).label}</span>
+        {!employee.payment_delivery_method && <span className="block text-xs text-amber-700">Not reviewed</span>}
       </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-2">

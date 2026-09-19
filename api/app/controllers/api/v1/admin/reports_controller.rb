@@ -2141,6 +2141,7 @@ module Api
             total_deductions: item.total_deductions.to_f,
             net_pay: item.net_pay.to_f,
             check_number: item.check_number,
+            payment_delivery_method: item.effective_payment_delivery_method,
             payroll_field_entries: payroll_field_entry_rows(item),
             payroll_field_totals: payroll_field_totals(item),
             source: {
