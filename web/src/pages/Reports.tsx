@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -1307,6 +1307,7 @@ export function YtdSummaryPanel() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
+  const reportRequestSequence = useRef(0);
 
   function calendarRange(mode: 'quarter' | 'month'): { start_date: string; end_date: string } {
     const startMonth = mode === 'quarter' ? ((quarter - 1) * 3) + 1 : month;
@@ -1377,16 +1378,17 @@ export function YtdSummaryPanel() {
   }
 
   async function loadReport(overrides: Partial<YtdSummaryParams> = {}) {
+    const requestSequence = ++reportRequestSequence.current;
     setLoading(true);
     setError(null);
     setReport(null);
     try {
       const res = await reportsApi.ytdSummary(reportParams(overrides));
-      setReport(res.report);
+      if (requestSequence === reportRequestSequence.current) setReport(res.report);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (requestSequence === reportRequestSequence.current) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (requestSequence === reportRequestSequence.current) setLoading(false);
     }
   }
 
@@ -1534,7 +1536,7 @@ export function YtdSummaryPanel() {
               <input
                 type="checkbox"
                 checked={includeZeroPay}
-                onChange={(e) => { setIncludeZeroPay(e.target.checked); setReport(null); }}
+                onChange={(e) => { reportRequestSequence.current += 1; setIncludeZeroPay(e.target.checked); setReport(null); setLoading(false); }}
                 className="h-4 w-4 accent-primary"
               />
               Include active employees with $0 pay
