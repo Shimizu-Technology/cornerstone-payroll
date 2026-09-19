@@ -309,7 +309,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             <p className="mt-2 text-sm text-neutral-500">Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.</p>
           </div>
           {payRun.status === 'committed' && (
-            <Button onClick={() => setCheckPrintOpen(true)} disabled={countActivePayrollChecks(items) === 0 && hasNonEmployeeChecks === false}>
+            <Button onClick={() => setCheckPrintOpen(true)} disabled={countActivePayrollChecks(items) === 0 && hasNonEmployeeChecks !== true}>
               <Printer className="mr-2 h-4 w-4" />Print checks
             </Button>
           )}
