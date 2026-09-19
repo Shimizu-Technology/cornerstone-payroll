@@ -19,7 +19,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
-import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
+import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -34,6 +34,7 @@ const initialFormData: EmployeeFormData = {
   salary_type: 'annual',
   pay_rate: 0,
   pay_frequency: 'biweekly',
+  payment_delivery_method: null,
   filing_status: 'single',
   allowances: 0,
   additional_withholding: 0,
@@ -330,6 +331,7 @@ export function EmployeeForm() {
         salary_type: employee.salary_type || 'annual',
         pay_rate: toNumberOrZero(employee.pay_rate),
         pay_frequency: employee.pay_frequency,
+        payment_delivery_method: employee.payment_delivery_method || null,
         filing_status: normalizeFilingStatus(employee.filing_status),
         allowances: toNumberOrZero(employee.allowances),
         additional_withholding: toNumberOrZero(employee.additional_withholding),
@@ -1404,6 +1406,25 @@ export function EmployeeForm() {
                   <option value="semimonthly">Semi-monthly</option>
                   <option value="monthly">Monthly</option>
                 </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="payment_delivery_method">
+                  How this employee is paid
+                </label>
+                <Select
+                  id="payment_delivery_method"
+                  name="payment_delivery_method"
+                  value={form.payment_delivery_method || ''}
+                  disabled={isClient}
+                  onChange={(event) => handleChange('payment_delivery_method', (event.target.value || null) as PaymentDeliveryMethod | null)}
+                >
+                  <option value="">Paper check (default; not reviewed)</option>
+                  <option value="paper_check">Paper check</option>
+                  <option value="direct_deposit">Direct deposit — print earnings stub</option>
+                </Select>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">
+                  {isClient ? 'Ask the payroll team to verify or change this setting.' : 'This is the default for future runs. Existing runs keep their own method. Printing a stub does not send a bank transfer.'}
+                </p>
               </div>
             </div>
 

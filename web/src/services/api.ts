@@ -1811,6 +1811,11 @@ export const payrollItemsApi = {
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
+  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean }) =>
+    api.patch<{ payroll_item: PayrollItem; pay_period_status: string }>(
+      `/admin/pay_periods/${payPeriodId}/payroll_items/${id}/payment_method`,
+      { payment_delivery_method: method, ...options },
+    ),
 };
 
 // Time Entries
@@ -2176,6 +2181,7 @@ export interface TaxSummaryReport {
 export interface YtdSummaryReport {
   report: {
     type: string;
+    meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
     period: PayrollReportPeriod;
     employees: {
@@ -2658,6 +2664,7 @@ export interface PayrollFinalRecord {
   };
   employee_payments: {
     required_count: number;
+    direct_deposit_count: number;
     assigned_count: number;
     printed_count: number;
     delivered_count: number;
@@ -2670,6 +2677,7 @@ export interface PayrollFinalRecord {
       employee_id: number;
       employee_name: string;
       amount: string;
+      payment_delivery_method: 'paper_check' | 'direct_deposit';
       check_number: string | null;
       issuance_status: string;
       reconciliation_status: string;
@@ -3069,6 +3077,8 @@ export const payStubsApi = {
       pay_period_id: payPeriodId,
       payroll_item_ids: payrollItemIds && payrollItemIds.length > 0 ? payrollItemIds : undefined,
     }),
+  directDepositStubsPdf: (payPeriodId: number) =>
+    api.postBlob('/admin/pay_stubs/direct_deposit_stubs_pdf', { pay_period_id: payPeriodId }),
   employeeStubs: (employeeId: number, limit?: number) =>
     api.get<{ employee: { id: number; name: string }; pay_stubs: PayStubInfo[] }>(`/admin/pay_stubs/employee/${employeeId}`, { limit }),
 };

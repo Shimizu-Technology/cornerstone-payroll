@@ -54,7 +54,9 @@ module Api
         # Download the PDF (generate on-the-fly or from storage)
         def download
           # Try to get from storage first
-          if r2_configured?
+          # The delivery method can be changed for an unissued committed run.
+          # A previously stored PDF may still name the old method or check.
+          if r2_configured? && @payroll_item.payment_delivery_method.blank?
             storage = R2StorageService.new
             key = existing_storage_key(storage: storage)
             pdf_data = storage.download(key) if key.present?
@@ -126,7 +128,12 @@ module Api
 
         # POST /api/v1/admin/pay_stubs/batch_pdf
         # Generate one plain-paper PDF containing all or selected pay stubs for a pay period.
+        def direct_deposit_stubs_pdf
+          batch_pdf
+        end
+
         def batch_pdf
+          deposit_only = action_name == "direct_deposit_stubs_pdf"
           pay_period = PayPeriod.find(params[:pay_period_id])
 
           unless pay_period.company_id == current_company_id
@@ -163,29 +170,39 @@ module Api
             if unpaid_items.any?
               names = unpaid_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
               return render json: {
-                error: "Selected employees were not paid in this pay period",
+                error: "Selected employees have no printable net-pay stub in this pay period",
                 details: "Remove #{names} from the selection and try again."
               }, status: :unprocessable_entity
+            end
+
+            if deposit_only && selected_items.any? { |item| item.effective_payment_delivery_method != "direct_deposit" }
+              return render json: { error: "The direct-deposit stub selection may include only direct-deposit employees" }, status: :unprocessable_entity
             end
 
             items = selected_items
           else
             all_items = base_items.not_voided.to_a
-            items = all_items.select { |item| pay_stub_printable?(item) }
+            items = all_items.select do |item|
+              pay_stub_printable?(item) && (!deposit_only || item.effective_payment_delivery_method == "direct_deposit")
+            end
             skipped_count = all_items.count - items.count
           end
 
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
 
           if items.empty?
-            return render json: { error: "No pay stubs found for this pay period" }, status: :unprocessable_entity
+            return render json: { error: deposit_only ? "No direct-deposit stubs found for this pay period" : "No pay stubs found for this pay period" }, status: :unprocessable_entity
           end
 
           combined_pdf = combine_pdfs(items.map { |item| PayStubGenerator.new(item).generate })
           response.set_header("X-Pay-Stubs-Generated", items.count.to_s)
           response.set_header("X-Pay-Stubs-Skipped", skipped_count.to_s)
           pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
-          filename_prefix = requested_ids.any? ? "selected_paystubs" : "paystubs"
+          filename_prefix = if deposit_only
+            requested_ids.any? ? "selected_direct_deposit_stubs" : "direct_deposit_stubs"
+          else
+            requested_ids.any? ? "selected_paystubs" : "paystubs"
+          end
 
           send_data combined_pdf,
             type: "application/pdf",

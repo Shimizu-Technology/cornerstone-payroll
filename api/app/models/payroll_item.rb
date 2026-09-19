@@ -49,6 +49,7 @@ class PayrollItem < ApplicationRecord
   before_validation :normalize_pay_precision
 
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
+  validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
   # Hours / wage validations only apply to non-correction rows. A correction
   # row stores deltas (corrected_value - original_value), which can legitimately
@@ -69,6 +70,7 @@ class PayrollItem < ApplicationRecord
   validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }, unless: :correction_entry?
   validates :tips_paid_out, numericality: true, if: :correction_entry?
   validate :company_matches_pay_period
+  validate :direct_deposit_has_no_check_number
   validate :custom_deductions_are_valid
   validate :payroll_adjustments_are_valid
 
@@ -76,6 +78,13 @@ class PayrollItem < ApplicationRecord
   validates :employee_id, uniqueness: { scope: :pay_period_id }
 
   delegate :full_name, to: :employee, prefix: true
+
+  # Before commitment a nil choice follows the employee default. A committed
+  # row always stores the resolved method, so later profile edits cannot change
+  # the meaning of an issued payroll run. Older committed rows are paper checks.
+  def effective_payment_delivery_method
+    payment_delivery_method.presence || (pay_period.committed? ? "paper_check" : employee&.payment_delivery_method.presence) || "paper_check"
+  end
 
   # True when this row was created by IssueCorrectivePaycheckService and
   # represents a delta against another payroll item (rather than an
@@ -664,6 +673,12 @@ class PayrollItem < ApplicationRecord
     return if company_id == pay_period.company_id
 
     errors.add(:company_id, "must match the pay period company")
+  end
+
+  def direct_deposit_has_no_check_number
+    return unless payment_delivery_method == "direct_deposit" && check_number.present?
+
+    errors.add(:check_number, "cannot be assigned to a direct-deposit payment")
   end
 
   def custom_deductions_are_valid

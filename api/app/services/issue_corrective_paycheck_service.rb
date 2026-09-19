@@ -556,6 +556,7 @@ class IssueCorrectivePaycheckService
       employee_id:                       @employee.id,
       company_id:                        supplemental.company_id,
       employment_type:                   original_item.employment_type,
+      payment_delivery_method:          @employee.payment_delivery_method.presence || "paper_check",
       correction_for_payroll_item_id:    original_item.id,
       correction_reason:                 @reason,
 
@@ -642,7 +643,7 @@ class IssueCorrectivePaycheckService
     # but don't generate paper.
     items_needing_check = supplemental.payroll_items
       .where(check_number: nil)
-      .select { |i| i.net_pay.to_f > 0 }
+      .select { |i| i.net_pay.to_f > 0 && i.payment_delivery_method == "paper_check" }
     supplemental.company.assign_check_numbers!(items_needing_check) if items_needing_check.any?
 
     # FIT auto-deposit: if there's a positive FIT delta and the company

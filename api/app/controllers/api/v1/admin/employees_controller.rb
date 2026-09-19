@@ -234,6 +234,7 @@ module Api
             :salary_type,
             :pay_rate,
             :pay_frequency,
+            :payment_delivery_method,
             :filing_status,
             :allowances,
             :additional_withholding,

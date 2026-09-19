@@ -122,6 +122,9 @@ class Company < ApplicationRecord
   def assign_check_numbers!(items)
     items = items.to_a
     return 0 if items.empty?
+    if items.any? { |item| item.effective_payment_delivery_method == "direct_deposit" }
+      raise ArgumentError, "Direct-deposit payments cannot receive paper check numbers"
+    end
 
     assigned = 0
     self.class.transaction do
@@ -257,6 +260,10 @@ class Company < ApplicationRecord
     payroll_numbers = PayrollItem.where(company_id: id, check_number: numbers).pluck(:check_number)
     non_employee_numbers = NonEmployeeCheck.where(company_id: id, check_number: numbers).pluck(:check_number)
 
-    Set.new(payroll_numbers + non_employee_numbers)
+    historical_numbers = CheckEvent.joins(:payroll_item)
+      .where(payroll_items: { company_id: id }, check_number: numbers)
+      .pluck(:check_number)
+
+    Set.new(payroll_numbers + non_employee_numbers + historical_numbers)
   end
 end

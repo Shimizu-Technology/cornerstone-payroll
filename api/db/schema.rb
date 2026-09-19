@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -998,6 +998,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
     t.string "middle_name"
     t.string "pay_frequency", default: "biweekly"
     t.decimal "pay_rate", precision: 18, scale: 6, null: false
+    t.string "payment_delivery_method"
     t.string "phone"
     t.boolean "portal_pending_approval", default: false, null: false
     t.bigint "previous_employee_id"
@@ -1029,6 +1030,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
+    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying, 'direct_deposit'::character varying]::text[]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
   end
 
@@ -2452,6 +2454,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
     t.bigint "pay_period_id", null: false
     t.decimal "pay_rate", precision: 18, scale: 6, null: false
+    t.string "payment_delivery_method"
     t.jsonb "payroll_adjustments", default: [], null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "qualified_overtime_compensation", precision: 14, scale: 2
@@ -2505,6 +2508,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_010000) do
     t.index ["voided"], name: "index_payroll_items_on_voided"
     t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying::text, 'mosa_revel'::character varying::text]))", name: "payroll_items_bonus_source_check"
     t.check_constraint "imported_bonus IS NULL OR imported_bonus >= 0::numeric", name: "payroll_items_imported_bonus_check"
+    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying, 'direct_deposit'::character varying]::text[]))", name: "payroll_items_payment_delivery_method_check"
+    t.check_constraint "payment_delivery_method::text IS DISTINCT FROM 'direct_deposit'::text OR check_number IS NULL", name: "payroll_items_direct_deposit_no_check_number"
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
   end
 

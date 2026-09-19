@@ -133,6 +133,12 @@ class PayPeriod < ApplicationRecord
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
   scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
+  # A migration rehearsal cannot commit or pay anyone. Its calculated runs are
+  # provisional inputs for testing reports and cumulative tax math only.
+  def self.reportable_for_company(company)
+    base = where(company_id: company.id, correction_status: [ nil, "correction" ])
+    company.migration_rehearsal? ? base.where(status: %w[calculated approved]) : base.committed
+  end
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
   # Dates are required for normal records; NULLS LAST is intentionally kept in
@@ -218,7 +224,26 @@ class PayPeriod < ApplicationRecord
         unapproved_at: nil,
         unapproved_by_id: nil
       )
+      invalidate_later_rehearsal_calculations!
     end
+  end
+
+  def invalidate_later_rehearsal_calculations!
+    return unless migration_rehearsal?
+
+    company.pay_periods
+      .where(status: %w[calculated approved])
+      .where("pay_date > :date OR (pay_date = :date AND id > :id)", date: pay_date, id: id)
+      .find_each do |later|
+        later.supersede_current_review_package!(
+          reason: "An earlier rehearsal run changed. Recalculate in pay-date order."
+        )
+        later.update!(
+          status: "draft", calculated_at: nil, calculated_by_id: nil,
+          approved_at: nil, approved_by_id: nil,
+          unapproved_at: nil, unapproved_by_id: nil
+        )
+      end
   end
 
   def supersede_current_review_package!(reason:, at: Time.current)
