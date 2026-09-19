@@ -835,7 +835,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     let releaseQuickField: (() => void) | undefined;
     const quickFieldStarted = new Promise<void>((resolve): void => { markQuickFieldStarted = resolve; });
     const quickFieldReleased = new Promise<void>((resolve): void => { releaseQuickField = resolve; });
-    await page.route('**/api/v1/admin/payroll_fields', async (route): Promise<void> => {
+    const createPersonalPath = `/api/v1/admin/employees/${fixture.employee_id}/payroll_fields/create_personal`;
+    await page.route(`**${createPersonalPath}`, async (route): Promise<void> => {
       if (route.request().method() !== 'POST' || route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
         await route.continue();
         return;
@@ -848,11 +849,11 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
     await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
-    const createClientFieldButton = page.getByRole('button', { name: 'Create client-wide field' });
-    await expect(createClientFieldButton).toBeVisible();
+    const addEmployeeItemButton = page.getByRole('button', { name: 'Add employee-only item' });
+    await expect(addEmployeeItemButton).toBeVisible();
     await waitForUiCommit(page);
-    await createClientFieldButton.click();
-    await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toBeVisible();
+    await addEmployeeItemButton.click();
+    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toBeVisible();
     const delayedFieldName = `Delayed primary field ${randomUUID()}`;
     await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill(delayedFieldName);
     await page.getByRole('button', { name: 'Create and assign' }).click();
@@ -865,7 +866,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.locator('input[name="first_name"]')).toHaveValue('Jordan');
 
     const quickFieldDelivered = page.waitForResponse((response): boolean => (
-      new URL(response.url()).pathname === '/api/v1/admin/payroll_fields'
+      new URL(response.url()).pathname === createPersonalPath
       && response.request().method() === 'POST'
       && response.request().headers()['x-company-id'] === String(fixture.company_id)
     ));
@@ -874,7 +875,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(createdFieldResponse.ok()).toBe(true);
     await waitForUiCommit(page);
     await expect(page.getByText(delayedFieldName, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Create reusable client-wide payroll field' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toHaveCount(0);
     await context.close();
   });
 
