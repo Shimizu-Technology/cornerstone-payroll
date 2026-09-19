@@ -238,6 +238,27 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(text).to include("Rent Deduction")
   end
 
+  it "lets a client hide active employees with $0 pay without changing company totals" do
+    unpaid = create(:employee, company: company, department: department, first_name: "No", last_name: "Pay")
+
+    get "/api/v1/client/reports/ytd_summary", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("report", "employees").map { |row| row.fetch("employee_id") }).to include(unpaid.id)
+
+    get "/api/v1/client/reports/ytd_summary", params: { year: 2026, include_zero_pay: false }
+    expect(response).to have_http_status(:ok)
+    report = response.parsed_body.fetch("report")
+    expect(report.fetch("employees").map { |row| row.fetch("employee_id") }).not_to include(unpaid.id)
+    expect(report.fetch("employees").map { |row| row.fetch("employee_id") }).to include(employee.id)
+    expect(report.dig("company_totals", "gross_pay").to_f).to eq(1450.0)
+
+    get "/api/v1/client/reports/ytd_summary_csv", params: { year: 2026, include_zero_pay: false }
+    expect(response).to have_http_status(:ok)
+    csv_names = CSV.parse(response.body, headers: true).map { |row| row.fetch("Employee Name") }
+    expect(csv_names).to include(employee.full_name)
+    expect(csv_names).not_to include(unpaid.full_name)
+  end
+
   it "allows client users to review and export year-by-year payroll totals" do
     create_client_historical_paycheck(employee: employee, suffix: "annual-linked")
 

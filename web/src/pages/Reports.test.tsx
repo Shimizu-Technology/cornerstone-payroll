@@ -120,6 +120,23 @@ describe('YtdSummaryPanel', () => {
     expect(rollingParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('includes active $0-pay employees by default and sends the changed selection to the report', async () => {
+    render(<YtdSummaryPanel />);
+    const checkbox = screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    await screen.findByText('Payroll Summary — 2026');
+    expect(apiMocks.ytdSummary.mock.calls[0][0].include_zero_pay).toBe(true);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    expect(screen.queryByText('Payroll Summary — 2026')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    await screen.findByText('Payroll Summary — 2026');
+    expect(apiMocks.ytdSummary.mock.calls.at(-1)?.[0].include_zero_pay).toBe(false);
+  });
+
   it('labels rehearsal totals as test-only rather than paid payroll', async () => {
     apiMocks.ytdSummary.mockResolvedValue({
       report: { ...report, meta: { provisional: true, payroll_status_note: 'TEST ONLY — calculated rehearsal payroll, not committed or paid' } },
