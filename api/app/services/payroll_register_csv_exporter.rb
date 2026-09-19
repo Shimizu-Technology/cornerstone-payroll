@@ -74,7 +74,7 @@ class PayrollRegisterCsvExporter
     start_d = pp[:start_date].to_s.gsub(/[^0-9\-]/, "")
     end_d   = pp[:end_date].to_s.gsub(/[^0-9\-]/, "")
     source_prefix = report.dig(:source, :system) == "quickbooks_online" ? "quickbooks_payroll_register" : "payroll_register"
-    prefix = [ source_prefix, company_slug ].compact.join("_")
+    prefix = [ ("test_only" if provisional?), source_prefix, company_slug ].compact.join("_")
     if start_d.present? && end_d.present?
       "#{prefix}_#{start_d}_to_#{end_d}.csv"
     else
@@ -85,7 +85,7 @@ class PayrollRegisterCsvExporter
   private
 
   def headers
-    HEADERS + payroll_adjustment_export.headers +
+    (provisional? ? [ "Payroll Status" ] : []) + HEADERS + payroll_adjustment_export.headers +
       payroll_field_columns.map { |column| payroll_field_header(column) }
   end
 
@@ -120,7 +120,13 @@ class PayrollRegisterCsvExporter
   end
 
   def payroll_field_key(entry)
-    [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+    if entry[:payroll_field_definition_id].present?
+      [ :definition, entry[:payroll_field_definition_id] ]
+    elsif entry[:id].present? || entry[:payroll_item_id].present?
+      [ :entry, entry[:id] || entry[:payroll_item_id] ]
+    else
+      [ :legacy, entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+    end
   end
 
   def payroll_field_group(entry)
@@ -137,7 +143,16 @@ class PayrollRegisterCsvExporter
 
   def payroll_field_header(column)
     effect = { addition: "in gross", deduction: "in deductions", employer: "employer only" }.fetch(column[:group])
-    "Payroll Field - #{column[:label]} (#{column[:tax_treatment].humanize}; #{effect})"
+    identity = case column[:key][0]
+    when :definition then "; field ##{column[:key][1]}"
+    when :entry then "; entry ##{column[:key][1]}"
+    else ""
+    end
+    "Payroll Field - #{column[:label]} (#{column[:tax_treatment].humanize}; #{effect}#{identity})"
+  end
+
+  def provisional?
+    report.dig(:meta, :provisional) == true
   end
 
   def payroll_adjustment_export
@@ -182,7 +197,7 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
-    base_row + payroll_adjustment_export.values_for(emp).map do |amount|
+    (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + payroll_adjustment_export.values_for(emp).map do |amount|
       amount.nil? ? "" : format_currency(amount)
     end + payroll_field_columns.map do |column|
       amount = payroll_field_amount(emp, column)
@@ -193,7 +208,7 @@ class PayrollRegisterCsvExporter
   def summary_row
     s = report[:summary] || {}
 
-    [
+    (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + [
       sanitize_csv_field(summary_label(s)),
       "",
       "",

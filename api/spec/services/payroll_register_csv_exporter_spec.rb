@@ -202,6 +202,36 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(rows.find { |row| row["Employee Name"] == "Bob Meno" }[header]).to eq("")
     end
 
+    it "keeps configured fields with the same name in separate columns" do
+      report_data[:employees].first[:payroll_field_entries] = [
+        { payroll_field_definition_id: 58, label: "Bonus", kind: "addition", tax_treatment: "taxable_addition", amount: 12.50 },
+        { payroll_field_definition_id: 59, label: "Bonus", kind: "addition", tax_treatment: "taxable_addition", amount: 7.25 }
+      ]
+
+      rows = CSV.parse(exporter.generate, headers: true)
+      first = rows.headers.find { |header| header.include?("field #58") }
+      second = rows.headers.find { |header| header.include?("field #59") }
+
+      expect(first).not_to be_nil
+      expect(second).not_to be_nil
+      expect(rows.first[first]).to eq("12.50")
+      expect(rows.first[second]).to eq("7.25")
+      expect(rows[-1][first]).to eq("12.50")
+      expect(rows[-1][second]).to eq("7.25")
+    end
+
+    it "labels every rehearsal CSV row as test-only" do
+      report_data[:meta][:provisional] = true
+      report_data[:meta][:payroll_status_note] = "TEST ONLY — calculated rehearsal payroll, not committed or paid"
+
+      rows = CSV.parse(exporter.generate, headers: true)
+
+      expect(exporter.filename).to start_with("test_only_payroll_register_")
+      expect(rows.headers.first).to eq("Payroll Status")
+      expect(rows.map { |row| row["Payroll Status"] }.uniq).to eq([ report_data[:meta][:payroll_status_note] ])
+      expect(rows.map(&:fields)).to all(satisfy { |fields| fields.length == rows.headers.length })
+    end
+
     it "exports source-aware adjustment columns and reconciled totals" do
       report_data[:employees].first[:payroll_adjustments] = [
         { label: "Employee Loan", treatment: "post_tax_deduction", source: "employee_default", amount: 50.00 }

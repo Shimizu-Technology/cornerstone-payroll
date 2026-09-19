@@ -2026,7 +2026,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
 
       first_line = response.body.lines.first
-      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction; in deductions)")
+      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction; in deductions; field ##{field.id})")
       expect(response.body).to include("75.00")
     end
 

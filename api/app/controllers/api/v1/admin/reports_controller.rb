@@ -1350,9 +1350,11 @@ module Api
             meta: report_meta(company, :payroll_register),
             source: {
               system: "cornerstone",
-              label: "Cornerstone",
+              label: company.migration_rehearsal? ? "Cornerstone test payroll" : "Cornerstone",
               locked: pay_period.committed?,
-              statement: "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
+              statement: company.migration_rehearsal? ?
+                "TEST ONLY — calculated rehearsal payroll, not committed or paid. Values may change if recalculated." :
+                "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
             },
             pay_period: {
               id: pay_period.id,
@@ -2710,9 +2712,10 @@ module Api
           contractors = Array(report[:contractors])
           adjustment_export = PayrollAdjustmentExport.new(employees + contractors)
           field_columns = payroll_field_export_columns(employees + contractors)
-          detail_headers = PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
-          employee_rows = employees.map { |emp| payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
-          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          status_note = report.dig(:meta, :payroll_status_note)
+          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
@@ -2882,6 +2885,7 @@ module Api
             [ nil, "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
             [ nil, "Pay Date", pp[:pay_date] ],
             [ nil, "Status", pp[:status].to_s.titleize ],
+            *([ [ nil, "Payroll status", meta[:payroll_status_note] ] ] if meta[:payroll_status_note]),
             [ nil, "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
             [ nil, "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
             [ nil, "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
