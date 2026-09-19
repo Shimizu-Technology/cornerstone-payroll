@@ -30,7 +30,7 @@ import {
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { parsePayRunId } from '@/lib/pay-run-filters';
-import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi, payrollItemsApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -50,7 +50,7 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, PaymentDeliveryMethod } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -343,6 +343,7 @@ export function PayPeriodDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
   const [clientApprovalLoading, setClientApprovalLoading] = useState(false);
   const [clientApprovers, setClientApprovers] = useState<Array<{ id: number; name: string; email: string }>>([]);
@@ -1026,6 +1027,21 @@ export function PayPeriodDetail({
     if (payPeriod) void loadPayPeriod(payPeriod.id, true);
   };
 
+  const handlePaymentMethodChange = async (item: PayrollItem, method: PaymentDeliveryMethod) => {
+    if (!payPeriod || method === item.effective_payment_delivery_method) return;
+    if (payPeriod.status === 'approved' && !window.confirm('Changing payment method rolls this run back to calculated so it can be approved again. Continue?')) return;
+    setPaymentMethodBusyId(item.id);
+    setError(null);
+    try {
+      await payrollItemsApi.updatePaymentMethod(payPeriod.id, item.id, method);
+      await loadPayPeriod(payPeriod.id, true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change payment method');
+    } finally {
+      setPaymentMethodBusyId(null);
+    }
+  };
+
   const handlePayrollItemApplied = (updated?: PayrollItem) => {
     if (!updated) return;
 
@@ -1071,6 +1087,9 @@ export function PayPeriodDetail({
   const isCommitted = payPeriod.status === 'committed';
   const isVoided = payPeriod.correction_status === 'voided';
   const isCorrection = payPeriod.correction_status === 'correction';
+  const payableItems = payrollItems.filter((item) => !item.voided && toNumber(item.net_pay) > 0);
+  const paperCheckCount = payableItems.filter((item) => item.effective_payment_delivery_method !== 'direct_deposit').length;
+  const directDepositCount = payableItems.filter((item) => item.effective_payment_delivery_method === 'direct_deposit').length;
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
 
   const syncStatus = payPeriod.tax_sync_status as TaxSyncStatus | null | undefined;
@@ -1524,6 +1543,40 @@ export function PayPeriodDetail({
         </div>
         {workflowActions}
       </section>
+
+      {!isCommitted && payableItems.length > 0 && (
+        <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Payment methods for this pay period">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold text-neutral-950">Payment methods for this run</p>
+              <p className="mt-1 text-sm text-neutral-700">
+                {paperCheckCount} paper checks · {directDepositCount} direct deposits. This changes the delivery method only; pay and taxes stay the same.
+              </p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {payableItems.map((item) => (
+              <label key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
+                  {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
+                </span>
+                <select
+                  aria-label={`Payment method for ${item.employee_name}`}
+                  className="h-10 shrink-0 rounded-md border border-neutral-300 bg-white px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                  value={item.effective_payment_delivery_method || 'paper_check'}
+                  disabled={paymentMethodBusyId !== null}
+                  onChange={(event) => void handlePaymentMethodChange(item, event.target.value as PaymentDeliveryMethod)}
+                >
+                  <option value="paper_check">Paper check</option>
+                  <option value="direct_deposit">Direct deposit</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="space-y-6">
         {error && (
@@ -3333,10 +3386,10 @@ export function PayPeriodDetail({
         {isCommitted && (
           <Card>
             <div className="p-4 border-b flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-gray-900">Checks</h3>
+              <h3 className="font-semibold text-gray-900">Checks & direct deposit</h3>
               <div className="flex items-center gap-3">
                 <Link to="/check-settings" className="text-xs text-blue-600 hover:underline">Check Settings ›</Link>
-                <Button size="sm" onClick={() => setCheckPrintOpen(true)}>Print checks</Button>
+                <Button size="sm" onClick={() => setCheckPrintOpen(true)} disabled={paperCheckCount === 0 && !nonEmployeeChecks.some((check) => !check.voided)}>Print checks</Button>
               </div>
             </div>
             <div className="p-4">

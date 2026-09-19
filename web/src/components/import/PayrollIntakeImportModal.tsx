@@ -390,6 +390,7 @@ export function PayrollIntakeImportModal({
       contractor_pay_type: newEmployeeForm.contractor_pay_type,
       pay_rate: Number.isFinite(payRate) ? payRate : 0,
       pay_frequency: newEmployeeForm.pay_frequency,
+      payment_delivery_method: null,
       filing_status: 'single',
       allowances: 0,
       additional_withholding: 0,

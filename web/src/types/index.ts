@@ -72,6 +72,7 @@ export type EmploymentType = 'hourly' | 'salary' | 'contractor';
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export type FilingStatus = 'single' | 'married' | 'married_separate' | 'head_of_household';
 export type EmployeeStatus = 'active' | 'inactive' | 'terminated';
+export type PaymentDeliveryMethod = 'paper_check' | 'direct_deposit';
 export type ContractorType = 'individual' | 'business';
 export type ContractorPayType = 'hourly' | 'flat_fee';
 
@@ -225,6 +226,7 @@ export interface Employee {
   salary_type?: 'annual' | 'per_period' | 'variable';
   pay_rate: number;
   pay_frequency: PayFrequency;
+  payment_delivery_method?: PaymentDeliveryMethod | null;
   filing_status: FilingStatus;
   allowances: number;
   additional_withholding: number;
@@ -486,6 +488,7 @@ export interface EmployeeFormData {
   salary_type?: 'annual' | 'per_period' | 'variable';
   pay_rate: number;
   pay_frequency: PayFrequency;
+  payment_delivery_method: PaymentDeliveryMethod | null;
   filing_status: FilingStatus;
   allowances: number;
   additional_withholding: number;
@@ -1333,6 +1336,9 @@ export interface PayrollItem {
   // Check info
   // CPR-66: Check printing lifecycle
   check_number?: string | null;
+  payment_delivery_method?: PaymentDeliveryMethod | null;
+  employee_payment_delivery_method?: PaymentDeliveryMethod | null;
+  effective_payment_delivery_method?: PaymentDeliveryMethod;
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -1649,6 +1655,7 @@ export interface CheckItem {
 
 export interface CheckListMeta {
   total: number;
+  direct_deposit_count: number;
   printed: number;
   delivered: number;
   unprinted: number;
@@ -1659,6 +1666,7 @@ export interface CheckListMeta {
 
 export interface CheckListResponse {
   checks: CheckItem[];
+  direct_deposit_items: Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>;
   meta: CheckListMeta;
 }
 

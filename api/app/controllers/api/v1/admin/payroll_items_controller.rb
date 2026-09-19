@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollItemsController < BaseController
         before_action :set_pay_period
-        before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate ]
+        before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate, :update_payment_method ]
         around_action :with_financial_pay_period_lock, only: [ :create, :update, :destroy, :recalculate ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
@@ -36,6 +36,23 @@ module Api
           render json: { payroll_item: payroll_item_json(@payroll_item, detailed: true) }
         end
 
+        def update_payment_method
+          updated = PayrollPaymentMethodService.new(
+            payroll_item: @payroll_item,
+            method: params[:payment_delivery_method],
+            actor: current_user,
+            reason: params[:reason],
+            confirm_not_paid: params[:confirm_not_paid],
+            ip_address: request.remote_ip
+          ).call
+          render json: {
+            payroll_item: payroll_item_json(updated, detailed: true),
+            pay_period_status: updated.pay_period.status
+          }
+        rescue PayrollPaymentMethodService::Error, ActiveRecord::RecordInvalid, PayrollReview::RevisionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         # Add an employee to this pay period
         def create
@@ -53,6 +70,7 @@ module Api
           attrs[:employment_type] = employee.employment_type
 
           @payroll_item = @pay_period.payroll_items.build(attrs)
+          @payroll_item.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
           PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
           @payroll_item.employee = employee
           @payroll_item.employment_type ||= employee.employment_type
@@ -351,6 +369,8 @@ module Api
             loan_payment: item.loan_payment,
             insurance_payment: item.insurance_payment,
             check_number: item.check_number,
+            payment_delivery_method: item.payment_delivery_method,
+            effective_payment_delivery_method: item.effective_payment_delivery_method,
             check_printed_at: item.check_printed_at,
             check_date: item.check_date,
             check_memo: item.check_memo,

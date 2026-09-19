@@ -26,6 +26,7 @@ class PayPeriodLifecycleService
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_client_approval!
+      validate_payment_delivery!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -72,17 +73,22 @@ class PayPeriodLifecycleService
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_client_approval!
-      pay_period.update!(
-        status: "committed",
-        committed_at: Time.current,
-        committed_by_id: actor&.id
-      )
-
+      validate_payment_delivery!
       committed_items = pay_period.payroll_items.includes(
         :employee,
         payroll_item_deductions: :deduction_type,
         employee: { employee_loans: :loan_transactions }
       ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
+
+      committed_items.each do |item|
+        item.update!(payment_delivery_method: item.effective_payment_delivery_method)
+      end
+
+      pay_period.update!(
+        status: "committed",
+        committed_at: Time.current,
+        committed_by_id: actor&.id
+      )
 
       apply_ytd_and_loan_effects!(committed_items)
       PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
@@ -105,6 +111,18 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_payment_delivery!
+    items = pay_period.payroll_items.includes(:employee).to_a
+    numbered_direct_deposits = items.select do |item|
+      !item.voided? && item.net_pay.to_d.positive? &&
+        item.effective_payment_delivery_method == "direct_deposit" && item.check_number.present?
+    end
+    return if numbered_direct_deposits.empty?
+
+    names = numbered_direct_deposits.map { |item| item.employee.full_name }.sort.to_sentence
+    raise InvalidTransitionError, "Remove draft check numbers for direct-deposit employees before approving payroll for #{names}."
+  end
 
   def with_financial_pay_period_lock
     ApplicationRecord.transaction do
@@ -198,7 +216,9 @@ class PayPeriodLifecycleService
   end
 
   def assign_check_numbers!(committed_items)
-    unassigned = committed_items.select { |item| item.check_number.nil? && item.net_pay.to_d.positive? }
+    unassigned = committed_items.select do |item|
+      item.effective_payment_delivery_method == "paper_check" && item.check_number.nil? && item.net_pay.to_d.positive?
+    end
     return if unassigned.empty?
 
     pay_period.company.assign_check_numbers!(unassigned)

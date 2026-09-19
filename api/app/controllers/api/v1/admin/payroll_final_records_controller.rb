@@ -83,7 +83,7 @@ module Api
               [ "Pay date", period[:pay_date] ],
               [ "Payroll status", payroll[:status].to_s.humanize ],
               [ "Closeout status", completion[:status].to_s.humanize ],
-              [ "Paychecks", payroll[:paycheck_count] ],
+              [ "Employee payments", payroll[:paycheck_count] ],
               [ "Gross pay", payroll[:gross_pay] ],
               [ "Non-taxable pay", payroll[:non_taxable_pay] ],
               [ "Employee deductions", payroll[:employee_deductions] ],
@@ -121,10 +121,13 @@ module Api
         def employee_payments_sheet(payload)
           rows = payload.dig(:employee_payments, :rows)
           {
-            name: "Employee Checks",
+            name: "Employee Payments",
             rows: [
-              [ "Employee", "Net pay", "Check number", "Issuance status", "Reconciliation status" ],
-              *rows.map { |row| [ row[:employee_name], row[:amount], row[:check_number], row[:issuance_status].humanize, row[:reconciliation_status].humanize ] }
+              [ "Employee", "Net pay", "Payment method", "Check number", "Issuance status", "Reconciliation status" ],
+              *rows.map do |row|
+                [ row[:employee_name], row[:amount], row[:payment_delivery_method].humanize,
+                  row[:check_number], row[:issuance_status].humanize, row[:reconciliation_status].humanize ]
+              end
             ]
           }
         end

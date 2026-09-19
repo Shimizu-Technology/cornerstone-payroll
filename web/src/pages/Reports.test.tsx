@@ -97,4 +97,62 @@ describe('YtdSummaryPanel', () => {
     expect(employeeRow?.textContent).toContain('$75.00');
     expect(employeeRow?.textContent).toContain('$2,325.00');
   });
+
+  it('uses a year-to-date pay-date range by default and offers a rolling year preset', async () => {
+    render(<YtdSummaryPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    await screen.findByText('Payroll Summary — 2026');
+    const firstParams = apiMocks.ytdSummary.mock.calls[0][0];
+    expect(firstParams.start_date).toMatch(/^\d{4}-01-01$/);
+    expect(firstParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payroll summary period type' }), { target: { value: 'rolling_year' } });
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    await screen.findByText('Payroll Summary — 2026');
+    const rollingParams = apiMocks.ytdSummary.mock.calls.at(-1)?.[0];
+    expect(rollingParams.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(rollingParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('labels rehearsal totals as test-only rather than paid payroll', async () => {
+    apiMocks.ytdSummary.mockResolvedValue({
+      report: { ...report, meta: { provisional: true, payroll_status_note: 'TEST ONLY — calculated rehearsal payroll, not committed or paid' } },
+    });
+    render(<YtdSummaryPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(await screen.findByText(/Test-only projection/)).toBeTruthy();
+    expect(screen.getByText(/not committed or paid payroll/)).toBeTruthy();
+  });
+
+  it('adds decimal-string payroll fields numerically in totals and employee rows', async () => {
+    apiMocks.ytdSummary.mockResolvedValue({ report: {
+      ...report,
+      company_totals: {
+        ...report.company_totals,
+        payroll_field_taxable_additions_total: '12.50',
+        payroll_field_non_taxable_additions_total: '3.25',
+        payroll_field_pre_tax_deductions_total: '4.00',
+        payroll_field_post_tax_deductions_total: '1.75',
+      },
+      employees: [{
+        ...report.employees[0],
+        payroll_field_taxable_additions_total: '12.50',
+        payroll_field_non_taxable_additions_total: '3.25',
+        payroll_field_pre_tax_deductions_total: '4.00',
+        payroll_field_post_tax_deductions_total: '1.75',
+      }],
+    } });
+    render(<YtdSummaryPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(screen.getByText('Payroll Field Additions').nextElementSibling?.textContent).toBe('$15.75');
+    expect(screen.getByText('Payroll Field Deductions').nextElementSibling?.textContent).toBe('$5.75');
+    const employeeRow = screen.getByText('Test Employee').closest('tr');
+    expect(employeeRow?.textContent).toContain('$15.75');
+    expect(employeeRow?.textContent).toContain('$5.75');
+    expect(employeeRow?.textContent).not.toContain('NaN');
+  });
 });

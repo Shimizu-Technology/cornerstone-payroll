@@ -141,6 +141,7 @@ export function PayrollItemDetail(): ReactElement {
     ? 'MoSa Revel + change workbook'
     : (payrollItem.import_source || payrollItem.timekeeping_source || 'manual').replaceAll('_', ' ');
   const importedComponents = (payrollItem.payroll_field_entries || []).filter((entry) => entry.source === 'import' && entry.active !== false);
+  const isDirectDeposit = payrollItem.effective_payment_delivery_method === 'direct_deposit';
 
   return (
     <div>
@@ -155,6 +156,7 @@ export function PayrollItemDetail(): ReactElement {
           <Badge variant={payrollItem.voided ? 'danger' : payRun.status === 'committed' ? 'success' : 'default'}>{payrollItem.voided ? 'Voided' : payRun.status === 'committed' ? 'Finalized' : 'In progress'}</Badge>
           <Badge variant="default">{payrollItem.employment_type}</Badge>
           {payrollItem.check_number && <Badge variant={payrollItem.check_printed_at ? 'success' : 'info'}>Check #{payrollItem.check_number}</Badge>}
+          {isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
         </div>
       </section>
 
@@ -168,7 +170,7 @@ export function PayrollItemDetail(): ReactElement {
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
           <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
           <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
-          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
+          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={isDirectDeposit ? 'Direct-deposit stub; transfer not confirmed' : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -187,13 +189,20 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Check context</CardTitle><p className="mt-2 text-sm text-neutral-500">Payment identity and print lifecycle attached to this record.</p></CardHeader>
+            <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">Payment method for this run; finalized when payroll is committed.</p></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <ContextRow icon={Printer} label="Check number" value={payrollItem.check_number || 'Not assigned'} />
-              <ContextRow icon={Printer} label="Check status" value={payrollItem.voided ? 'Voided' : payrollItem.check_printed_at ? 'Printed' : payrollItem.check_number ? 'Assigned' : 'Pending'} />
-              <ContextRow icon={CalendarDays} label="Check date" value={payrollItem.check_date ? formatDate(payrollItem.check_date) : formatDate(payRun.pay_date)} />
-              <ContextRow icon={Printer} label="Print count" value={String(payrollItem.check_print_count || 0)} />
-              <ContextRow icon={CalendarDays} label="Printed at" value={payrollItem.check_printed_at ? formatGuamDateTime(payrollItem.check_printed_at) : 'Not printed'} />
+              <ContextRow icon={Banknote} label="Method" value={isDirectDeposit ? 'Direct deposit (stub only)' : 'Paper check'} />
+              {isDirectDeposit ? (
+                <ContextRow icon={ReceiptText} label="Stub status" value="Available to print; bank transfer not confirmed" />
+              ) : (
+                <>
+                  <ContextRow icon={Printer} label="Check number" value={payrollItem.check_number || 'Not assigned'} />
+                  <ContextRow icon={Printer} label="Check status" value={payrollItem.voided ? 'Voided' : payrollItem.check_printed_at ? 'Printed' : payrollItem.check_number ? 'Assigned' : 'Pending'} />
+                  <ContextRow icon={Printer} label="Print count" value={String(payrollItem.check_print_count || 0)} />
+                  <ContextRow icon={CalendarDays} label="Printed at" value={payrollItem.check_printed_at ? formatGuamDateTime(payrollItem.check_printed_at) : 'Not printed'} />
+                </>
+              )}
+              <ContextRow icon={CalendarDays} label="Pay date" value={payrollItem.check_date ? formatDate(payrollItem.check_date) : formatDate(payRun.pay_date)} />
               <ContextRow icon={ReceiptText} label="Memo" value={payrollItem.check_memo || 'No memo'} />
             </CardContent>
           </Card>

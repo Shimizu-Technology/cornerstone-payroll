@@ -604,6 +604,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.pay_rate).to eq(25.00)
       end
 
+      it "records a verified payroll delivery method on the employee profile" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { payment_delivery_method: "direct_deposit" }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload.payment_delivery_method).to eq("direct_deposit")
+        expect(response.parsed_body.dig("data", "payment_delivery_method")).to eq("direct_deposit")
+      end
+
       it "appends effective-dated W-4 history while leaving the prior election intact" do
         EmployeeW4ElectionChangeService.new(
           employee: employee,

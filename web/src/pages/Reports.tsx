@@ -1268,13 +1268,14 @@ function EmployeePayHistoryPanel() {
 
 export function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
+  const localIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
-  const [periodMode, setPeriodMode] = useState<'year' | 'quarter' | 'month' | 'custom'>('year');
+  const [periodMode, setPeriodMode] = useState<'ytd' | 'rolling_year' | 'year' | 'quarter' | 'month' | 'custom'>('ytd');
   const [quarter, setQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(localIsoDate(new Date()));
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
@@ -1299,6 +1300,13 @@ export function YtdSummaryPanel() {
   }
 
   function selectedPeriodParams(): PayrollReportPeriodParams {
+    if (periodMode === 'ytd') return { start_date: `${currentYear}-01-01`, end_date: localIsoDate(new Date()) };
+    if (periodMode === 'rolling_year') {
+      const end = new Date();
+      const start = new Date(end);
+      start.setFullYear(start.getFullYear() - 1);
+      return { start_date: localIsoDate(start), end_date: localIsoDate(end) };
+    }
     if (periodMode === 'custom') return { start_date: startDate, end_date: endDate };
     if (periodMode === 'quarter' || periodMode === 'month') return calendarRange(periodMode);
     return { year };
@@ -1418,7 +1426,9 @@ export function YtdSummaryPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as typeof periodMode); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
-              <option value="year">Calendar year</option>
+              <option value="ytd">Year to date</option>
+              <option value="rolling_year">Past 12 months</option>
+              <option value="year">Full calendar year</option>
               <option value="quarter">Quarter</option>
               <option value="month">Month</option>
               <option value="custom">Custom pay dates</option>
@@ -1427,7 +1437,7 @@ export function YtdSummaryPanel() {
               <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
               <span className="text-sm text-gray-500">to</span>
               <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
-            </> : <>
+            </> : periodMode === 'year' || periodMode === 'quarter' || periodMode === 'month' ? <>
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -1460,7 +1470,7 @@ export function YtdSummaryPanel() {
                 </select>
               </div>
             )}
-            </>}
+            </> : null}
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-search" className="text-sm font-medium text-gray-700">Search</label>
               <input
@@ -1510,6 +1520,11 @@ export function YtdSummaryPanel() {
 
       {report && (
         <>
+          {report.meta?.provisional && (
+            <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <span className="font-semibold">Test-only projection.</span> These totals include calculated MoSa rehearsal runs and locked historical data. They are not committed or paid payroll.
+            </div>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Payroll Summary — {report.period.label}</CardTitle>
@@ -1529,13 +1544,13 @@ export function YtdSummaryPanel() {
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
                   <TotalBox label="Total Bonus" value={report.company_totals.bonus ?? 0} />
                   <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
-                  <TotalBox label="Payroll Field Additions" value={(report.company_totals.payroll_field_taxable_additions_total ?? 0) + (report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
+                  <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
                   <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
                   <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
                   <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
                   <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
                   <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
-                  <TotalBox label="Payroll Field Deductions" value={(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + (report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
+                  <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
                   <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
                   <TotalBox label="Installment Loans" value={report.company_totals.installment_loan_payments ?? 0} />
                   <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
@@ -1597,13 +1612,13 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.bonus ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_taxable_additions_total ?? 0) + (emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_taxable_additions_total ?? 0) + Number(emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_pre_tax_deductions_total ?? 0) + (emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_pre_tax_deductions_total ?? 0) + Number(emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.straight_loan_deductions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.installment_loan_payments ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>

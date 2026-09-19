@@ -22,8 +22,8 @@ const record: PayrollFinalRecord = {
     { account_key: 'gross', account_label: 'Gross payroll expense', debit: '1000.0', credit: '0.0', source: 'Committed gross pay' },
     { account_key: 'net', account_label: 'Employee net payroll payable', debit: '0.0', credit: '750.0', source: 'Committed net pay' },
   ], debit_total: '1116.5', credit_total: '1116.5', difference: '0.0', balanced: true },
-  employee_payments: { required_count: 1, assigned_count: 1, printed_count: 1, delivered_count: 1, reconciled_count: 0, outstanding_count: 1, total_amount: '750.0', by_status: { issued: 1 }, rows: [
-    { payroll_item_id: 10, employee_id: 2, employee_name: 'Mo Shimizu', amount: '750.0', check_number: '8200', issuance_status: 'delivered', reconciliation_status: 'issued' },
+  employee_payments: { required_count: 1, direct_deposit_count: 0, assigned_count: 1, printed_count: 1, delivered_count: 1, reconciled_count: 0, outstanding_count: 1, total_amount: '750.0', by_status: { issued: 1 }, rows: [
+    { payroll_item_id: 10, employee_id: 2, employee_name: 'Mo Shimizu', amount: '750.0', payment_delivery_method: 'paper_check', check_number: '8200', issuance_status: 'delivered', reconciliation_status: 'issued' },
   ] },
   liabilities: { posting_status: 'posted', payment_tracking_status: 'tracked_in_liability_center', calculated_amount: '316.5', prepared_amount: '0.0', paid_amount: '0.0', outstanding_amount: '316.5', unreserved_amount: '316.5', unclassified_components: [], obligations: [
     { key: '8:DRT', authority: 'Treasurer of Guam', liability_date: '2026-08-20', due_date: null, calculated_amount: '100.0', prepared_amount: '0.0', paid_amount: '0.0', outstanding_amount: '100.0', status: 'unpaid' },
@@ -62,5 +62,30 @@ describe('PayrollFinalRecordPanel', () => {
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Record unavailable'));
     expect(screen.getByRole('button', { name: 'View record' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('does not label direct-deposit stubs as missing checks', async () => {
+    apiMocks.payrollFinalRecord.mockResolvedValue({ final_record: {
+      ...record,
+      employee_payments: {
+        ...record.employee_payments,
+        required_count: 0,
+        direct_deposit_count: 1,
+        outstanding_count: 0,
+        rows: [{
+          ...record.employee_payments.rows[0],
+          payment_delivery_method: 'direct_deposit',
+          check_number: null,
+          issuance_status: 'transfer_not_confirmed',
+          reconciliation_status: 'not_tracked',
+        }],
+      },
+    } });
+    render(<PayrollFinalRecordPanel payPeriodId={8} />);
+
+    expect(await screen.findByText('0 checks open · 1 direct deposit')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View record' }));
+    expect(screen.getByText('Direct deposit · earnings stub ready')).toBeTruthy();
+    expect(screen.getByText('Bank transfer not tracked here')).toBeTruthy();
   });
 });

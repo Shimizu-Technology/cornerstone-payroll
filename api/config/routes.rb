@@ -297,6 +297,7 @@ Rails.application.routes.draw do
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
             member do
               post :recalculate
+              patch :payment_method, action: :update_payment_method
             end
           end
 
@@ -517,6 +518,7 @@ Rails.application.routes.draw do
         post "pay_stubs/:id/generate", to: "pay_stubs#generate"
         get "pay_stubs/:id/download", to: "pay_stubs#download"
         post "pay_stubs/batch_pdf", to: "pay_stubs#batch_pdf"
+        post "pay_stubs/direct_deposit_stubs_pdf", to: "pay_stubs#direct_deposit_stubs_pdf"
         post "pay_stubs/batch_generate", to: "pay_stubs#batch_generate"
         get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
 

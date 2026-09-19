@@ -40,6 +40,16 @@ RSpec.describe Company, type: :model do
       expect(company.reload.next_check_number).to eq(2000)
     end
 
+    it "refuses to assign a paper check number to a direct-deposit item" do
+      item = make_items(1).first
+      item.update!(payment_delivery_method: "direct_deposit")
+
+      expect { company.assign_check_numbers!([ item ]) }
+        .to raise_error(ArgumentError, /Direct-deposit payments/)
+      expect(item.reload.check_number).to be_nil
+      expect(company.reload.next_check_number).to eq(2000)
+    end
+
     it "handles concurrent calls without collision (serialized via lock)" do
       # Simulate two concurrent batches
       items_a = make_items(5)
