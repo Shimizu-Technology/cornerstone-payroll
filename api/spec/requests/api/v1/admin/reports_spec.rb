@@ -1934,9 +1934,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     let!(:inactive_employee) { create(:employee, company: company, department: department, first_name: "Unpaid", last_name: "Inactive", status: "inactive") }
 
     before do
-      create(:payroll_item, company: company, employee: employee, pay_period: summary_period, gross_pay: 100, net_pay: 80)
-      create(:payroll_item, company: company, employee: zero_item_employee, pay_period: summary_period, hours_worked: 0, gross_pay: 0, net_pay: 0)
-      create(:payroll_item, company: company, employee: zero_net_employee, pay_period: summary_period, gross_pay: 50, total_deductions: 50, net_pay: 0)
+      create(:payroll_item, company: company, employee: employee, pay_period: summary_period, gross_pay: BigDecimal("100.00"), net_pay: BigDecimal("80.00"))
+      zero_item = create(:payroll_item, company: company, employee: zero_item_employee, pay_period: summary_period, hours_worked: 0, gross_pay: BigDecimal("0.00"), net_pay: BigDecimal("0.00"))
+      zero_item.payroll_item_field_entries.create!(
+        label: "Employer-only benefit", kind: "employer_contribution", tax_treatment: "employer_contribution",
+        category: "benefit", source: "manual", employee_paid: false, employer_paid: true,
+        amount: BigDecimal("15.00")
+      )
+      create(:payroll_item, company: company, employee: zero_net_employee, pay_period: summary_period, gross_pay: BigDecimal("50.00"), total_deductions: BigDecimal("50.00"), net_pay: BigDecimal("0.00"))
     end
 
     it "defaults to all employees and excludes only active $0-pay rows when requested" do
@@ -1959,6 +1964,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
       expect(filtered_report.dig("company_totals", "gross_pay")).to eq(default_report.dig("company_totals", "gross_pay"))
       expect(filtered_report.dig("company_totals", "net_pay")).to eq(default_report.dig("company_totals", "net_pay"))
+      expect(filtered_report.dig("payroll_fields", "totals", 0, "amount").to_d).to eq(BigDecimal("15.00"))
+      expect(filtered_report.dig("payroll_fields", "entries")).to be_empty
     end
 
     it "applies the selection to CSV, Excel, and PDF exports" do
@@ -1978,6 +1985,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(names).to include(employee.full_name, zero_net_employee.full_name, inactive_employee.full_name)
       expect(names).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
       expect(workbook.sheet("Report Info").to_a).to include([ "Active $0-pay employees", "Excluded" ])
+      expect(workbook.sheet("Payroll Field Activity").to_a.flatten).not_to include(zero_item_employee.full_name)
+      expect(workbook.sheet("Payroll Field Totals").to_a.flatten.any? { |value| value.to_s.to_d == BigDecimal("15.00") }).to be(true)
 
       get "/api/v1/admin/reports/ytd_summary_pdf", params: params
       expect(response).to have_http_status(:ok)

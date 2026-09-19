@@ -1819,9 +1819,10 @@ module Api
           end)
           zero_pay_count = employee_rows.count { |row| active_zero_pay_employee?(row) }
           employee_rows.reject! { |row| active_zero_pay_employee?(row) } unless include_zero_pay_employees?
+          visible_employee_ids = employee_rows.map { |row| row[:employee_id] }
           component_columns = period_summary_component_columns(
             disclosure.rows + adjustment_disclosure.rows,
-            employee_rows.map { |row| row[:employee_id] }
+            visible_employee_ids
           )
           employee_rows.each do |row|
             row[:component_values] = period_summary_component_values(component_columns, row[:employee_id])
@@ -1850,12 +1851,12 @@ module Api
             ),
             payroll_fields: {
               totals: disclosure.totals,
-              entries: disclosure.rows,
+              entries: disclosure.rows.select { |entry| visible_employee_ids.include?(entry[:employee_id]) },
               treatment_totals: disclosure.treatment_totals
             },
             payroll_adjustments: {
               totals: adjustment_disclosure.totals,
-              entries: adjustment_disclosure.rows,
+              entries: adjustment_disclosure.rows.select { |entry| visible_employee_ids.include?(entry[:employee_id]) },
               treatment_totals: adjustment_disclosure.treatment_totals
             }
           }

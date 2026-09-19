@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +22,7 @@ export function ClientReports() {
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [includeZeroPay, setIncludeZeroPay] = useState(true);
+  const ytdRequestSequence = useRef(0);
   const [exporting, setExporting] = useState<string | null>(null);
 
   const payPeriodOptions = useMemo(
@@ -58,11 +59,14 @@ export function ClientReports() {
   }, [selectedPayPeriodId]);
 
   const loadYtdSummary = useCallback(async () => {
+    const requestSequence = ++ytdRequestSequence.current;
+    setYtdSummary(null);
+    setError(null);
     try {
       const response = await clientReportsApi.ytdSummary({ start_date: startDate, end_date: endDate, include_zero_pay: includeZeroPay });
-      setYtdSummary(response.report);
+      if (requestSequence === ytdRequestSequence.current) setYtdSummary(response.report);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load report data');
+      if (requestSequence === ytdRequestSequence.current) setError(err instanceof Error ? err.message : 'Failed to load report data');
     }
   }, [startDate, endDate, includeZeroPay]);
 
@@ -86,6 +90,7 @@ export function ClientReports() {
 
   useEffect(() => {
     void loadYtdSummary();
+    return () => { ytdRequestSequence.current += 1; };
   }, [loadYtdSummary]);
 
   useEffect(() => {
@@ -368,7 +373,7 @@ export function ClientReports() {
                 <input aria-label="Client report start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
                 <span className="text-sm text-gray-500">to</span>
                 <input aria-label="Client report end date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
-                <label className="flex min-h-9 items-center gap-2 text-sm text-gray-700">
+                <label className="flex min-h-12 items-center gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={includeZeroPay} onChange={(e) => setIncludeZeroPay(e.target.checked)} className="h-4 w-4 accent-primary" />
                   Include active employees with $0 pay
                 </label>

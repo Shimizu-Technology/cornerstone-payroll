@@ -1530,7 +1530,7 @@ export function YtdSummaryPanel() {
                 <option value="terminated">Terminated</option>
               </select>
             </div>
-            <label className="flex min-h-9 items-center gap-2 text-sm text-gray-700">
+            <label className="flex min-h-12 items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
                 checked={includeZeroPay}
