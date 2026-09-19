@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ def
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
 const EmployeeWorkspace = lazy(() => import('@/pages/employees/EmployeeWorkspace').then((module) => ({ default: module.EmployeeWorkspace })));
+const ClientEmployeeOverview = lazy(() => import('@/pages/employees/ClientEmployeeOverview').then((module) => ({ default: module.ClientEmployeeOverview })));
 const Departments = lazy(() => import('@/pages/Departments').then((module) => ({ default: module.Departments })));
 const PayPeriods = lazy(() => import('@/pages/PayPeriods').then((module) => ({ default: module.PayPeriods })));
 const PayRunWorkspace = lazy(() => import('@/pages/pay-periods/PayRunWorkspace').then((module) => ({ default: module.PayRunWorkspace })));
@@ -320,7 +321,7 @@ function AppRoutes() {
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/new" element={<EmployeeForm />} />
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
-          <Route path="employees/:id/:tab?" element={isClient ? <EmployeeForm /> : <EmployeeWorkspace />} />
+          <Route path="employees/:id/:tab?" element={isClient ? <ClientEmployeeOverview /> : <EmployeeWorkspace />} />
           <Route path="pay-runs" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
           <Route path="pay-runs/imported/:id" element={<ImportedPayRunDetail audience={isClient ? 'client' : 'staff'} />} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
