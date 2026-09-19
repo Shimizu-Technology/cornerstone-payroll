@@ -86,6 +86,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
     'pay_schedule_not_effective',
     'pay_schedule_confirmation_required',
     'cutoff_rule_invalid',
+    'cutoff_time_invalid',
     'workweek_confirmation_required',
   ].includes(calendar.eligibility_code || '');
 
@@ -104,7 +105,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                Cornerstone sets the payroll calendar. AIRE independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
+                Cornerstone sets the payroll calendar. AIRE locks this period seven days after its scheduled pay date and sends the final hour record back here. Review live hours before issuing payroll, then match payments to their source entries.
               </p>
             </div>
           </div>

@@ -28,7 +28,7 @@ pay_date = Date.iso8601(aire.fetch("pay_date"))
 cutoff_at = Time.iso8601(aire.fetch("cutoff_at"))
 next_start_date = end_date + 1.day
 next_end_date = next_start_date.day == 16 ? next_start_date.end_of_month : next_start_date.change(day: 15)
-next_pay_date = next_end_date + 7.days
+next_pay_date = next_end_date + 1.day
 
 fixture = ApplicationRecord.transaction do
   organization = Organization.create!(
@@ -81,7 +81,7 @@ fixture = ApplicationRecord.transaction do
     notes: "Confirmed for the isolated AIRE certification",
     effective_on: start_date.beginning_of_year,
     payroll_cutoff_days_before: 7,
-    payroll_cutoff_at_minutes: (cutoff_at.hour * 60) + cutoff_at.min
+    payroll_cutoff_at_minutes: 1_020
   )
   department = Department.create!(company: company, name: "Certification Operations")
   employee = Employee.create!(

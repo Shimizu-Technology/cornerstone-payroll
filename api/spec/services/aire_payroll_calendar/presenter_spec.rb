@@ -50,7 +50,7 @@ RSpec.describe AirePayrollCalendar::Presenter do
   it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
     state = described_class.call(
       pay_period,
-      now: Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+      now: Time.find_zone!("Pacific/Guam").local(2026, 11, 1, 17)
     )
 
     expect(state).to include(

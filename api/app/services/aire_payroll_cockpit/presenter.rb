@@ -56,6 +56,11 @@ module AirePayrollCockpit
               required: true
             )
           )
+        end,
+        "manual_allocations" => payload.fetch("manual_allocations", []).map do |allocation|
+          allocation.merge(
+            "cornerstone" => mapping_payload(allocation["source_user_uuid"], required: true)
+          )
         end
       )
     end

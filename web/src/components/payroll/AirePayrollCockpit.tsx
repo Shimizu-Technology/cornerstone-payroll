@@ -46,6 +46,8 @@ type Props = {
   payPeriodId: number;
   payPeriodStatus?: import('@/types').PayPeriodStatus;
   payrollHours?: Record<string, { regular: number; overtime: number }>;
+  payrollItems?: import('@/types').PayrollItem[];
+  employees?: import('@/types').Employee[];
   aireRecordLinked?: boolean;
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
@@ -99,7 +101,7 @@ const dispositionLabel = (entry: AirePayrollTimeEntry) => {
   if (disposition === 'partially_included') return 'Partially included at cutoff';
   if (disposition === 'created_after_cutoff') return 'Submitted after cutoff';
   if (disposition === 'changed_after_cutoff') return entry.state.payable_now ? 'Included; changed after cutoff' : 'Changed after cutoff';
-  if (entry.state.payable_now) return 'Included at cutoff';
+  if (entry.state.payable_now) return 'Eligible in AIRE snapshot';
   if (disposition === 'approved_after_cutoff') return 'Approved after cutoff';
   if (disposition === 'overtime_approved_after_cutoff') return 'Overtime approved after cutoff';
   if (disposition === 'open_clock') return 'Missing punch';
@@ -284,6 +286,8 @@ export function AirePayrollCockpit({
   payPeriodId,
   payPeriodStatus = 'draft',
   payrollHours = {},
+  payrollItems = [],
+  employees = [],
   aireRecordLinked = false,
   calendar,
   onRefresh,
@@ -548,6 +552,8 @@ export function AirePayrollCockpit({
         payPeriodId={payPeriodId}
         payPeriodStatus={payPeriodStatus}
         payrollHours={payrollHours}
+        payrollItems={payrollItems}
+        employees={employees}
         aireRecordLinked={aireRecordLinked}
       />
 
@@ -562,7 +568,7 @@ export function AirePayrollCockpit({
                     <Badge className="bg-white/10 text-white">Live from AIRE</Badge>
                   </div>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-300">
-                    Review the exact AIRE timecards, resolve manual entries, lock the cutoff, and follow every hour through payroll without leaving Cornerstone.
+                    Review AIRE timecards and resolve exceptions here. The final AIRE lock occurs seven days after the scheduled pay date; use the live hours check before paying and reconcile the locked record afterward.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -966,7 +972,7 @@ export function AirePayrollCockpit({
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-5 grid gap-3">
-              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">The hours will be included automatically once they are approved and that payroll reaches cutoff.</span></span></span></label>
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">This schedules the unpaid hours for review in that run. Confirm the hours and include them before paying; AIRE’s later cutoff records what remains.</span></span></span></label>
               <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in AIRE’s history.</span></span></span></label>
             </div>
             {settlementRoute.destinationKind === 'regular' && (

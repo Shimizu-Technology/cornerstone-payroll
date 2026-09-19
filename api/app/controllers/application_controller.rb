@@ -74,8 +74,8 @@ class ApplicationController < ActionController::API
                         .find_by(email: request.headers[E2E_USER_EMAIL_HEADER].to_s.downcase)
         candidate if candidate&.payroll_access_allowed?
       else
-        preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).find(&:payroll_access_allowed?)
-        preferred || User.includes(:organization).find(&:payroll_access_allowed?)
+        preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).order(:id).find(&:payroll_access_allowed?)
+        preferred || User.includes(:organization).order(:id).find(&:payroll_access_allowed?)
       end
     end
   end

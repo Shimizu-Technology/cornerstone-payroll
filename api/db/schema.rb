@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3061,6 +3061,44 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
     t.check_constraint "external_batch_id IS NULL AND external_batch_checksum IS NULL AND contract_version IS NULL AND source_cutoff_at IS NULL OR external_batch_id IS NOT NULL AND external_batch_checksum IS NOT NULL AND contract_version IS NOT NULL AND source_cutoff_at IS NOT NULL", name: "time_tracking_imports_batch_provenance_complete"
   end
 
+  create_table "time_tracking_manual_allocations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.uuid "commit_command_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.uuid "issue_command_id", null: false
+    t.text "last_sync_error"
+    t.datetime "last_synced_at"
+    t.date "original_work_date", null: false
+    t.decimal "overtime_hours", precision: 8, scale: 2, null: false
+    t.bigint "pay_period_id", null: false
+    t.bigint "payroll_item_id", null: false
+    t.text "reconciliation_note", null: false
+    t.decimal "regular_hours", precision: 8, scale: 2, null: false
+    t.string "remote_allocation_id"
+    t.integer "remote_version"
+    t.string "source_time_entry_id", null: false
+    t.integer "source_time_entry_version", null: false
+    t.uuid "source_user_uuid", null: false
+    t.string "status", default: "pending_commit", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "void_command_id", null: false
+    t.index ["commit_command_id"], name: "index_time_tracking_manual_allocations_on_commit_command_id", unique: true
+    t.index ["company_id"], name: "index_time_tracking_manual_allocations_on_company_id"
+    t.index ["created_by_id"], name: "index_time_tracking_manual_allocations_on_created_by_id"
+    t.index ["employee_id"], name: "index_time_tracking_manual_allocations_on_employee_id"
+    t.index ["issue_command_id"], name: "index_time_tracking_manual_allocations_on_issue_command_id", unique: true
+    t.index ["pay_period_id"], name: "index_time_tracking_manual_allocations_on_pay_period_id"
+    t.index ["payroll_item_id"], name: "index_time_tracking_manual_allocations_on_payroll_item_id"
+    t.index ["time_tracking_source_id", "source_time_entry_id", "payroll_item_id"], name: "index_manual_time_allocations_on_source_entry_and_item", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_on_time_tracking_source_id_e71b0095b1"
+    t.index ["void_command_id"], name: "index_time_tracking_manual_allocations_on_void_command_id", unique: true
+    t.check_constraint "regular_hours >= 0::numeric AND overtime_hours >= 0::numeric AND (regular_hours + overtime_hours) > 0::numeric", name: "manual_time_allocation_positive_hours"
+    t.check_constraint "status::text = ANY (ARRAY['pending_commit'::character varying, 'committed'::character varying, 'issued'::character varying, 'voided'::character varying]::text[])", name: "manual_time_allocation_status"
+  end
+
   create_table "time_tracking_sources", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.string "base_url", null: false
@@ -3557,6 +3595,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
   add_foreign_key "time_tracking_imports", "time_tracking_sources"
   add_foreign_key "time_tracking_imports", "users", column: "applied_by_id"
   add_foreign_key "time_tracking_imports", "users", column: "reconciled_by_id"
+  add_foreign_key "time_tracking_manual_allocations", "companies"
+  add_foreign_key "time_tracking_manual_allocations", "employees"
+  add_foreign_key "time_tracking_manual_allocations", "pay_periods"
+  add_foreign_key "time_tracking_manual_allocations", "payroll_items"
+  add_foreign_key "time_tracking_manual_allocations", "time_tracking_sources"
+  add_foreign_key "time_tracking_manual_allocations", "users", column: "created_by_id"
   add_foreign_key "time_tracking_sources", "companies"
   add_foreign_key "timecards", "companies"
   add_foreign_key "timecards", "employees", column: "applied_employee_id"
