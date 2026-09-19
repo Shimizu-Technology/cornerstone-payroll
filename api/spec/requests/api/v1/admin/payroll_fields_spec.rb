@@ -160,6 +160,17 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(assignment.effective_amount_for(100)).to eq(35)
     end
 
+    it "lets a payroll accountant add a one-person item without changing client-wide definitions" do
+      accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::EmployeePayrollFieldsController)
+        .to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: payload
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("payroll_field", "owner_employee_id")).to eq(employee.id)
+    end
+
     it "does not leave an orphan definition when the payday range is invalid" do
       invalid = payload.deep_merge(employee_payroll_field: { end_date: "2026-09-20" })
       expect { post "/api/v1/admin/employees/#{employee.id}/payroll_fields/create_personal", params: invalid }
