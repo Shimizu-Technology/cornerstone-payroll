@@ -2159,6 +2159,7 @@ export interface PayrollReportPeriodParams {
   start_date?: string;
   end_date?: string;
   all_time?: boolean;
+  include_zero_pay?: boolean;
 }
 
 export interface TaxSummaryReport {
@@ -2186,6 +2187,7 @@ export interface YtdSummaryReport {
     meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
     period: PayrollReportPeriod;
+    employee_visibility?: { include_zero_pay: boolean; active_zero_pay_count: number; displayed_count: number };
     employees: {
       employee_id: number;
       first_name: string;
@@ -2257,6 +2259,7 @@ export interface YtdSummaryParams {
   search?: string;
   employment_type?: string;
   status?: string;
+  include_zero_pay?: boolean;
   sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'custom_earnings_total' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'total_deductions' | 'custom_deductions_total' | 'net_pay';
   sort_direction?: 'asc' | 'desc';
 }

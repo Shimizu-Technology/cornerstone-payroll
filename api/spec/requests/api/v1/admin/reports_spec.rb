@@ -1923,6 +1923,79 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "payroll summary $0-pay employee visibility" do
+    let!(:summary_period) do
+      create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 9, 1), end_date: Date.new(2026, 9, 14), pay_date: Date.new(2026, 9, 18))
+    end
+    let!(:unpaid_employee) { create(:employee, company: company, department: department, first_name: "Unpaid", last_name: "Active") }
+    let!(:zero_item_employee) { create(:employee, company: company, department: department, first_name: "Zero", last_name: "Item") }
+    let!(:zero_net_employee) { create(:employee, company: company, department: department, first_name: "Zero", last_name: "Net") }
+    let!(:inactive_employee) { create(:employee, company: company, department: department, first_name: "Unpaid", last_name: "Inactive", status: "inactive") }
+
+    before do
+      create(:payroll_item, company: company, employee: employee, pay_period: summary_period, gross_pay: BigDecimal("100.00"), net_pay: BigDecimal("80.00"))
+      zero_item = create(:payroll_item, company: company, employee: zero_item_employee, pay_period: summary_period, hours_worked: 0, gross_pay: BigDecimal("0.00"), net_pay: BigDecimal("0.00"))
+      zero_item.payroll_item_field_entries.create!(
+        label: "Employer-only benefit", kind: "employer_contribution", tax_treatment: "employer_contribution",
+        category: "benefit", source: "manual", employee_paid: false, employer_paid: true,
+        amount: BigDecimal("15.00")
+      )
+      create(:payroll_item, company: company, employee: zero_net_employee, pay_period: summary_period, gross_pay: BigDecimal("50.00"), total_deductions: BigDecimal("50.00"), net_pay: BigDecimal("0.00"))
+    end
+
+    it "defaults to all employees and excludes only active $0-pay rows when requested" do
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+      expect(response).to have_http_status(:ok)
+      default_report = response.parsed_body.fetch("report")
+      expect(default_report.fetch("employees").map { |row| row.fetch("employee_id") }).to contain_exactly(
+        employee.id, unpaid_employee.id, zero_item_employee.id, zero_net_employee.id, inactive_employee.id
+      )
+      expect(default_report.dig("employee_visibility", "active_zero_pay_count")).to eq(2)
+
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026, include_zero_pay: false }
+      expect(response).to have_http_status(:ok)
+      filtered_report = response.parsed_body.fetch("report")
+      expect(filtered_report.fetch("employees").map { |row| row.fetch("employee_id") }).to contain_exactly(
+        employee.id, zero_net_employee.id, inactive_employee.id
+      )
+      expect(filtered_report.fetch("employee_visibility")).to include(
+        "include_zero_pay" => false, "active_zero_pay_count" => 2, "displayed_count" => 3
+      )
+      expect(filtered_report.dig("company_totals", "gross_pay")).to eq(default_report.dig("company_totals", "gross_pay"))
+      expect(filtered_report.dig("company_totals", "net_pay")).to eq(default_report.dig("company_totals", "net_pay"))
+      expect(filtered_report.dig("payroll_fields", "totals", 0, "amount").to_d).to eq(BigDecimal("15.00"))
+      expect(filtered_report.dig("payroll_fields", "entries")).to be_empty
+    end
+
+    it "applies the selection to CSV, Excel, and PDF exports" do
+      params = { year: 2026, include_zero_pay: false }
+
+      get "/api/v1/admin/reports/ytd_summary_csv", params: params
+      expect(response).to have_http_status(:ok)
+      expect(response.headers.fetch("Content-Disposition")).to include("_exclude_zero_pay.csv")
+      csv_names = CSV.parse(response.body, headers: true).map { |row| row.fetch("Employee Name") }
+      expect(csv_names).to include(employee.full_name, zero_net_employee.full_name, inactive_employee.full_name)
+      expect(csv_names).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
+
+      get "/api/v1/admin/reports/ytd_summary_xlsx", params: params
+      expect(response).to have_http_status(:ok)
+      workbook = Roo::Excelx.new(StringIO.new(response.body))
+      names = workbook.sheet("Payroll Summary").column(3)
+      expect(names).to include(employee.full_name, zero_net_employee.full_name, inactive_employee.full_name)
+      expect(names).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
+      expect(workbook.sheet("Report Info").to_a).to include([ "Active $0-pay employees", "Excluded" ])
+      expect(workbook.sheet("Payroll Field Activity").to_a.flatten).not_to include(zero_item_employee.full_name)
+      expect(workbook.sheet("Payroll Field Totals").to_a.flatten.any? { |value| value.to_s.to_d == BigDecimal("15.00") }).to be(true)
+
+      get "/api/v1/admin/reports/ytd_summary_pdf", params: params
+      expect(response).to have_http_status(:ok)
+      pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(pdf_text).to include(employee.full_name, zero_net_employee.full_name)
+      expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
+    end
+  end
+
   # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
 
   describe "GET /api/v1/admin/reports/payroll_register_csv" do

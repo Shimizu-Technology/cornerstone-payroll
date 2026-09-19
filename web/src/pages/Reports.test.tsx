@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YtdSummaryReport } from '@/services/api';
 import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
@@ -118,6 +118,36 @@ describe('YtdSummaryPanel', () => {
     const rollingParams = apiMocks.ytdSummary.mock.calls.at(-1)?.[0];
     expect(rollingParams.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(rollingParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('includes active $0-pay employees by default and sends the changed selection to the report', async () => {
+    render(<YtdSummaryPanel />);
+    const checkbox = screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    await screen.findByText('Payroll Summary — 2026');
+    expect(apiMocks.ytdSummary.mock.calls[0][0].include_zero_pay).toBe(true);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    expect(screen.queryByText('Payroll Summary — 2026')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    await screen.findByText('Payroll Summary — 2026');
+    expect(apiMocks.ytdSummary.mock.calls.at(-1)?.[0].include_zero_pay).toBe(false);
+  });
+
+  it('does not show a stale report when the visibility selection changes during loading', async () => {
+    let resolveRequest!: (value: { report: typeof report }) => void;
+    apiMocks.ytdSummary.mockReturnValue(new Promise((resolve) => { resolveRequest = resolve; }));
+    render(<YtdSummaryPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }));
+    await act(async () => { resolveRequest({ report }); });
+
+    expect(screen.queryByText('Payroll Summary — 2026')).toBeNull();
+    expect(screen.getByRole('button', { name: 'View Report' })).toBeTruthy();
   });
 
   it('labels rehearsal totals as test-only rather than paid payroll', async () => {
