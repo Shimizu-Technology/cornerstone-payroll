@@ -1330,13 +1330,22 @@ module Api
             return [ report, nil ]
           end
 
-          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, { payroll_item_field_entries: :payroll_field_definition }, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: record_id)
+          pay_period = PayPeriod.find_by(id: record_id, company_id: current_company_id)
 
-          unless pay_period && pay_period.company_id == current_company_id
+          # Calculated and approved periods remain available from the pay-period
+          # review screen, but drafts and voided runs cannot be exported as a
+          # payroll register even when someone supplies a native key directly.
+          unless pay_period && !pay_period.draft? && !pay_period.voided?
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
           end
 
-          items = sorted_payroll_items(pay_period.payroll_items.not_voided)
+          items = sorted_payroll_items(
+            pay_period.payroll_items.not_voided.includes(
+              :payroll_item_earnings,
+              { payroll_item_field_entries: :payroll_field_definition },
+              { payroll_item_deductions: :deduction_type, employee: :department }
+            )
+          )
           w2_items = items.reject { |i| i.employment_type == "contractor" }
           contractor_items = items.select { |i| i.employment_type == "contractor" }
 

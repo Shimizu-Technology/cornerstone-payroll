@@ -2189,6 +2189,17 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:not_found)
     end
 
+    it "rejects a voided pay period from every register format even when its native key is supplied directly" do
+      voided_period = create(:pay_period, :voided, company: company)
+
+      %w[payroll_register payroll_register_csv payroll_register_pdf payroll_register_xlsx].each do |endpoint|
+        get "/api/v1/admin/reports/#{endpoint}", params: { pay_run_key: "native:#{voided_period.id}" }
+
+        expect(response).to have_http_status(:not_found)
+        expect(response.parsed_body.fetch("error")).to eq("Pay period not found")
+      end
+    end
+
     it "returns 404 for a non-existent pay period id" do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: 999_999 }
 
