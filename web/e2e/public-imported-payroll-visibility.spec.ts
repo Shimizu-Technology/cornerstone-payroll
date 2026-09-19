@@ -168,3 +168,39 @@ test('payroll summary explains combined sources and any excluded unlinked record
   await expect(page.getByText(/1 QuickBooks record was excluded/)).toBeVisible();
   await expect(page.getByText(/Payroll field reconciliation below covers Cornerstone records only/)).toBeVisible();
 });
+
+test('payroll summary can show or hide active employees with $0 pay', async ({ page }) => {
+  await mockShell(page, 'admin');
+  const requestedVisibility: string[] = [];
+  await page.route('**/api/v1/admin/reports/ytd_summary**', (route) => {
+    const includeZeroPay = new URL(route.request().url()).searchParams.get('include_zero_pay');
+    requestedVisibility.push(includeZeroPay ?? 'default');
+    const paidEmployee = {
+      employee_id: 1, first_name: 'Paid', last_name: 'Worker', name: 'Paid Worker',
+      employment_type: 'hourly', status: 'active', gross_pay: 100, net_pay: 80,
+      withholding_tax: 10, social_security_tax: 6, medicare_tax: 1, retirement: 0,
+    };
+    const unpaidEmployee = { ...paidEmployee, employee_id: 2, first_name: 'Unpaid', last_name: 'Worker', name: 'Unpaid Worker', gross_pay: 0, net_pay: 0 };
+    return fulfillJson(route, { report: {
+      type: 'ytd_summary', year: 2026,
+      period: { label: '2026', start_date: '2026-01-01', end_date: '2026-12-31', basis: 'pay_date' },
+      employees: includeZeroPay === 'false' ? [paidEmployee] : [paidEmployee, unpaidEmployee],
+      employee_visibility: { include_zero_pay: includeZeroPay !== 'false', active_zero_pay_count: 1, displayed_count: includeZeroPay === 'false' ? 1 : 2 },
+      company_totals: { gross_pay: 100, net_pay: 80, payroll_count: 1 },
+      payroll_fields: { totals: [], entries: [], treatment_totals: {} },
+    } });
+  });
+
+  await page.goto('/reports?report=ytd-summary');
+  const checkbox = page.getByRole('checkbox', { name: 'Include active employees with $0 pay' });
+  await expect(checkbox).toBeChecked();
+  await page.getByRole('button', { name: 'View Report' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toBeVisible();
+
+  await checkbox.uncheck();
+  await page.getByRole('button', { name: 'View Report' }).click();
+  await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toHaveCount(0);
+  await expect(page.getByText('1 active $0-pay employee hidden')).toBeVisible();
+  await expect(page.getByText('Only employee rows are filtered; company totals still include all payroll activity.')).toBeVisible();
+  expect(requestedVisibility).toEqual(['true', 'false']);
+});

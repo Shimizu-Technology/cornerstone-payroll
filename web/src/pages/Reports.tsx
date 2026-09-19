@@ -1298,6 +1298,7 @@ export function YtdSummaryPanel() {
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
+  const [includeZeroPay, setIncludeZeroPay] = useState(true);
   const [sortBy, setSortBy] = useState<NonNullable<YtdSummaryParams['sort_by']>>('name');
   const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
@@ -1345,6 +1346,7 @@ export function YtdSummaryPanel() {
       ...(search.trim() ? { search: search.trim() } : {}),
       ...(employmentType !== 'all' ? { employment_type: employmentType } : {}),
       ...(status !== 'all' ? { status } : {}),
+      include_zero_pay: includeZeroPay,
       ...overrides,
     };
   }
@@ -1528,6 +1530,15 @@ export function YtdSummaryPanel() {
                 <option value="terminated">Terminated</option>
               </select>
             </div>
+            <label className="flex min-h-9 items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={includeZeroPay}
+                onChange={(e) => { setIncludeZeroPay(e.target.checked); setReport(null); }}
+                className="h-4 w-4 accent-primary"
+              />
+              Include active employees with $0 pay
+            </label>
             <Button onClick={() => loadReport()} disabled={loading}>
               {loading ? 'Loading…' : 'View Report'}
             </Button>
@@ -1552,10 +1563,16 @@ export function YtdSummaryPanel() {
                 {report.company_totals?.payroll_count != null && (
                   <> &bull; {report.company_totals.payroll_count} payroll{report.company_totals.payroll_count !== 1 ? 's' : ''}</>
                 )}
+                {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
+                  <> &bull; {report.employee_visibility.active_zero_pay_count} active $0-pay employee{report.employee_visibility.active_zero_pay_count !== 1 ? 's' : ''} hidden</>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
+              {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
+                <p className="text-xs text-gray-600">Only employee rows are filtered; company totals still include all payroll activity.</p>
+              )}
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
