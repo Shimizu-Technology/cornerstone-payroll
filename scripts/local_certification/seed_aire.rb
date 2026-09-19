@@ -21,15 +21,16 @@ populated = {
 abort "Refusing to seed a populated AIRE certification database: #{populated.inspect}" if populated.any?
 
 guam = ActiveSupport::TimeZone["Pacific/Guam"]
-cutoff_at = (guam.now.beginning_of_minute + 2.minutes)
+next_cutoff_date = guam.now.hour < 17 ? guam.today : guam.today + 1.day
+cutoff_at = guam.local(next_cutoff_date.year, next_cutoff_date.month, next_cutoff_date.day, 17, 0)
 cutoff_date = cutoff_at.to_date
-pay_date = cutoff_date + 7.days
+pay_date = cutoff_date - 7.days
 
-if cutoff_date.day >= 16
-  start_date = cutoff_date.beginning_of_month
-  end_date = cutoff_date.change(day: 15)
+if pay_date.day >= 16
+  start_date = pay_date.beginning_of_month
+  end_date = pay_date.change(day: 15)
 else
-  previous_month = cutoff_date.prev_month
+  previous_month = pay_date.prev_month
   start_date = previous_month.change(day: 16)
   end_date = previous_month.end_of_month
 end
@@ -67,8 +68,8 @@ fixture = ApplicationRecord.transaction do
   UserTimeCategory.create!(user: employee, time_category: category, hourly_rate_cents: 2_500)
 
   timestamps = {
-    created_at: cutoff_at - 2.days,
-    updated_at: cutoff_at - 2.days
+    created_at: pay_date.in_time_zone("Pacific/Guam") - 1.day,
+    updated_at: pay_date.in_time_zone("Pacific/Guam") - 1.day
   }
   entry_attributes = {
     user: employee,

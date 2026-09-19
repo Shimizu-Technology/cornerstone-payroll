@@ -146,13 +146,35 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(response).to have_http_status(:ok)
     expect(client).to have_received(:payroll_cockpit_manual_review).with(
       start_date: "2026-08-16",
-      end_date: "2026-08-31"
+      end_date: "2026-08-31",
+      external_pay_period_id: unpublished.id
     )
     expect(response.parsed_body.dig("employees", 0, "cornerstone")).to include(
       "status" => "mapped",
       "employee_id" => employee.id
     )
     expect(response.parsed_body.dig("exclusions", 0, "cornerstone", "employee_id")).to eq(employee.id)
+  end
+
+  it "matches a live AIRE permanent identity to one existing Cornerstone employee" do
+    employee = create(:employee, company: company, department: create(:department, company: company))
+    uuid = SecureRandom.uuid
+    allow(client).to receive(:payroll_cockpit_employees).and_return(
+      "employees" => [ { "id" => "91", "payroll_integration_id" => uuid, "full_name" => "AIRE employee" } ]
+    )
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping",
+         params: { source_user_id: "91", employee_id: employee.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(TimeTrackingEmployeeMapping.find_by!(time_tracking_source: source, source_user_uuid: uuid).employee_id).to eq(employee.id)
+    expect(client).to have_received(:payroll_cockpit_employees).with(page: 1, per_page: 1, employee_id: "91")
+
+    other = create(:employee, company: company, department: create(:department, company: company))
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping",
+         params: { source_user_id: "91", employee_id: other.id }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(TimeTrackingEmployeeMapping.find_by!(time_tracking_source: source, source_user_uuid: uuid).employee_id).to eq(employee.id)
   end
 
   it "uses the exact AIRE source that published the pay period" do

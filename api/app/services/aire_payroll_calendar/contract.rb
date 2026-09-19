@@ -2,9 +2,10 @@
 
 module AirePayrollCalendar
   class Contract
-    SCHEMA_VERSION = "1.0"
+    SCHEMA_VERSION = "1.1"
     TIME_ZONE = "Pacific/Guam"
     CUTOFF_DAYS_BEFORE = CompanyPaySchedule::PAYROLL_CUTOFF_DAYS_BEFORE
+    CUTOFF_POLICY = "after_regular_pay_date"
 
     class Error < StandardError
       attr_reader :code
@@ -24,7 +25,7 @@ module AirePayrollCalendar
     def payload
       validate!
       schedule = pay_schedule
-      cutoff_date = pay_period.pay_date - schedule.payroll_cutoff_days_before
+      cutoff_date = pay_period.pay_date + schedule.payroll_cutoff_days_before
       cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
       cutoff_at = Time.find_zone!(TIME_ZONE).local(
         cutoff_date.year,
@@ -40,7 +41,8 @@ module AirePayrollCalendar
         "pay_date" => pay_period.pay_date.iso8601,
         "cutoff_at" => cutoff_at.iso8601,
         "time_zone" => TIME_ZONE,
-        "cutoff_days_before" => schedule.payroll_cutoff_days_before
+        "cutoff_policy" => CUTOFF_POLICY,
+        "cutoff_days_after_pay_date" => schedule.payroll_cutoff_days_before
       }
     end
 
@@ -57,7 +59,8 @@ module AirePayrollCalendar
         end
         fail_contract!("Confirm a semimonthly pay schedule before publishing this period to AIRE.", "pay_schedule_confirmation_required")
       end
-      fail_contract!("AIRE payroll cutoff must remain seven calendar days before pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      fail_contract!("AIRE payroll cutoff must remain seven calendar days after this regular pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      fail_contract!("Set the AIRE cutoff time to 5:00 p.m. Guam", "cutoff_time_invalid") unless pay_schedule.payroll_cutoff_at_minutes == 1_020
       fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless pay_period.resolved_company_workweek&.confirmed?
       fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
       fail_contract!("The pay date must be after the period end", "pay_date_invalid") unless pay_period.pay_date > pay_period.end_date
@@ -80,6 +83,7 @@ module AirePayrollCalendar
     def pay_schedule
       @pay_schedule ||= pay_period.company_pay_schedule || CompanyPaySchedule.for_date(pay_period.company_id, pay_period.start_date)
     end
+
 
     def next_confirmed_semimonthly_schedule
       pay_period.company.company_pay_schedules

@@ -3,10 +3,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+echo "Certification driver PID: $$"
 AIRE_REPO_PATH="${AIRE_REPO_PATH:-}"
 AIRE_PORT="${AIRE_PORT:-44327}"
 CORNERSTONE_PORT="${CORNERSTONE_PORT:-44328}"
 KEEP_RUNNING="${KEEP_RUNNING:-false}"
+BROWSER_REVIEW_ONLY="${BROWSER_REVIEW_ONLY:-false}"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
 CORNERSTONE_DATABASE="cornerstone_aire_certification_${RUN_ID//-/_}"
@@ -181,7 +183,7 @@ api_call() {
 }
 
 PUBLISH_RESPONSE="$TEMP_DIR/publish.json"
-api_call 201 "publish the T-7 calendar from Cornerstone to AIRE" POST \
+api_call 201 "publish the post-pay calendar from Cornerstone to AIRE" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_calendar/publish" "$PUBLISH_RESPONSE"
 NEXT_PUBLISH_RESPONSE="$TEMP_DIR/next-publish.json"
 api_call 201 "publish the next available AIRE payroll period" POST \
@@ -251,6 +253,18 @@ STALE_RESPONSE="$TEMP_DIR/stale-response.json"
 api_call 409 "reject a stale manual-time decision" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit/time_entries/$MANUAL_HOLD_ID/approval" \
   "$STALE_RESPONSE" "$STALE_BODY"
+
+if [[ "$BROWSER_REVIEW_ONLY" == "true" ]]; then
+  echo "Synthetic pre-pay browser fixture is ready; no payroll or payment has been recorded."
+  echo "Cornerstone API: $CORNERSTONE_BASE_URL"
+  echo "AIRE API: $AIRE_BASE_URL"
+  echo "Synthetic pay period ID: $PAY_PERIOD_ID"
+  echo "Synthetic company ID: $COMPANY_ID"
+  echo "Synthetic admin email: $ADMIN_EMAIL"
+  echo "Press Ctrl-C when browser review is complete; fixture databases and servers will be cleaned."
+  wait "$AIRE_PID" "$CORNERSTONE_PID"
+  exit 0
+fi
 
 echo "Waiting for the synthetic cutoff at $CUTOFF_AT..."
 until ruby -rtime -e 'exit(Time.now >= Time.iso8601(ARGV[0]) ? 0 : 1)' "$CUTOFF_AT"; do

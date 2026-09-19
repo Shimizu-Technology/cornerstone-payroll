@@ -101,8 +101,10 @@ module TimeTracking
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
     end
 
-    def payroll_cockpit_manual_review(start_date:, end_date:)
-      uri = payroll_cockpit_uri("/manual_review", start_date: start_date, end_date: end_date)
+    def payroll_cockpit_manual_review(start_date:, end_date:, external_pay_period_id: nil)
+      query = { start_date: start_date, end_date: end_date }
+      query[:external_pay_period_id] = external_pay_period_id if external_pay_period_id.present?
+      uri = payroll_cockpit_uri("/manual_review", query)
       require_secure_payroll_transport!(uri)
       request_json(
         uri,
@@ -111,9 +113,58 @@ module TimeTracking
       )
     end
 
-    def payroll_cockpit_employees(page: 1, per_page: 100, active: nil)
+    def payroll_cockpit_manual_allocations(external_pay_period_id:, page: 1)
+      uri = payroll_cockpit_uri("/manual_allocations", external_pay_period_id: external_pay_period_id, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, surface_remote_error: true)
+    end
+
+    def commit_payroll_manual_allocation(entry_id:, command_id:, expected_version:, source_user_uuid:,
+                                         regular_hours:, overtime_hours:, external_pay_period_id:,
+                                         external_payroll_item_id:, pay_date:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations"),
+        body: {
+          source_time_entry_id: normalized_cockpit_id(entry_id),
+          command_id: command_id,
+          expected_version: expected_version,
+          source_user_uuid: source_user_uuid,
+          regular_hours: regular_hours,
+          overtime_hours: overtime_hours,
+          external_pay_period_id: external_pay_period_id,
+          external_payroll_item_id: external_payroll_item_id,
+          pay_date: pay_date,
+          reason: reason
+        }
+      )
+    end
+
+    def issue_payroll_manual_allocation(allocation_id:, command_id:, expected_version:,
+                                        payment_method:, payment_reference:, occurred_at:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          payment_method: payment_method,
+          payment_reference: payment_reference,
+          occurred_at: occurred_at,
+          reason: reason
+        }
+      )
+    end
+
+    def void_payroll_manual_allocation(allocation_id:, command_id:, expected_version:, occurred_at:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/void"),
+        body: { command_id: command_id, expected_version: expected_version, occurred_at: occurred_at, reason: reason }
+      )
+    end
+
+    def payroll_cockpit_employees(page: 1, per_page: 100, active: nil, employee_id: nil)
       query = bounded_pagination(page, per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
       query[:active] = active unless active.nil?
+      query[:employee_id] = normalized_cockpit_id(employee_id, label: "employee") if employee_id.present?
       request_json(payroll_cockpit_uri("/employees", query), validate_source: false, surface_remote_error: true)
     end
 
@@ -347,18 +398,23 @@ module TimeTracking
     end
 
     def payroll_cockpit_time_entry_approval_uri(entry_id, overtime: false)
-      normalized_id = entry_id.to_s
-      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+      normalized_id = normalized_cockpit_id(entry_id, label: "time entry")
 
       action = overtime ? "overtime_approval" : "approval"
       source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/#{action}")
     end
 
     def payroll_cockpit_time_entry_correction_uri(entry_id)
-      normalized_id = entry_id.to_s
-      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+      normalized_id = normalized_cockpit_id(entry_id, label: "time entry")
 
       source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/correction")
+    end
+
+    def normalized_cockpit_id(value, label: "record")
+      normalized = value.to_s
+      raise Error, "Invalid AIRE #{label} ID" unless normalized.match?(/\A[1-9]\d*\z/)
+
+      normalized
     end
 
     def payroll_cockpit_settlement_case_uri(case_id, action: nil)

@@ -239,7 +239,10 @@ Rails.application.routes.draw do
             post :retry_delivery
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
+            post :employee_mapping, action: :create_employee_mapping
             get :manual_review
+            post :manual_allocations, action: :create_manual_allocation
+            post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
             get :exceptions
             get :settlement_cases

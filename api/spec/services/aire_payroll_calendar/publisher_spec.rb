@@ -54,7 +54,7 @@ RSpec.describe AirePayrollCalendar::Publisher do
     allow(AirePayrollCalendarPublication).to receive(:dispatch_one!)
   end
 
-  it "creates one versioned T-7 Guam publication and queues delivery" do
+  it "creates one versioned seven-days-after-pay Guam publication and queues delivery" do
     result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
 
     expect(result.created).to be(true)
@@ -63,9 +63,10 @@ RSpec.describe AirePayrollCalendar::Publisher do
       "start_date" => "2026-10-01",
       "end_date" => "2026-10-15",
       "pay_date" => "2026-10-25",
-      "cutoff_at" => "2026-10-18T17:00:00+10:00",
+      "cutoff_at" => "2026-11-01T17:00:00+10:00",
       "time_zone" => "Pacific/Guam",
-      "cutoff_days_before" => 7
+      "cutoff_policy" => "after_regular_pay_date",
+      "cutoff_days_after_pay_date" => 7
     )
     expect(AirePayrollCalendarPublication).to have_received(:dispatch_one!).with(result.publication.id, now: now)
     expect(AuditLog.find_by!(action: "aire_payroll_calendar#published").company_id).to eq(company.id)
@@ -88,7 +89,7 @@ RSpec.describe AirePayrollCalendar::Publisher do
     revised = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
 
     expect(revised.publication.schedule_version).to eq(2)
-    expect(revised.publication.payload["cutoff_at"]).to eq("2026-10-19T17:00:00+10:00")
+    expect(revised.publication.payload["cutoff_at"]).to eq("2026-11-02T17:00:00+10:00")
     expect(first.calendar_period.publications.order(:schedule_version).pluck(:schedule_version)).to eq([ 1, 2 ])
   end
 
@@ -102,7 +103,7 @@ RSpec.describe AirePayrollCalendar::Publisher do
         pay_period: pay_period.reload,
         source: source,
         actor: actor,
-        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+        now: Time.find_zone!("Pacific/Guam").local(2026, 11, 1, 17)
       ).call
     end.to raise_error(described_class::ConflictError, /cutoff has passed/)
   end
@@ -113,7 +114,7 @@ RSpec.describe AirePayrollCalendar::Publisher do
         pay_period: pay_period,
         source: source,
         actor: actor,
-        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+        now: Time.find_zone!("Pacific/Guam").local(2026, 11, 1, 17)
       ).call
     end.to raise_error(described_class::ConflictError, /already passed/)
 
