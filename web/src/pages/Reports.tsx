@@ -111,7 +111,7 @@ function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalid
 
 // ─── Payroll Register Panel ───────────────────────────────────────────────────
 
-function PayrollRegisterPanel() {
+export function PayrollRegisterPanel() {
   const { activeCompanyId } = useCompany();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(true);
@@ -131,14 +131,33 @@ function PayrollRegisterPanel() {
       return;
     }
     setLoadingPeriods(true);
-    payrollHistoryApi.list({ page: 1, per_page: 100, sort: 'pay_date', direction: 'desc' }, activeCompanyId)
-      .then((res) => {
-        const periods = res.data.filter((period) => period.record_type === 'imported' || period.status === 'committed');
+    setPayPeriods([]);
+    setSelectedPayRunKey('');
+    setReport(null);
+    setError(null);
+    let cancelled = false;
+    const loadPeriods = async () => {
+      try {
+        const periods: PayrollHistoryRecord[] = [];
+        let page = 1;
+        let totalPages = 1;
+        while (page <= totalPages) {
+          const res = await payrollHistoryApi.list({ page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true }, activeCompanyId);
+          periods.push(...res.data);
+          totalPages = res.meta.total_pages;
+          page += 1;
+        }
+        if (cancelled) return;
         setPayPeriods(periods);
         setSelectedPayRunKey(periods[0]?.key || '');
-      })
-      .catch(() => setError('Failed to load pay periods'))
-      .finally(() => setLoadingPeriods(false));
+      } catch {
+        if (!cancelled) setError('Failed to load pay periods');
+      } finally {
+        if (!cancelled) setLoadingPeriods(false);
+      }
+    };
+    void loadPeriods();
+    return () => { cancelled = true; };
   }, [activeCompanyId]);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
@@ -233,7 +252,7 @@ function PayrollRegisterPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Payroll Register</CardTitle>
           <CardDescription>
-            Complete payroll details for a selected pay period. Committed Cornerstone payroll and locked QuickBooks imports use the same report.
+            Complete payroll details for committed Cornerstone payroll and locked QuickBooks imports. Migration-test clients can also review calculated or approved rehearsal payrolls, clearly marked test-only.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -256,10 +275,10 @@ function PayrollRegisterPanel() {
                   disabled={busy}
                   className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                 >
-                  {payPeriods.length === 0 && <option value="">No completed pay periods</option>}
+                  {payPeriods.length === 0 && <option value="">No reportable pay periods</option>}
                   {payPeriods.map((pp) => (
                     <option key={pp.key} value={pp.key}>
-                      {pp.source.label} · {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
+                      {pp.status === 'calculated' || pp.status === 'approved' ? 'TEST ONLY · ' : ''}{pp.source.label} · {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
                     </option>
                   ))}
                 </select>
@@ -3447,7 +3466,7 @@ const reports: ReportDefinition[] = [
   {
     id: 'payroll-register',
     title: 'Payroll Register',
-    description: 'Complete payroll detail for one committed pay period, including hours, taxes, deductions, and net pay.',
+    description: 'Complete payroll detail for a committed pay period or a clearly marked migration-test rehearsal, including hours, taxes, deductions, and net pay.',
     category: 'payroll',
     basis: 'Pay period',
     frequency: 'Each run',

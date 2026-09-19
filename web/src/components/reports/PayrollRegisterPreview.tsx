@@ -697,6 +697,12 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
 
   return (
     <div className="space-y-5">
+      {report.meta?.provisional && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950" role="status">
+          <p className="font-bold">Test-only payroll register</p>
+          <p className="mt-1">{report.meta.payroll_status_note || 'Calculated rehearsal payroll, not committed or paid. Values may change if recalculated.'}</p>
+        </div>
+      )}
       {report.source?.system === 'quickbooks_online' && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950">
           <p className="font-bold">Locked QuickBooks payroll</p>
