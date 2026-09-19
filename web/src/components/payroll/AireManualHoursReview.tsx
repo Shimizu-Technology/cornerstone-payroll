@@ -185,6 +185,10 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setError(null);
     try {
       const result = await payPeriodsApi.airePayrollManualReview(payPeriodId);
+      if (!Array.isArray(result.employees) || !Array.isArray(result.exclusions) ||
+          !result.summary || !result.issues || !result.start_date || !result.end_date) {
+        throw new Error('AIRE returned an incomplete hours check. Refresh or contact support before relying on these totals.');
+      }
       if (generation === requestGeneration.current) setReview(result);
     } catch (caught) {
       if (generation === requestGeneration.current) {

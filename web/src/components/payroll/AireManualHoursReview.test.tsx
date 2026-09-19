@@ -182,6 +182,14 @@ describe('AireManualHoursReview', () => {
     expect(screen.getByText(/You can still process payroll manually/i)).toBeTruthy();
   });
 
+  it('shows a recoverable error when AIRE returns an incomplete response', async () => {
+    apiMocks.manualReview.mockResolvedValue({ data: [] });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText('The manual check could not load.')).toBeTruthy();
+    expect(screen.getByText(/AIRE returned an incomplete hours check/)).toBeTruthy();
+  });
+
   it('links an exact carryover entry to a committed paycheck', async () => {
     const user = userEvent.setup();
     render(<AireManualHoursReview
