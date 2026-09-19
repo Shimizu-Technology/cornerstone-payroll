@@ -345,8 +345,8 @@ RSpec.describe PayrollCalculator do
 
       2.times { described_class.for(employee, payroll_item).calculate }
 
-      entries = payroll_item.payroll_item_field_entries.active.order(:payroll_field_definition_id)
-      expect(entries.pluck(:payroll_field_definition_id, :amount).map { |id, amount| [ id, amount.to_f ] })
+      entries = payroll_item.payroll_item_field_entries.select(&:active?)
+      expect(entries.map { |entry| [ entry.payroll_field_definition_id, entry.amount.to_f ] })
         .to contain_exactly([ client_field.id, 12.0 ], [ personal_field.id, 7.0 ])
       expect(payroll_item.post_tax_payroll_field_entries_total.to_f).to eq(19.0)
     end
