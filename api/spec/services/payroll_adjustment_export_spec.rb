@@ -40,13 +40,14 @@ RSpec.describe PayrollAdjustmentExport do
 
   it "keeps separately saved same-label adjustments in separate columns" do
     rows = [
-      { payroll_adjustments: [ { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: 10 } ] },
-      { payroll_adjustments: [ { payroll_item_id: 11, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: 20 } ] }
+      { payroll_adjustments: [ { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: BigDecimal("10") } ] },
+      { payroll_adjustments: [ { payroll_item_id: 11, position: 0, label: "Allowance", treatment: "taxable_addition", source: "employee_default", amount: BigDecimal("20") } ] }
     ]
     distinct = described_class.new(rows)
 
     expect(distinct.headers.length).to eq(2)
     expect(distinct.column_totals).to contain_exactly(10, 20)
     expect(distinct.headers).to all(include("item #"))
+    expect(distinct.grouped_totals.map { |row| row.fetch(:identity) }).to contain_exactly("item:10:0", "item:11:0")
   end
 end

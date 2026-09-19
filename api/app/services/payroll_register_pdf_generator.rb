@@ -253,9 +253,10 @@ class PayrollRegisterPdfGenerator
     active_payroll_adjustments_by_worker
       .group_by { |entry| payroll_adjustment_column_key(entry) }
       .sort_by { |key, _| key.map(&:to_s) }
-      .map do |_key, grouped|
+      .map do |key, grouped|
         first = grouped.first
-        [ first[:treatment].to_s.humanize, first[:label], adjustment_source_label(first[:source]), fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+        label = key[0] == :item ? "#{first[:label]} [#{key[1]}/#{key[2].to_i + 1}]" : first[:label].to_s
+        [ first[:treatment].to_s.humanize, label, adjustment_source_label(first[:source]), fmt(grouped.sum { |entry| entry[:amount].to_d }) ]
       end
   end
 

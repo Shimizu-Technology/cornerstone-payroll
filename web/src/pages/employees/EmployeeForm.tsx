@@ -1779,7 +1779,7 @@ export function EmployeeForm() {
                       </div>
                     )}
                   </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <label className="text-xs font-medium text-gray-600">First payday (optional)
                       <Input type="date" value={quickPayrollField.start_date} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, start_date: event.target.value }))} />
                     </label>
