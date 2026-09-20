@@ -25,9 +25,6 @@ module TimeTracking
       versions = source_versions(import)
       lines = import.time_tracking_entry_allocations.includes(:payroll_item).to_a
       lines.group_by(&:payroll_item).each do |item, item_lines|
-        if item.effective_payment_delivery_method == "direct_deposit"
-          raise ArgumentError, "AIRE direct-deposit hours need bank-settlement confirmation before committing this payroll"
-        end
         unless item.hours_worked.to_d.round(2) == item_lines.sum(&:regular_hours).to_d.round(2) &&
                item.overtime_hours.to_d.round(2) == item_lines.sum(&:overtime_hours).to_d.round(2)
           raise ArgumentError, "Payroll hours changed after AIRE import. Refresh the snapshot and recalculate before committing."
