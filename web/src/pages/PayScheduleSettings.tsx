@@ -125,7 +125,11 @@ export function PayScheduleSettings() {
       return;
     }
     if (form.payroll_cutoff_days_before !== 7) {
-      setError('Payroll cutoff must be seven calendar days before the pay date.');
+      setError('AIRE cutoff must be seven calendar days after this period’s regular pay date.');
+      return;
+    }
+    if (form.frequency === 'semimonthly' && cutoffMinutes !== 1_020) {
+      setError('Set the semimonthly AIRE cutoff to 5:00 p.m. Guam.');
       return;
     }
     try {
@@ -204,8 +208,8 @@ export function PayScheduleSettings() {
               {form.period_rule === 'biweekly' && <div className="space-y-2 sm:col-span-2"><Label htmlFor="period-anchor">Known period start date</Label><Input id="period-anchor" type="date" required value={form.period_anchor_date} onChange={(event) => setForm({ ...form, period_anchor_date: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">Use the first day of any confirmed two-week pay period. This anchors which alternating week begins each cycle.</p></div>}
               <div className="space-y-2"><Label htmlFor="pay-date-rule">Pay-date rule</Label><Select id="pay-date-rule" value={form.pay_date_rule} onChange={(event) => setForm({ ...form, pay_date_rule: event.target.value as FormState['pay_date_rule'] })}><option value="manual">Manual pay date</option><option value="days_after_period_end">Days after period ends</option></Select></div>
               {form.pay_date_rule === 'days_after_period_end' && <div className="space-y-2"><Label htmlFor="pay-date-offset">Days after period end</Label><Input id="pay-date-offset" type="number" min={0} max={31} value={form.pay_date_offset_days} onChange={(event) => setForm({ ...form, pay_date_offset_days: Number(event.target.value) })} /></div>}
-              <div className="space-y-2"><Label htmlFor="cutoff-days">Payroll cutoff</Label><div className="flex items-center gap-2"><Input id="cutoff-days" className="w-24" type="number" min={7} max={7} value={form.payroll_cutoff_days_before} readOnly /><span className="text-sm text-neutral-600">days before pay date</span></div><p className="text-xs leading-5 text-neutral-500">The payroll policy fixes this at one week so Cornerstone and AIRE always use the same boundary.</p></div>
-              <div className="space-y-2"><Label htmlFor="cutoff-time">Cutoff time (Guam)</Label><Input id="cutoff-time" type="time" value={form.payroll_cutoff_time} onChange={(event) => setForm({ ...form, payroll_cutoff_time: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">AIRE currently requires seven calendar days. Its automated lock uses this exact local time.</p></div>
+              <div className="space-y-2"><Label htmlFor="cutoff-days">AIRE time-entry cutoff</Label><div className="flex items-center gap-2"><Input id="cutoff-days" className="w-24" type="number" min={7} max={7} value={form.payroll_cutoff_days_before} readOnly /><span className="text-sm text-neutral-600">days after this period’s regular pay date</span></div><p className="text-xs leading-5 text-neutral-500">AIRE locks at 5:00 p.m. Guam. Adjustment checks do not reset this deadline; already-published cutoffs stay unchanged.</p></div>
+              <div className="space-y-2"><Label htmlFor="cutoff-time">Cutoff time (Guam)</Label><Input id="cutoff-time" type="time" value={form.payroll_cutoff_time} onChange={(event) => setForm({ ...form, payroll_cutoff_time: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">For semimonthly AIRE payroll, use 5:00 p.m. Guam.</p></div>
             </CardContent>
           </Card>
 

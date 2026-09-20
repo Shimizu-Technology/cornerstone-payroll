@@ -3,9 +3,10 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatDate, formatDateRange } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
-import type { AirePayrollManualReview, PayPeriodStatus } from '@/types';
+import type { AirePayrollManualReview, AirePayrollManualReviewAdjustment, AirePayrollManualReviewEmployee, Employee, PayrollItem, PayPeriodStatus } from '@/types';
 
 type PayrollHours = Record<string, { regular: number; overtime: number }>;
 
@@ -13,11 +14,21 @@ type Props = {
   payPeriodId: number;
   payPeriodStatus: PayPeriodStatus;
   payrollHours: PayrollHours;
+  payrollItems?: PayrollItem[];
+  employees?: Employee[];
   aireRecordLinked: boolean;
 };
 
+type LinkTarget = { employee: AirePayrollManualReviewEmployee; adjustment: AirePayrollManualReviewAdjustment };
+type BulkLinkTarget = { employee: AirePayrollManualReviewEmployee; adjustments: AirePayrollManualReviewAdjustment[]; item: PayrollItem };
+
 const hours = (value: number) => Number(value || 0).toFixed(2);
 const sameHundredth = (left: number, right: number) => Math.round(left * 100) === Math.round(right * 100);
+type CornerstoneAllocation = NonNullable<AirePayrollManualReview['cornerstone_manual_allocations']>[number];
+const needsAireSync = (allocation: CornerstoneAllocation) => Boolean(
+  allocation.last_sync_error || allocation.status === 'pending_commit' ||
+  (allocation.status === 'committed' && allocation.payroll_item_check_status === 'delivered')
+);
 
 const exclusionLabel = (reason: string) => ({
   pending_approval: 'approval needed',
@@ -30,11 +41,154 @@ const exclusionLabel = (reason: string) => ({
   denied_overtime: 'overtime denied',
 }[reason] || reason.replaceAll('_', ' '));
 
-export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked }: Props) {
+const DEFAULT_LINK_NOTE = 'These AIRE hours match the committed Cornerstone payroll item';
+
+export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, payrollItems = [], employees = [], aireRecordLinked }: Props) {
   const [review, setReview] = useState<AirePayrollManualReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
+  const [linkTarget, setLinkTarget] = useState<LinkTarget | null>(null);
+  const [bulkLinkTarget, setBulkLinkTarget] = useState<BulkLinkTarget | null>(null);
+  const [bulkGrossVerified, setBulkGrossVerified] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState('');
+  const [regularToLink, setRegularToLink] = useState('0');
+  const [overtimeToLink, setOvertimeToLink] = useState('0');
+  const [linkNote, setLinkNote] = useState(DEFAULT_LINK_NOTE);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [mapSourceId, setMapSourceId] = useState<string | null>(null);
+  const [mapEmployeeId, setMapEmployeeId] = useState('');
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [mapBusy, setMapBusy] = useState(false);
+
+  const saveMapping = async () => {
+    if (!mapSourceId || !mapEmployeeId) return;
+    setMapBusy(true);
+    setMapError(null);
+    try {
+      await payPeriodsApi.mapAireEmployee(payPeriodId, { source_user_id: mapSourceId, employee_id: Number(mapEmployeeId) });
+      setMapSourceId(null);
+      setMapEmployeeId('');
+      await load();
+    } catch (caught) {
+      setMapError(caught instanceof Error ? caught.message : 'Could not save the employee match');
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const openLink = (employee: AirePayrollManualReviewEmployee, adjustment: AirePayrollManualReviewAdjustment) => {
+    const item = payrollItems.find((candidate) => candidate.employee_id === employee.cornerstone.employee_id && !candidate.voided && candidate.effective_payment_delivery_method !== 'direct_deposit');
+    setLinkTarget({ employee, adjustment });
+    setSelectedItemId(item ? String(item.id) : '');
+    setRegularToLink(String(Math.max(0, adjustment.regular_hours)));
+    setOvertimeToLink(String(Math.max(0, adjustment.overtime_hours)));
+    setLinkNote(DEFAULT_LINK_NOTE);
+    setLinkError(null);
+  };
+
+  const saveLink = async () => {
+    if (!linkTarget?.employee.source_user_uuid || linkTarget.adjustment.source_time_entry_version == null) {
+      setLinkError('Refresh AIRE hours before linking: this entry is missing its permanent employee identity or version.');
+      return;
+    }
+    const regular = Number(regularToLink);
+    const overtime = Number(overtimeToLink);
+    if (!selectedItemId || !Number.isFinite(regular) || !Number.isFinite(overtime) || regular < 0 || overtime < 0 || regular + overtime <= 0 ||
+        regular > linkTarget.adjustment.regular_hours || overtime > linkTarget.adjustment.overtime_hours || linkNote.trim().length < 10) {
+      setLinkError('Choose a paycheck, enter no more than the AIRE hours still owed, and explain the match.');
+      return;
+    }
+    setLinkBusy(true);
+    setLinkError(null);
+    try {
+      await payPeriodsApi.linkManualAireHours(payPeriodId, {
+        payroll_item_id: Number(selectedItemId),
+        source_time_entry_id: linkTarget.adjustment.source_time_entry_id,
+        source_time_entry_version: linkTarget.adjustment.source_time_entry_version,
+        source_user_uuid: linkTarget.employee.source_user_uuid,
+        regular_hours: regular,
+        overtime_hours: overtime,
+        original_work_date: linkTarget.adjustment.original_work_date,
+        note: linkNote.trim(),
+      });
+      setLinkTarget(null);
+      await load();
+    } catch (caught) {
+      setLinkError(caught instanceof Error ? caught.message : 'Could not link these hours');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const retryLink = async (allocationId: number) => {
+    setLinkBusy(true);
+    setLinkError(null);
+    try {
+      await payPeriodsApi.retryManualAireHours(payPeriodId, allocationId);
+      await load();
+    } catch (caught) {
+      setLinkError(caught instanceof Error ? caught.message : 'Could not retry the AIRE sync');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const retryAllLinks = async (allocationIds: number[]) => {
+    setLinkBusy(true);
+    setLinkError(null);
+    let synced = 0;
+    let firstError: string | null = null;
+    for (const allocationId of allocationIds) {
+      try {
+        const result = await payPeriodsApi.retryManualAireHours(payPeriodId, allocationId);
+        if (result.manual_allocation.last_sync_error) {
+          firstError ||= result.manual_allocation.last_sync_error;
+        } else {
+          synced += 1;
+        }
+      } catch (caught) {
+        firstError ||= caught instanceof Error ? caught.message : 'Could not sync this AIRE update';
+      }
+    }
+    await load();
+    if (firstError) setLinkError(`${synced} of ${allocationIds.length} AIRE updates synced. ${firstError} Review the remaining errors below.`);
+    setLinkBusy(false);
+  };
+
+  const saveBulkLink = async () => {
+    if (!bulkLinkTarget?.employee.source_user_uuid || linkNote.trim().length < 10 || !bulkGrossVerified) {
+      setLinkError('Verify the wage category and gross pay, then explain why these AIRE entries match the paycheck.');
+      return;
+    }
+    setLinkBusy(true);
+    setLinkError(null);
+    let linked = 0;
+    try {
+      for (const adjustment of bulkLinkTarget.adjustments) {
+        await payPeriodsApi.linkManualAireHours(payPeriodId, {
+          payroll_item_id: bulkLinkTarget.item.id,
+          source_time_entry_id: adjustment.source_time_entry_id,
+          source_time_entry_version: adjustment.source_time_entry_version!,
+          source_user_uuid: bulkLinkTarget.employee.source_user_uuid,
+          regular_hours: adjustment.regular_hours,
+          overtime_hours: adjustment.overtime_hours,
+          original_work_date: adjustment.original_work_date,
+          note: linkNote.trim(),
+        });
+        linked += 1;
+      }
+      setBulkLinkTarget(null);
+      await load();
+    } catch (caught) {
+      setBulkLinkTarget(null);
+      await load();
+      setLinkError(`${linked} of ${bulkLinkTarget.adjustments.length} entries linked. ${caught instanceof Error ? caught.message : 'The remaining entries could not be linked.'} Review the refreshed list before retrying.`);
+    } finally {
+      setLinkBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
@@ -42,6 +196,10 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setError(null);
     try {
       const result = await payPeriodsApi.airePayrollManualReview(payPeriodId);
+      if (!Array.isArray(result.employees) || !Array.isArray(result.exclusions) ||
+          !result.summary || !result.issues || !result.start_date || !result.end_date) {
+        throw new Error('AIRE returned an incomplete hours check. Refresh or contact support before relying on these totals.');
+      }
       if (generation === requestGeneration.current) setReview(result);
     } catch (caught) {
       if (generation === requestGeneration.current) {
@@ -77,12 +235,38 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     return { employee, payrollRegular, payrollOvertime, carryover, corrections, categories, matched };
   }), [payrollHours, review?.employees]);
 
+  const isCommitted = payPeriodStatus === 'committed';
   const matchedCount = rows.filter((row) => row.matched).length;
   const mismatchCount = rows.length - matchedCount;
   const attentionCount = Number(review?.summary.exclusion_count || 0)
     + Number(review?.issues.missing_category_count || 0)
     + Number(review?.issues.negative_adjustment_count || 0);
-  const isCommitted = payPeriodStatus === 'committed';
+  const bulkCandidates = isCommitted ? (review?.employees || []).flatMap((employee) => {
+    if (employee.cornerstone.status !== 'mapped' || !employee.source_user_uuid ||
+        employee.adjustments.some((adjustment) => adjustment.regular_hours < 0 || adjustment.overtime_hours < 0)) return [];
+    const candidates = employee.adjustments.filter((adjustment) =>
+      adjustment.source_time_entry_version != null && adjustment.regular_hours >= 0 &&
+      adjustment.overtime_hours >= 0 && adjustment.regular_hours + adjustment.overtime_hours > 0);
+    if (candidates.length < 2 || new Set(candidates.map((entry) => entry.source_time_entry_id)).size !== candidates.length) return [];
+    if (new Set(candidates.map((entry) => entry.category?.id || entry.category?.name).filter(Boolean)).size !== 1 ||
+        candidates.some((entry) => !entry.category?.id && !entry.category?.name)) return [];
+    const items = payrollItems.filter((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit');
+    if (items.length !== 1) return [];
+    const item = items[0];
+    const linked = (review?.cornerstone_manual_allocations || []).filter((allocation) =>
+      allocation.payroll_item_id === item.id && allocation.status !== 'voided');
+    const remainingRegular = Number(item.hours_worked || 0) - linked.reduce((sum, allocation) => sum + Number(allocation.regular_hours), 0);
+    const remainingOvertime = Number(item.overtime_hours || 0) - linked.reduce((sum, allocation) => sum + Number(allocation.overtime_hours), 0);
+    if (!sameHundredth(remainingRegular, candidates.reduce((sum, entry) => sum + entry.regular_hours, 0)) ||
+        !sameHundredth(remainingOvertime, candidates.reduce((sum, entry) => sum + entry.overtime_hours, 0))) return [];
+    return [{ employee, adjustments: candidates, item }];
+  }) : [];
+  const pendingSyncIds = (review?.cornerstone_manual_allocations || []).filter(needsAireSync).map((allocation) => allocation.id);
+  const unlinkedHours = Number(review?.summary.total_hours || 0);
+  const linkedAwaitingEvidenceHours = (review?.manual_allocations || [])
+    .filter((allocation) => allocation.status === 'committed')
+    .reduce((sum, allocation) => sum + Number(allocation.regular_hours) + Number(allocation.overtime_hours), 0);
+  const outstandingHours = unlinkedHours + linkedAwaitingEvidenceHours;
 
   return (
     <Card className="overflow-hidden border-primary-200">
@@ -93,8 +277,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <h3 className="font-display text-lg font-bold text-neutral-950">Manual AIRE hours check</h3>
               <Badge variant="info">Live from AIRE</Badge>
             </div>
+
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-700">
-              Use this before Calculate Payroll when you type hours into Payroll yourself. It includes payable carryover and shows the exact regular and overtime totals to enter.
+              AIRE shows regular, overtime, and carryover hours still owed. Before payroll, compare these with the hours you entered. After committing, link each paid time entry to its actual paycheck so AIRE knows what was paid.
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
@@ -114,16 +299,27 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           </div>
         ) : review && (
           <>
+            {review.employees.some((employee) => employee.cornerstone.status !== 'mapped') && (
+              <div className="border-b border-warning-200 bg-warning-50/50 px-6 py-5">
+                <h4 className="font-semibold text-neutral-950">Match AIRE people before payroll</h4>
+                <p className="mt-1 text-sm text-neutral-700">Choose the existing Cornerstone employee only after verifying it is the same person. If they are new, finish their payroll profile first; this does not create or pay anyone automatically.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {review.employees.filter((employee) => employee.cornerstone.status !== 'mapped').map((employee) => (
+                    <Button key={employee.source_user_id} type="button" size="sm" variant="outline" onClick={() => { setMapSourceId(employee.source_user_id); setMapEmployeeId(''); setMapError(null); }}>Match {employee.display_name}</Button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid gap-4 border-b border-neutral-200 bg-white p-4 sm:grid-cols-3 sm:p-6">
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE payable</p>
-                <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(review.summary.total_hours)} hrs</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE not yet linked to payroll</p>
+                <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(unlinkedHours)} hrs</p>
                 <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
               </div>
-              <div className={`rounded-xl border p-4 ${mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll match</p>
-                <p className="mt-2 font-display text-xl font-bold text-neutral-950">{matchedCount}/{rows.length} employees</p>
-                <p className="mt-2 text-xs text-neutral-600">{mismatchCount ? `${mismatchCount} need an hours update below` : 'Regular and OT totals match'}</p>
+              <div className={`rounded-xl border p-4 ${isCommitted ? 'border-primary-200 bg-primary-50' : mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? 'Payment not yet confirmed' : 'Payroll match'}</p>
+                <p className="mt-2 font-display text-xl font-bold text-neutral-950">{isCommitted ? `${hours(outstandingHours)} hrs` : `${matchedCount}/${rows.length} employees`}</p>
+                <p className="mt-2 text-xs text-neutral-600">{isCommitted ? `${hours(unlinkedHours)} unlinked · ${hours(linkedAwaitingEvidenceHours)} linked, awaiting payment evidence. Do not pay linked hours twice.` : mismatchCount ? `${mismatchCount} need an hours update below` : 'Regular and OT totals match'}</p>
               </div>
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
@@ -143,7 +339,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                         {employee.cornerstone.status !== 'mapped' && <Badge variant="danger">Not mapped</Badge>}
                       </div>
                     </div>
-                    {matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update</Badge>}
+                    {isCommitted ? <Badge variant="warning">Reconcile</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update</Badge>}
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
@@ -155,7 +351,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Entered in Payroll</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(payrollRegular)} regular · {hours(payrollOvertime)} OT</p>
-                      {!matched && employee.cornerstone.status === 'mapped' && <p className="mt-2 text-xs text-warning-900">Change to {hours(employee.regular_hours)} regular and {hours(employee.overtime_hours)} OT below.</p>}
+                      {!isCommitted && !matched && employee.cornerstone.status === 'mapped' && <p className="mt-2 text-xs text-warning-900">Change to {hours(employee.regular_hours)} regular and {hours(employee.overtime_hours)} OT below.</p>}
                     </div>
                   </div>
                 </article>
@@ -185,12 +381,12 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       </td>
                       <td className="px-4 py-4 align-top">
                         <p className="font-semibold text-neutral-950">{hours(payrollRegular)} regular · {hours(payrollOvertime)} OT</p>
-                        {!matched && employee.cornerstone.status === 'mapped' && (
+                        {!isCommitted && !matched && employee.cornerstone.status === 'mapped' && (
                           <p className="mt-2 text-xs text-warning-900">Enter {hours(employee.regular_hours)} regular and {hours(employee.overtime_hours)} OT in the payroll table.</p>
                         )}
                       </td>
                       <td className="px-6 py-4 align-top">
-                        {matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update needed</Badge>}
+                        {isCommitted ? <Badge variant="warning">Reconcile</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update needed</Badge>}
                       </td>
                     </tr>
                   ))}
@@ -214,25 +410,120 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </div>
             )}
 
+            <div className="border-t border-neutral-200 px-6 py-6">
+              <h4 className="font-semibold text-neutral-950">AIRE hours and payment history</h4>
+              <p className="mt-1 text-sm text-neutral-600">Hours below remain owed until linked to a committed paycheck. A recorded check delivery marks linked hours paid automatically.</p>
+              {payrollItems.some((item) => item.effective_payment_delivery_method === 'direct_deposit' && !item.voided) && <p className="mt-2 text-sm text-warning-800">Direct-deposit items stay unpaid in AIRE until bank payment confirmation can be recorded. They cannot be linked through the paper-check flow.</p>}
+              {linkError && !linkTarget && !bulkLinkTarget && <p role="alert" className="mt-3 text-sm text-danger-800">{linkError}</p>}
+              {pendingSyncIds.length > 1 && <Button type="button" size="sm" variant="outline" className="mt-4" disabled={linkBusy} onClick={() => void retryAllLinks(pendingSyncIds)}>
+                {linkBusy ? 'Syncing…' : `Sync all ${pendingSyncIds.length} pending AIRE updates`}
+              </Button>}
+              {bulkCandidates.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
+                {bulkCandidates.map((candidate) => <Button key={candidate.employee.source_user_id} type="button" size="sm" disabled={linkBusy} onClick={() => { setBulkLinkTarget(candidate); setBulkGrossVerified(false); setLinkNote(DEFAULT_LINK_NOTE); setLinkError(null); }}>
+                  Link all {candidate.adjustments.length} entries for {candidate.employee.display_name}
+                </Button>)}
+              </div>}
+              <div className="mt-4 space-y-3">
+                {review.employees.flatMap((employee) => employee.adjustments.map((adjustment) => (
+                  <div key={`${employee.source_user_id}-${adjustment.source_time_entry_id}-${adjustment.source_kind}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                    <div>
+                      <p className="font-semibold text-neutral-950">{employee.cornerstone.employee_name || employee.display_name} · {hours(adjustment.regular_hours)} regular · {hours(adjustment.overtime_hours)} OT</p>
+                      <p className="mt-1 text-xs text-neutral-600">{formatDate(adjustment.original_work_date)} · {adjustment.source_kind === 'carryover' ? 'Carryover still owed' : adjustment.source_kind === 'correction' ? 'Correction still owed' : 'Current period still owed'}</p>
+                    </div>
+                    {isCommitted && adjustment.regular_hours >= 0 && adjustment.overtime_hours >= 0 && (
+                      <Button type="button" size="sm" variant="outline" disabled={employee.cornerstone.status !== 'mapped' || !payrollItems.some((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit')} onClick={() => openLink(employee, adjustment)}>Link to paycheck</Button>
+                    )}
+                  </div>
+                )))}
+                {(review.manual_allocations || []).filter((allocation) => allocation.status !== 'voided').map((allocation) => (
+                  <div key={`paid-${allocation.id}`} className="rounded-xl border border-success-200 bg-success-50/50 p-4">
+                    <p className="font-semibold text-neutral-950">{allocation.cornerstone?.employee_name || allocation.display_name} · {hours(allocation.regular_hours)} regular · {hours(allocation.overtime_hours)} OT</p>
+                    <p className="mt-1 text-xs text-neutral-600">{formatDate(allocation.original_work_date)} · {allocation.status === 'issued' ? `Paid${allocation.payment_reference ? ` · check ${allocation.payment_reference}` : ''}` : 'Linked to committed payroll; awaiting payment evidence'}</p>
+                  </div>
+                ))}
+                {(review.cornerstone_manual_allocations || []).filter(needsAireSync).map((allocation) => (
+                  <div key={`sync-${allocation.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning-200 bg-warning-50 p-4">
+                    <div><p className="font-semibold text-neutral-950">{allocation.employee_name} · AIRE payment update pending</p><p className="mt-1 text-xs text-neutral-700">{allocation.last_sync_error || (allocation.status === 'pending_commit' ? 'The paycheck link has not reached AIRE yet.' : 'Check delivery is recorded in Cornerstone; AIRE has not confirmed it as paid yet.')}</p></div>
+                    <Button type="button" size="sm" variant="outline" disabled={linkBusy} onClick={() => void retryLink(allocation.id)}>Sync now</Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="border-t border-neutral-200 bg-neutral-950 px-6 py-6 text-sm text-neutral-200">
               <p className="font-semibold text-white">Finish the manual workflow</p>
               <ol className="mt-2 grid gap-2 leading-5 md:grid-cols-4">
                 <li><span className="font-semibold text-white">1.</span> Make every employee match.</li>
                 <li><span className="font-semibold text-white">2.</span> Calculate, approve, then commit.</li>
-                <li><span className="font-semibold text-white">3.</span> Link the finalized AIRE record.</li>
-                <li><span className="font-semibold text-white">4.</span> Print checks, then Record Issued.</li>
+                <li><span className="font-semibold text-white">3.</span> Link the AIRE entries actually paid by each paycheck.</li>
+                <li><span className="font-semibold text-white">4.</span> Give out checks and record their delivery. Review the final AIRE lock seven days after the scheduled pay date.</li>
               </ol>
               <p className="mt-4 text-xs leading-5 text-neutral-300">
                 {isCommitted
                   ? aireRecordLinked
-                    ? 'AIRE is linked. Recording each check as issued automatically marks its linked hours paid in AIRE.'
-                    : 'This run is committed. Use Link AIRE Record in Payroll actions before recording the checks as issued.'
-                  : 'After the AIRE record is linked, Payroll automatically updates AIRE when a check is recorded as issued—there is no separate “mark paid” step in AIRE.'}
+                    ? 'The finalized AIRE record is linked. Recording each check as issued updates the included AIRE hours.'
+                    : 'For manually entered payroll, link the AIRE hours to each committed paycheck above. Recording check delivery then marks those exact hours paid in AIRE.'
+                  : 'For manually entered payroll, commit first, then link each paid time entry to its paycheck. AIRE keeps any unlinked hours owed.'}
               </p>
             </div>
           </>
         )}
       </CardContent>
+      <Dialog open={Boolean(linkTarget)} onOpenChange={(open) => { if (!open && !linkBusy) setLinkTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link AIRE hours to this paycheck</DialogTitle>
+            <DialogDescription>Confirm only the hours actually included in the committed paycheck. This records the source time entry and leaves any remainder owed.</DialogDescription>
+          </DialogHeader>
+          {linkTarget && (
+            <div className="space-y-4 text-sm">
+              <p className="font-semibold text-neutral-950">{linkTarget.employee.display_name} · {formatDate(linkTarget.adjustment.original_work_date)} · up to {hours(linkTarget.adjustment.regular_hours)} regular and {hours(linkTarget.adjustment.overtime_hours)} OT</p>
+              <label className="block font-medium text-neutral-700">Paycheck
+                <select className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2" value={selectedItemId} onChange={(event) => setSelectedItemId(event.target.value)}>
+                  <option value="">Choose paycheck</option>
+                  {payrollItems.filter((item) => item.employee_id === linkTarget.employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit').map((item) => <option key={item.id} value={item.id}>#{item.check_number || item.id} · {hours(Number(item.hours_worked || 0))} regular / {hours(Number(item.overtime_hours || 0))} OT</option>)}
+                </select>
+              </label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+                <label className="font-medium text-neutral-700">Regular hours<input type="number" min="0" max={linkTarget.adjustment.regular_hours} step="0.01" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={regularToLink} onChange={(event) => setRegularToLink(event.target.value)} /></label>
+                <label className="font-medium text-neutral-700">OT hours<input type="number" min="0" max={linkTarget.adjustment.overtime_hours} step="0.01" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={overtimeToLink} onChange={(event) => setOvertimeToLink(event.target.value)} /></label>
+              </div>
+              <label className="block font-medium text-neutral-700">Why these hours match<textarea className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} value={linkNote} onChange={(event) => setLinkNote(event.target.value)} /></label>
+              {linkError && <p role="alert" className="text-danger-800">{linkError}</p>}
+            </div>
+          )}
+          <DialogFooter><Button type="button" variant="outline" disabled={linkBusy} onClick={() => setLinkTarget(null)}>Cancel</Button><Button type="button" disabled={linkBusy} onClick={() => void saveLink()}>{linkBusy ? 'Linking…' : 'Confirm link'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(bulkLinkTarget)} onOpenChange={(open) => { if (!open && !linkBusy) setBulkLinkTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link all matching AIRE entries</DialogTitle>
+            <DialogDescription>This links exact source entries to the committed paycheck. It does not mark them paid until check delivery is recorded.</DialogDescription>
+          </DialogHeader>
+          {bulkLinkTarget && <div className="space-y-4 text-sm">
+            <p className="font-semibold text-neutral-950">{bulkLinkTarget.employee.display_name} · {bulkLinkTarget.adjustments.length} entries · check #{bulkLinkTarget.item.check_number || bulkLinkTarget.item.id}</p>
+            <p>{hours(bulkLinkTarget.adjustments.reduce((sum, entry) => sum + entry.regular_hours, 0))} regular · {hours(bulkLinkTarget.adjustments.reduce((sum, entry) => sum + entry.overtime_hours, 0))} OT exactly match the paycheck hours not already linked.</p>
+            <label className="flex items-start gap-2 text-neutral-700"><input type="checkbox" className="mt-1" checked={bulkGrossVerified} onChange={(event) => setBulkGrossVerified(event.target.checked)} />I checked the wage category, rate, and gross pay on this paycheck against these AIRE entries.</label>
+            <label className="block font-medium text-neutral-700">Why these hours match<textarea className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} value={linkNote} onChange={(event) => setLinkNote(event.target.value)} /></label>
+            {linkError && <p role="alert" className="text-danger-800">{linkError}</p>}
+          </div>}
+          <DialogFooter><Button type="button" variant="outline" disabled={linkBusy} onClick={() => setBulkLinkTarget(null)}>Cancel</Button><Button type="button" disabled={linkBusy} onClick={() => void saveBulkLink()}>{linkBusy ? 'Linking…' : 'Confirm all links'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(mapSourceId)} onOpenChange={(open) => { if (!open && !mapBusy) setMapSourceId(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Match AIRE employee</DialogTitle><DialogDescription>Link one permanent AIRE identity to one Cornerstone payroll employee. Existing links cannot be silently reassigned.</DialogDescription></DialogHeader>
+          <label className="block text-sm font-medium text-neutral-700">Cornerstone employee
+            <select className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2" value={mapEmployeeId} onChange={(event) => setMapEmployeeId(event.target.value)}>
+              <option value="">Choose the same person</option>
+              {employees.map((employee) => <option key={employee.id} value={employee.id}>{[employee.first_name, employee.last_name].filter(Boolean).join(' ')}</option>)}
+            </select>
+          </label>
+          {mapError && <p role="alert" className="text-sm text-danger-800">{mapError}</p>}
+          <DialogFooter><Button type="button" variant="outline" disabled={mapBusy} onClick={() => setMapSourceId(null)}>Cancel</Button><Button type="button" disabled={mapBusy || !mapEmployeeId} onClick={() => void saveMapping()}>{mapBusy ? 'Saving…' : 'Save match'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -6,6 +6,7 @@ module Api
       class AirePayrollCockpitsController < BaseController
         before_action :set_pay_period_and_source
         before_action :disable_http_caching
+        before_action :require_manual_reconciliation_access!, only: %i[create_manual_allocation retry_manual_allocation create_employee_mapping]
 
         def show
           presenter = cockpit_presenter
@@ -32,11 +33,52 @@ module Api
 
         def manual_review
           require_aire_source!
-          payload = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_manual_review(
+          payload = cockpit_client(with_delegation: true).payroll_cockpit_manual_review(
             start_date: @pay_period.start_date.iso8601,
-            end_date: @pay_period.end_date.iso8601
+            end_date: @pay_period.end_date.iso8601,
+            external_pay_period_id: @pay_period.id
           )
-          render json: cockpit_presenter.manual_review(payload)
+          render json: cockpit_presenter.manual_review(payload).merge(
+            "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
+              .includes(:employee, payroll_item: :check_events)
+              .order(:id)
+              .map { |allocation| manual_allocation_json(allocation) }
+          )
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def create_employee_mapping
+          require_aire_source!
+          mapping = TimeTracking::EmployeeMappingService.new(pay_period: @pay_period, source: @source).link!(
+            source_user_id: params.require(:source_user_id), employee_id: params.require(:employee_id)
+          )
+          render json: { mapping: { source_user_id: mapping.source_user_id,
+                                    source_user_uuid: mapping.source_user_uuid,
+                                    employee_id: mapping.employee_id,
+                                    employee_name: mapping.employee.full_name } }, status: :ok
+        rescue ActionController::ParameterMissing, ArgumentError,
+               TimeTracking::EmployeeMappingService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
+               ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def create_manual_allocation
+          allocation = manual_allocation_service.create!(**manual_allocation_params.to_h.symbolize_keys)
+          render json: { manual_allocation: manual_allocation_json(allocation) }, status: :created
+        rescue ActionController::ParameterMissing, ArgumentError,
+               TimeTracking::ManualAllocationService::Error, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_manual_allocation
+          allocation = @pay_period.time_tracking_manual_allocations.find(params[:manual_allocation_id])
+          manual_allocation_service.sync!(allocation)
+          render json: { manual_allocation: manual_allocation_json(allocation.reload) }
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
         end
@@ -225,6 +267,45 @@ module Api
         end
 
         private
+
+        def require_manual_reconciliation_access!
+          require_capability!(:manage_client_configuration)
+        end
+
+        def manual_allocation_params
+          %i[payroll_item_id source_time_entry_id source_time_entry_version source_user_uuid
+             regular_hours overtime_hours original_work_date note].each { |key| params.require(key) }
+          params.permit(:payroll_item_id, :source_time_entry_id, :source_time_entry_version,
+                        :source_user_uuid, :regular_hours, :overtime_hours,
+                        :original_work_date, :note)
+        end
+
+        def manual_allocation_service
+          @manual_allocation_service ||= TimeTracking::ManualAllocationService.new(
+            pay_period: @pay_period, source: @source, actor: current_user
+          )
+        end
+
+        def manual_allocation_json(allocation)
+          {
+            id: allocation.id,
+            payroll_item_id: allocation.payroll_item_id,
+            employee_id: allocation.employee_id,
+            employee_name: allocation.employee.full_name,
+            source_user_uuid: allocation.source_user_uuid,
+            source_time_entry_id: allocation.source_time_entry_id,
+            source_time_entry_version: allocation.source_time_entry_version,
+            original_work_date: allocation.original_work_date.iso8601,
+            regular_hours: allocation.regular_hours.to_f,
+            overtime_hours: allocation.overtime_hours.to_f,
+            status: allocation.status,
+            payroll_item_check_status: allocation.payroll_item.check_status,
+            payment_method: allocation.payroll_item.effective_payment_delivery_method,
+            remote_allocation_id: allocation.remote_allocation_id,
+            last_sync_error: allocation.last_sync_error,
+            last_synced_at: allocation.last_synced_at&.iso8601
+          }.compact
+        end
 
         def disable_http_caching
           response.headers["Cache-Control"] = "no-store"

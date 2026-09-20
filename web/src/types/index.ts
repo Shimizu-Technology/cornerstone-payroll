@@ -615,6 +615,7 @@ export interface AirePayrollCalendarState {
     | 'pay_schedule_not_effective'
     | 'pay_schedule_confirmation_required'
     | 'cutoff_rule_invalid'
+    | 'cutoff_time_invalid'
     | 'workweek_confirmation_required'
     | 'period_dates_invalid'
     | 'pay_date_invalid'
@@ -682,7 +683,9 @@ export interface AirePayrollCockpitPeriod {
   pay_date: string;
   cutoff_at: string;
   time_zone: string;
-  cutoff_days_before: number;
+  cutoff_days_before?: number;
+  cutoff_policy?: 'before_current_pay_date' | 'after_regular_pay_date';
+  cutoff_days_after_pay_date?: number;
   version: number;
   schedule_version: number;
   publication_id: string;
@@ -799,6 +802,7 @@ export interface AirePayrollCockpitOverview {
 
 export interface AirePayrollManualReviewAdjustment {
   source_time_entry_id: string;
+  source_time_entry_version?: number;
   source_kind: 'current' | 'carryover' | 'correction';
   original_work_date: string;
   category?: { id?: string | number; key?: string | null; name?: string | null } | null;
@@ -839,6 +843,34 @@ export interface AirePayrollManualReview {
   generated_at: string;
   employees: AirePayrollManualReviewEmployee[];
   exclusions: AirePayrollManualReviewExclusion[];
+  manual_allocations?: Array<{
+    id: string;
+    source_time_entry_id: string;
+    source_user_uuid: string;
+    display_name: string;
+    original_work_date: string;
+    regular_hours: number;
+    overtime_hours: number;
+    status: 'committed' | 'issued' | 'voided';
+    external_pay_period_id: string;
+    external_payroll_item_id: string;
+    payment_reference?: string | null;
+    cornerstone?: AirePayrollCockpitMapping;
+  }>;
+  cornerstone_manual_allocations?: Array<{
+    id: number;
+    payroll_item_id: number;
+    employee_id: number;
+    employee_name: string;
+    source_time_entry_id: string;
+    original_work_date: string;
+    regular_hours: number;
+    overtime_hours: number;
+    status: 'pending_commit' | 'committed' | 'issued' | 'voided';
+    payroll_item_check_status?: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
+    payment_method?: 'paper_check' | 'direct_deposit';
+    last_sync_error?: string | null;
+  }>;
   issues: {
     missing_category_count: number;
     negative_adjustment_count: number;

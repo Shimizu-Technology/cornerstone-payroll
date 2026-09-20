@@ -1090,6 +1090,19 @@ export const payPeriodsApi = {
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`
     ),
+  mapAireEmployee: (id: number, data: { source_user_id: string; employee_id: number }) =>
+    api.post(`/admin/pay_periods/${id}/aire_payroll_cockpit/employee_mapping`, data),
+  linkManualAireHours: (id: number, data: {
+    payroll_item_id: number; source_time_entry_id: string; source_time_entry_version: number;
+    source_user_uuid: string; regular_hours: number; overtime_hours: number;
+    original_work_date: string; note: string;
+  }) => api.post<{ manual_allocation: NonNullable<import('@/types').AirePayrollManualReview['cornerstone_manual_allocations']>[number] }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations`, data
+  ),
+  retryManualAireHours: (id: number, allocationId: number) =>
+    api.post<{ manual_allocation: NonNullable<import('@/types').AirePayrollManualReview['cornerstone_manual_allocations']>[number] }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations/${allocationId}/retry`
+    ),
   airePayrollTimeEntries: (id: number, params?: { employee_id?: string; approval_status?: string; page?: number }) =>
     api.get<import('@/types').AirePayrollTimeEntriesResponse>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/time_entries`,
