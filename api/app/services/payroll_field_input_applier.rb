@@ -18,12 +18,6 @@ class PayrollFieldInputApplier
       field = assignment.payroll_field_definition
       raise ArgumentError, "Payroll field is not available in the payroll worksheet" unless field.active? && field.show_in_payroll_grid?
       raise ArgumentError, "Payroll field belongs to another client" unless field.company_id == company_id
-      if direct_loan_field_should_be_skipped?(payroll_item, field)
-        next if input.fetch(:mode) == "default"
-
-        raise ArgumentError, "Clear the direct loan deduction before overriding #{field.name}; only one loan deduction source can apply"
-      end
-
       entry = payroll_item.payroll_item_field_entries.detect do |candidate|
         candidate.payroll_field_definition_id == field.id
       end
@@ -116,11 +110,5 @@ class PayrollFieldInputApplier
       active: true,
       notes: assignment.notes
     }
-  end
-
-  def direct_loan_field_should_be_skipped?(payroll_item, field)
-    payroll_item.loan_deduction.to_f.positive? &&
-      field.category == "loan" &&
-      field.tax_treatment == "post_tax_deduction"
   end
 end

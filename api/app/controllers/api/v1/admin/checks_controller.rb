@@ -34,7 +34,7 @@ module Api
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
-        before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
+        before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
@@ -85,6 +85,41 @@ module Api
               requires_verified_print_package: @pay_period.company.require_distinct_check_print_confirmer?
             }
           }
+        end
+
+        # Read-only, non-negotiable proof for calculated or approved migration
+        # rehearsals. This deliberately does not allocate check numbers, record
+        # a print event, or make a rehearsal eligible for payment/commit.
+        def rehearsal_preview_pdf
+          unless @pay_period.company.migration_rehearsal? && %w[calculated approved].include?(@pay_period.status)
+            return render json: { error: "Mock checks are only available for calculated or approved migration rehearsals" }, status: :unprocessable_entity
+          end
+
+          items = @pay_period.payroll_items
+            .includes(:payroll_item_earnings, :payroll_item_field_entries,
+              { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
+            .not_voided.to_a
+            .select { |item| item.effective_payment_delivery_method == "paper_check" && item.net_pay.to_d.positive? }
+            .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
+          if items.empty?
+            return render json: { error: "No positive-net paper checks are available in this rehearsal" }, status: :unprocessable_entity
+          end
+
+          pdf_data = if @pay_period.company.first_hawaiian_4up_checks?
+            FirstHawaiianFourUpCheckGenerator.new(
+              company: @pay_period.company, payroll_items: items,
+              starting_slot: params[:starting_slot], rehearsal_preview: true
+            ).generate
+          else
+            combine_pdfs(items.map { |item| CheckGenerator.new(item).generate_rehearsal_preview })
+          end
+
+          response.headers["Cache-Control"] = "private, no-store"
+          pay_date_token = @pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
+          send_data pdf_data, type: "application/pdf", disposition: "attachment",
+            filename: "test_only_rehearsal_checks_#{pay_date_token}.pdf"
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------

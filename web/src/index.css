@@ -167,3 +167,21 @@ h6,
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
+
+/* A shared baseline for financial report headers, including dynamic source
+   columns. Keep source-category colors while aligning the labels and rules. */
+.reports-tables table thead th {
+  vertical-align: bottom;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #cbd5e1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.reports-tables table thead th > span {
+  letter-spacing: normal;
+}

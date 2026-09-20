@@ -57,6 +57,20 @@ RSpec.describe CheckGenerator do
 
   subject(:generator) { described_class.new(payroll_item) }
 
+  it "includes both a direct loan and a separate loan field in check deductions" do
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+    payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+      label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+    payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
+
+    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("428.36"))
+    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("428.36"))
+    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("428.36")))
+    expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
+  end
+
   describe "#generate" do
     subject(:pdf) { generator.generate }
 
@@ -109,6 +123,38 @@ RSpec.describe CheckGenerator do
 
       expect(text).to include("Cash Advance")
       expect(text).to include("40.00")
+    end
+
+    it "keeps the full names of distinct loan fields and other pay on the stub" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+        kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+        label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+        category: "loan", amount: BigDecimal("250"), source: "employee_default")
+      payroll_item.update!(custom_earnings: [ { "label" => "Auto Loan Reimbursement", "amount" => 121.0 } ])
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Loan - Madela Severin")
+      expect(text).to include("Auto Loan Reimbursement")
+      expect(text).not_to include("Auto Loan Reimburs..")
+    end
+
+    it "bounds unusually long labels while keeping the deduction and summary readable" do
+      long_label = "Loan - Madela Severin Extra Long Reimbursement Installment Reference Number"
+      field = PayrollFieldDefinition.create!(company: company, name: long_label,
+        kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+        label: long_label, kind: "deduction", tax_treatment: "post_tax_deduction",
+        category: "loan", amount: BigDecimal("250"), source: "employee_default")
+
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      text = reader.pages.map(&:text).join("\n")
+
+      expect(reader.page_count).to eq(1)
+      expect(text).to include("Loan - Madela Severin Extra Long", "Reimbursemen...")
+      expect(text).to include("SUMMARY", "NET PAY")
+      expect(text).not_to include("[TABLE]")
     end
 
     it "prints payroll adjustment deduction YTD values on check stubs" do

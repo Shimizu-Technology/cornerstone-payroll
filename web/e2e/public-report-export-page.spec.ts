@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('Tax Summary exports every format after the results card has loaded', async ({ page }, testInfo) => {
+test('Tax Summary previews PDF and exports data formats after the results card has loaded', async ({ page }, testInfo) => {
   const exported: string[] = [];
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -22,12 +22,20 @@ test('Tax Summary exports every format after the results card has loaded', async
   await page.locator('#ts-year').selectOption('2026');
   await page.getByRole('button', { name: 'View Report', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Tax Summary —/ })).toBeVisible();
-  for (const [label, format] of [['PDF', 'pdf'], ['Excel workbook', 'xlsx'], ['CSV data', 'csv']]) {
+  for (const [label, format] of [['Preview PDF', 'pdf'], ['Excel workbook', 'xlsx'], ['CSV data', 'csv']]) {
     await page.getByRole('button', { name: /Export Tax Summary/ }).click();
     if (format === 'pdf') await page.screenshot({ path: testInfo.outputPath('export-menu-fixed.png') });
-    const download = page.waitForEvent('download');
+    const exportDownload = format === 'pdf' ? null : page.waitForEvent('download');
     await page.getByRole('menuitem', { name: new RegExp(`^${label}`) }).click();
-    expect((await download).suggestedFilename()).toMatch(new RegExp(`\\.${format}$`));
+    if (format === 'pdf') {
+      await expect(page.getByRole('heading', { name: 'Tax summary preview' })).toBeVisible();
+      const download = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Download', exact: true }).click();
+      expect((await download).suggestedFilename()).toMatch(/\.pdf$/);
+      await page.getByRole('button', { name: 'Close PDF preview' }).click();
+    } else {
+      expect((await exportDownload)?.suggestedFilename()).toMatch(new RegExp(`\\.${format}$`));
+    }
   }
   expect(exported).toEqual(['pdf', 'xlsx', 'csv']);
 });

@@ -192,6 +192,150 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/employees/:employee_id/payroll_fields/convert_legacy" do
+    let(:legacy_loan) do
+      { label: "Loan - Installment", amount: 250, treatment: "post_tax_deduction", notes: "Verify payoff date", active: true }
+    end
+    let(:conversion_payload) do
+      {
+        legacy: legacy_loan.merge(kind: "adjustment"),
+        payroll_field: { name: "Loan - Installment", category: "loan" },
+        employee_payroll_field: { start_date: "2026-09-21", end_date: "2026-10-22", notes: "Verified payoff date" }
+      }
+    end
+
+    before do
+      employee.update!(default_payroll_adjustments: [
+        legacy_loan,
+        { label: "Other loan", amount: 428.36, treatment: "post_tax_deduction", active: true }
+      ])
+    end
+
+    it "atomically replaces one legacy loan and leaves a separate loan untouched" do
+      expect {
+        post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: conversion_payload
+      }.to change(PayrollFieldDefinition, :count).by(1)
+        .and change(EmployeePayrollField, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      field = PayrollFieldDefinition.find(response.parsed_body.dig("payroll_field", "id"))
+      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
+      expect(field.attributes.slice("kind", "tax_treatment", "category", "amount_type")).to eq(
+        "kind" => "deduction", "tax_treatment" => "post_tax_deduction", "category" => "loan", "amount_type" => "fixed"
+      )
+      expect(assignment.amount.to_d).to eq(250.to_d)
+      expect(assignment.start_date).to eq(Date.new(2026, 9, 21))
+      expect(Employee.normalize_payroll_adjustments(employee.reload.default_payroll_adjustments).map { |row| row.fetch("label") }).to eq([ "Other loan" ])
+      expect(AuditLog.where(action: "employee_payroll_fields#convert_legacy", record_id: employee.id)).to exist
+    end
+
+    it "calculates the moved loan and a separate direct worksheet loan as two deductions" do
+      create(:tax_table, tax_year: 2026)
+      employee.update!(default_payroll_adjustments: [ legacy_loan ])
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: conversion_payload
+      expect(response).to have_http_status(:created)
+
+      period = create(:pay_period, company: company,
+        start_date: Date.new(2026, 9, 7), end_date: Date.new(2026, 9, 20), pay_date: Date.new(2026, 9, 25))
+      item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+        import_source: "mosa_revel", loan_deduction: BigDecimal("428.36"))
+      item.sync_default_payroll_adjustments!(employee.reload)
+      PayrollCalculator.for(employee, item).calculate
+
+      loan_rows = item.payroll_item_deductions.select { |deduction| deduction.deduction_type&.loan? }
+      expect(loan_rows.map { |row| row.amount.to_d }).to eq([ BigDecimal("250") ])
+      expect(item.loan_deduction.to_d).to eq(BigDecimal("428.36"))
+      expect(item.loan_payment.to_d).to eq(BigDecimal("678.36"))
+    end
+
+    it "keeps both sources unchanged when the legacy row is stale or the new setup is invalid" do
+      stale = conversion_payload.deep_merge(legacy: { amount: 200 })
+      invalid = conversion_payload.deep_merge(employee_payroll_field: { end_date: "2026-09-20" })
+      malformed_date = conversion_payload.deep_merge(employee_payroll_field: { start_date: "not-a-date" })
+
+      [ stale, invalid, malformed_date ].each do |payload|
+        expect {
+          post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: payload
+        }.not_to change(PayrollFieldDefinition, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+      expect(Employee.normalize_payroll_adjustments(employee.reload.default_payroll_adjustments).size).to eq(2)
+      expect(employee.employee_payroll_fields).to be_empty
+    end
+
+    it "blocks an overlapping conversion when an open payroll item has a manual legacy override" do
+      period = create(:pay_period, :calculated, company: company,
+        start_date: Date.new(2026, 9, 7), end_date: Date.new(2026, 9, 20), pay_date: Date.new(2026, 9, 25))
+      item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+        payroll_adjustments: [ legacy_loan.merge(amount: 200) ])
+      item.mark_payroll_adjustments_overridden!
+      item.save!
+
+      expect {
+        post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: conversion_payload
+      }.not_to change(PayrollFieldDefinition, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").join).to include("Pay period #{period.id}")
+      expect(employee.reload.default_payroll_adjustments.size).to eq(2)
+    end
+
+    it "allows a future-dated conversion while preserving an older manual payroll snapshot" do
+      period = create(:pay_period, :calculated, company: company,
+        start_date: Date.new(2026, 9, 7), end_date: Date.new(2026, 9, 20), pay_date: Date.new(2026, 9, 25))
+      item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+        payroll_adjustments: [ legacy_loan ])
+      item.mark_payroll_adjustments_overridden!
+      item.save!
+
+      future_payload = conversion_payload.deep_merge(employee_payroll_field: { start_date: "2026-10-01" })
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: future_payload
+
+      expect(response).to have_http_status(:created)
+      expect(item.reload.payroll_adjustments.first.fetch("label")).to eq("Loan - Installment")
+      expect(employee.reload.default_payroll_adjustments.size).to eq(1)
+    end
+
+    it "allows a default snapshot to refresh safely after conversion" do
+      period = create(:pay_period, :calculated, company: company,
+        start_date: Date.new(2026, 9, 7), end_date: Date.new(2026, 9, 20), pay_date: Date.new(2026, 9, 25))
+      item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+        payroll_adjustments: [ legacy_loan ])
+      item.mark_payroll_adjustments_default_snapshot!
+      item.save!
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: conversion_payload
+
+      expect(response).to have_http_status(:created)
+      item.reload.sync_default_payroll_adjustments!(employee.reload)
+      expect(item.payroll_adjustments.map { |row| row.fetch("label") }).to eq([ "Other loan" ])
+    end
+
+    it "moves a legacy taxable earning without changing its tax treatment or amount" do
+      employee.update!(default_custom_earnings: [ { label: "Bonus", amount: 125 } ])
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: {
+        legacy: { kind: "custom_earning", label: "Bonus", amount: 125 },
+        payroll_field: { name: "Legacy Bonus", category: "other" },
+        employee_payroll_field: { notes: "Migrated after review" }
+      }
+
+      expect(response).to have_http_status(:created)
+      field = PayrollFieldDefinition.find(response.parsed_body.dig("payroll_field", "id"))
+      expect(field.kind).to eq("addition")
+      expect(field.tax_treatment).to eq("taxable_addition")
+      expect(field.default_amount.to_d).to eq(125.to_d)
+      expect(employee.reload.default_custom_earnings).to be_empty
+    end
+
+    it "cannot convert another client's employee through the current client" do
+      other_employee = create(:employee, company: other_company)
+      post "/api/v1/admin/employees/#{other_employee.id}/payroll_fields/convert_legacy", params: conversion_payload
+
+      expect(response).to have_http_status(:not_found)
+      expect(PayrollFieldDefinition.where(owner_employee: other_employee)).not_to exist
+    end
+  end
+
   describe "POST /api/v1/admin/employees/:employee_id/payroll_fields" do
     it "only lists active employee payroll field assignments" do
       active_field = PayrollFieldDefinition.create!(company: company, name: "Active Field", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")

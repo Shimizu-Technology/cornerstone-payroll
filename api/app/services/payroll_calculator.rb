@@ -179,7 +179,6 @@ class PayrollCalculator
   # Called before tax calculation so these reduce the FIT withholding base.
   def calculate_base_gross_for_payroll_fields
     unless historical_calculation? || is_a?(ContractorPayrollCalculator) || !recurring_items_enabled?
-      PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item)
       PayrollRetirementConfigurationGuard.new(employee: employee, payroll_item: payroll_item).validate!
     end
     @exclude_payroll_field_entry_totals = true
@@ -382,27 +381,24 @@ class PayrollCalculator
 
     direct_loan_payment = 0.0
 
-    # Imports and the Adjust Hours grid can provide the paycheck loan deduction
-    # directly. That value is authoritative for this payroll run even if the
-    # employee also has itemized EmployeeLoan records configured; those records
-    # are separate loan-tracking setup and must not hide or duplicate the direct
-    # paycheck deduction.
+    # The direct worksheet amount is a separate one-time deduction. Named loan
+    # fields and employee deductions remain independently payable on this check.
     if payroll_item.loan_deduction.to_f > 0
       direct_loan_payment = payroll_item.loan_deduction.to_f
-      payroll_item.loan_payment = direct_loan_payment
     end
 
     has_itemized_deductions = payroll_item.payroll_item_deductions.any?
+    if direct_loan_payment.positive? || has_itemized_deductions
+      payroll_item.loan_payment = (itemized_loan_payment + direct_loan_payment).round(2)
+    end
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
     legacy_insurance_payment = has_itemized_deductions ? 0.0 : payroll_item.insurance_payment.to_f
 
-    post_tax_deductions = if direct_loan_payment.positive?
-      (itemized_post_tax - itemized_loan_payment) + direct_loan_payment + legacy_insurance_payment
-    elsif has_itemized_deductions
-      itemized_post_tax
+    post_tax_deductions = if has_itemized_deductions
+      itemized_post_tax + direct_loan_payment
     else
-      payroll_item.loan_payment.to_f + payroll_item.insurance_payment.to_f
+      payroll_item.loan_payment.to_f + legacy_insurance_payment
     end
 
     payroll_item.total_deductions = (
@@ -589,7 +585,6 @@ class PayrollCalculator
   end
 
   def skip_employee_deduction?(deduction_type)
-    return true if payroll_item.loan_deduction.to_f.positive? && deduction_type&.loan?
     # New payrolls reject overlapping elections explicitly. Retain the legacy
     # precedence only when reproducing a saved historical calculation snapshot.
     return false unless historical_calculation?
@@ -681,26 +676,32 @@ class PayrollCalculator
     return unless excess.positive?
 
     had_itemized_deductions = payroll_item.payroll_item_deductions.any?
+    had_direct_loan_deduction = payroll_item.loan_deduction.to_f.positive?
 
     remaining = reduce_custom_deductions_by!(excess)
     remaining = reduce_payroll_field_deductions_by!(remaining)
     remaining = reduce_payroll_item_deductions_by!(remaining)
     sync_aggregate_deductions_from_itemized! if had_itemized_deductions
 
-    [
+    numeric_fields = [
       :additional_withholding,
       :withholding_tax,
       :roth_retirement_payment,
-      :retirement_payment,
-      :loan_payment,
+      :retirement_payment
+    ]
+    numeric_fields << :loan_deduction if had_direct_loan_deduction
+    numeric_fields << :loan_payment if !had_direct_loan_deduction && !had_itemized_deductions
+    numeric_fields.concat([
       :insurance_payment,
       :medicare_tax,
       :social_security_tax,
       :tips_paid_out
-    ].each do |field|
+    ])
+    numeric_fields.each do |field|
       remaining = reduce_numeric_deduction_field_by!(field, remaining)
       break unless remaining.positive?
     end
+    sync_aggregate_deductions_from_itemized! if had_itemized_deductions || had_direct_loan_deduction
 
     payroll_item.total_deductions = [ (payroll_item.total_deductions.to_f - (excess - remaining)).round(2), available_pay ].min
   end
@@ -787,9 +788,10 @@ class PayrollCalculator
   end
 
   def sync_aggregate_deductions_from_itemized!
-    payroll_item.loan_payment = payroll_item.payroll_item_deductions.sum do |deduction|
+    itemized_loan_payment = payroll_item.payroll_item_deductions.sum do |deduction|
       deduction.deduction_type&.loan? ? deduction.amount.to_f : 0.0
-    end.round(2)
+    end
+    payroll_item.loan_payment = (itemized_loan_payment + payroll_item.loan_deduction.to_f).round(2)
     payroll_item.insurance_payment = payroll_item.payroll_item_deductions.sum do |deduction|
       deduction.deduction_type&.sub_category == "insurance" ? deduction.amount.to_f : 0.0
     end.round(2)

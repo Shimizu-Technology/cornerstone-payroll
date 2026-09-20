@@ -3,6 +3,24 @@
 require "rails_helper"
 
 RSpec.describe QuickbooksPayrollReportData do
+  it "exports direct and named loan deductions as separate entries" do
+    company = create(:company)
+    employee = create(:employee, company: company)
+    pay_period = create(:pay_period, :committed, company: company)
+    item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company,
+      loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+    item.payroll_item_field_entries.create!(payroll_field_definition: field,
+      label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+
+    entries = described_class.new(pay_period).deduction_contribution_entries_for_item(item)
+
+    expect(entries).to include(have_attributes(description: "Loan", employee_amount: BigDecimal("428.36")))
+    expect(entries).to include(have_attributes(description: "Loan - Madela Severin", employee_amount: BigDecimal("250")))
+  end
+
   it "uses explicit payroll field reporting groups for 401(k) retirement sections" do
     company = create(:company)
     employee = create(:employee, company: company)

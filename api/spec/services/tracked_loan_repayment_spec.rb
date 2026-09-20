@@ -150,24 +150,26 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(item.payroll_item_deductions.first.employee_loan).to eq(loan)
   end
 
-  it "rejects a direct amount that would suppress a tracked balance, then commits a named override correctly" do
-    item.loan_deduction = 40
+  it "deducts a direct amount separately from a tracked loan and posts only the named payment to its ledger" do
+    item.loan_deduction = BigDecimal("40")
     applier = PayrollFieldInputApplier.new(pay_period: period, company_id: company.id)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "default" } }) }.not_to raise_error
-    expect { calculate }.to raise_error(ArgumentError, /direct amount is not recorded in that ledger/i)
-    expect(loan.reload.current_balance).to eq(75)
-    expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 30 } }) }.to raise_error(ArgumentError, /only one loan deduction source/)
-    item.loan_deduction = 0
-    applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 40 } })
     calculate
-    expect(item.payroll_item_deductions.sum(&:amount)).to eq(40)
+    expect(item.loan_payment).to eq(BigDecimal("115"))
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(BigDecimal("75"))
+    expect(loan.reload.current_balance).to eq(75)
+    expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: BigDecimal("30") } }) }.not_to raise_error
+    calculate
+    expect(item.loan_payment).to eq(BigDecimal("70"))
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(BigDecimal("30"))
     period.update!(status: "approved")
     PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
-    expect(loan.reload.current_balance).to eq(35)
+    expect(loan.reload.current_balance).to eq(BigDecimal("45"))
+    expect(loan.loan_transactions.payments.sum(:amount)).to eq(BigDecimal("30"))
   end
 
   it "allows an unrelated direct payment when the tracked schedule is not due or has stopped" do
-    item.loan_deduction = 40
+    item.loan_deduction = BigDecimal("40")
     loan.update!(first_deduction_date: period.pay_date + 1)
     expect { calculate }.not_to raise_error
     expect(item.loan_payment).to eq(40)
@@ -177,13 +179,15 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(loan.reload.current_balance).to eq(75)
   end
 
-  it "protects a legacy loan repayment schedule from the same direct override" do
+  it "adds a direct amount to a separate legacy tracked repayment" do
     assignment.destroy!
     deduction_type = DeductionType.create!(company: company, name: "Legacy loan", category: "post_tax", sub_category: "loan")
     loan.update!(deduction_type: deduction_type)
     employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
     item.loan_deduction = 40
-    expect { calculate }.to raise_error(ArgumentError, /named deduction/)
+    calculate
+    expect(item.loan_payment).to eq(BigDecimal("115"))
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(BigDecimal("75"))
   end
 
   it "also blocks committing an older saved direct payment that bypassed the tracked schedule" do
@@ -193,6 +197,20 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(period.reload).to be_approved
     expect(loan.reload.current_balance).to eq(75)
     expect(loan.loan_transactions).to be_empty
+  end
+
+  it "does not let one deduction satisfy two due loan ledgers by ID and type" do
+    type = DeductionType.create!(company: company, name: "Second loan deduction", category: "post_tax", sub_category: "loan")
+    second_loan = EmployeeLoan.create!(employee: employee, company: company, name: "Second loan",
+      tracking_mode: "recurring_no_balance", payment_amount: BigDecimal("25"),
+      first_deduction_date: period.pay_date, status: "active", deduction_type: type)
+    employee.employee_deductions.create!(deduction_type: type, amount: BigDecimal("25"), active: true)
+    item.payroll_item_deductions.create!(deduction_type: type, employee_loan: loan, category: "post_tax",
+      amount: BigDecimal("25"), label: type.name)
+    item.loan_deduction = BigDecimal("40")
+
+    expect { PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: item) }
+      .to raise_error(ArgumentError, /named deduction for Second loan is missing/)
   end
 
   context "with a recurring deduction that has no known balance" do
@@ -236,11 +254,15 @@ RSpec.describe "Tracked payroll loan repayment" do
       expect(loan.reload.current_balance).to be_nil
     end
 
-    it "rejects an unidentified direct import amount that would bypass its ledger" do
-      item.loan_deduction = 40
+    it "keeps a direct import amount separate from the named no-balance repayment" do
+      item.loan_deduction = BigDecimal("40")
 
-      expect { calculate }.to raise_error(ArgumentError, /named deduction/)
-      expect(loan.loan_transactions).to be_empty
+      calculate
+      expect(item.loan_payment).to eq(BigDecimal("90"))
+      expect(item.payroll_item_deductions.sum(&:amount)).to eq(BigDecimal("50"))
+      period.update!(status: "approved")
+      PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+      expect(loan.loan_transactions.payments.sum(:amount)).to eq(BigDecimal("50"))
     end
 
     it "never allows payoff or balance additions for the no-balance mode" do
@@ -259,9 +281,11 @@ RSpec.describe "Tracked payroll loan repayment" do
         employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
       end
 
-      it "rejects a direct deduction that would bypass the active legacy repayment" do
-        item.loan_deduction = 40
-        expect { calculate }.to raise_error(ArgumentError, /named deduction/)
+      it "adds a direct deduction to the active legacy repayment" do
+        item.loan_deduction = BigDecimal("40")
+        calculate
+        expect(item.loan_payment).to eq(BigDecimal("115"))
+        expect(item.payroll_item_deductions.sum(&:amount)).to eq(BigDecimal("75"))
         expect(loan.reload.current_balance).to eq(75)
         expect(loan.loan_transactions).to be_empty
       end
