@@ -48,6 +48,11 @@ module TimeTracking
 
       allocation = nil
       item.with_lock do
+        raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
+        if item.effective_payment_delivery_method == "direct_deposit"
+          raise Error, "Direct-deposit AIRE hours need recorded bank payment confirmation before they can be marked paid"
+        end
+        raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
         if TimeTrackingManualAllocation.where(time_tracking_source: source, source_time_entry_id: entry_id,
                                               payroll_item_id: item.id).exists?
           raise Error, "This AIRE time entry is already linked to this payroll item"

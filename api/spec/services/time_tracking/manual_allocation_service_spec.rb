@@ -78,6 +78,17 @@ RSpec.describe TimeTracking::ManualAllocationService do
     expect(TimeTrackingManualAllocation.count).to eq(0)
   end
 
+  it "rejects a payment-method change that wins the race before the item lock" do
+    item
+    allow_any_instance_of(PayrollItem).to receive(:with_lock).and_wrap_original do |original, *args, &block|
+      original.receiver.update_columns(payment_delivery_method: "direct_deposit", check_number: nil)
+      original.call(*args, &block)
+    end
+
+    expect { create_link }.to raise_error(described_class::Error, /bank payment confirmation/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   it "releases committed AIRE hours when the paycheck is voided before delivery" do
     allocation = create_link
     item.update_columns(voided: true, voided_at: Time.current)
