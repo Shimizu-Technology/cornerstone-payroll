@@ -3112,6 +3112,11 @@ export const checksApi = {
   printQueue: (payPeriodId: number) =>
     api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
 
+  rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
+      starting_slot: startingSlot,
+    }),
+
   updateCheckNumbers: (
     payPeriodId: number,
     changes: Array<{ source_type: 'payroll_item' | 'non_employee_check'; source_id: number; check_number: string | null }>,

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe "Api::V1::Admin::Checks", type: :request do
   let!(:company) do
@@ -167,6 +168,86 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("verified check print package")
       expect(CheckEvent.where(event_type: "batch_downloaded")).to be_empty
+    end
+  end
+
+  describe "GET /api/v1/admin/pay_periods/:pay_period_id/checks/rehearsal_preview_pdf" do
+    before do
+      source_company = create(:company, organization: company.organization)
+      source_batch = create(:historical_import_batch, company: source_company, status: "locked")
+      company.update_columns(
+        payroll_environment: "migration_rehearsal",
+        migration_source_company_id: source_company.id,
+        migration_source_batch_id: source_batch.id,
+        migration_rehearsal_status: "ready"
+      )
+      draft_period.update_columns(status: "calculated")
+      draft_item.update_columns(check_number: nil)
+    end
+
+    it "renders a non-negotiable mock check without allocating a number or recording a print" do
+      original_number = company.reload.next_check_number
+      original_item = draft_item.reload.attributes.slice("check_number", "check_status", "check_printed_at", "check_print_count")
+
+      expect {
+        get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      }.not_to change(CheckEvent, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers.fetch("Content-Disposition")).to include("test_only_rehearsal_checks")
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("TEST ONLY - NOT NEGOTIABLE", "Alice Reyes", "500.00")
+      expect(company.reload.next_check_number).to eq(original_number)
+      expect(draft_item.reload.attributes.slice(*original_item.keys)).to eq(original_item)
+      expect(draft_period.reload.status).to eq("calculated")
+    end
+
+    it "allows an approved rehearsal run but never a draft or live client" do
+      draft_period.update_columns(status: "approved")
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:ok)
+
+      draft_period.update_columns(status: "draft")
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      company.update_columns(payroll_environment: "live", migration_source_company_id: nil,
+        migration_source_batch_id: nil, migration_rehearsal_status: nil)
+      draft_period.update_columns(status: "calculated")
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "marks every occupied First Hawaiian slot as a rehearsal preview" do
+      company.update_columns(check_stock_type: "first_hawaiian_4up")
+      create(:payroll_item, pay_period: draft_period, employee: employee_b,
+        gross_pay: 800, net_pay: 600, total_deductions: 200)
+
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text.scan("TEST ONLY - NOT NEGOTIABLE").size).to eq(2)
+      expect(text).to include("Alice Reyes", "Bob Santos")
+    end
+
+    it "excludes direct deposit and refuses an empty paper-check preview" do
+      deposit_employee = create(:employee, company: company, first_name: "Dina", last_name: "Deposit",
+        payment_delivery_method: "direct_deposit")
+      create(:payroll_item, pay_period: draft_period, employee: deposit_employee,
+        payment_delivery_method: "direct_deposit", gross_pay: 600, net_pay: 500)
+
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("Alice Reyes")
+      expect(text).not_to include("Dina Deposit")
+
+      draft_item.update_columns(net_pay: 0)
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("No positive-net paper checks")
     end
   end
 
