@@ -1808,6 +1808,7 @@ module Api
           adjustments_by_employee = historical_adjustments.group_by { |adjustment| adjustment.historical_paycheck.employee_id }
           disclosure = PayrollFieldDisclosure.new(items)
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
+          historical_deductions = unified.historical_deduction_entries(historical_paychecks, historical_adjustments)
           employee_rows = sort_ytd_rows(employees.map do |employee|
             payroll_period_employee_row(
               employee,
@@ -1821,7 +1822,7 @@ module Api
           employee_rows.reject! { |row| active_zero_pay_employee?(row) } unless include_zero_pay_employees?
           visible_employee_ids = employee_rows.map { |row| row[:employee_id] }
           component_columns = period_summary_component_columns(
-            disclosure.rows + adjustment_disclosure.rows,
+            disclosure.rows + adjustment_disclosure.rows + historical_deductions,
             visible_employee_ids
           )
           employee_rows.each do |row|
@@ -1840,6 +1841,12 @@ module Api
               displayed_count: employee_rows.length
             },
             component_columns: component_columns.map { |column| column.except(:entries) },
+            historical_deductions: {
+              source_bucket_totals: historical_deductions.group_by { |entry| [ entry[:source], entry[:treatment] ] }.map do |(source, treatment), entries|
+                { source: source, treatment: treatment, amount: entries.sum(BigDecimal("0")) { |entry| entry[:amount] } }
+              end,
+              classification_note: "QuickBooks deduction labels retain their source tax buckets. Historical loan labels do not establish straight versus installment treatment. A 401(k) After Tax label in a QuickBooks pre-tax bucket is shown separately, not reclassified."
+            },
             company_totals: payroll_period_company_totals(
               items, period, historical_paychecks, historical_adjustments, unified: unified
             ),
@@ -1865,7 +1872,9 @@ module Api
         def period_summary_component_columns(entries, employee_ids)
           entries.select { |entry| employee_ids.include?(entry[:employee_id]) }
             .group_by do |entry|
-              if entry.key?(:tax_treatment)
+              if entry.key?(:historical_source) || entry[:source].in?(%w[quickbooks historical_adjustment])
+                "historical:#{entry[:source]}:#{entry[:treatment]}:#{entry[:label]}"
+              elsif entry.key?(:tax_treatment)
                 entry[:payroll_field_definition_id] ? "field:definition:#{entry[:payroll_field_definition_id]}" : "field:entry:#{entry[:payroll_item_field_entry_id]}"
               else
                 "adjustment:item:#{entry[:payroll_item_id]}:#{entry[:position]}"
@@ -1873,16 +1882,19 @@ module Api
             end
             .map do |key, grouped|
               first = grouped.first
+              historical = first[:source].in?(%w[quickbooks historical_adjustment])
               field = first.key?(:tax_treatment)
               treatment = field ? first[:tax_treatment] : first[:treatment]
-              identity = if field
+              identity = if historical
+                first[:source] == "quickbooks" ? "QuickBooks source" : "Historical adjustment"
+              elsif field
                 first[:payroll_field_definition_id] ? "field ##{first[:payroll_field_definition_id]}" : "entry ##{first[:payroll_item_field_entry_id]}"
               else
                 "#{first[:employee_name]}, item ##{first[:payroll_item_id]}/#{first[:position].to_i + 1}"
               end
               {
                 key: key,
-                label: "#{field ? 'Payroll Field' : 'Payroll Adjustment'} - #{first[:label]} (#{treatment.to_s.humanize}; #{identity})",
+                label: "#{historical ? identity : (field ? 'Payroll Field' : 'Payroll Adjustment')} - #{first[:label]} (#{treatment.to_s.humanize}; #{identity})",
                 short_label: first[:label],
                 identity_label: identity,
                 treatment: treatment,
@@ -1923,6 +1935,7 @@ module Api
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
             payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
+            health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
@@ -1934,6 +1947,8 @@ module Api
             bonus: items.sum { |item| item.bonus.to_f },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+            historical_loan_deductions_unclassified: 0,
+            source_labeled_after_tax_401k_in_pretax_bucket: 0,
             employer_contributions: items.sum { |item| employer_contributions_total(item) },
             employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             total_deductions: custom_totals[:total_deductions],
@@ -1960,6 +1975,8 @@ module Api
             bonus: items.sum { |item| item.bonus.to_f },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
+            historical_loan_deductions_unclassified: 0,
+            source_labeled_after_tax_401k_in_pretax_bucket: 0,
             employer_contributions: items.sum { |item| employer_contributions_total(item) },
             employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
             custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
@@ -1967,6 +1984,7 @@ module Api
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
             payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
+            health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
@@ -2533,7 +2551,13 @@ module Api
 
         def installment_loan_amount(item)
           loan_payment = BigDecimal(item[:loan_payment].to_s.presence || "0")
-          [ loan_payment - straight_loan_amount(item), BigDecimal("0") ].max
+          adjustment = item.active_payroll_adjustments.sum(BigDecimal("0")) do |entry|
+            next BigDecimal("0") unless entry["treatment"] == "post_tax_deduction" &&
+              entry["label"].to_s.match?(/\A(?:Payroll Adjustment - )?Loan - Installment\z/i)
+
+            BigDecimal(entry["amount"].to_s)
+          end
+          [ loan_payment - straight_loan_amount(item), BigDecimal("0") ].max + adjustment
         end
 
         def employer_contributions_total(item)
@@ -3681,6 +3705,8 @@ module Api
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
             "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
             "Tips", "Tips Paid Out", "Bonus", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
+            "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
+            "401(k) After Tax Label in Source Pre-Tax Bucket",
             "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
           ] + component_columns.map { |column| column[:label] } + provisional_column ]
@@ -3691,6 +3717,7 @@ module Api
               emp[:payroll_field_non_taxable_additions_total], emp[:payroll_field_pre_tax_deductions_total],
               emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
               emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
+              emp[:historical_loan_deductions_unclassified], emp[:health_insurance_deductions], emp[:source_labeled_after_tax_401k_in_pretax_bucket],
               emp[:employer_contributions], emp[:employer_payroll_cost], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
               *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] },

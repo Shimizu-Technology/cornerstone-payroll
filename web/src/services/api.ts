@@ -2203,6 +2203,9 @@ export interface YtdSummaryReport {
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
+      historical_loan_deductions_unclassified?: number;
+      health_insurance_deductions?: number;
+      source_labeled_after_tax_401k_in_pretax_bucket?: number;
       employer_contributions?: number;
       employer_payroll_cost?: number;
       custom_earnings_total?: number;
@@ -2228,6 +2231,9 @@ export interface YtdSummaryReport {
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
+      historical_loan_deductions_unclassified?: number;
+      health_insurance_deductions?: number;
+      source_labeled_after_tax_401k_in_pretax_bucket?: number;
       employer_contributions?: number;
       employer_payroll_cost?: number;
       custom_earnings_total?: number;
@@ -2248,6 +2254,10 @@ export interface YtdSummaryReport {
     source_summary: PayrollSourceSummary;
     payroll_fields: PayrollFieldsDisclosure;
     payroll_adjustments?: PayrollAdjustmentsDisclosure;
+    historical_deductions?: {
+      source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
+      classification_note: string;
+    };
     component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; treatment: string }>;
   };
 }

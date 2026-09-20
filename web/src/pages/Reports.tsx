@@ -1572,6 +1572,9 @@ export function YtdSummaryPanel() {
             </CardHeader>
             <CardContent className="space-y-6">
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
+              {report.historical_deductions?.source_bucket_totals.length ? (
+                <p className="text-sm text-amber-900" role="note">{report.historical_deductions.classification_note}</p>
+              ) : null}
               {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
                 <p className="text-xs text-gray-600">Only employee rows are filtered; company totals still include all payroll activity.</p>
               )}
@@ -1591,6 +1594,9 @@ export function YtdSummaryPanel() {
                   <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
                   <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
                   <TotalBox label="Installment Loans" value={report.company_totals.installment_loan_payments ?? 0} />
+                  <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
+                  <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
+                  <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
                   <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
                   <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
                   <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
@@ -1626,6 +1632,9 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
                     <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
                     <th className="py-2 pr-4 text-right font-medium">Installment Loan</th>
+                    <th className="py-2 pr-4 text-right font-medium">Historical Loans (unclassified)</th>
+                    <th className="py-2 pr-4 text-right font-medium">Health Insurance</th>
+                    <th className="py-2 pr-4 text-right font-medium">401(k) After Tax (source pre-tax)</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
@@ -1659,6 +1668,9 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_pre_tax_deductions_total ?? 0) + Number(emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.straight_loan_deductions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.installment_loan_payments ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.historical_loan_deductions_unclassified ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.health_insurance_deductions ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
@@ -1670,7 +1682,7 @@ export function YtdSummaryPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={22 + (report.component_columns?.length || 0)} className="py-6 text-center text-gray-400">
+                      <td colSpan={25 + (report.component_columns?.length || 0)} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
