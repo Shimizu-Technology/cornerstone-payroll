@@ -74,6 +74,55 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     expect(client).not_to have_received(:payroll_batch)
   end
 
+  it "includes confirmed payment for a carryover source entry linked in a later pay period" do
+    person = payload.fetch("employees").first
+    person["source_user_uuid"] = uuid
+    line = person.fetch("adjustments").first
+    line["source_kind"] = "carryover"
+    line["original_work_date"] = "2026-09-26"
+    line["original_week_start"] = "2026-09-20"
+    payload.fetch("summary")["current_count"] = 0
+    payload.fetch("summary")["carryover_count"] = 1
+    payload.fetch("export")["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    verified_event
+    later_period = create(:pay_period, :committed, company: company,
+                                                 start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31),
+                                                 pay_date: Date.new(2026, 11, 15))
+    item = create(:payroll_item, :with_check, company: company, pay_period: later_period,
+                                            employee: employee, hours_worked: 2)
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: later_period,
+      payroll_item: item, employee: employee, created_by: actor, source_user_uuid: uuid,
+      source_time_entry_id: "101", source_time_entry_version: 0,
+      original_work_date: Date.new(2026, 9, 26), regular_hours: 2, overtime_hours: 0,
+      reconciliation_note: "Later check paid this exact carryover line", status: "issued"
+    )
+
+    result = service.call
+
+    expect(result.dig(:summary, "paid", :regular_hours)).to eq(2.0)
+    expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id }).to include(status: "paid", source_time_entry_id: "101")
+  end
+
+  it "flags a payroll link whose source identity no longer matches the final AIRE line" do
+    payload.fetch("employees").first["source_user_uuid"] = uuid
+    payload.fetch("export")["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    verified_event
+    item = create(:payroll_item, :with_check, company: company, pay_period: pay_period, employee: employee, hours_worked: 2)
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: pay_period,
+      payroll_item: item, employee: employee, created_by: actor, source_user_uuid: SecureRandom.uuid,
+      source_time_entry_id: "101", source_time_entry_version: 0,
+      original_work_date: Date.new(2026, 10, 5), regular_hours: 2, overtime_hours: 0,
+      reconciliation_note: "Legacy identity requires a source review", status: "issued"
+    )
+
+    result = service.call
+
+    expect(result.dig(:summary, "mismatch", :regular_hours)).to eq(2.0)
+    expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id }.fetch(:reason)).to include("identity")
+  end
+
   it "refuses a final batch whose immutable checksum changed" do
     verified_event
     payload.fetch("summary")["total_hours"] = 9

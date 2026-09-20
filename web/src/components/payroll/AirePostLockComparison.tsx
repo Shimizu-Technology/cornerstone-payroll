@@ -10,9 +10,10 @@ import type { AirePostLockComparison as Comparison, AirePostLockStatus } from '@
 const labels: Record<AirePostLockStatus, string> = {
   paid: 'Paid · confirmed',
   awaiting_payment: 'Linked · payment not confirmed',
-  owed: 'Still owed',
+  owed: 'AIRE unallocated at cutoff',
   held: 'Held · not payable yet',
   correction: 'Correction to review',
+  mismatch: 'Identity mismatch · review',
 };
 
 const tones: Record<AirePostLockStatus, 'success' | 'warning' | 'danger'> = {
@@ -21,6 +22,7 @@ const tones: Record<AirePostLockStatus, 'success' | 'warning' | 'danger'> = {
   owed: 'warning',
   held: 'warning',
   correction: 'danger',
+  mismatch: 'danger',
 };
 
 const hours = (value: number) => Number(value || 0).toFixed(2);
@@ -57,7 +59,7 @@ export function AirePostLockComparison({ payPeriodId }: { payPeriodId: number })
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-200 bg-neutral-950 px-6 py-5 text-white">
         <div>
           <h3 className="font-display text-lg font-bold">Final AIRE cutoff vs. payroll payments</h3>
-          <p className="mt-1 max-w-3xl text-sm text-neutral-300">AIRE is the source for hours. A committed paycheck is not counted as paid until its payment is confirmed. Review what remains owed before the next regular payroll.</p>
+          <p className="mt-1 max-w-3xl text-sm text-neutral-300">AIRE’s final batch already excludes hours linked to payroll at cutoff. Its unallocated lines are an as-of-cutoff snapshot; confirmed payments are shown separately and may have changed since then. Review later allocations before deciding what remains owed now.</p>
         </div>
         <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void load()}>
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Refresh comparison
@@ -67,8 +69,8 @@ export function AirePostLockComparison({ payPeriodId }: { payPeriodId: number })
       {error && <p role="alert" className="px-6 py-5 text-sm text-danger-800">{error} No final comparison is being shown until the verified source can be checked.</p>}
       {comparison && !error && <>
         <p className="px-6 pt-5 text-xs text-neutral-500">Verified cutoff {formatGuamDateTime(comparison.cutoff_at)} · batch {comparison.batch_id}</p>
-        <div className="grid gap-3 px-6 py-5 sm:grid-cols-2 xl:grid-cols-5">
-          {(['paid', 'awaiting_payment', 'owed', 'held', 'correction'] as const).map((status) => {
+        <div className="grid gap-3 px-6 py-5 sm:grid-cols-2 xl:grid-cols-3">
+          {(['paid', 'awaiting_payment', 'owed', 'held', 'correction', 'mismatch'] as const).map((status) => {
             const total = comparison.summary[status];
             return <div key={status} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{labels[status]}</p>
@@ -80,7 +82,7 @@ export function AirePostLockComparison({ payPeriodId }: { payPeriodId: number })
         {comparison.summary.unmapped_count > 0 && <p className="mx-6 mb-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900">{comparison.summary.unmapped_count} final AIRE lines have no active Cornerstone employee match. Review the employee identity before processing them.</p>}
         <div className="border-t border-neutral-200 px-6 py-5">
           <h4 className="font-semibold text-neutral-950">Exact source lines</h4>
-          <p className="mt-1 text-sm text-neutral-600">Still-owed and held lines are not new checks by themselves. Resolve approvals, payment evidence, and any corrections before routing them into another run.</p>
+          <p className="mt-1 text-sm text-neutral-600">Unallocated and held lines are not new checks by themselves. AIRE subtracts linked payroll hours before creating the final batch, so these categories are not additive. Resolve approvals, later payment evidence, and corrections before routing hours into another run.</p>
           <div className="mt-4 max-h-96 overflow-auto rounded-xl border border-neutral-200">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="sticky top-0 bg-neutral-100 text-xs uppercase tracking-wide text-neutral-600"><tr><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Work date / source</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Regular</th><th className="px-4 py-3">OT</th></tr></thead>
