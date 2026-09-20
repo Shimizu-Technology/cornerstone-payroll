@@ -1727,7 +1727,13 @@ export interface CheckListMeta {
 
 export interface CheckListResponse {
   checks: CheckItem[];
-  direct_deposit_items: Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>;
+  direct_deposit_items: Array<{
+    id: number;
+    employee_id: number;
+    employee_name: string;
+    net_pay: number;
+    payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string } | null;
+  }>;
   meta: CheckListMeta;
 }
 

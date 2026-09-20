@@ -70,10 +70,26 @@ RSpec.describe PayrollFinalRecordService do
     expect(result.dig(:employee_payments, :rows, 0)).to include(
       payment_delivery_method: "direct_deposit",
       issuance_status: "transfer_not_confirmed",
-      reconciliation_status: "not_tracked"
+      reconciliation_status: "not_confirmed"
     )
     expect(result.dig(:completion, :blockers).join).not_to include("check number")
     expect(result.dig(:completion, :open_items).join).not_to include("employee check")
+    expect(result.dig(:completion, :open_items)).to include("Confirm 1 direct-deposit payment with bank evidence")
+  end
+
+  it "shows confirmed bank payment as settled in the final payroll record" do
+    item.update!(check_number: nil, payment_delivery_method: "direct_deposit")
+    actor = create(:user, company: company, organization: company.organization)
+    item.create_direct_deposit_payment_confirmation!(
+      user: actor, settled_on: PayrollBusinessClock.today, bank_reference: "BANK-TEST-8200"
+    )
+
+    result = described_class.new(pay_period: period).call
+
+    expect(result.dig(:employee_payments, :rows, 0)).to include(
+      issuance_status: "bank_confirmed", reconciliation_status: "bank_confirmed"
+    )
+    expect(result.dig(:completion, :open_items).join).not_to include("direct-deposit")
   end
 
   it "rejects a draft because it is not an official payroll record" do

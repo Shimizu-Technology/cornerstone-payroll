@@ -212,7 +212,8 @@ describe('AireManualHoursReview', () => {
     })));
   });
 
-  it('keeps direct-deposit items out of the paper-check payment-link flow', async () => {
+  it('links direct-deposit hours while keeping them unpaid until bank evidence is recorded', async () => {
+    const user = userEvent.setup();
     render(<AireManualHoursReview
       payPeriodId={67}
       payPeriodStatus="committed"
@@ -222,10 +223,12 @@ describe('AireManualHoursReview', () => {
       aireRecordLinked={false}
     />);
 
-    expect(await screen.findByText(/Direct-deposit items stay unpaid in AIRE/)).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Link to paycheck' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Link to paycheck' }).every((button) => button.hasAttribute('disabled'))).toBe(true);
-    expect(apiMocks.link).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Linked hours become paid only after/)).toBeTruthy();
+    const linkButtons = screen.getAllByRole('button', { name: 'Link to paycheck' });
+    expect(linkButtons).toHaveLength(2);
+    expect(linkButtons.every((button) => !button.hasAttribute('disabled'))).toBe(true);
+    await user.click(linkButtons[0]);
+    expect(screen.getByRole('option', { name: /Direct deposit/ })).toBeTruthy();
   });
 
   it('explains why an AIRE entry with missing identity cannot be linked', async () => {

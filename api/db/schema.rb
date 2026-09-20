@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -576,6 +576,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_040000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "name"], name: "index_departments_on_company_id_and_name", unique: true
     t.index ["company_id"], name: "index_departments_on_company_id"
+  end
+
+  create_table "direct_deposit_payment_confirmations", force: :cascade do |t|
+    t.string "bank_reference", null: false
+    t.datetime "created_at", null: false
+    t.string "ip_address"
+    t.text "note"
+    t.bigint "payroll_item_id", null: false
+    t.date "settled_on", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["payroll_item_id"], name: "index_direct_deposit_payment_confirmations_on_payroll_item_id", unique: true
+    t.index ["user_id"], name: "index_direct_deposit_payment_confirmations_on_user_id"
   end
 
   create_table "employee_change_requests", force: :cascade do |t|
@@ -3308,6 +3321,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_040000) do
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "departments", "companies"
+  add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
+  add_foreign_key "direct_deposit_payment_confirmations", "users"
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
@@ -3635,6 +3650,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_040000) do
     DROP TRIGGER IF EXISTS check_reconciliation_events_append_only ON check_reconciliation_events;
     CREATE TRIGGER check_reconciliation_events_append_only
     BEFORE UPDATE OR DELETE ON check_reconciliation_events
+    FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+
+    DROP TRIGGER IF EXISTS direct_deposit_payment_confirmations_append_only ON direct_deposit_payment_confirmations;
+    CREATE TRIGGER direct_deposit_payment_confirmations_append_only
+    BEFORE UPDATE OR DELETE ON direct_deposit_payment_confirmations
     FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
 
     CREATE OR REPLACE FUNCTION prevent_payroll_filing_event_mutation()

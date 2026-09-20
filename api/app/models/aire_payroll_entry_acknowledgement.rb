@@ -38,7 +38,10 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
 
   def self.record_for_check_event!(check_event:, status:)
     item = check_event.payroll_item
-    item.time_tracking_entry_allocations.includes(:time_tracking_import).group_by { |row| [ row.time_tracking_import_id, row.source_time_entry_id ] }.map do |(_import_id, source_time_entry_id), rows|
+    item.time_tracking_entry_allocations.includes(:time_tracking_import)
+      .select { |row| row.time_tracking_import.finalized_batch? }
+      .group_by { |row| [ row.time_tracking_import_id, row.source_time_entry_id ] }
+      .map do |(_import_id, source_time_entry_id), rows|
       record_from_rows!(
         rows: rows,
         source_event_key: "check_event:#{check_event.id}:#{source_time_entry_id}:#{status}",
