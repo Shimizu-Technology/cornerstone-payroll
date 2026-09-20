@@ -17,6 +17,9 @@ module TimeTracking
 
       item = pay_period.payroll_items.find(payroll_item_id)
       raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
+      if item.effective_payment_delivery_method == "direct_deposit"
+        raise Error, "Direct-deposit AIRE hours need recorded bank payment confirmation before they can be marked paid"
+      end
       raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
 
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)
@@ -214,7 +217,13 @@ module TimeTracking
     end
 
     def client_for_source
-      TimeTracking::Client.new(source, actor: actor)
+      @client_for_source ||= begin
+        linked = TimeTracking::Client.new(source).payroll_account_link(external_actor_id: actor.id)
+          .dig("account_link", "connected") == true
+        TimeTracking::Client.new(source, actor: (actor if linked), delegation: source.delegation_for(actor))
+      rescue TimeTracking::Client::Error
+        TimeTracking::Client.new(source, delegation: source.delegation_for(actor))
+      end
     end
 
     def delivered_check_event(allocation)

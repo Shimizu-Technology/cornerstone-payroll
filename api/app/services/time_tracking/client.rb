@@ -109,6 +109,7 @@ module TimeTracking
       request_json(
         uri,
         validate_source: false,
+        headers: payroll_actor_headers,
         surface_remote_error: true
       )
     end
@@ -457,14 +458,7 @@ module TimeTracking
     end
 
     def delegated_request_json(uri, body:)
-      headers = if @actor.present?
-        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
-      else
-        token = @delegation&.token.to_s
-        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
-
-        { "X-Aire-Delegation-Token" => token }
-      end
+      headers = payroll_actor_headers
       require_secure_payroll_transport!(uri)
 
       request_json(
@@ -475,6 +469,17 @@ module TimeTracking
         headers: headers,
         surface_remote_error: true
       )
+    end
+
+    def payroll_actor_headers
+      if @actor.present?
+        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
+      else
+        token = @delegation&.token.to_s
+        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
+
+        { "X-Aire-Delegation-Token" => token }
+      end
     end
 
     def require_secure_payroll_transport!(uri)
