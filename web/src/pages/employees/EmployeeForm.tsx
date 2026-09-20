@@ -257,6 +257,7 @@ export function EmployeeForm() {
   const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
   const [showQuickPayrollField, setShowQuickPayrollField] = useState(false);
   const [quickPayrollField, setQuickPayrollField] = useState<QuickPayrollFieldDraft>(initialQuickPayrollFieldDraft());
+  const [quickPayrollFieldError, setQuickPayrollFieldError] = useState<string | null>(null);
   const [legacyPayItemSource, setLegacyPayItemSource] = useState<LegacyPayItemSource | null>(null);
   const [quickPayrollFieldSaving, setQuickPayrollFieldSaving] = useState(false);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
@@ -522,6 +523,7 @@ export function EmployeeForm() {
     setIsLoading(false);
     setShowQuickPayrollField(false);
     setQuickPayrollField(initialQuickPayrollFieldDraft());
+    setQuickPayrollFieldError(null);
     setLegacyPayItemSource(null);
     setQuickPayrollFieldSaving(false);
     setClassificationTransitionOpen(false);
@@ -674,6 +676,7 @@ export function EmployeeForm() {
 
   const closeQuickPayrollField = () => {
     setQuickPayrollField(initialQuickPayrollFieldDraft());
+    setQuickPayrollFieldError(null);
     setLegacyPayItemSource(null);
     setShowQuickPayrollField(false);
   };
@@ -681,6 +684,7 @@ export function EmployeeForm() {
   const startLegacyPayItemMove = (source: LegacyPayItemSource) => {
     const treatment: PayrollFieldTaxTreatment = source.kind === 'custom_earning' ? 'taxable_addition' : source.row.treatment;
     setLegacyPayItemSource(source);
+    setQuickPayrollFieldError(null);
     setQuickPayrollField({
       ...initialQuickPayrollFieldDraft(),
       name: source.row.label,
@@ -690,7 +694,6 @@ export function EmployeeForm() {
       default_amount: source.row.amount,
       notes: source.kind === 'adjustment' ? source.row.notes : '',
     });
-    setGeneralError(null);
     setShowQuickPayrollField(true);
     window.requestAnimationFrame(() => quickPayrollFieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   };
@@ -707,11 +710,11 @@ export function EmployeeForm() {
   const createQuickPayrollField = async (): Promise<void> => {
     if (!quickPayrollField.name.trim() || !id) return;
     if (!quickPayrollField.category) {
-      setGeneralError('Choose the category before moving this legacy item.');
+      setQuickPayrollFieldError('Choose a category for this pay item.');
       return;
     }
     if (quickPayrollField.start_date && quickPayrollField.end_date && quickPayrollField.end_date < quickPayrollField.start_date) {
-      setGeneralError('Last payday must be on or after first payday.');
+      setQuickPayrollFieldError('Last payday must be on or after first payday.');
       return;
     }
 
@@ -722,6 +725,7 @@ export function EmployeeForm() {
       && requestedCompanyId === companyIdRef.current
     );
     setQuickPayrollFieldSaving(true);
+    setQuickPayrollFieldError(null);
     try {
       const payload: Partial<PayrollFieldDefinition> = {
         ...quickPayrollField,
@@ -770,10 +774,11 @@ export function EmployeeForm() {
         setLegacyCustomEarnings((prev) => prev.filter((row) => row.temp_id !== legacyPayItemSource.row.temp_id));
       }
       setQuickPayrollField(initialQuickPayrollFieldDraft());
+      setQuickPayrollFieldError(null);
       setLegacyPayItemSource(null);
       setShowQuickPayrollField(false);
     } catch (err) {
-      if (isCurrentRequest()) setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
+      if (isCurrentRequest()) setQuickPayrollFieldError(err instanceof Error ? err.message : 'Failed to create payroll field');
     } finally {
       if (isCurrentRequest()) setQuickPayrollFieldSaving(false);
     }
@@ -1783,7 +1788,7 @@ export function EmployeeForm() {
                   <Plus className="mr-1 h-4 w-4" />
                   Assign Payroll Field
                 </Button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => { setLegacyPayItemSource(null); setQuickPayrollField(initialQuickPayrollFieldDraft()); setShowQuickPayrollField(true); }}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => { setLegacyPayItemSource(null); setQuickPayrollField(initialQuickPayrollFieldDraft()); setQuickPayrollFieldError(null); setShowQuickPayrollField(true); }}>
                   <Plus className="mr-1 h-4 w-4" />
                   Add employee-only item
                 </Button>
@@ -1892,6 +1897,7 @@ export function EmployeeForm() {
                     </label>
                   </div>
                   {legacyPayItemSource && <p role="note" className="mt-3 text-xs leading-5 text-amber-800">Old notes are reference only; dates mentioned there never controlled the old calculation. Set first and last payday above if the replacement needs limits. For a loan balance that should stop at payoff, connect a verified loan in Loans after this move.</p>}
+                  {quickPayrollFieldError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{quickPayrollFieldError}</p>}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim() || !quickPayrollField.category}>
                       {quickPayrollFieldSaving ? 'Saving…' : legacyPayItemSource ? 'Move to typed setup' : 'Create and assign'}
