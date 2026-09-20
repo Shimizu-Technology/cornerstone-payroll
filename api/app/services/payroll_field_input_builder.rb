@@ -38,14 +38,11 @@ class PayrollFieldInputBuilder
       .where(payroll_items: { pay_period_id: pay_period.id, company_id: company_id })
       .where(payroll_field_definition_id: fields.map(&:id))
       .index_by { |entry| [ entry.payroll_item.employee_id, entry.payroll_field_definition_id ] }
-    items = pay_period.payroll_items.where(company_id: company_id).index_by(&:employee_id)
-
     {
       fields: fields.map { |field| field_payload(field) },
       assignments: assignments.map do |assignment|
         assignment_payload(
           assignment,
-          items[assignment.employee_id],
           entries[[ assignment.employee_id, assignment.payroll_field_definition_id ]]
         )
       end
@@ -77,9 +74,8 @@ class PayrollFieldInputBuilder
     }
   end
 
-  def assignment_payload(assignment, payroll_item, entry)
+  def assignment_payload(assignment, entry)
     field = assignment.payroll_field_definition
-    skipped_reason = direct_loan_skip_reason(payroll_item, field)
     suggested_amount = if entry&.active?
       entry.amount
     elsif field.amount_type == "percentage"
@@ -100,16 +96,9 @@ class PayrollFieldInputBuilder
       current_amount: decimal(entry&.amount),
       current_source: entry&.source,
       overridden: entry&.source.in?(%w[manual import]),
-      editable: skipped_reason.nil?,
-      skipped_reason: skipped_reason
+      editable: true,
+      skipped_reason: nil
     }
-  end
-
-  def direct_loan_skip_reason(payroll_item, field)
-    return unless payroll_item&.loan_deduction.to_f.positive?
-    return unless field.category == "loan" && field.tax_treatment == "post_tax_deduction"
-
-    "Supplied by this payroll's direct loan deduction"
   end
 
   def decimal(value)

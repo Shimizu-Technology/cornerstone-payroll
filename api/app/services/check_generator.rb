@@ -524,7 +524,7 @@ class CheckGenerator
     rows << ["401(k) Pre-Tax", fn(payroll_item.retirement_payment), fn(ytd[:retire])] if payroll_item.retirement_payment.to_f > 0
     rows << ["Roth 401(k)", fn(payroll_item.roth_retirement_payment), fn(ytd[:roth])] if payroll_item.roth_retirement_payment.to_f > 0
     rows << ["Health Insurance", fn(visible_legacy_insurance_payment), fn(ytd[:ins])] if visible_legacy_insurance_payment.positive?
-    rows << ["Loan", fn(visible_legacy_loan_payment), fn(ytd[:loan])] if visible_legacy_loan_payment.positive?
+    rows << ["Loan", fn(visible_legacy_loan_payment), fn(visible_legacy_loan_ytd)] if visible_legacy_loan_payment.positive?
     rows << ["Tips Paid Out", fn(payroll_item.tips_paid_out), fn(ytd[:tips_paid_out])] if payroll_item.tips_paid_out.to_f > 0
     Array(payroll_item.custom_deductions).each do |deduction|
       amount = deduction["amount"].to_f
@@ -565,9 +565,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_payment
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    payroll_item.loan_payment.to_f
+    field_total = payroll_field_entries_for("post_tax_deduction")
+      .select { |entry| entry.category == "loan" }
+      .sum(0.to_d) { |entry| entry.amount.to_d }
+    [ payroll_item.loan_payment.to_d - field_total, 0.to_d ].max
   end
 
   def ytd_visible_deds
@@ -582,9 +583,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    ytd[:loan]
+    field_total = ytd_payroll_field_totals.sum do |(_label, treatment, category), amount|
+      treatment == "post_tax_deduction" && category == "loan" ? amount.to_f : 0.0
+    end
+    [ ytd[:loan] - field_total, 0.0 ].max
   end
 
   def ytd_payroll_field_deductions_total

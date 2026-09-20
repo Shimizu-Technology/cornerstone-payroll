@@ -57,6 +57,20 @@ RSpec.describe CheckGenerator do
 
   subject(:generator) { described_class.new(payroll_item) }
 
+  it "includes both a direct loan and a separate loan field in check deductions" do
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+    payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+      label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+    payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
+
+    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("428.36"))
+    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("428.36"))
+    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("428.36")))
+    expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
+  end
+
   describe "#generate" do
     subject(:pdf) { generator.generate }
 
