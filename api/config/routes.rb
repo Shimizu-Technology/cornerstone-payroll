@@ -241,6 +241,7 @@ Rails.application.routes.draw do
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             post :employee_mapping, action: :create_employee_mapping
             get :manual_review
+            get :post_lock_comparison
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries

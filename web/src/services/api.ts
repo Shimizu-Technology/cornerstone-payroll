@@ -1092,6 +1092,10 @@ export const payPeriodsApi = {
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`
     ),
+  airePostLockComparison: (id: number) =>
+    api.get<{ comparison: import('@/types').AirePostLockComparison }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/post_lock_comparison`
+    ),
   mapAireEmployee: (id: number, data: { source_user_id: string; employee_id: number }) =>
     api.post(`/admin/pay_periods/${id}/aire_payroll_cockpit/employee_mapping`, data),
   linkManualAireHours: (id: number, data: {
