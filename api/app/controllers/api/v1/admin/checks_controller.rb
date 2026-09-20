@@ -120,6 +120,10 @@ module Api
             filename: "test_only_rehearsal_checks_#{pay_date_token}.pdf"
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue LoadError
+          render json: {
+            error: "Mock check PDF requires the combine_pdf gem. Please install it or contact your administrator."
+          }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
