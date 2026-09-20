@@ -171,7 +171,7 @@ export function Layout() {
                 <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <div>
                   <span className="font-semibold">Migration rehearsal — no live payroll.</span>{' '}
-                  Changes stay in this test client. Payroll cannot be committed, and checks, payments, and filing-ready actions are blocked.
+                  Changes stay in this test client. Payroll cannot be committed. Only watermarked, non-negotiable mock checks can be downloaded; real checks, payments, and filing-ready actions remain blocked.
                   {activeCompany.migration_source_company_name && (
                     <span className="text-amber-800"> Source: {activeCompany.migration_source_company_name}.</span>
                   )}
