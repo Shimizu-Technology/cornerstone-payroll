@@ -943,12 +943,14 @@ export interface TimeTrackingImportData {
   processed_payload: {
     ready: boolean;
     rows: TimeTrackingPreviewRow[];
-    validation_version?: 'time_summary_v1' | 'payroll_batch_v2';
+    validation_version?: 'time_summary_v1' | 'payroll_batch_v2' | 'aire_live_snapshot_v1';
     schema_version?: string;
     batch_id?: string;
     batch_checksum?: string;
     cutoff_at?: string;
     finalized_at?: string;
+    captured_at?: string;
+    snapshot_checksum?: string;
     negative_adjustment_count?: number;
     summary?: Record<string, number>;
     issues?: Record<string, number>;
@@ -1313,7 +1315,7 @@ export const payPeriodsApi = {
   },
   applyTimecardImport: (id: number, mappings: TimecardImportMapping[]) =>
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
-  previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
+  previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string; mode?: 'live' | 'finalized' }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),

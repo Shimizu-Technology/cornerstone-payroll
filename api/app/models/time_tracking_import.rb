@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class TimeTrackingImport < ApplicationRecord
-  STATUSES = %w[previewed applied failed].freeze
+  STATUSES = %w[previewed applied superseded failed].freeze
   SOURCE_PROCESSING_STATUSES = %w[imported committed payment_issued payment_failed].freeze
   SOURCE_PAYMENT_STATUSES = %w[payment_issued payment_failed].freeze
   SOURCE_PROCESSING_STATUS_RANK = {
@@ -37,6 +37,10 @@ class TimeTrackingImport < ApplicationRecord
 
   def finalized_batch?
     external_batch_id.present? || external_batch_checksum.present? || contract_version.present? || source_cutoff_at.present?
+  end
+
+  def live_snapshot?
+    processed_payload["validation_version"] == TimeTracking::LiveSnapshotPreviewService::VALIDATION_VERSION
   end
 
   def record_source_processing_sync!(status:, synced_at:, occurred_at:)
@@ -103,12 +107,13 @@ class TimeTrackingImport < ApplicationRecord
   end
 
   def finalized_batch_snapshot_is_immutable
-    return unless finalized_batch_persisted?
+    return unless finalized_batch_persisted? ||
+                  processed_payload_in_database["validation_version"] == TimeTracking::LiveSnapshotPreviewService::VALIDATION_VERSION
 
     changed_fields = FINALIZED_IMMUTABLE_ATTRIBUTES.select { |attribute| will_save_change_to_attribute?(attribute) }
     return if changed_fields.empty?
 
-    errors.add(:base, "Finalized payroll batch provenance and payload cannot be changed after preview creation")
+    errors.add(:base, "AIRE source snapshot and provenance cannot be changed after preview creation")
   end
 
   def finalized_batch_persisted?

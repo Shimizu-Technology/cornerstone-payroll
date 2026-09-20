@@ -4,15 +4,26 @@ module TimeTracking
   class ImportPreviewService
     attr_reader :pay_period, :source, :start_date, :end_date
 
-    def initialize(pay_period:, source:, start_date: nil, end_date: nil)
+    def initialize(pay_period:, source:, start_date: nil, end_date: nil, mode: nil)
       @pay_period = pay_period
       @source = source
       @start_date = parse_date(start_date.presence || pay_period.start_date, "start_date")
       @end_date = parse_date(end_date.presence || pay_period.end_date, "end_date")
+      @mode = mode.to_s
     end
 
     def call
       if source.source_type == "aire_services"
+        if @mode == "live"
+          return LiveSnapshotPreviewService.new(
+            pay_period: pay_period,
+            source: source,
+            start_date: start_date,
+            end_date: end_date
+          ).call
+        end
+        raise ArgumentError, "Unknown AIRE import mode" unless @mode.blank? || @mode == "finalized"
+
         return BatchImportPreviewService.new(
           pay_period: pay_period,
           source: source,
