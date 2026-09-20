@@ -137,4 +137,27 @@ RSpec.describe TimeTracking::ManualAllocationService do
     expect(allocation.reload).to have_attributes(status: "pending_commit", remote_allocation_id: nil)
     expect(allocation.last_sync_error).to include("AIRE temporarily unavailable")
   end
+
+  it "keeps a malformed AIRE commitment acknowledgement retryable" do
+    allow(client).to receive(:commit_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501" })
+
+    allocation = create_link
+
+    expect(allocation.reload.status).to eq("pending_commit")
+    expect(allocation.last_sync_error).to include("invalid manual allocation acknowledgement")
+  end
+
+  it "keeps malformed or mismatched AIRE payment acknowledgements retryable" do
+    allocation = create_link
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    allow(client).to receive(:issue_payroll_manual_allocation).and_return(
+      "manual_allocation" => { "id" => "999", "version" => 1 }
+    )
+
+    service.sync!(allocation.reload)
+
+    expect(allocation.reload.status).to eq("committed")
+    expect(allocation.last_sync_error).to include("invalid manual allocation acknowledgement")
+  end
 end

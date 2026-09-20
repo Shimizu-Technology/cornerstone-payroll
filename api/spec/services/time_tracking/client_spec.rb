@@ -75,6 +75,15 @@ RSpec.describe TimeTracking::Client do
       expect(request).not_to have_been_requested
     end
 
+    it "refuses to send employee identities and the shared secret over insecure HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      request = stub_request(:get, %r{time\.example\.com/client-a/api/v1/payroll/cockpit/employees})
+
+      expect { client_for(source).payroll_cockpit_employees(employee_id: "91") }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect(request).not_to have_been_requested
+    end
+
     it "reads a period and literal time entries with bounded query parameters" do
       period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
         .with(headers: { "X-Payroll-Shared-Secret" => "secret" })

@@ -1700,7 +1700,7 @@ export function PayPeriodDetail({
             payrollHours={hoursMap}
             payrollItems={payrollItems}
             employees={employees}
-            aireRecordLinked={Boolean(payPeriod.time_tracking?.linked_aire_records.length)}
+            aireRecordLinked={hasLinkedAireRecord}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
           />
@@ -1712,7 +1712,7 @@ export function PayPeriodDetail({
             payrollHours={hoursMap}
             payrollItems={payrollItems}
             employees={employees}
-            aireRecordLinked={Boolean(payPeriod.time_tracking?.linked_aire_records.length)}
+            aireRecordLinked={hasLinkedAireRecord}
           />
         )}
 
