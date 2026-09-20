@@ -35,10 +35,11 @@ RSpec.describe TimeTracking::Client do
     let(:external_id) { SecureRandom.uuid }
 
     it "reads a manual payroll review by date range without requiring a published calendar ID" do
+      actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
       review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")
         .with(
           query: { "start_date" => "2026-08-16", "end_date" => "2026-08-31" },
-          headers: { "X-Payroll-Shared-Secret" => "secret" }
+          headers: { "X-Payroll-Shared-Secret" => "secret", "X-Cornerstone-Actor-Id" => actor.id.to_s }
         )
         .to_return(
           status: 200,
@@ -46,13 +47,19 @@ RSpec.describe TimeTracking::Client do
           headers: { "Content-Type" => "application/json" }
         )
 
-      result = client_for(source).payroll_cockpit_manual_review(
+      result = client_for(source, actor: actor).payroll_cockpit_manual_review(
         start_date: "2026-08-16",
         end_date: "2026-08-31"
       )
 
       expect(result.dig("summary", "total_hours")).to eq(42.5)
       expect(review_stub).to have_been_requested.once
+    end
+
+    it "requires an AIRE payroll actor for the sensitive manual review" do
+      expect do
+        client_for(source).payroll_cockpit_manual_review(start_date: "2026-08-16", end_date: "2026-08-31")
+      end.to raise_error(TimeTracking::Client::Error, /Connect your AIRE administrator account/)
     end
 
     it "refuses to send the shared secret over insecure HTTP for a manual review" do
@@ -65,6 +72,15 @@ RSpec.describe TimeTracking::Client do
           end_date: "2026-08-31"
         )
       end.to raise_error(TimeTracking::Client::Error, /require HTTPS/)
+      expect(request).not_to have_been_requested
+    end
+
+    it "refuses to send employee identities and the shared secret over insecure HTTP" do
+      source.update!(base_url: "http://time.example.com/client-a")
+      request = stub_request(:get, %r{time\.example\.com/client-a/api/v1/payroll/cockpit/employees})
+
+      expect { client_for(source).payroll_cockpit_employees(employee_id: "91") }
+        .to raise_error(TimeTracking::Client::Error, /require HTTPS/)
       expect(request).not_to have_been_requested
     end
 

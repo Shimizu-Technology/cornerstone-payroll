@@ -5,10 +5,15 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AireManualHoursReview } from './AireManualHoursReview';
 
-const apiMocks = vi.hoisted(() => ({ manualReview: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ manualReview: vi.fn(), link: vi.fn(), retry: vi.fn(), map: vi.fn() }));
 
 vi.mock('@/services/api', () => ({
-  payPeriodsApi: { airePayrollManualReview: apiMocks.manualReview },
+  payPeriodsApi: {
+    airePayrollManualReview: apiMocks.manualReview,
+    linkManualAireHours: apiMocks.link,
+    retryManualAireHours: apiMocks.retry,
+    mapAireEmployee: apiMocks.map,
+  },
 }));
 
 const review = {
@@ -18,24 +23,24 @@ const review = {
   employees: [{
     source_user_id: '91',
     source_user_uuid: '282bf986-dd27-46fa-bd70-65ebbc9d9cea',
-    display_name: 'Traven Cruz',
+    display_name: 'Test Worker A',
     total_hours: 28.2,
     regular_hours: 27.2,
     overtime_hours: 1,
     adjustments: [
-      { source_time_entry_id: '40', source_kind: 'current', original_work_date: '2026-08-22', category: { name: 'Flight Hours' }, total_hours: 22.1, regular_hours: 21.1, overtime_hours: 1 },
-      { source_time_entry_id: '41', source_kind: 'carryover', original_work_date: '2026-08-15', category: { name: 'Flight Hours' }, total_hours: 6.1, regular_hours: 6.1, overtime_hours: 0 },
+      { source_time_entry_id: '40', source_time_entry_version: 1, source_kind: 'current', original_work_date: '2026-08-22', category: { name: 'Flight Hours' }, total_hours: 22.1, regular_hours: 21.1, overtime_hours: 1 },
+      { source_time_entry_id: '41', source_time_entry_version: 2, source_kind: 'carryover', original_work_date: '2026-08-15', category: { name: 'Flight Hours' }, total_hours: 6.1, regular_hours: 6.1, overtime_hours: 0 },
     ],
-    cornerstone: { status: 'mapped', employee_id: 7, employee_name: 'Traven Cruz' },
+    cornerstone: { status: 'mapped', employee_id: 7, employee_name: 'Test Worker A' },
   }],
   exclusions: [{
     source_time_entry_id: '52',
     source_user_id: '92',
-    display_name: 'Malia Cruz',
+    display_name: 'Test Worker B',
     original_work_date: '2026-08-29',
     reason: 'pending_approval',
     held_total_hours: 2.5,
-    cornerstone: { status: 'mapped', employee_id: 8, employee_name: 'Malia Cruz' },
+    cornerstone: { status: 'mapped', employee_id: 8, employee_name: 'Test Worker B' },
   }],
   issues: {
     missing_category_count: 0,
@@ -62,6 +67,9 @@ const review = {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.manualReview.mockResolvedValue(review);
+  apiMocks.link.mockResolvedValue({});
+  apiMocks.retry.mockResolvedValue({});
+  apiMocks.map.mockResolvedValue({});
 });
 
 afterEach(() => cleanup());
@@ -80,8 +88,8 @@ describe('AireManualHoursReview', () => {
     expect(await screen.findByText('Manual AIRE hours check')).toBeTruthy();
     expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
-    expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
-    expect(screen.getByText(/there is no separate “mark paid” step in AIRE/i)).toBeTruthy();
+    expect(screen.getByText('Test Worker B · 2.50 hrs')).toBeTruthy();
+    expect(screen.getByText(/link each paid time entry to its paycheck/i)).toBeTruthy();
   });
 
   it('updates the match result immediately as Payroll hours change', async () => {
@@ -153,7 +161,7 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/Recording each check as issued automatically marks/i);
+    await screen.findByText(/Recording each check as issued updates the included AIRE hours/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
@@ -172,5 +180,157 @@ describe('AireManualHoursReview', () => {
 
     expect(await screen.findByText('The manual check could not load.')).toBeTruthy();
     expect(screen.getByText(/You can still process payroll manually/i)).toBeTruthy();
+  });
+
+  it('shows a recoverable error when AIRE returns an incomplete response', async () => {
+    apiMocks.manualReview.mockResolvedValue({ data: [] });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText('The manual check could not load.')).toBeTruthy();
+    expect(screen.getByText(/AIRE returned an incomplete hours check/)).toBeTruthy();
+  });
+
+  it('links an exact carryover entry to a committed paycheck', async () => {
+    const user = userEvent.setup();
+    render(<AireManualHoursReview
+      payPeriodId={67}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 27.2, overtime: 1 } }}
+      payrollItems={[{ id: 200, employee_id: 7, hours_worked: 27.2, overtime_hours: 1, check_number: '01045', voided: false } as import('@/types').PayrollItem]}
+      aireRecordLinked={false}
+    />);
+
+    expect(await screen.findAllByRole('button', { name: 'Link to paycheck' })).toHaveLength(2);
+    await user.click(screen.getAllByRole('button', { name: 'Link to paycheck' })[1]);
+    await user.click(screen.getByRole('button', { name: 'Confirm link' }));
+    await waitFor(() => expect(apiMocks.link).toHaveBeenCalledWith(67, expect.objectContaining({
+      payroll_item_id: 200,
+      source_time_entry_id: '41',
+      source_time_entry_version: 2,
+      regular_hours: 6.1,
+      overtime_hours: 0,
+    })));
+  });
+
+  it('keeps direct-deposit items out of the paper-check payment-link flow', async () => {
+    render(<AireManualHoursReview
+      payPeriodId={67}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 27.2, overtime: 1 } }}
+      payrollItems={[{ id: 200, employee_id: 7, hours_worked: 27.2, overtime_hours: 1,
+        effective_payment_delivery_method: 'direct_deposit', voided: false } as import('@/types').PayrollItem]}
+      aireRecordLinked={false}
+    />);
+
+    expect(await screen.findByText(/Direct-deposit items stay unpaid in AIRE/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Link to paycheck' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Link to paycheck' }).every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(apiMocks.link).not.toHaveBeenCalled();
+  });
+
+  it('explains why an AIRE entry with missing identity cannot be linked', async () => {
+    const user = userEvent.setup();
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      employees: [{ ...review.employees[0], source_user_uuid: null }],
+    });
+    render(<AireManualHoursReview
+      payPeriodId={67}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 27.2, overtime: 1 } }}
+      payrollItems={[{ id: 200, employee_id: 7, hours_worked: 27.2, overtime_hours: 1, check_number: '01045', voided: false } as import('@/types').PayrollItem]}
+      aireRecordLinked={false}
+    />);
+
+    await user.click((await screen.findAllByRole('button', { name: 'Link to paycheck' }))[0]);
+    await user.click(screen.getByRole('button', { name: 'Confirm link' }));
+
+    expect(screen.getByRole('alert').textContent).toContain('missing its permanent employee identity or version');
+    expect(apiMocks.link).not.toHaveBeenCalled();
+  });
+
+  it('offers one confirmed action for multiple exact entries matching the remaining paycheck hours', async () => {
+    const user = userEvent.setup();
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      employees: [{
+        ...review.employees[0], total_hours: 6.1, regular_hours: 6.1, overtime_hours: 0,
+        adjustments: [
+          { source_time_entry_id: '40', source_time_entry_version: 1, source_kind: 'current', original_work_date: '2026-08-11', category: { id: '2', name: 'Flight Hours' }, total_hours: 1, regular_hours: 1, overtime_hours: 0 },
+          { source_time_entry_id: '41', source_time_entry_version: 2, source_kind: 'current', original_work_date: '2026-08-15', category: { id: '2', name: 'Flight Hours' }, total_hours: 5.1, regular_hours: 5.1, overtime_hours: 0 },
+        ],
+      }],
+      summary: { ...review.summary, total_hours: 6.1, regular_hours: 6.1, overtime_hours: 0 },
+    });
+    render(<AireManualHoursReview
+      payPeriodId={68}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 6.1, overtime: 0 } }}
+      payrollItems={[{ id: 200, employee_id: 7, hours_worked: 6.1, overtime_hours: 0, check_number: '01045', voided: false } as import('@/types').PayrollItem]}
+      aireRecordLinked={false}
+    />);
+
+    await user.click(await screen.findByRole('button', { name: 'Link all 2 entries for Test Worker A' }));
+    expect(screen.getByText(/does not mark them paid until check delivery/i)).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: /checked the wage category, rate, and gross pay/i }));
+    await user.click(screen.getByRole('button', { name: 'Confirm all links' }));
+    await waitFor(() => expect(apiMocks.link).toHaveBeenCalledTimes(2));
+    expect(apiMocks.link).toHaveBeenNthCalledWith(1, 68, expect.objectContaining({ source_time_entry_id: '40', regular_hours: 1 }));
+    expect(apiMocks.link).toHaveBeenNthCalledWith(2, 68, expect.objectContaining({ source_time_entry_id: '41', regular_hours: 5.1 }));
+  });
+
+  it('offers a visible sync action when check delivery is recorded but AIRE has not confirmed payment', async () => {
+    const user = userEvent.setup();
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      cornerstone_manual_allocations: [{
+        id: 15, payroll_item_id: 200, employee_id: 7, employee_name: 'Test Worker A',
+        source_time_entry_id: '41', original_work_date: '2026-08-15',
+        regular_hours: 6.1, overtime_hours: 0, status: 'committed',
+        payroll_item_check_status: 'delivered', payment_method: 'paper_check',
+      }],
+    });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText(/Check delivery is recorded in Cornerstone/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Sync now' }));
+    await waitFor(() => expect(apiMocks.retry).toHaveBeenCalledWith(67, 15));
+  });
+
+  it('keeps committed but undelivered hours visible as payment not yet confirmed', async () => {
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      employees: [],
+      summary: { ...review.summary, total_hours: 0, regular_hours: 0, overtime_hours: 0 },
+      manual_allocations: [{ id: '501', source_time_entry_id: '41', source_user_uuid: review.employees[0].source_user_uuid,
+        display_name: 'Test Worker A', original_work_date: '2026-08-15', regular_hours: 6.1,
+        overtime_hours: 0, status: 'committed', external_pay_period_id: '68', external_payroll_item_id: '200' }],
+    });
+    render(<AireManualHoursReview payPeriodId={68} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+
+    const card = (await screen.findByText('Payment not yet confirmed')).parentElement;
+    expect(within(card as HTMLElement).getByText('6.10 hrs')).toBeTruthy();
+    expect(within(card as HTMLElement).getByText(/0.00 unlinked · 6.10 linked, awaiting payment evidence/)).toBeTruthy();
+  });
+
+  it('retries multiple failed AIRE links from one review action', async () => {
+    const user = userEvent.setup();
+    apiMocks.retry.mockResolvedValue({ manual_allocation: { last_sync_error: null } });
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      cornerstone_manual_allocations: [41, 42].map((id) => ({
+        id, payroll_item_id: 200, employee_id: 7, employee_name: 'Test Worker A',
+        source_time_entry_id: String(id), original_work_date: '2026-08-15',
+        regular_hours: 1, overtime_hours: 0, status: 'pending_commit',
+        payroll_item_check_status: 'printed', payment_method: 'paper_check',
+        last_sync_error: 'AIRE connection unavailable',
+      })),
+    });
+    render(<AireManualHoursReview payPeriodId={68} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Sync all 2 pending AIRE updates' }));
+    await waitFor(() => expect(apiMocks.retry).toHaveBeenCalledTimes(2));
+    expect(apiMocks.retry).toHaveBeenNthCalledWith(1, 68, 41);
+    expect(apiMocks.retry).toHaveBeenNthCalledWith(2, 68, 42);
   });
 });

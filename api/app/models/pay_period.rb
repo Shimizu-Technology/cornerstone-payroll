@@ -24,6 +24,7 @@ class PayPeriod < ApplicationRecord
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee

@@ -43,6 +43,7 @@ import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel'
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecordsDialog';
 import { AirePayrollCockpit } from '@/components/payroll/AirePayrollCockpit';
+import { AireManualHoursReview } from '@/components/payroll/AireManualHoursReview';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
@@ -1697,9 +1698,21 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
             payrollHours={hoursMap}
-            aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
+            payrollItems={payrollItems}
+            employees={employees}
+            aireRecordLinked={hasLinkedAireRecord}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
+          />
+        )}
+        {activeTimeTrackingSources.includes('aire_services') && !payPeriod.time_tracking?.aire_calendar && (
+          <AireManualHoursReview
+            payPeriodId={payPeriod.id}
+            payPeriodStatus={payPeriod.status}
+            payrollHours={hoursMap}
+            payrollItems={payrollItems}
+            employees={employees}
+            aireRecordLinked={hasLinkedAireRecord}
           />
         )}
 

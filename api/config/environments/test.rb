@@ -28,6 +28,10 @@ Rails.application.configure do
   if ENV["SOLID_QUEUE_TEST_MODE"] == "true"
     config.active_job.queue_adapter = :solid_queue
     config.solid_queue.connects_to = { database: { writing: :primary } }
+  elsif ENV["E2E_TEST_MODE"] == "true"
+    # The disposable two-app certification runs without a queue worker. Execute
+    # after-commit sync jobs so browser-tested check delivery reaches AIRE.
+    config.active_job.queue_adapter = :inline
   end
 
   # Render exception templates for rescuable exceptions and raise for other exceptions.
