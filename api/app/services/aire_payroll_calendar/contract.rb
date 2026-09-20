@@ -25,7 +25,9 @@ module AirePayrollCalendar
     def payload
       validate!
       schedule = pay_schedule
-      cutoff_date = pay_period.pay_date + schedule.payroll_cutoff_days_before
+      # Legacy column name; the confirmed policy now counts days after the regular pay date.
+      cutoff_days_after_pay_date = schedule.payroll_cutoff_days_before
+      cutoff_date = pay_period.pay_date + cutoff_days_after_pay_date
       cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
       cutoff_at = Time.find_zone!(TIME_ZONE).local(
         cutoff_date.year,
@@ -42,7 +44,7 @@ module AirePayrollCalendar
         "cutoff_at" => cutoff_at.iso8601,
         "time_zone" => TIME_ZONE,
         "cutoff_policy" => CUTOFF_POLICY,
-        "cutoff_days_after_pay_date" => schedule.payroll_cutoff_days_before
+        "cutoff_days_after_pay_date" => cutoff_days_after_pay_date
       }
     end
 

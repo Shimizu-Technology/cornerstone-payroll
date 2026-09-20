@@ -73,65 +73,19 @@ module TimeTracking
     end
 
     def sync!(allocation, raise_on_failure: false)
-      allocation.with_lock do
-        client = client_for(allocation)
-        if allocation.status == "pending_commit"
-          result = client.commit_payroll_manual_allocation(
-            entry_id: allocation.source_time_entry_id,
-            command_id: allocation.commit_command_id,
-            expected_version: allocation.source_time_entry_version,
-            source_user_uuid: allocation.source_user_uuid,
-            regular_hours: allocation.regular_hours.to_s("F"),
-            overtime_hours: allocation.overtime_hours.to_s("F"),
-            external_pay_period_id: allocation.pay_period_id.to_s,
-            external_payroll_item_id: allocation.payroll_item_id.to_s,
-            pay_date: allocation.pay_period.pay_date.iso8601,
-            reason: allocation.reconciliation_note
-          )
-          remote = result.fetch("manual_allocation")
-          allocation.update!(status: "committed", remote_allocation_id: remote.fetch("id"),
-                             remote_version: remote.fetch("version"), last_sync_error: nil,
-                             last_synced_at: Time.current)
+      3.times do
+        allocation.reload
+        transitioned = case allocation.status
+        when "pending_commit" then sync_commit!(allocation)
+        when "committed" then sync_committed!(allocation)
+        when "issued" then sync_issued!(allocation)
+        else false
         end
-
-        if allocation.status == "committed" && !allocation.payroll_item.voided? && (delivery = delivered_check_event(allocation))
-          result = client.issue_payroll_manual_allocation(
-            allocation_id: allocation.remote_allocation_id,
-            command_id: allocation.issue_command_id,
-            expected_version: allocation.remote_version,
-            payment_method: "paper_check",
-            payment_reference: allocation.payroll_item.check_number,
-            occurred_at: delivery.created_at.iso8601,
-            reason: "Cornerstone check #{allocation.payroll_item.check_number} delivered on #{delivery.effective_on.iso8601}"
-          )
-          remote = result.fetch("manual_allocation")
-          allocation.update!(status: "issued", remote_version: remote.fetch("version"),
-                             last_sync_error: nil, last_synced_at: Time.current)
-        end
-
-        if allocation.status == "issued" && allocation.payroll_item.voided?
-          # A delivered check may still be cashed after a software void. Keep
-          # AIRE's paid claim until nonpayment/replacement evidence is reviewed;
-          # releasing these hours automatically could pay the worker twice.
-          allocation.update!(
-            last_sync_error: "Delivered check was voided in Cornerstone. Verify bank nonpayment or replacement before releasing these AIRE hours."
-          )
-        elsif allocation.status == "committed" && allocation.payroll_item.voided?
-          result = client.void_payroll_manual_allocation(
-            allocation_id: allocation.remote_allocation_id,
-            command_id: allocation.void_command_id,
-            expected_version: allocation.remote_version,
-            occurred_at: allocation.payroll_item.voided_at.iso8601,
-            reason: "Cornerstone payroll item #{allocation.payroll_item_id} was voided"
-          )
-          remote = result.fetch("manual_allocation")
-          allocation.update!(status: "voided", remote_version: remote.fetch("version"),
-                             last_sync_error: nil, last_synced_at: Time.current)
-        end
+        break unless transitioned
       end
       allocation
     rescue TimeTracking::Client::Error => e
-      allocation.update!(last_sync_error: e.message)
+      allocation.with_lock { allocation.update!(last_sync_error: e.message) }
       raise if raise_on_failure
 
       allocation
@@ -140,6 +94,83 @@ module TimeTracking
     private
 
     attr_reader :pay_period, :source, :actor
+
+    def sync_commit!(allocation)
+      result = client_for(allocation).commit_payroll_manual_allocation(
+        entry_id: allocation.source_time_entry_id,
+        command_id: allocation.commit_command_id,
+        expected_version: allocation.source_time_entry_version,
+        source_user_uuid: allocation.source_user_uuid,
+        regular_hours: allocation.regular_hours.to_s("F"),
+        overtime_hours: allocation.overtime_hours.to_s("F"),
+        external_pay_period_id: allocation.pay_period_id.to_s,
+        external_payroll_item_id: allocation.payroll_item_id.to_s,
+        pay_date: allocation.pay_period.pay_date.iso8601,
+        reason: allocation.reconciliation_note
+      )
+      remote = result.fetch("manual_allocation")
+      allocation.with_lock do
+        next unless allocation.status == "pending_commit"
+
+        allocation.update!(status: "committed", remote_allocation_id: remote.fetch("id"),
+                           remote_version: remote.fetch("version"), last_sync_error: nil,
+                           last_synced_at: Time.current)
+      end
+      true
+    end
+
+    def sync_committed!(allocation)
+      item = allocation.payroll_item.reload
+      if !item.voided? && (delivery = delivered_check_event(allocation))
+        result = client_for(allocation).issue_payroll_manual_allocation(
+          allocation_id: allocation.remote_allocation_id,
+          command_id: allocation.issue_command_id,
+          expected_version: allocation.remote_version,
+          payment_method: "paper_check",
+          payment_reference: item.check_number,
+          occurred_at: delivery.created_at.iso8601,
+          reason: "Cornerstone check #{item.check_number} delivered on #{delivery.effective_on.iso8601}"
+        )
+        persist_remote_transition!(allocation, "committed", "issued", result)
+        return true
+      end
+      return false unless item.voided?
+
+      result = client_for(allocation).void_payroll_manual_allocation(
+        allocation_id: allocation.remote_allocation_id,
+        command_id: allocation.void_command_id,
+        expected_version: allocation.remote_version,
+        occurred_at: item.voided_at.iso8601,
+        reason: "Cornerstone payroll item #{allocation.payroll_item_id} was voided"
+      )
+      persist_remote_transition!(allocation, "committed", "voided", result)
+      true
+    end
+
+    def sync_issued!(allocation)
+      return false unless allocation.payroll_item.reload.voided?
+
+      # A delivered check may still be cashed after a software void. Keep
+      # AIRE's paid claim until nonpayment/replacement evidence is reviewed.
+      allocation.with_lock do
+        if allocation.status == "issued"
+          allocation.update!(
+            last_sync_error: "Delivered check was voided in Cornerstone. Verify bank nonpayment or replacement before releasing these AIRE hours."
+          )
+        end
+      end
+      false
+    end
+
+    def persist_remote_transition!(allocation, from, to, result)
+      remote = result.fetch("manual_allocation")
+      allocation.with_lock do
+        next unless allocation.status == from
+
+        allocation.update!(status: to, remote_version: remote.fetch("version"),
+                           last_sync_error: nil, last_synced_at: Time.current)
+      end
+    end
 
     def verify_live_source!(entry_id, uuid, version, work_date, regular, overtime)
       review = client_for_source.payroll_cockpit_manual_review(
@@ -158,19 +189,22 @@ module TimeTracking
     end
 
     def client_for(allocation)
-      source_client = TimeTracking::Client.new(allocation.time_tracking_source)
-      linked = source_client.payroll_account_link(external_actor_id: actor.id)
-        .dig("account_link", "connected") == true
-      TimeTracking::Client.new(
-        allocation.time_tracking_source,
-        actor: (actor if linked),
-        delegation: allocation.time_tracking_source.delegation_for(actor)
-      )
-    rescue TimeTracking::Client::Error
-      TimeTracking::Client.new(
-        allocation.time_tracking_source,
-        delegation: allocation.time_tracking_source.delegation_for(actor)
-      )
+      @clients_by_source ||= {}
+      @clients_by_source[allocation.time_tracking_source_id] ||= begin
+        source_client = TimeTracking::Client.new(allocation.time_tracking_source)
+        linked = source_client.payroll_account_link(external_actor_id: actor.id)
+          .dig("account_link", "connected") == true
+        TimeTracking::Client.new(
+          allocation.time_tracking_source,
+          actor: (actor if linked),
+          delegation: allocation.time_tracking_source.delegation_for(actor)
+        )
+      rescue TimeTracking::Client::Error
+        TimeTracking::Client.new(
+          allocation.time_tracking_source,
+          delegation: allocation.time_tracking_source.delegation_for(actor)
+        )
+      end
     end
 
     def client_for_source

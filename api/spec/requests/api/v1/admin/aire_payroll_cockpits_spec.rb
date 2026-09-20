@@ -177,6 +177,18 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(TimeTrackingEmployeeMapping.find_by!(time_tracking_source: source, source_user_uuid: uuid).employee_id).to eq(employee.id)
   end
 
+  it "returns actionable validation errors for incomplete reconciliation requests" do
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping",
+         params: { source_user_id: "91" }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("employee_id")
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_allocations",
+         params: { payroll_item_id: "1" }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("source_time_entry_id")
+  end
+
   it "uses the exact AIRE source that published the pay period" do
     source.update!(active: false)
     create(
@@ -649,6 +661,21 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       reason: "Attempted routing",
       destination_kind: "not_payable"
     }
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it "requires configuration authority for every mutating manual reconciliation action" do
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(accountant)
+    base = "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
+
+    post "#{base}/employee_mapping", params: { source_user_id: "91", employee_id: 1 }
+    expect(response).to have_http_status(:forbidden)
+
+    post "#{base}/manual_allocations", params: { payroll_item_id: 1 }
+    expect(response).to have_http_status(:forbidden)
+
+    post "#{base}/manual_allocations/1/retry"
     expect(response).to have_http_status(:forbidden)
   end
 

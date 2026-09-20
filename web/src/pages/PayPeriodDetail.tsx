@@ -1700,19 +1700,19 @@ export function PayPeriodDetail({
             payrollHours={hoursMap}
             payrollItems={payrollItems}
             employees={employees}
-            aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
+            aireRecordLinked={Boolean(payPeriod.time_tracking?.linked_aire_records.length)}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
           />
         )}
-        {payPeriod.time_tracking?.active_source_types.includes('aire_services') && !payPeriod.time_tracking.aire_calendar && (
+        {activeTimeTrackingSources.includes('aire_services') && !payPeriod.time_tracking?.aire_calendar && (
           <AireManualHoursReview
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
             payrollHours={hoursMap}
             payrollItems={payrollItems}
             employees={employees}
-            aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
+            aireRecordLinked={Boolean(payPeriod.time_tracking?.linked_aire_records.length)}
           />
         )}
 

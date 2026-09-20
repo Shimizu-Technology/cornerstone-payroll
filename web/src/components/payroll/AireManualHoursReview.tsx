@@ -24,6 +24,11 @@ type BulkLinkTarget = { employee: AirePayrollManualReviewEmployee; adjustments: 
 
 const hours = (value: number) => Number(value || 0).toFixed(2);
 const sameHundredth = (left: number, right: number) => Math.round(left * 100) === Math.round(right * 100);
+type CornerstoneAllocation = NonNullable<AirePayrollManualReview['cornerstone_manual_allocations']>[number];
+const needsAireSync = (allocation: CornerstoneAllocation) => Boolean(
+  allocation.last_sync_error || allocation.status === 'pending_commit' ||
+  (allocation.status === 'committed' && allocation.payroll_item_check_status === 'delivered')
+);
 
 const exclusionLabel = (reason: string) => ({
   pending_approval: 'approval needed',
@@ -81,7 +86,10 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   };
 
   const saveLink = async () => {
-    if (!linkTarget?.employee.source_user_uuid || linkTarget.adjustment.source_time_entry_version == null) return;
+    if (!linkTarget?.employee.source_user_uuid || linkTarget.adjustment.source_time_entry_version == null) {
+      setLinkError('Refresh AIRE hours before linking: this entry is missing its permanent employee identity or version.');
+      return;
+    }
     const regular = Number(regularToLink);
     const overtime = Number(overtimeToLink);
     if (!selectedItemId || !Number.isFinite(regular) || !Number.isFinite(overtime) || regular < 0 || overtime < 0 || regular + overtime <= 0 ||
@@ -250,10 +258,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
         !sameHundredth(remainingOvertime, candidates.reduce((sum, entry) => sum + entry.overtime_hours, 0))) return [];
     return [{ employee, adjustments: candidates, item }];
   }) : [];
-  const pendingSyncIds = (review?.cornerstone_manual_allocations || []).filter((allocation) =>
-    allocation.last_sync_error || allocation.status === 'pending_commit' ||
-    (allocation.status === 'committed' && allocation.payroll_item_check_status === 'delivered')
-  ).map((allocation) => allocation.id);
+  const pendingSyncIds = (review?.cornerstone_manual_allocations || []).filter(needsAireSync).map((allocation) => allocation.id);
   const unlinkedHours = Number(review?.summary.total_hours || 0);
   const linkedAwaitingEvidenceHours = (review?.manual_allocations || [])
     .filter((allocation) => allocation.status === 'committed')
@@ -405,7 +410,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <div className="border-t border-neutral-200 px-6 py-6">
               <h4 className="font-semibold text-neutral-950">AIRE hours and payment history</h4>
               <p className="mt-1 text-sm text-neutral-600">Hours below remain owed until linked to a committed paycheck. A recorded check delivery marks linked hours paid automatically.</p>
-              {linkError && <p role="alert" className="mt-3 text-sm text-danger-800">{linkError}</p>}
+              {linkError && !linkTarget && !bulkLinkTarget && <p role="alert" className="mt-3 text-sm text-danger-800">{linkError}</p>}
               {pendingSyncIds.length > 1 && <Button type="button" size="sm" variant="outline" className="mt-4" disabled={linkBusy} onClick={() => void retryAllLinks(pendingSyncIds)}>
                 {linkBusy ? 'Syncing…' : `Sync all ${pendingSyncIds.length} pending AIRE updates`}
               </Button>}
@@ -432,10 +437,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                     <p className="mt-1 text-xs text-neutral-600">{formatDate(allocation.original_work_date)} · {allocation.status === 'issued' ? `Paid${allocation.payment_reference ? ` · check ${allocation.payment_reference}` : ''}` : 'Linked to committed payroll; awaiting payment evidence'}</p>
                   </div>
                 ))}
-                {(review.cornerstone_manual_allocations || []).filter((allocation) =>
-                  allocation.last_sync_error || allocation.status === 'pending_commit' ||
-                  (allocation.status === 'committed' && allocation.payroll_item_check_status === 'delivered')
-                ).map((allocation) => (
+                {(review.cornerstone_manual_allocations || []).filter(needsAireSync).map((allocation) => (
                   <div key={`sync-${allocation.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning-200 bg-warning-50 p-4">
                     <div><p className="font-semibold text-neutral-950">{allocation.employee_name} · AIRE payment update pending</p><p className="mt-1 text-xs text-neutral-700">{allocation.last_sync_error || (allocation.status === 'pending_commit' ? 'The paycheck link has not reached AIRE yet.' : 'Check delivery is recorded in Cornerstone; AIRE has not confirmed it as paid yet.')}</p></div>
                     <Button type="button" size="sm" variant="outline" disabled={linkBusy} onClick={() => void retryLink(allocation.id)}>Sync now</Button>
@@ -478,7 +480,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   {payrollItems.filter((item) => item.employee_id === linkTarget.employee.cornerstone.employee_id && !item.voided).map((item) => <option key={item.id} value={item.id}>#{item.check_number || item.id} · {hours(Number(item.hours_worked || 0))} regular / {hours(Number(item.overtime_hours || 0))} OT</option>)}
                 </select>
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
                 <label className="font-medium text-neutral-700">Regular hours<input type="number" min="0" max={linkTarget.adjustment.regular_hours} step="0.01" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={regularToLink} onChange={(event) => setRegularToLink(event.target.value)} /></label>
                 <label className="font-medium text-neutral-700">OT hours<input type="number" min="0" max={linkTarget.adjustment.overtime_hours} step="0.01" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={overtimeToLink} onChange={(event) => setOvertimeToLink(event.target.value)} /></label>
               </div>
