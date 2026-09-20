@@ -449,6 +449,8 @@ Rails.application.routes.draw do
             post :mark_printed
             post :mark_paid
             post :void_check
+            get :payroll_matches
+            post :supersede_with_payroll_item
             get :check_pdf
             get :voucher_pdf
             get :history

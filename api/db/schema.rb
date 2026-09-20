@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1868,6 +1868,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
     t.check_constraint "amount > 0::numeric", name: "non_employee_check_line_items_amount_positive"
   end
 
+  create_table "non_employee_check_supersessions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "non_employee_check_id", null: false
+    t.bigint "payroll_item_id", null: false
+    t.text "reason", null: false
+    t.bigint "user_id", null: false
+    t.index ["non_employee_check_id"], name: "idx_on_non_employee_check_id_9b0b859cc0", unique: true
+    t.index ["payroll_item_id"], name: "index_non_employee_check_supersessions_on_payroll_item_id", unique: true
+    t.index ["user_id"], name: "index_non_employee_check_supersessions_on_user_id"
+  end
+
   create_table "non_employee_checks", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2, null: false
     t.string "auto_generated_type"
@@ -3479,6 +3490,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "non_employee_check_supersessions", "non_employee_checks"
+  add_foreign_key "non_employee_check_supersessions", "payroll_items"
+  add_foreign_key "non_employee_check_supersessions", "users"
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
@@ -3635,6 +3649,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 
   execute <<~SQL
+    CREATE OR REPLACE FUNCTION protect_non_employee_check_supersession()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'Non-employee check supersession evidence is append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_non_employee_check_supersessions ON non_employee_check_supersessions;
+    CREATE TRIGGER protect_non_employee_check_supersessions
+    BEFORE UPDATE OR DELETE ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION protect_non_employee_check_supersession();
+
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
     BEGIN

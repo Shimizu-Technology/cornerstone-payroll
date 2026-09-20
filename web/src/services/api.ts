@@ -4496,6 +4496,10 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_paid`, data),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
+  payrollMatches: (id: number) =>
+    api.get<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }>(`/admin/non_employee_checks/${id}/payroll_matches`),
+  supersedeWithPayrollItem: (id: number, payrollItemId: number, reason: string) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/supersede_with_payroll_item`, { payroll_item_id: payrollItemId, reason }),
   checkPdf: (id: number, options?: { startingSlot?: number }) =>
     api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`, {
       starting_slot: options?.startingSlot,
