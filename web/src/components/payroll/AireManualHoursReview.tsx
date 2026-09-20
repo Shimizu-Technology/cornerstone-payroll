@@ -41,6 +41,8 @@ const exclusionLabel = (reason: string) => ({
   denied_overtime: 'overtime denied',
 }[reason] || reason.replaceAll('_', ' '));
 
+const DEFAULT_LINK_NOTE = 'These AIRE hours match the committed Cornerstone payroll item';
+
 export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, payrollItems = [], employees = [], aireRecordLinked }: Props) {
   const [review, setReview] = useState<AirePayrollManualReview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +54,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const [selectedItemId, setSelectedItemId] = useState('');
   const [regularToLink, setRegularToLink] = useState('0');
   const [overtimeToLink, setOvertimeToLink] = useState('0');
-  const [linkNote, setLinkNote] = useState('These AIRE hours match the committed Cornerstone payroll item');
+  const [linkNote, setLinkNote] = useState(DEFAULT_LINK_NOTE);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [mapSourceId, setMapSourceId] = useState<string | null>(null);
@@ -82,6 +84,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setSelectedItemId(item ? String(item.id) : '');
     setRegularToLink(String(Math.max(0, adjustment.regular_hours)));
     setOvertimeToLink(String(Math.max(0, adjustment.overtime_hours)));
+    setLinkNote(DEFAULT_LINK_NOTE);
     setLinkError(null);
   };
 
@@ -415,7 +418,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 {linkBusy ? 'Syncing…' : `Sync all ${pendingSyncIds.length} pending AIRE updates`}
               </Button>}
               {bulkCandidates.length > 0 && <div className="mt-4 flex flex-wrap gap-2">
-                {bulkCandidates.map((candidate) => <Button key={candidate.employee.source_user_id} type="button" size="sm" disabled={linkBusy} onClick={() => { setBulkLinkTarget(candidate); setBulkGrossVerified(false); setLinkError(null); }}>
+                {bulkCandidates.map((candidate) => <Button key={candidate.employee.source_user_id} type="button" size="sm" disabled={linkBusy} onClick={() => { setBulkLinkTarget(candidate); setBulkGrossVerified(false); setLinkNote(DEFAULT_LINK_NOTE); setLinkError(null); }}>
                   Link all {candidate.adjustments.length} entries for {candidate.employee.display_name}
                 </Button>)}
               </div>}

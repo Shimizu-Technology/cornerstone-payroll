@@ -35,7 +35,7 @@ The separate browser-only review has exercised manual entry, check delivery, and
 
 ## Browser review
 
-Use `BROWSER_REVIEW_ONLY=true KEEP_RUNNING=true` when an operator needs to inspect the synthetic result in Cornerstone before the cutoff. Start the Cornerstone frontend separately against the printed API URL, use a disabled-auth local build, and open the printed pay-period ID. Stop the drill with Ctrl-C when the review is complete; its cleanup trap removes only the two processes and databases that run created.
+Use `BROWSER_REVIEW_ONLY=true` when an operator needs to inspect the synthetic result in Cornerstone before the cutoff. Start the Cornerstone frontend separately against the printed API URL, use a disabled-auth local build, and open the printed pay-period ID. Stop the drill with Ctrl-C when the review is complete; its cleanup trap removes only the two processes and databases that run created.
 
 ## Production release boundary
 

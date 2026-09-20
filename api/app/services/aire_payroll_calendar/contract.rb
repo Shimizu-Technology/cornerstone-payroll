@@ -4,7 +4,7 @@ module AirePayrollCalendar
   class Contract
     SCHEMA_VERSION = "1.1"
     TIME_ZONE = "Pacific/Guam"
-    CUTOFF_DAYS_BEFORE = CompanyPaySchedule::PAYROLL_CUTOFF_DAYS_BEFORE
+    CUTOFF_DAYS_AFTER_PAY_DATE = CompanyPaySchedule::PAYROLL_CUTOFF_DAYS_BEFORE
     CUTOFF_POLICY = "after_regular_pay_date"
 
     class Error < StandardError
@@ -61,7 +61,7 @@ module AirePayrollCalendar
         end
         fail_contract!("Confirm a semimonthly pay schedule before publishing this period to AIRE.", "pay_schedule_confirmation_required")
       end
-      fail_contract!("AIRE payroll cutoff must remain seven calendar days after this regular pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      fail_contract!("AIRE payroll cutoff must remain seven calendar days after this regular pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_AFTER_PAY_DATE
       fail_contract!("Set the AIRE cutoff time to 5:00 p.m. Guam", "cutoff_time_invalid") unless pay_schedule.payroll_cutoff_at_minutes == 1_020
       fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless pay_period.resolved_company_workweek&.confirmed?
       fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
