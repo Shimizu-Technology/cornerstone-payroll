@@ -21,6 +21,9 @@ class NonEmployeeCheckSupersessionService
     note = reason.to_s.strip
     raise Error, "Explain why these records represent one physical check (at least 20 characters)" if note.length < 20
     raise Error, "Confirm that both records name the recipient of the same physical check" unless recipient_verified == true
+    if check.company.live_payroll? && !ENV.fetch("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").split(",").map(&:strip).include?(check.company_id.to_s)
+      raise Error, "Live-check reconciliation is disabled until this company is approved for rollout"
+    end
 
     check.with_lock do
       raise Error, "Only an unvoided, printed, unpaid standalone check can be linked" unless candidate_check?
@@ -31,9 +34,25 @@ class NonEmployeeCheckSupersessionService
 
       item.with_lock do
         raise Error, "Choose a matching issued payroll check" unless eligible_item?(item)
+        delivery = delivery_event(item)
 
         NonEmployeeCheckSupersession.create!(non_employee_check: check, payroll_item: item,
-                                            user: actor, reason: note)
+                                            company: check.company, user: actor, reason: note,
+                                            verified_facts: {
+                                              standalone_payee: check.payable_to,
+                                              payroll_employee_id: item.employee_id,
+                                              payroll_employee_name: item.employee.full_name,
+                                              standalone_check_number: check.check_number,
+                                              payroll_check_number: item.check_number,
+                                              normalized_check_number: normalized_number(item.check_number),
+                                              standalone_amount: check.amount.to_s,
+                                              payroll_net_amount: item.net_pay.to_s,
+                                              delivery_event_id: delivery.id,
+                                              delivered_on: delivery.effective_on.iso8601,
+                                              delivery_evidence_type: delivery.evidence_type,
+                                              delivery_evidence_reference: delivery.evidence_reference,
+                                              recipient_verified: true
+                                            })
       end
     end
   rescue ActiveRecord::RecordNotUnique
@@ -53,7 +72,11 @@ class NonEmployeeCheckSupersessionService
   def eligible_item?(item)
     item.pay_period.committed? && !item.pay_period.voided? && item.effective_payment_delivery_method == "paper_check" &&
       CheckReconciliationStatus.for(item).in?(%w[issued cleared]) &&
-      normalized_number(item.check_number) == normalized_number(check.check_number)
+      normalized_number(item.check_number) == normalized_number(check.check_number) && delivery_event(item).present?
+  end
+
+  def delivery_event(item)
+    item.check_events.where(event_type: "delivered", check_number: item.check_number).order(:id).last
   end
 
   def normalized_number(value)

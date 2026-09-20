@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_070500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1869,11 +1869,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_070000) do
   end
 
   create_table "non_employee_check_supersessions", force: :cascade do |t|
+    t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.bigint "non_employee_check_id", null: false
     t.bigint "payroll_item_id", null: false
     t.text "reason", null: false
     t.bigint "user_id", null: false
+    t.jsonb "verified_facts", default: {}, null: false
+    t.index ["company_id"], name: "index_non_employee_check_supersessions_on_company_id"
     t.index ["non_employee_check_id"], name: "idx_on_non_employee_check_id_9b0b859cc0", unique: true
     t.index ["payroll_item_id"], name: "index_non_employee_check_supersessions_on_payroll_item_id", unique: true
     t.index ["user_id"], name: "index_non_employee_check_supersessions_on_user_id"
@@ -3491,6 +3494,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_070000) do
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_supersessions", "non_employee_checks"
+  add_foreign_key "non_employee_check_supersessions", "companies"
   add_foreign_key "non_employee_check_supersessions", "payroll_items"
   add_foreign_key "non_employee_check_supersessions", "users"
   add_foreign_key "non_employee_checks", "companies"
@@ -3660,6 +3664,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_070000) do
     CREATE TRIGGER protect_non_employee_check_supersessions
     BEFORE UPDATE OR DELETE ON non_employee_check_supersessions
     FOR EACH ROW EXECUTE FUNCTION protect_non_employee_check_supersession();
+
+    CREATE OR REPLACE FUNCTION validate_non_employee_check_supersession_tenant()
+    RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM non_employee_checks c
+        JOIN payroll_items p ON p.id = NEW.payroll_item_id
+        JOIN companies co ON co.id = c.company_id
+        JOIN users u ON u.id = NEW.user_id
+        WHERE c.id = NEW.non_employee_check_id
+          AND c.company_id = NEW.company_id
+          AND p.company_id = NEW.company_id
+          AND u.organization_id = co.organization_id
+      ) THEN
+        RAISE EXCEPTION 'Supersession records must belong to the same company and reviewer organization';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS validate_non_employee_check_supersession_tenant_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER validate_non_employee_check_supersession_tenant_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION validate_non_employee_check_supersession_tenant();
 
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$

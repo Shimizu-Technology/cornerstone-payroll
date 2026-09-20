@@ -19,6 +19,11 @@ RSpec.describe NonEmployeeCheckSupersessionService do
            printed_at: Time.current, payment_method: "check")
   end
 
+  before do
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return(company.id.to_s)
+  end
+
   it "links matching printed records without deleting the standalone evidence" do
     item
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
@@ -28,6 +33,11 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     evidence = service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
 
     expect(evidence.payroll_item).to eq(item)
+    expect(evidence.verified_facts).to include("standalone_payee" => employee.full_name,
+                                               "payroll_employee_name" => employee.full_name,
+                                               "normalized_check_number" => "1045",
+                                               "recipient_verified" => true)
+    expect(evidence.verified_facts.fetch("delivery_event_id")).to be_present
     expect(check.reload.check_status).to eq("superseded")
     expect(NonEmployeeCheck.active).not_to include(check)
     expect(check).to be_persisted
@@ -88,5 +98,28 @@ RSpec.describe NonEmployeeCheckSupersessionService do
       payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: false) }
       .to raise_error(described_class::Error, /recipient/)
     expect(NonEmployeeCheckSupersession.count).to eq(0)
+  end
+
+  it "blocks live-company reconciliation until that company is explicitly enabled" do
+    item
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return("")
+    expect { described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true) }
+      .to raise_error(described_class::Error, /disabled/)
+    expect(NonEmployeeCheckSupersession.count).to eq(0)
+  end
+
+  it "rejects cross-company evidence at the database boundary" do
+    item
+    other_company = create(:company, organization: company.organization)
+    other_item = create(:payroll_item, company: other_company, employee: create(:employee, company: other_company),
+                       pay_period: create(:pay_period, :committed, company: other_company))
+    expect { NonEmployeeCheckSupersession.insert_all!([ {
+      non_employee_check_id: check.id, payroll_item_id: other_item.id, company_id: company.id,
+      user_id: actor.id, reason: "This would incorrectly hide another company's check",
+      verified_facts: { recipient_verified: true }, created_at: Time.current
+    } ]) }.to raise_error(ActiveRecord::StatementInvalid, /same company/)
   end
 end

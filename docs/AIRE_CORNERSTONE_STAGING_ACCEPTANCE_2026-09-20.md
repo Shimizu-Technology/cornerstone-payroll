@@ -36,6 +36,9 @@ production until Leon has tested the local UI and explicitly approves promotion.
    check, link the duplicate to the exact issued payroll item with a reason.
    This preserves the audit trail and removes the duplicate representation
    from active totals; it does **not** void or delete the physical check.
+   Live-client links are disabled by default. Only after local acceptance and
+   explicit production approval should operators enable the exact company ID
+   in `LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS`. Keep it unset otherwise.
 
 ## Local acceptance cases for Leon
 
