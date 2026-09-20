@@ -38,7 +38,9 @@ production until Leon has tested the local UI and explicitly approves promotion.
    from active totals; it does **not** void or delete the physical check.
    Once linked, neither its payroll item nor the containing pay period can be
    voided without a separate, reviewed reversal workflow; the app and database
-   both reject an ordinary void.
+   both reject an ordinary void. Reprints, replacements, and check-number
+   corrections are also blocked because they would invalidate the verified
+   physical-check evidence.
    Live-client links are disabled by default. Only after local acceptance and
    Leon's explicit production approval should an active organization admin
    create the append-only, company-specific rollout approval with a documented

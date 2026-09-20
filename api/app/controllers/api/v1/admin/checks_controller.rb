@@ -382,6 +382,7 @@ module Api
           ActiveRecord::Base.transaction do
             @payroll_item.lock!
             raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reissue: this payroll check is linked to a duplicate software record" if @payroll_item.duplicate_check_linked?
             if CheckReconciliationStatus.for(@payroll_item) == "cleared"
               raise ArgumentError, "Reverse the clearing evidence before reissuing this check"
             end

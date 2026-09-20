@@ -405,6 +405,26 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
   describe "POST /api/v1/admin/payroll_items/:payroll_item_id/reprint" do
     before { company.update!(next_check_number: 3002) }
 
+    it "rejects reprinting a payroll check linked to a duplicate software record" do
+      approver = create(:user, company: company, role: "org_admin")
+      CheckSupersessionRolloutApproval.create!(company: company, approved_by: approver,
+                                               reason: "Approved for isolated request test only", approved_at: Time.current)
+      item_a.mark_printed!(user: admin_user)
+      item_a.mark_delivered!(user: admin_user, delivered_on: Date.current,
+                             delivery_method: "hand_delivery", attestation: true)
+      standalone = create(:non_employee_check, :standalone, company: company, check_type: "other",
+                          payment_period_type: "none", tax_year: nil, tax_month: nil,
+                          payable_to: employee_a.full_name, amount: item_a.net_pay,
+                          check_number: item_a.check_number, printed_at: Time.current, payment_method: "check")
+      NonEmployeeCheckSupersessionService.new(check: standalone, actor: admin_user).supersede!(
+        payroll_item_id: item_a.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
+
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("linked to a duplicate")
+      expect(item_a.reload.check_number).to eq("3000")
+    end
+
     it "returns 201 with original_check_number and reprint data" do
       post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
       expect(response).to have_http_status(:created)

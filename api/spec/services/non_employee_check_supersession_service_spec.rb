@@ -123,6 +123,33 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     expect(register.dig(:summary, :amount)).to eq(183.to_d)
   end
 
+  it "preserves verified check facts against renumbering, replacement, and direct updates" do
+    item
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
+
+    expect { CheckNumberCorrectionService.new(payroll_item: item, new_check_number: "01046", actor: actor).call }
+      .to raise_error(CheckNumberCorrectionService::Error, /linked to a duplicate/)
+    expect {
+      CheckNumberBatchCorrectionService.new(pay_period: period, actor: actor,
+                                            changes: [ { "source_type" => "payroll_item", "source_id" => item.id, "check_number" => "01046" } ]).call
+    }.to raise_error(CheckNumberBatchCorrectionService::Error, /linked to a duplicate/)
+    expect { ReplaceCheckService.preview(payroll_item: item, corrected_inputs: { hours_worked: 1 }) }
+      .to raise_error(ReplaceCheckService::InvalidStateError, /linked to a duplicate/)
+    expect {
+      ApplicationRecord.transaction(requires_new: true) do
+        PayrollItem.where(id: item.id).update_all(check_number: "01046")
+      end
+    }.to raise_error(ActiveRecord::StatementInvalid, /linked to a duplicate/)
+
+    expect(item.reload.check_number).to eq("01045")
+    register = CheckRegisterService.new(company: company, from: "2026-05-01", to: "2026-05-31").call
+    expect(register.fetch(:rows).map { |row| row.fetch(:source_type) }).to eq([ "payroll_item" ])
+    expect(register.dig(:summary, :amount)).to eq(183.to_d)
+  end
+
   it "rejects mismatched numbers and does not double count" do
     item.update!(check_number: "1046")
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",

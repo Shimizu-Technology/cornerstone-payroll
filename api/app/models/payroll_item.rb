@@ -13,6 +13,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
+  has_one :non_employee_check_supersession, dependent: :restrict_with_error
   has_one :direct_deposit_payment_confirmation, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
@@ -183,7 +184,7 @@ class PayrollItem < ApplicationRecord
   # @return [CheckEvent]
   def void!(user:, reason:, ip_address: nil)
     raise ArgumentError, "Already voided" if voided?
-    raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
+    raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
     raise ArgumentError, "No check number assigned" if check_number.blank?
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
@@ -191,7 +192,7 @@ class PayrollItem < ApplicationRecord
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
       raise ArgumentError, "Already voided" if voided? # re-check under lock
-      raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
+      raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
       update!(
@@ -208,6 +209,10 @@ class PayrollItem < ApplicationRecord
         ip_address: ip_address
       )
     end
+  end
+
+  def duplicate_check_linked?
+    NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
   end
 
   # Check status helper (used in serialisation)
