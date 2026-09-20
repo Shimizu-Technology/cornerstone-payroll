@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Download, Printer, Search, X } from 'lucide-react';
 import { getDocument, GlobalWorkerOptions, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -20,7 +20,8 @@ function downloadPdf(artifact: PdfArtifact, url: string) {
 }
 
 export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null; onClose: () => void }) {
-  const url = useMemo(() => artifact ? URL.createObjectURL(artifact.blob) : null, [artifact]);
+  const [urlState, setUrlState] = useState<{ artifact: PdfArtifact; url: string } | null>(null);
+  const url = urlState?.artifact === artifact ? urlState.url : null;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const printFrameRef = useRef<HTMLIFrameElement>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
@@ -29,7 +30,15 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
   const [rendering, setRendering] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  useEffect(() => {
+    if (!artifact) {
+      setUrlState(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(artifact.blob);
+    setUrlState({ artifact, url: objectUrl });
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [artifact]);
 
   useEffect(() => {
     if (!artifact) {
@@ -68,6 +77,7 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
     let cancelled = false;
     let task: RenderTask | null = null;
     setRendering(true);
+    setError(null);
     void pdfDocument.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
       const viewport = page.getViewport({ scale: 1.75 });
