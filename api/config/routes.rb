@@ -212,6 +212,7 @@ Rails.application.routes.draw do
             collection do
               post :bulk_update
               post :create_personal
+              post :convert_legacy
             end
           end
         end

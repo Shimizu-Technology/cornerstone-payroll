@@ -540,6 +540,17 @@ export const employeePayrollFieldsApi = {
       { payroll_field: field, employee_payroll_field: assignment },
       { companyId },
     ),
+  convertLegacy: (
+    employeeId: number,
+    legacy: { kind: 'adjustment' | 'custom_earning'; label: string; amount: number; treatment?: string; notes?: string },
+    field: Partial<PayrollFieldDefinition>,
+    assignment: Partial<EmployeePayrollField>,
+    companyId?: number,
+  ) => api.post<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
+    `/admin/employees/${employeeId}/payroll_fields/convert_legacy`,
+    { legacy, payroll_field: field, employee_payroll_field: assignment },
+    { companyId },
+  ),
   update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>) =>
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
