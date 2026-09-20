@@ -903,6 +903,7 @@ export interface AirePostLockComparison {
   summary: Record<AirePostLockStatus, { regular_hours: number; overtime_hours: number; entry_count: number }> & {
     needs_attention: boolean;
     unmapped_count: number;
+    needs_verification_count?: number;
   };
   rows: Array<{
     employee_name: string;
@@ -915,7 +916,7 @@ export interface AirePostLockComparison {
     regular_hours: number;
     overtime_hours: number;
     reason?: string | null;
-    mapping_status?: 'mapped' | 'inactive' | 'unmapped';
+    mapping_status?: 'mapped' | 'inactive' | 'unmapped' | 'needs_verification';
     payroll_item_id?: number;
     pay_period_id?: number;
     payment_method?: string;
