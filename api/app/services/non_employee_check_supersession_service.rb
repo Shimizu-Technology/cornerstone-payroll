@@ -17,9 +17,10 @@ class NonEmployeeCheckSupersessionService
       .select { |item| eligible_item?(item) }
   end
 
-  def supersede!(payroll_item_id:, reason:)
+  def supersede!(payroll_item_id:, reason:, recipient_verified:)
     note = reason.to_s.strip
     raise Error, "Explain why these records represent one physical check (at least 20 characters)" if note.length < 20
+    raise Error, "Confirm that both records name the recipient of the same physical check" unless recipient_verified == true
 
     check.with_lock do
       raise Error, "Only an unvoided, printed, unpaid standalone check can be linked" unless candidate_check?

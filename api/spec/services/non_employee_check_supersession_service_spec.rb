@@ -25,7 +25,7 @@ RSpec.describe NonEmployeeCheckSupersessionService do
                          effective_on: PayrollBusinessClock.today)
     service = described_class.new(check: check, actor: actor)
     expect(service.candidates).to contain_exactly(item)
-    evidence = service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item")
+    evidence = service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
 
     expect(evidence.payroll_item).to eq(item)
     expect(check.reload.check_status).to eq("superseded")
@@ -45,7 +45,7 @@ RSpec.describe NonEmployeeCheckSupersessionService do
                          effective_on: PayrollBusinessClock.today)
     service = described_class.new(check: check, actor: actor)
     expect(service.candidates).to be_empty
-    expect { service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item") }
+    expect { service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true) }
       .to raise_error(described_class::Error)
     expect(NonEmployeeCheckSupersession.count).to eq(0)
   end
@@ -55,8 +55,8 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
                          effective_on: PayrollBusinessClock.today)
     service = described_class.new(check: check, actor: actor)
-    service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item")
-    expect { service.supersede!(payroll_item_id: item.id, reason: "Repeated duplicate link must be rejected") }
+    service.supersede!(payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
+    expect { service.supersede!(payroll_item_id: item.id, reason: "Repeated duplicate link must be rejected", recipient_verified: true) }
       .to raise_error(described_class::Error)
   end
 
@@ -75,8 +75,18 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     end
 
     expect { described_class.new(check: check, actor: actor).supersede!(
-      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item") }
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true) }
       .to raise_error(described_class::Error, /matching issued payroll check/)
+    expect(NonEmployeeCheckSupersession.count).to eq(0)
+  end
+
+  it "requires an explicit recipient attestation even when check number and amount match" do
+    item
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    expect { described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: false) }
+      .to raise_error(described_class::Error, /recipient/)
     expect(NonEmployeeCheckSupersession.count).to eq(0)
   end
 end

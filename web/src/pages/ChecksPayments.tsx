@@ -167,6 +167,7 @@ export function ChecksPayments() {
   const [payrollMatches, setPayrollMatches] = useState<Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }>>([]);
   const [selectedPayrollItemId, setSelectedPayrollItemId] = useState<number | null>(null);
   const [linkReason, setLinkReason] = useState('');
+  const [recipientVerified, setRecipientVerified] = useState(false);
   const [linkLoading, setLinkLoading] = useState(false);
   const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
   const [paymentConfirmation, setPaymentConfirmation] = useState('');
@@ -398,6 +399,7 @@ export function ChecksPayments() {
     setPayrollMatches([]);
     setSelectedPayrollItemId(null);
     setLinkReason('');
+    setRecipientVerified(false);
     setLinkLoading(true);
     setError(null);
     try {
@@ -412,11 +414,11 @@ export function ChecksPayments() {
   };
 
   const confirmPayrollLink = async () => {
-    if (!linkingCheck || !selectedPayrollItemId || linkReason.trim().length < 20) return;
+    if (!linkingCheck || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified) return;
     setBusyId(linkingCheck.id);
     setError(null);
     try {
-      const response = await nonEmployeeChecksApi.supersedeWithPayrollItem(linkingCheck.id, selectedPayrollItemId, linkReason.trim());
+      const response = await nonEmployeeChecksApi.supersedeWithPayrollItem(linkingCheck.id, selectedPayrollItemId, linkReason.trim(), recipientVerified);
       handleSavedCheck(response.non_employee_check);
       setLinkingCheck(null);
       await loadChecks();
@@ -966,6 +968,7 @@ export function ChecksPayments() {
             <DialogTitle>Link duplicate to payroll</DialogTitle>
             <DialogDescription>Use this only when this software record and a committed payroll item represent the same physical check. The standalone record remains in the audit history; this does not issue, void, or pay a check.</DialogDescription>
           </DialogHeader>
+          <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm"><span className="font-medium">Standalone record:</span> {linkingCheck.payable_to} · Check #{linkingCheck.check_number} · {formatCurrency(Number(linkingCheck.amount))}</div>
           {linkLoading ? <p className="mt-4 text-sm text-neutral-500">Finding matching payroll checks…</p> : payrollMatches.length === 0 ? (
             <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">No issued payroll check matches this check number and net amount. Confirm payroll check delivery, then refresh this match. Do not link a merely prepared check.</p>
           ) : (
@@ -977,9 +980,10 @@ export function ChecksPayments() {
                 </label>)}
               </div>
               <div><label htmlFor="payroll-duplicate-reason" className="mb-1 block text-sm font-medium">Why are these the same physical check?</label><textarea id="payroll-duplicate-reason" className="w-full rounded-xl border border-neutral-300 p-3 text-sm" rows={3} value={linkReason} onChange={event => setLinkReason(event.target.value)} placeholder="Verified check number, recipient, amount, and paper check issued…" /><p className="text-xs text-neutral-500">At least 20 characters; saved permanently in the audit record.</p></div>
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={recipientVerified} onChange={event => setRecipientVerified(event.target.checked)} /><span>I verified that the standalone payee and payroll employee received the same physical check, even if the names are written differently.</span></label>
             </div>
           )}
-          <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setLinkingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void confirmPayrollLink()} disabled={busyId !== null || !selectedPayrollItemId || linkReason.trim().length < 20}>Link duplicate</Button></DialogFooter>
+          <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setLinkingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void confirmPayrollLink()} disabled={busyId !== null || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified}>Link duplicate</Button></DialogFooter>
         </DialogContent>}
       </Dialog>
 

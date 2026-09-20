@@ -247,13 +247,15 @@ module Api
         def supersede_with_payroll_item
           ActiveRecord::Base.transaction do
             evidence = NonEmployeeCheckSupersessionService.new(check: @check, actor: current_user).supersede!(
-              payroll_item_id: params.require(:payroll_item_id), reason: params.require(:reason)
+              payroll_item_id: params.require(:payroll_item_id), reason: params.require(:reason),
+              recipient_verified: params[:recipient_verified] == true
             )
             AuditLog.record!(
               user: current_user, organization_id: @check.company.organization_id, company_id: @check.company_id,
               action: "non_employee_checks#superseded", record_type: "non_employee_checks", record_id: @check.id,
               subject_name: @check.payable_to,
               metadata: { payroll_item_id: evidence.payroll_item_id, reason: evidence.reason,
+                          recipient_verified: true,
                           check_number: @check.check_number, amount: @check.amount.to_s },
               ip_address: request.remote_ip, user_agent: request.user_agent,
               request_id: request.request_id, event_category: "activity"
