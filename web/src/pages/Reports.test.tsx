@@ -87,13 +87,20 @@ describe('YtdSummaryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(screen.getByText('All loan deductions (in deductions)').nextElementSibling?.textContent).toBe('$75.00');
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Total Hours').nextElementSibling?.textContent).toBe('82.50');
     expect(screen.getByText('Total OT Hours').nextElementSibling?.textContent).toBe('2.25');
     expect(screen.getByText('Straight Loans').nextElementSibling?.textContent).toBe('$25.00');
-    expect(screen.getByText('Installment Loans').nextElementSibling?.textContent).toBe('$50.00');
+    expect(screen.getByText('Other native loans (named or recurring)').nextElementSibling?.textContent).toBe('$50.00');
+    expect(screen.getByText('Bonus (in gross)').nextElementSibling?.textContent).toBe('$100.00');
+    expect(screen.getByText('Pre-tax 401(k) (in deductions)').nextElementSibling?.textContent).toBe('$84.00');
     expect(screen.getByText('Employer Contributions').nextElementSibling?.textContent).toBe('$75.00');
     expect(screen.getByText('Employer Payroll Cost').nextElementSibling?.textContent).toBe('$2,325.00');
 
+    const compactRow = screen.getByText('Test Employee').closest('tr');
+    expect(compactRow?.textContent).not.toContain('$25.00');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show deduction and earnings categories' }));
     const employeeRow = screen.getByText('Test Employee').closest('tr');
     expect(employeeRow?.textContent).toContain('82.50');
     expect(employeeRow?.textContent).toContain('2.25');
@@ -127,10 +134,13 @@ describe('YtdSummaryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
-    expect(screen.getByRole('note').textContent).toContain('classification review');
+    expect(screen.getByText('QuickBooks source labels need classification review.')).toBeTruthy();
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Historical Loans (type unclassified)').nextElementSibling?.textContent).toBe('$60.06');
     expect(screen.getByText('Health Insurance (payroll fields + historical)').nextElementSibling?.textContent).toBe('$48.11');
     expect(screen.getByText('Source-labeled after-tax 401(k) in pre-tax bucket').nextElementSibling?.textContent).toBe('$15.45');
+    expect(screen.queryByText(/post tax deduction · QuickBooks source/)).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show source breakdown columns' }));
     expect(screen.getByText(/post tax deduction · QuickBooks source/)).toBeTruthy();
   });
 
@@ -214,8 +224,10 @@ describe('YtdSummaryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Payroll Field Additions').nextElementSibling?.textContent).toBe('$15.75');
     expect(screen.getByText('Payroll Field Deductions').nextElementSibling?.textContent).toBe('$5.75');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show deduction and earnings categories' }));
     const employeeRow = screen.getByText('Test Employee').closest('tr');
     expect(employeeRow?.textContent).toContain('$15.75');
     expect(employeeRow?.textContent).toContain('$5.75');
