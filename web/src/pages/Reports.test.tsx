@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
+import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YtdSummaryReport } from '@/services/api';
+import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
+
+function renderReportPanel(panel: ReactNode) {
+  return render(<PdfPreviewProvider>{panel}</PdfPreviewProvider>);
+}
 
 const apiMocks = vi.hoisted(() => ({
   ytdSummary: vi.fn(),
@@ -82,7 +88,7 @@ describe('YtdSummaryPanel', () => {
   });
 
   it('renders the new company totals and employee-level report values', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
@@ -130,7 +136,7 @@ describe('YtdSummaryPanel', () => {
         label: 'QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)',
         short_label: 'Health Insurance', identity_label: 'QuickBooks source', treatment: 'post_tax_deduction' }],
     } });
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
@@ -140,12 +146,12 @@ describe('YtdSummaryPanel', () => {
     expect(screen.getByText('Health Insurance (payroll fields + historical)').nextElementSibling?.textContent).toBe('$48.11');
     expect(screen.getByText('Source-labeled after-tax 401(k) in pre-tax bucket').nextElementSibling?.textContent).toBe('$15.45');
     expect(screen.queryByText(/post tax deduction · QuickBooks source/)).toBeNull();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show source breakdown columns' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show source breakdown columns/ }));
     expect(screen.getByText(/post tax deduction · QuickBooks source/)).toBeTruthy();
   });
 
   it('uses a year-to-date pay-date range by default and offers a rolling year preset', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     await screen.findByText('Payroll Summary — 2026');
@@ -162,7 +168,7 @@ describe('YtdSummaryPanel', () => {
   });
 
   it('includes active $0-pay employees by default and sends the changed selection to the report', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     const checkbox = screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
 
@@ -181,7 +187,7 @@ describe('YtdSummaryPanel', () => {
   it('does not show a stale report when the visibility selection changes during loading', async () => {
     let resolveRequest!: (value: { report: typeof report }) => void;
     apiMocks.ytdSummary.mockReturnValue(new Promise((resolve) => { resolveRequest = resolve; }));
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }));
@@ -195,7 +201,7 @@ describe('YtdSummaryPanel', () => {
     apiMocks.ytdSummary.mockResolvedValue({
       report: { ...report, meta: { provisional: true, payroll_status_note: 'TEST ONLY — calculated rehearsal payroll, not committed or paid' } },
     });
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText(/Test-only projection/)).toBeTruthy();
@@ -220,7 +226,7 @@ describe('YtdSummaryPanel', () => {
         payroll_field_post_tax_deductions_total: '1.75',
       }],
     } });
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
@@ -253,7 +259,7 @@ describe('PayrollRegisterPanel', () => {
   });
 
   it('loads every reportable page and labels approved rehearsal runs as test-only', async () => {
-    render(<PayrollRegisterPanel />);
+    renderReportPanel(<PayrollRegisterPanel />);
 
     const select = await screen.findByRole('combobox', { name: 'Pay Period' });
     expect(await screen.findByRole('option', { name: /TEST ONLY · Cornerstone/ })).toBeTruthy();
