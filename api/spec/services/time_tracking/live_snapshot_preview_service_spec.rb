@@ -89,6 +89,24 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     expect(described_class.snapshot_checksum(response)).to eq(described_class.snapshot_checksum(later))
   end
 
+  it "does not silently remap an existing AIRE identity during payroll import" do
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(response)
+    other_employee = create(:employee, company: company, department: employee.department)
+    import = described_class.new(pay_period: pay_period, source: source).call
+
+    result = TimeTracking::ApplyImportService.new(
+      import: import,
+      mappings: [ { source_user_id: "17", employee_id: other_employee.id } ],
+      applied_by: create(:user, company: company)
+    ).call
+
+    expect(result.fetch(:errors).first.fetch(:error)).to include("permanent employee link")
+    expect(import.reload.status).to eq("previewed")
+    expect(TimeTrackingEmployeeMapping.find_by!(time_tracking_source: source, source_user_uuid: uuid).employee_id).to eq(employee.id)
+  end
+
   it "rejects a duplicate AIRE source line" do
     duplicate = response.deep_dup
     duplicate["employees"][0]["adjustments"] << duplicate["employees"][0]["adjustments"].first.deep_dup

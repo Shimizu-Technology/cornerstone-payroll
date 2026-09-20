@@ -316,10 +316,10 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(unlinkedHours)} hrs</p>
                 <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
               </div>
-              <div className={`rounded-xl border p-4 ${isCommitted ? 'border-primary-200 bg-primary-50' : mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? 'Payment not yet confirmed' : 'Payroll match'}</p>
+              <div className={`rounded-xl border p-4 ${isCommitted ? (outstandingHours > 0 ? 'border-primary-200 bg-primary-50' : 'border-success-200 bg-success-50') : mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? (outstandingHours > 0 ? 'Payment not yet confirmed' : 'No payable AIRE hours awaiting payment') : 'Payroll match'}</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{isCommitted ? `${hours(outstandingHours)} hrs` : `${matchedCount}/${rows.length} employees`}</p>
-                <p className="mt-2 text-xs text-neutral-600">{isCommitted ? `${hours(unlinkedHours)} unlinked · ${hours(linkedAwaitingEvidenceHours)} linked, awaiting payment evidence. Do not pay linked hours twice.` : mismatchCount ? `${mismatchCount} need an hours update below` : 'Regular and OT totals match'}</p>
+                <p className="mt-2 text-xs text-neutral-600">{isCommitted ? (outstandingHours > 0 ? `${hours(unlinkedHours)} unlinked · ${hours(linkedAwaitingEvidenceHours)} linked, awaiting payment evidence. Do not pay linked hours twice.` : 'Paid entries are recorded below. Held or unapproved time remains separate.') : mismatchCount ? `${mismatchCount} need an hours update below` : 'Regular and OT totals match'}</p>
               </div>
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
