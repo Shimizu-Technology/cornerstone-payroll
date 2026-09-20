@@ -283,16 +283,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
     t.check_constraint "evidence_type IS NULL OR (evidence_type::text = ANY (ARRAY['bank_statement'::character varying, 'bank_portal'::character varying, 'accountant_review'::character varying, 'payee_confirmation'::character varying, 'other'::character varying]::text[]))", name: "check_reconciliation_events_evidence_type"
   end
 
-  create_table "check_supersession_rollout_approvals", force: :cascade do |t|
-    t.bigint "approved_by_id", null: false
-    t.datetime "approved_at", null: false
-    t.bigint "company_id", null: false
-    t.datetime "created_at", null: false
-    t.text "reason", null: false
-    t.index ["approved_by_id"], name: "index_check_supersession_rollout_approvals_on_approved_by_id"
-    t.index ["company_id"], name: "index_check_supersession_rollout_approvals_on_company_id", unique: true
-  end
-
   create_table "check_signoff_sheets", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -305,6 +295,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
     t.index ["company_id"], name: "index_check_signoff_sheets_on_company_id"
     t.index ["pay_period_id"], name: "index_check_signoff_sheets_on_pay_period_id", unique: true
     t.index ["updated_by_id"], name: "index_check_signoff_sheets_on_updated_by_id"
+  end
+
+  create_table "check_supersession_rollout_approvals", force: :cascade do |t|
+    t.bigint "approved_by_id", null: false
+    t.datetime "approved_at", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "reason", null: false
+    t.index ["approved_by_id"], name: "index_check_supersession_rollout_approvals_on_approved_by_id"
+    t.index ["company_id"], name: "index_check_supersession_rollout_approvals_on_company_id", unique: true
   end
 
   create_table "client_documents", force: :cascade do |t|
@@ -3313,11 +3313,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
   add_foreign_key "check_reconciliation_events", "pay_periods", on_delete: :restrict
   add_foreign_key "check_reconciliation_events", "payroll_items", on_delete: :restrict
   add_foreign_key "check_reconciliation_events", "users", column: "recorded_by_id", on_delete: :restrict
-  add_foreign_key "check_supersession_rollout_approvals", "companies"
-  add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
+  add_foreign_key "check_supersession_rollout_approvals", "companies"
+  add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "client_documents", "companies"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"

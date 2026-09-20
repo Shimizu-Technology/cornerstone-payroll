@@ -2209,7 +2209,7 @@ export interface NonEmployeeCheck {
   void_reason?: string;
   voided_at?: string;
   check_status: string;
-  supersession?: { payroll_item_id: number; reason: string; linked_at: string } | null;
+  supersession?: { payroll_item_id: number; payroll_check_number: string; reason: string; linked_at: string } | null;
   edit_count?: number;
   created_by_id?: number;
   created_by_name?: string | null;

@@ -625,6 +625,7 @@ module Api
             check_status: check.check_status,
             supersession: check.non_employee_check_supersession && {
               payroll_item_id: check.non_employee_check_supersession.payroll_item_id,
+              payroll_check_number: check.non_employee_check_supersession.verified_facts["payroll_check_number"],
               reason: check.non_employee_check_supersession.reason,
               linked_at: check.non_employee_check_supersession.created_at
             },
