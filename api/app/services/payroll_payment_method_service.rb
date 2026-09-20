@@ -103,6 +103,7 @@ class PayrollPaymentMethodService
       end
     elsif old_method == "direct_deposit" && method == "paper_check"
       raise Error, "A check number is already assigned" if item.check_number.present?
+      raise Error, "Bank payment was already confirmed. Correct the payment rather than changing its delivery method." if item.direct_deposit_payment_confirmation.present?
 
       new_number = company.next_check_number!
       item.update!(payment_delivery_method: method, check_number: new_number)

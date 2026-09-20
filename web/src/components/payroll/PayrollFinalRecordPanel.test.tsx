@@ -77,7 +77,7 @@ describe('PayrollFinalRecordPanel', () => {
           payment_delivery_method: 'direct_deposit',
           check_number: null,
           issuance_status: 'transfer_not_confirmed',
-          reconciliation_status: 'not_tracked',
+          reconciliation_status: 'not_confirmed',
         }],
       },
     } });
@@ -86,6 +86,22 @@ describe('PayrollFinalRecordPanel', () => {
     expect(await screen.findByText('0 checks open · 1 direct deposit')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View record' }));
     expect(screen.getByText('Direct deposit · earnings stub ready')).toBeTruthy();
-    expect(screen.getByText('Bank transfer not tracked here')).toBeTruthy();
+    expect(screen.getByText('Awaiting bank confirmation')).toBeTruthy();
+  });
+
+  it('shows bank evidence after a direct deposit is confirmed', async () => {
+    apiMocks.payrollFinalRecord.mockResolvedValue({ final_record: {
+      ...record,
+      employee_payments: {
+        ...record.employee_payments,
+        direct_deposit_count: 1,
+        rows: [{ ...record.employee_payments.rows[0], payment_delivery_method: 'direct_deposit',
+          check_number: null, issuance_status: 'bank_confirmed', reconciliation_status: 'bank_confirmed' }],
+      },
+    } });
+    render(<PayrollFinalRecordPanel payPeriodId={8} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View record' }));
+    expect(screen.getByText('Direct deposit · bank payment confirmed')).toBeTruthy();
+    expect(screen.getByText('Bank evidence recorded')).toBeTruthy();
   });
 });
