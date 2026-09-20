@@ -219,6 +219,19 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
 
+    it "includes every eligible employee as a separate standard-layout PDF page" do
+      create(:payroll_item, pay_period: draft_period, employee: employee_b,
+        gross_pay: 800, net_pay: 600, total_deductions: 200)
+
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+
+      expect(response).to have_http_status(:ok)
+      pages = PDF::Reader.new(StringIO.new(response.body)).pages
+      expect(pages.size).to eq(2)
+      expect(pages.map(&:text).join("\n")).to include("Alice Reyes", "Bob Santos")
+      expect(pages.map(&:text).all? { |text| text.include?("TEST ONLY - NOT NEGOTIABLE") }).to be(true)
+    end
+
     it "marks every occupied First Hawaiian slot as a rehearsal preview" do
       company.update_columns(check_stock_type: "first_hawaiian_4up")
       create(:payroll_item, pay_period: draft_period, employee: employee_b,
