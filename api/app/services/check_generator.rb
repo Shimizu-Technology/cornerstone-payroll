@@ -102,6 +102,10 @@ class CheckGenerator
     render_document(voided: true)
   end
 
+  def generate_rehearsal_preview
+    render_document(rehearsal_preview: true)
+  end
+
   def alignment_test
     render_alignment_test
   end
@@ -176,14 +180,14 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # Main render
   # -----------------------------------------------------------------------
-  def render_document(voided: false)
+  def render_document(voided: false, rehearsal_preview: false)
     Prawn::Document.new(
       page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)
-      draw_check_face(pdf, check_y, voided)
-      draw_stub(pdf, stub1_y, voided)
-      draw_stub(pdf, stub2_y, voided)
+      draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
+      draw_stub(pdf, stub1_y, voided, rehearsal_preview: rehearsal_preview)
+      draw_stub(pdf, stub2_y, voided, rehearsal_preview: rehearsal_preview)
     end.render
   end
 
@@ -199,8 +203,9 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # CHECK FACE  – keep the top third clean like QuickBooks
   # -----------------------------------------------------------------------
-  def draw_check_face(pdf, sect_bot, voided)
+  def draw_check_face(pdf, sect_bot, voided, rehearsal_preview: false)
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
+    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
     date_cfg = layout_field(:check_face, :date)
     payee_cfg = layout_field(:check_face, :payee)
     payee_address_cfg = layout_field(:check_face, :payee_address)
@@ -247,7 +252,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # STUB – Cornerstone 4-quadrant layout
   # -----------------------------------------------------------------------
-  def draw_stub(pdf, sect_bot, voided)
+  def draw_stub(pdf, sect_bot, voided, rehearsal_preview: false)
     stub_cfg = layout_section(:stub)
     usable = PAGE_WIDTH - stub_cfg["left"].to_f - stub_cfg["right"].to_f
     left_w = usable * stub_cfg["left_ratio"].to_f
@@ -308,7 +313,7 @@ class CheckGenerator
       padding_x: stub_cfg["table_padding_x"].to_f
     )
 
-    draw_section_table(pdf,
+    deductions_height = draw_section_table(pdf,
       x: rx, y: table_y2, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
@@ -341,12 +346,13 @@ class CheckGenerator
     draw_summary_box(
       pdf,
       x: rx + stub_cfg["summary_x_offset"].to_f,
-      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg),
+      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
       w: right_w,
       stub_cfg: stub_cfg
     )
 
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
+    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
   end
 
   # -----------------------------------------------------------------------
@@ -361,9 +367,10 @@ class CheckGenerator
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
+    rendered_height = 0.0
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6.5) do
-        pdf.table(data, column_widths: col_widths, cell_style: {
+        table = pdf.table(data, column_widths: col_widths, cell_style: {
           padding: [padding_y, padding_x], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
           row(0).borders = [:bottom]
@@ -375,12 +382,15 @@ class CheckGenerator
             row(last_idx).border_color = "999999"
           end
         end
+        rendered_height = table.height
       end
     end
+    rendered_height
   rescue Prawn::Errors::CannotFit
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
+    table_height
   end
 
   # -----------------------------------------------------------------------
@@ -396,7 +406,7 @@ class CheckGenerator
         hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
         if hourly_earnings.any?
           hourly_earnings.each do |earning|
-            rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+            rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
           end
         else
           rp = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
@@ -415,7 +425,7 @@ class CheckGenerator
       hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
       if hourly_earnings.any?
         hourly_earnings.each do |earning|
-          rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+          rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
         end
       else
         dept = employee.department&.name || "Regular"
@@ -445,18 +455,18 @@ class CheckGenerator
 
     Array(payroll_item.custom_earnings).each do |ce|
       amt = ce["amount"].to_f
-      rows << [truncate_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
+      rows << [stub_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
     end
 
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless adjustment["treatment"] == "taxable_addition"
 
       amt = adjustment["amount"].to_f
-      rows << [truncate_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
+      rows << [stub_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
     end
 
     payroll_field_entries_for("taxable_addition").each do |entry|
-      rows << [truncate_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
     end
 
     rows << [
@@ -507,13 +517,13 @@ class CheckGenerator
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless adjustment["treatment"] == "non_taxable_addition"
 
-      rows << [truncate_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
+      rows << [stub_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
     end
     payroll_field_entries_for("non_taxable_addition").each do |entry|
-      rows << [truncate_label(entry.label), fn(entry.amount), "-"] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), fn(entry.amount), "-"] if entry.amount.to_f.positive?
     end
     payroll_field_entries_for("employer_contribution").each do |entry|
-      rows << [truncate_label("ER #{entry.label}"), fn(entry.amount), "-"] if entry.amount.to_f.positive?
+      rows << [stub_label("ER #{entry.label}"), fn(entry.amount), "-"] if entry.amount.to_f.positive?
     end
     rows
   end
@@ -524,24 +534,24 @@ class CheckGenerator
     rows << ["401(k) Pre-Tax", fn(payroll_item.retirement_payment), fn(ytd[:retire])] if payroll_item.retirement_payment.to_f > 0
     rows << ["Roth 401(k)", fn(payroll_item.roth_retirement_payment), fn(ytd[:roth])] if payroll_item.roth_retirement_payment.to_f > 0
     rows << ["Health Insurance", fn(visible_legacy_insurance_payment), fn(ytd[:ins])] if visible_legacy_insurance_payment.positive?
-    rows << ["Loan", fn(visible_legacy_loan_payment), fn(ytd[:loan])] if visible_legacy_loan_payment.positive?
+    rows << ["Loan", fn(visible_legacy_loan_payment), fn(visible_legacy_loan_ytd)] if visible_legacy_loan_payment.positive?
     rows << ["Tips Paid Out", fn(payroll_item.tips_paid_out), fn(ytd[:tips_paid_out])] if payroll_item.tips_paid_out.to_f > 0
     Array(payroll_item.custom_deductions).each do |deduction|
       amount = deduction["amount"].to_f
       next unless amount.positive?
 
       label = deduction["label"].presence || "Other Deduction"
-      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
+      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
     end
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
 
       amount = adjustment["amount"].to_f
       label = adjustment["label"].presence || "Payroll Adjustment"
-      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
+      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
     end
     payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
-      rows << [truncate_label(entry.label), fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
     end
 
     if rows.any?
@@ -565,9 +575,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_payment
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    payroll_item.loan_payment.to_f
+    field_total = payroll_field_entries_for("post_tax_deduction")
+      .select { |entry| entry.category == "loan" }
+      .sum(0.to_d) { |entry| entry.amount.to_d }
+    [ payroll_item.loan_payment.to_d - field_total, 0.to_d ].max
   end
 
   def ytd_visible_deds
@@ -582,9 +593,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    ytd[:loan]
+    field_total = ytd_payroll_field_totals.sum do |(_label, treatment, category), amount|
+      treatment == "post_tax_deduction" && category == "loan" ? amount.to_f : 0.0
+    end
+    [ ytd[:loan] - field_total, 0.0 ].max
   end
 
   def ytd_payroll_field_deductions_total
@@ -685,9 +697,8 @@ class CheckGenerator
       .to_a
   end
 
-  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg)
-    estimated_deductions_height = ((deduction_rows.size + 1) * 9.0) + 4.0
-    non_overlapping_top = deductions_top - estimated_deductions_height - 6.0
+  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height)
+    non_overlapping_top = deductions_top - deductions_height - 6.0
     minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
 
     [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
@@ -747,8 +758,25 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # Void watermark
+  # Non-negotiable rehearsal and void watermarks
   # -----------------------------------------------------------------------
+  def draw_rehearsal_watermark(pdf, sect_bot)
+    center = [ PAGE_WIDTH / 2, sect_bot + SECTION_HEIGHT / 2 ]
+    pdf.save_graphics_state do
+      pdf.fill_color "B91C1C"
+      pdf.font_size(10) do
+        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 205, sect_bot + SECTION_HEIGHT - 13 ], style: :bold
+      end
+      pdf.transparent(0.28) do
+        pdf.font_size(55) do
+          pdf.rotate(20, origin: center) do
+            pdf.draw_text "VOID - TEST", at: [ 118, sect_bot + 100 ], style: :bold
+          end
+        end
+      end
+    end
+  end
+
   def draw_void_watermark(pdf, sect_bot, sect_top)
     cx = PAGE_WIDTH / 2
     cy = sect_bot + SECTION_HEIGHT / 2
@@ -856,8 +884,11 @@ class CheckGenerator
     default
   end
 
-  def truncate_label(text, max = 20)
-    text.to_s.length > max ? "#{text[0, max - 2]}.." : text.to_s
+  def stub_label(text)
+    # Keep enough of the label to identify distinct fields, while bounding the
+    # row height in this fixed-size check stub. Full names remain in reports.
+    label = text.to_s
+    label.length > 48 ? "#{label[0, 45].rstrip}..." : label
   end
 
   def layout_section(name)

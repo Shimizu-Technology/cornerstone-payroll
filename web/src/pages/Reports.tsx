@@ -17,6 +17,7 @@ import { reportsApi, payrollHistoryApi, employeesApi, ApiError } from '@/service
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
+import { PdfPreviewProvider, usePdfPreview } from '@/components/documents/PdfPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
@@ -39,6 +40,13 @@ const QUARTERLY_PREPARATION_STATUSES = ['not_started', 'in_progress', 'needs_rev
 
 function fmt(n: number | string) {
   return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function sourceGroupLabel(group?: string) {
+  if (group === 'quickbooks_history') return 'QuickBooks history';
+  if (group === 'historical_adjustment') return 'History adjustment';
+  if (group === 'cornerstone_adjustment') return 'Cornerstone adjustment';
+  return 'Cornerstone field';
 }
 
 function extractErrorMessage(err: unknown): string {
@@ -86,7 +94,7 @@ function SortableTh({
     <th className={`pb-2 pr-4 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
       <button
         type="button"
-        className={`text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
+        className={`whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
         onClick={onClick}
       >
         {label}{activeLabel}
@@ -112,6 +120,7 @@ function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalid
 // ─── Payroll Register Panel ───────────────────────────────────────────────────
 
 export function PayrollRegisterPanel() {
+  const previewPdf = usePdfPreview();
   const { activeCompanyId } = useCompany();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loadingPeriods, setLoadingPeriods] = useState(true);
@@ -172,7 +181,7 @@ export function PayrollRegisterPanel() {
     },
     {
       key: 'pdf',
-      label: 'Detailed PDF (.pdf)',
+      label: 'Preview detailed PDF',
       description: 'Printable detailed payroll report.',
       kind: 'pdf',
       loading: exportingPdf,
@@ -224,7 +233,7 @@ export function PayrollRegisterPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.payrollRegisterPdf(selectedPayRunKey);
-      triggerDownload(blob, filename || `payroll_register_${selectedPayRunKey.replace(':', '-')}.pdf`);
+      previewPdf({ blob, filename: filename || `payroll_register_${selectedPayRunKey.replace(':', '-')}.pdf`, title: 'Payroll register preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -328,6 +337,7 @@ function ChecksPaymentsRegisterPanel() {
 // ─── Tax Summary Panel ────────────────────────────────────────────────────────
 
 function TaxSummaryPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
   const yearOptions = Array.from(
@@ -384,7 +394,7 @@ function TaxSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.taxSummaryPdf(periodParams);
-      triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
+      previewPdf({ blob, filename: filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.pdf`, title: 'Tax summary preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -409,8 +419,8 @@ function TaxSummaryPanel() {
   const exportFormats: ReportDownloadFormat[] = [
     {
       key: 'pdf',
-      label: 'PDF',
-      description: 'Print-ready report for review or sharing',
+      label: 'Preview PDF',
+      description: 'Review before printing or downloading',
       kind: 'pdf',
       loading: exportingPdf,
       onSelect: downloadPdf,
@@ -549,6 +559,7 @@ function TaxSummaryPanel() {
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
 function W2GuPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
   const selectableMaxYear = currentYear + 1;
@@ -688,7 +699,7 @@ function W2GuPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.w2GuPdf(year);
-      triggerDownload(blob, filename || `w2gu_${year}.pdf`);
+      previewPdf({ blob, filename: filename || `w2gu_${year}.pdf`, title: 'W-2GU preview' });
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
     } finally {
@@ -713,8 +724,8 @@ function W2GuPanel() {
   const exportFormats: ReportDownloadFormat[] = [
     {
       key: 'pdf',
-      label: 'PDF',
-      description: 'Print-ready annual report',
+      label: 'Preview PDF',
+      description: 'Review before printing or downloading',
       kind: 'pdf',
       loading: exportingPdf,
       onSelect: downloadPdf,
@@ -1047,6 +1058,7 @@ function W2GuPanel() {
 // ─── Employee Pay History Panel ────────────────────────────────────────────
 
 function EmployeePayHistoryPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
@@ -1121,7 +1133,7 @@ function EmployeePayHistoryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.employeePayHistoryPdf(selectedEmployeeId, periodParams);
-      triggerDownload(blob, filename || `employee_pay_history_${selectedEmployeeId}.pdf`);
+      previewPdf({ blob, filename: filename || `employee_pay_history_${selectedEmployeeId}.pdf`, title: 'Employee pay history preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1144,7 +1156,7 @@ function EmployeePayHistoryPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready report for printing or sharing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Preview PDF', description: 'Review before printing or downloading.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Multi-sheet workbook for reconciliation.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'History data (.csv)', description: 'Flat paycheck history for data workflows.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
@@ -1286,6 +1298,7 @@ function EmployeePayHistoryPanel() {
 // ─── YTD Summary Panel ────────────────────────────────────────────────────────
 
 export function YtdSummaryPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const localIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
@@ -1299,6 +1312,8 @@ export function YtdSummaryPanel() {
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
   const [includeZeroPay, setIncludeZeroPay] = useState(true);
+  const [showCategoryColumns, setShowCategoryColumns] = useState(false);
+  const [showSourceColumns, setShowSourceColumns] = useState(false);
   const [sortBy, setSortBy] = useState<NonNullable<YtdSummaryParams['sort_by']>>('name');
   const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
@@ -1410,7 +1425,7 @@ export function YtdSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.ytdSummaryPdf(reportParams());
-      triggerDownload(blob, filename || `payroll_summary_${periodFilenameToken()}.pdf`);
+      previewPdf({ blob, filename: filename || `payroll_summary_${periodFilenameToken()}.pdf`, title: 'Payroll summary preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1432,7 +1447,7 @@ export function YtdSummaryPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready payroll summary.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Preview PDF', description: 'Review before printing or downloading.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Payroll detail and reconciliation sheets.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'Payroll data (.csv)', description: 'Flat employee totals for analysis.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
@@ -1572,40 +1587,79 @@ export function YtdSummaryPanel() {
             </CardHeader>
             <CardContent className="space-y-6">
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
-              {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
-                <p className="text-xs text-gray-600">Only employee rows are filtered; company totals still include all payroll activity.</p>
+              {report.historical_deductions?.source_bucket_totals.length ? (
+                <p className="text-sm text-amber-900" role="note">{report.historical_deductions.classification_note}</p>
+              ) : null}
+              {(search.trim() || employmentType !== 'all' || status !== 'all' || !includeZeroPay) && (
+                <p className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950" role="note">
+                  Employee filters change the rows below, not the company-wide totals above. The totals always include all reportable payroll activity in this period.
+                </p>
               )}
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700" role="note">
+                Bonus is part of gross pay. Retirement and loan payments are part of deductions. Payroll field and source amounts below show where those same totals came from; do not add the breakdowns to the totals again.
+              </p>
               {report.company_totals && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-                  <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
-                  <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
-                  <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
-                  <TotalBox label="Total Bonus" value={report.company_totals.bonus ?? 0} />
-                  <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
-                  <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
-                  <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
-                  <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
-                  <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
-                  <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
-                  <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
-                  <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
-                  <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
-                  <TotalBox label="Installment Loans" value={report.company_totals.installment_loan_payments ?? 0} />
-                  <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
-                  <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
-                  <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
-                  <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
+                <div className="space-y-5" aria-label="Payroll totals and included breakdowns">
+                  <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
+                    <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
+                    <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
+                    <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
+                  </div>
+                  <div>
+                    <h3 className="mb-3 text-sm font-semibold text-slate-800">Included in those totals</h3>
+                    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                      <TotalBox label="Bonus (in gross)" value={report.company_totals.bonus ?? 0} />
+                      <TotalBox label="Pre-tax 401(k) (in deductions)" value={report.company_totals.retirement} />
+                      <TotalBox label="Roth 401(k) (in deductions)" value={report.company_totals.roth_retirement ?? 0} />
+                      <TotalBox label="All loan deductions (in deductions)" value={Number(report.company_totals.straight_loan_deductions ?? 0) + Number(report.company_totals.installment_loan_payments ?? 0) + Number(report.company_totals.historical_loan_deductions_unclassified ?? 0)} />
+                    </div>
+                  </div>
+                  <details className="rounded-xl border border-slate-200 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-slate-800">More payroll categories and field reconciliation</summary>
+                    <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                      <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
+                      <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
+                      <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                      <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
+                      <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
+                      <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
+                      <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
+                      <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                      <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
+                      <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
+                      <TotalBox label="Other native loans (named or recurring)" value={report.company_totals.installment_loan_payments ?? 0} />
+                      <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
+                      <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
+                      <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
+                      <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
+                    </div>
+                    <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
+                  </details>
                 </div>
               )}
-              <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Employee Detail</CardTitle>
+              <CardDescription>Category and source columns are views of the same saved paychecks, not extra amounts to add.</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
+              <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={showCategoryColumns} onChange={(event) => setShowCategoryColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
+                Show deduction and earnings categories
+              </label>
+              {(report.component_columns?.length ?? 0) > 0 && (
+                <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={showSourceColumns} onChange={(event) => setShowSourceColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
+                  Show source breakdown columns (already included in totals)
+                </label>
+              )}
+              {showSourceColumns && <p className="mb-4 text-sm leading-6 text-slate-600" role="note">
+                Each source column is a separate saved field or QuickBooks label. A value may also appear in a category column; add neither breakdown to gross, deductions, or net again.
+              </p>}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500">
@@ -1615,6 +1669,7 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Hours</th>
                     <th className="py-2 pr-4 text-right font-medium">OT Hours</th>
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    {showCategoryColumns && <>
                     <th className="py-2 pr-4 text-right font-medium">Bonus</th>
                     <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
@@ -1625,13 +1680,21 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
                     <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
-                    <th className="py-2 pr-4 text-right font-medium">Installment Loan</th>
+                    <th className="py-2 pr-4 text-right font-medium">Other Native Loans</th>
+                    <th className="py-2 pr-4 text-right font-medium">Historical Loans (unclassified)</th>
+                    <th className="py-2 pr-4 text-right font-medium">Health Insurance</th>
+                    <th className="py-2 pr-4 text-right font-medium">401(k) After Tax (source pre-tax)</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
+                    </>}
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
-                    {(report.component_columns || []).map((column) => (
-                      <th key={column.key} title={column.label} className="min-w-36 py-2 pr-4 text-right font-medium">{column.short_label}<span className="block text-xs font-normal">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span></th>
+                    {showSourceColumns && (report.component_columns || []).map((column) => (
+                      <th key={column.key} title={column.label} className="min-w-44 px-4 py-4 text-right">
+                        <span className="block text-[10px] font-bold uppercase text-primary-700">{sourceGroupLabel(column.source_group)}</span>
+                        <span className="mt-2 block break-words font-semibold normal-case text-slate-800">{column.short_label}</span>
+                        <span className="mt-2 block text-[10px] font-normal normal-case text-slate-500">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -1648,6 +1711,7 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_overtime_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      {showCategoryColumns && <>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.bonus ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_taxable_additions_total ?? 0) + Number(emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
@@ -1659,18 +1723,22 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_pre_tax_deductions_total ?? 0) + Number(emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.straight_loan_deductions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.installment_loan_payments ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.historical_loan_deductions_unclassified ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.health_insurance_deductions ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
+                      </>}
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
-                      {(report.component_columns || []).map((column) => (
+                      {showSourceColumns && (report.component_columns || []).map((column) => (
                         <td key={column.key} className="py-2 pr-4 text-right tabular-nums">{emp.component_values?.[column.key] == null ? '—' : fmt(emp.component_values[column.key])}</td>
                       ))}
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={22 + (report.component_columns?.length || 0)} className="py-6 text-center text-gray-400">
+                      <td colSpan={8 + (showCategoryColumns ? 16 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -1688,6 +1756,7 @@ export function YtdSummaryPanel() {
 // ─── Annual Payroll Summary Panel ────────────────────────────────────────────
 
 function AnnualPayrollSummaryPanel() {
+  const previewPdf = usePdfPreview();
   const [loading, setLoading] = useState(true);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -1724,7 +1793,8 @@ function AnnualPayrollSummaryPanel() {
         : format === 'pdf'
           ? await reportsApi.annualPayrollSummaryPdf()
           : await reportsApi.annualPayrollSummaryCsv();
-      triggerDownload(response.blob, response.filename || `annual_payroll_summary.${format}`);
+      if (format === 'pdf') previewPdf({ blob: response.blob, filename: response.filename || 'annual_payroll_summary.pdf', title: 'Annual payroll summary preview' });
+      else triggerDownload(response.blob, response.filename || `annual_payroll_summary.${format}`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1733,7 +1803,7 @@ function AnnualPayrollSummaryPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Shareable year-by-year summary.', kind: 'pdf', loading: exportingPdf, onSelect: () => download('pdf', setExportingPdf) },
+    { key: 'pdf', label: 'Preview PDF', description: 'Review before printing or downloading.', kind: 'pdf', loading: exportingPdf, onSelect: () => download('pdf', setExportingPdf) },
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Annual totals and source reconciliation.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: () => download('xlsx', setExportingXlsx) },
     { key: 'csv', label: 'Annual totals (.csv)', description: 'One row per payroll year.', kind: 'data', loading: exportingCsv, onSelect: () => download('csv', setExportingCsv) },
   ];
@@ -1874,6 +1944,7 @@ function AnnualPayrollSummaryPanel() {
 // ─── Employer Tax Liability Panel ─────────────────────────────────────────────
 
 function EmployerLiabilityPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
@@ -1917,7 +1988,7 @@ function EmployerLiabilityPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.employerLiabilityPdf({ year, quarter });
-      triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
+      previewPdf({ blob, filename: filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.pdf`, title: 'Employer liability preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1939,7 +2010,7 @@ function EmployerLiabilityPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Printable employer liability review.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Preview PDF', description: 'Review before printing or downloading.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Detailed reconciliation workbook.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'Liability data (.csv)', description: 'Flat liability totals for analysis.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
@@ -2068,6 +2139,7 @@ function EmployerLiabilityPanel() {
 // ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
 
 function QuarterlyCompliancePacketPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
@@ -2125,7 +2197,7 @@ function QuarterlyCompliancePacketPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketPdf(year, quarter);
-      triggerDownload(blob, filename || `quarterly_compliance_review_packet_draft_${year}_q${quarter}.pdf`);
+      previewPdf({ blob, filename: filename || `quarterly_compliance_review_packet_draft_${year}_q${quarter}.pdf`, title: 'Quarterly compliance packet preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -2185,7 +2257,7 @@ function QuarterlyCompliancePacketPanel() {
   const exportFormats: ReportDownloadFormat[] = [
     {
       key: 'pdf',
-      label: 'Compliance review packet — draft (.pdf)',
+      label: 'Preview draft PDF packet',
       description: 'Summary and draft forms marked not filed; not proof of submission.',
       kind: 'pdf',
       loading: exportingPdf,
@@ -2814,6 +2886,7 @@ function QuarterlyOfficialFormModal({
 // ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
 function Form941GuPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
@@ -2857,7 +2930,7 @@ function Form941GuPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.form941GuPdf(year, quarter);
-      triggerDownload(blob, filename || `federal_form_941_draft_${year}_q${quarter}.pdf`);
+      previewPdf({ blob, filename: filename || `federal_form_941_draft_${year}_q${quarter}.pdf`, title: 'Draft Form 941 preview' });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -2866,7 +2939,7 @@ function Form941GuPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'Draft Form 941 (.pdf)', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Preview draft Form 941', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: '941 worksheet (.xlsx)', description: 'Supporting calculations and liability schedules.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
   ];
 
@@ -3212,6 +3285,7 @@ interface NecReport {
 }
 
 function Form1099NecPanel() {
+  const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   const [report, setReport] = useState<NecReport | null>(null);
@@ -3238,12 +3312,7 @@ function Form1099NecPanel() {
     setExportingPdf(true);
     try {
       const blobData = await reportsApi.form1099NecPdf(year);
-      const url = URL.createObjectURL(blobData.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `1099-NEC_${year}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      previewPdf({ blob: blobData.blob, filename: blobData.filename || `1099-NEC_${year}.pdf`, title: '1099-NEC preview' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to export PDF');
     } finally {
@@ -3278,7 +3347,7 @@ function Form1099NecPanel() {
   };
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready contractor summary.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Preview PDF', description: 'Review before printing or downloading.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Contractor detail and filing totals.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'Contractor data (.csv)', description: 'Flat contractor compensation data.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
@@ -3725,7 +3794,7 @@ function EmptyReportSearch({ onClear }: { onClear: () => void }) {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
-export function Reports() {
+function ReportsContent() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const reportParam = searchParams.get('report');
@@ -3816,7 +3885,7 @@ export function Reports() {
   };
 
   return (
-    <div>
+    <div className="reports-tables">
       <Header title="Reports" description="Find, prepare, and export payroll and Guam compliance reports." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
@@ -3972,4 +4041,8 @@ export function Reports() {
       </div>
     </div>
   );
+}
+
+export function Reports() {
+  return <PdfPreviewProvider><ReportsContent /></PdfPreviewProvider>;
 }

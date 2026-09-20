@@ -385,6 +385,17 @@ export function ClientReports() {
                 />
               </div>
               <PayrollSourceNotice summary={ytdSummary?.source_summary} mentionFieldScope />
+              {ytdSummary?.historical_deductions?.source_bucket_totals.length ? (
+                <p role="note" className="text-sm text-amber-900">{ytdSummary.historical_deductions.classification_note}</p>
+              ) : null}
+              {ytdSummary?.company_totals && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Metric label="OT hours" value={(ytdSummary.company_totals.total_overtime_hours ?? 0).toFixed(2)} />
+                  <Metric label="Health Insurance (payroll fields + historical)" value={formatCurrency(ytdSummary.company_totals.health_insurance_deductions ?? 0)} />
+                  <Metric label="Historical Loans (type unclassified)" value={formatCurrency(ytdSummary.company_totals.historical_loan_deductions_unclassified ?? 0)} />
+                  <Metric label="401(k) After Tax label in source pre-tax bucket" value={formatCurrency(ytdSummary.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)} />
+                </div>
+              )}
               {ytdSummary?.employee_visibility && !ytdSummary.employee_visibility.include_zero_pay && (
                 <p className="text-xs text-gray-600">
                   {ytdSummary.employee_visibility.active_zero_pay_count} active $0-pay employee{ytdSummary.employee_visibility.active_zero_pay_count !== 1 ? 's' : ''} hidden from detail. Company totals still include all payroll activity.
@@ -394,11 +405,14 @@ export function ClientReports() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Employee</TableHead>
+                    <TableHead>OT Hours</TableHead>
                     <TableHead>Gross Pay</TableHead>
                     <TableHead>Other Earn.</TableHead>
                     <TableHead>Field Add.</TableHead>
                     <TableHead>Other Ded.</TableHead>
                     <TableHead>Field Ded.</TableHead>
+                    <TableHead>Health Insurance</TableHead>
+                    <TableHead>Historical Loans</TableHead>
                     <TableHead>Employer Contrib.</TableHead>
                     <TableHead>Total Ded.</TableHead>
                     <TableHead>FIT</TableHead>
@@ -409,11 +423,14 @@ export function ClientReports() {
                   {(ytdSummary?.employees || []).map((employee) => (
                     <TableRow key={employee.employee_id}>
                       <TableCell className="font-medium text-gray-900">{employee.name}</TableCell>
+                      <TableCell>{(employee.total_overtime_hours ?? 0).toFixed(2)}</TableCell>
                       <TableCell>{formatCurrency(employee.gross_pay)}</TableCell>
                       <TableCell>{formatCurrency(employee.custom_earnings_total ?? 0)}</TableCell>
                       <TableCell>{formatCurrency((employee.payroll_field_taxable_additions_total ?? 0) + (employee.payroll_field_non_taxable_additions_total ?? 0))}</TableCell>
                       <TableCell>{formatCurrency(employee.custom_deductions_total ?? 0)}</TableCell>
                       <TableCell>{formatCurrency((employee.payroll_field_pre_tax_deductions_total ?? 0) + (employee.payroll_field_post_tax_deductions_total ?? 0))}</TableCell>
+                      <TableCell>{formatCurrency(employee.health_insurance_deductions ?? 0)}</TableCell>
+                      <TableCell>{formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.total_deductions ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.withholding_tax)}</TableCell>

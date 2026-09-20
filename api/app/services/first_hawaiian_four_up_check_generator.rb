@@ -44,7 +44,7 @@ class FirstHawaiianFourUpCheckGenerator
     keyword_init: true
   )
 
-  attr_reader :company, :entries, :starting_slot
+  attr_reader :company, :entries, :starting_slot, :rehearsal_preview
 
   def self.default_layout_config
     stringify_layout(DEFAULT_LAYOUT)
@@ -82,8 +82,9 @@ class FirstHawaiianFourUpCheckGenerator
     numeric_value.clamp(MIN_SLOT_PITCH_ADJUSTMENT, MAX_SLOT_PITCH_ADJUSTMENT)
   end
 
-  def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1)
+  def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1, rehearsal_preview: false)
     @company = company
+    @rehearsal_preview = rehearsal_preview
     @entries = payroll_items.map { |item| entry_from_payroll_item(item) } +
       non_employee_checks.map { |check| entry_from_non_employee_check(check) }
     @entries.sort_by! { |entry| check_number_sort_key(entry.check_number) }
@@ -155,7 +156,8 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def draw_entry(pdf, entry, slot_bottom)
-    draw_void_watermark(pdf, slot_bottom) if entry.voided
+    draw_void_watermark(pdf, slot_bottom) if entry.voided || rehearsal_preview
+    draw_rehearsal_label(pdf, slot_bottom) if rehearsal_preview
 
     draw_text_field(pdf, :check_face, :date, slot_bottom, format_date(entry.date), align: :right)
     draw_text_field(pdf, :check_face, :payee, slot_bottom, entry.payee)
@@ -307,6 +309,15 @@ class FirstHawaiianFourUpCheckGenerator
             pdf.draw_text "VOID", at: [ cx - 78, cy - 20 ], style: :bold
           end
         end
+      end
+    end
+  end
+
+  def draw_rehearsal_label(pdf, slot_bottom)
+    pdf.save_graphics_state do
+      pdf.fill_color "B91C1C"
+      pdf.font_size(9) do
+        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 194, slot_bottom + SLOT_HEIGHT - 13 ], style: :bold
       end
     end
   end

@@ -2548,7 +2548,7 @@ export function PayPeriodDetail({
                               fixedDecimalsOnBlur={2}
                             />
                           </div>
-                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">One-time deduction. For balance repayment, use the linked loan field.</p>
+                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">Separate one-time deduction. Configured loan columns also apply.</p>
                         </TableCell>
                         )}
                         {showPayrollFields && worksheetPayrollFields.map((field) => {
@@ -2563,10 +2563,8 @@ export function PayPeriodDetail({
                             );
                           }
 
-                          const isLoanField = field.category === 'loan' && field.tax_treatment === 'post_tax_deduction';
-                          const suppliedByDirectLoan = isLoanField && toNumber(loansMap[String(emp.id)]) > 0;
-                          const editable = isLoanField ? !suppliedByDirectLoan || draft?.mode === 'override' : assignment.editable;
-                          const skippedReason = suppliedByDirectLoan ? 'Using the direct loan deduction for this payroll' : assignment.skipped_reason;
+                          const editable = assignment.editable;
+                          const skippedReason = assignment.skipped_reason;
                           const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
                           const defaultLabel = field.amount_type === 'percentage'
                             ? `${percentage}% automatic`
