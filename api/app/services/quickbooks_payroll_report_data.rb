@@ -557,10 +557,10 @@ class QuickbooksPayrollReportData
   end
 
   def visible_legacy_loan_payment(item)
-    return item.loan_deduction.to_f if item.loan_deduction.to_f.positive?
-    return 0.0 if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.loan? }
+    return item.loan_deduction.to_d if item.loan_deduction.to_d.positive?
+    return 0.to_d if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.loan? }
 
-    item.loan_payment.to_f
+    item.loan_payment.to_d
   end
 
   def visible_legacy_insurance_payment(item)

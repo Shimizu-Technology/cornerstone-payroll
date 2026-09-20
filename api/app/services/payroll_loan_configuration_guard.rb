@@ -13,12 +13,17 @@ class PayrollLoanConfigurationGuard
       loan.scheduled_payment_for(pay_date: pay_date, requested_amount: requested_amount).positive? &&
         loan.repayment_schedule_active_on?(pay_date)
     end
+    available = payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_d.positive? }
+    shared_type_ids = loans.group_by(&:deduction_type_id).select { |type_id, group| type_id.present? && group.size > 1 }.keys
     missing = loans.reject do |loan|
-      payroll_item.payroll_item_deductions.any? do |deduction|
-        deduction.amount.to_d.positive? &&
-          (deduction.employee_loan_id == loan.id ||
-            (loan.deduction_type_id.present? && deduction.deduction_type_id == loan.deduction_type_id))
+      match_index = available.index { |deduction| deduction.employee_loan_id == loan.id }
+      if match_index.nil? && loan.deduction_type_id.present? && !shared_type_ids.include?(loan.deduction_type_id)
+        match_index = available.index do |deduction|
+          deduction.employee_loan_id.blank? && deduction.deduction_type_id == loan.deduction_type_id
+        end
       end
+      available.delete_at(match_index) if match_index
+      match_index.present?
     end
     return if missing.empty?
 

@@ -567,8 +567,8 @@ class CheckGenerator
   def visible_legacy_loan_payment
     field_total = payroll_field_entries_for("post_tax_deduction")
       .select { |entry| entry.category == "loan" }
-      .sum { |entry| entry.amount.to_f }
-    [ payroll_item.loan_payment.to_f - field_total, 0.0 ].max
+      .sum(0.to_d) { |entry| entry.amount.to_d }
+    [ payroll_item.loan_payment.to_d - field_total, 0.to_d ].max
   end
 
   def ytd_visible_deds
