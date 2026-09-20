@@ -1690,10 +1690,10 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                     {showSourceColumns && (report.component_columns || []).map((column) => (
-                      <th key={column.key} title={column.label} className="min-w-44 px-3 py-3 text-right">
+                      <th key={column.key} title={column.label} className="min-w-44 px-4 py-4 text-right">
                         <span className="block text-[10px] font-bold uppercase text-primary-700">{sourceGroupLabel(column.source_group)}</span>
-                        <span className="mt-1 block break-words font-semibold normal-case text-slate-800">{column.short_label}</span>
-                        <span className="mt-1 block text-[10px] font-normal normal-case text-slate-500">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
+                        <span className="mt-2 block break-words font-semibold normal-case text-slate-800">{column.short_label}</span>
+                        <span className="mt-2 block text-[10px] font-normal normal-case text-slate-500">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
                       </th>
                     ))}
                   </tr>

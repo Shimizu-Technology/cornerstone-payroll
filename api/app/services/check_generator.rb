@@ -313,7 +313,7 @@ class CheckGenerator
       padding_x: stub_cfg["table_padding_x"].to_f
     )
 
-    draw_section_table(pdf,
+    deductions_height = draw_section_table(pdf,
       x: rx, y: table_y2, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
@@ -346,7 +346,7 @@ class CheckGenerator
     draw_summary_box(
       pdf,
       x: rx + stub_cfg["summary_x_offset"].to_f,
-      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg),
+      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
       w: right_w,
       stub_cfg: stub_cfg
     )
@@ -367,9 +367,10 @@ class CheckGenerator
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
+    rendered_height = 0.0
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6.5) do
-        pdf.table(data, column_widths: col_widths, cell_style: {
+        table = pdf.table(data, column_widths: col_widths, cell_style: {
           padding: [padding_y, padding_x], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
           row(0).borders = [:bottom]
@@ -381,12 +382,15 @@ class CheckGenerator
             row(last_idx).border_color = "999999"
           end
         end
+        rendered_height = table.height
       end
     end
+    rendered_height
   rescue Prawn::Errors::CannotFit
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
+    table_height
   end
 
   # -----------------------------------------------------------------------
@@ -693,9 +697,8 @@ class CheckGenerator
       .to_a
   end
 
-  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg)
-    estimated_deductions_height = ((deduction_rows.size + 1) * 9.0) + 4.0
-    non_overlapping_top = deductions_top - estimated_deductions_height - 6.0
+  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height)
+    non_overlapping_top = deductions_top - deductions_height - 6.0
     minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
 
     [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
@@ -882,9 +885,10 @@ class CheckGenerator
   end
 
   def stub_label(text)
-    # The stub table can wrap within its label column. Character-based clipping
-    # hid the identity of distinct payroll fields (and even ordinary loan labels).
-    text.to_s
+    # Keep enough of the label to identify distinct fields, while bounding the
+    # row height in this fixed-size check stub. Full names remain in reports.
+    label = text.to_s
+    label.length > 48 ? "#{label[0, 45].rstrip}..." : label
   end
 
   def layout_section(name)

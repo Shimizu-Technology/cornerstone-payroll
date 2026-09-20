@@ -140,6 +140,23 @@ RSpec.describe CheckGenerator do
       expect(text).not_to include("Auto Loan Reimburs..")
     end
 
+    it "bounds unusually long labels while keeping the deduction and summary readable" do
+      long_label = "Loan - Madela Severin Extra Long Reimbursement Installment Reference Number"
+      field = PayrollFieldDefinition.create!(company: company, name: long_label,
+        kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+        label: long_label, kind: "deduction", tax_treatment: "post_tax_deduction",
+        category: "loan", amount: BigDecimal("250"), source: "employee_default")
+
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      text = reader.pages.map(&:text).join("\n")
+
+      expect(reader.page_count).to eq(1)
+      expect(text).to include("Loan - Madela Severin Extra Long", "Reimbursemen...")
+      expect(text).to include("SUMMARY", "NET PAY")
+      expect(text).not_to include("[TABLE]")
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,

@@ -33,7 +33,7 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
           )}
           {mentionFieldScope && <p className="mt-1 leading-6 text-amber-800">Payroll field reconciliation below covers Cornerstone records only.</p>}
           {(summary.source_overlap?.employee_pay_date_count ?? 0) > 0 && (
-            <p role="alert" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 font-medium text-red-900">
+            <p role="alert" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 font-medium text-red-900">
               Both sources contain {summary.source_overlap?.employee_pay_date_count} matching employee/pay-date {summary.source_overlap?.employee_pay_date_count === 1 ? 'pair' : 'pairs'}. Both are included in the totals; reconcile these records before relying on the report.
             </p>
           )}

@@ -23,7 +23,6 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
   const [urlState, setUrlState] = useState<{ artifact: PdfArtifact; url: string } | null>(null);
   const url = urlState?.artifact === artifact ? urlState.url : null;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const printFrameRef = useRef<HTMLIFrameElement>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -103,14 +102,14 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
   return (
     <Dialog open={Boolean(artifact)} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="dialog-wide flex h-[min(88vh,1000px)] w-full flex-col overflow-hidden p-0">
-        <DialogHeader className="shrink-0 border-b px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <DialogHeader className="shrink-0 border-b px-4 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <DialogTitle>{artifact?.title || 'PDF preview'}</DialogTitle>
               <DialogDescription>{artifact?.note || 'Review the PDF here, then print or download a copy if needed.'}</DialogDescription>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" disabled={!url} onClick={() => printFrameRef.current?.contentWindow?.print()}><Printer className="mr-2 h-4 w-4" />Print</Button>
+              <Button variant="outline" disabled={!url} onClick={() => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); }}><Printer className="mr-2 h-4 w-4" />Open to print</Button>
               <Button variant="outline" disabled={!url || !artifact} onClick={() => {
                 if (url && artifact) downloadPdf(artifact, url);
               }}><Download className="mr-2 h-4 w-4" />Download</Button>
@@ -119,21 +118,20 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col bg-slate-100">
-          <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-center gap-3 border-b border-slate-200 bg-white px-3 py-1 text-sm text-slate-700">
+          <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-center gap-4 border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
             <Button variant="ghost" size="sm" disabled={!pdfDocument || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous</Button>
             <span role="status">{pdfDocument ? `Page ${pageNumber} of ${pdfDocument.numPages}` : loading ? 'Loading PDF…' : 'PDF preview'}</span>
             <Button variant="ghost" size="sm" disabled={!pdfDocument || pageNumber >= pdfDocument.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next</Button>
             <Button variant="ghost" size="sm" disabled={!pdfDocument} onClick={() => setZoomed((value) => !value)}>
-              <Search className="mr-1.5 h-4 w-4" />{zoomed ? 'Fit page' : 'Zoom in'}
+              <Search className="mr-2 h-4 w-4" />{zoomed ? 'Fit page' : 'Zoom in'}
             </Button>
           </div>
           {error && <p role="alert" className="px-4 py-3 text-center text-sm text-red-700">{error}</p>}
-          <div className="min-h-0 flex-1 overflow-auto p-3 text-center sm:p-6">
+          <div className="min-h-0 flex-1 overflow-auto p-4 text-center sm:p-6">
             {loading && <p className="py-12 text-sm text-slate-600">Rendering PDF preview…</p>}
             {pdfDocument && <canvas ref={canvasRef} aria-label={`Page ${pageNumber} preview`} className={`mx-auto h-auto bg-white shadow-lg ${zoomed ? 'max-w-none' : 'max-w-full'} ${rendering ? 'opacity-50' : ''}`} />}
           </div>
         </div>
-        {url && <iframe ref={printFrameRef} title="PDF print source" src={url} className="absolute h-0 w-0 border-0" aria-hidden="true" tabIndex={-1} />}
       </DialogContent>
     </Dialog>
   );

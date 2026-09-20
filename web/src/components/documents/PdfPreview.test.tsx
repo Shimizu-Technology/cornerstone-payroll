@@ -28,16 +28,20 @@ it('renders pages without downloading until requested and cleans up the PDF work
   const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('http://localhost/preview.pdf');
   const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const open = vi.spyOn(window, 'open').mockImplementation(() => null);
   const artifact = { blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }), filename: 'test-checks.pdf', title: 'Mock checks' };
   const onClose = vi.fn();
 
   const view = render(<PdfPreview artifact={artifact} onClose={onClose} />);
-  expect(screen.getByTitle('PDF print source').getAttribute('src')).toBe('http://localhost/preview.pdf');
+  expect(screen.queryByTitle('PDF print source')).toBeNull();
+  expect(open).not.toHaveBeenCalled();
   expect(await screen.findByText('Page 1 of 2')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   expect(await screen.findByText('Page 2 of 2')).toBeTruthy();
   expect(pdfMocks.getPage).toHaveBeenCalledWith(2);
   expect(click).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Open to print' }));
+  expect(open).toHaveBeenCalledWith('http://localhost/preview.pdf', '_blank', 'noopener,noreferrer');
   fireEvent.click(screen.getByRole('button', { name: 'Download' }));
   expect(click).toHaveBeenCalledOnce();
   expect(create).toHaveBeenCalledWith(artifact.blob);
