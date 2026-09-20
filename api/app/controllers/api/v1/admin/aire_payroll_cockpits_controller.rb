@@ -50,33 +50,15 @@ module Api
 
         def create_employee_mapping
           require_aire_source!
-          source_user_id = params.require(:source_user_id).to_s
-          employee = @pay_period.company.employees.find(params.require(:employee_id))
-          live = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_employees(
-            page: 1, per_page: 1, employee_id: source_user_id
-          ).fetch("employees", []).find { |person| person["id"].to_s == source_user_id }
-          raise TimeTracking::ManualAllocationService::Error, "AIRE employee was not found; refresh the team list" unless live
-
-          source_uuid = TimeTrackingEmployeeMapping.normalize_uuid(live["payroll_integration_id"])
-          raise TimeTracking::ManualAllocationService::Error, "AIRE employee has no permanent payroll identity" if source_uuid.blank?
-
-          mapping = TimeTrackingEmployeeMapping.resolve_source_identity!(
-            company: @pay_period.company, source: @source, source_user_id: source_user_id, source_user_uuid: source_uuid
-          )
-          if mapping && mapping.employee_id != employee.id
-            raise TimeTracking::ManualAllocationService::Error, "This AIRE person is already linked to a different payroll employee. Review the existing mapping before changing it."
-          end
-          mapping.update!(source_user_uuid: source_uuid) if mapping && mapping.source_user_uuid.blank?
-          mapping ||= TimeTrackingEmployeeMapping.create!(
-            company: @pay_period.company, time_tracking_source: @source,
-            employee: employee, source_user_id: source_user_id, source_user_uuid: source_uuid
+          mapping = TimeTracking::EmployeeMappingService.new(pay_period: @pay_period, source: @source).link!(
+            source_user_id: params.require(:source_user_id), employee_id: params.require(:employee_id)
           )
           render json: { mapping: { source_user_id: mapping.source_user_id,
                                     source_user_uuid: mapping.source_user_uuid,
                                     employee_id: mapping.employee_id,
                                     employee_name: mapping.employee.full_name } }, status: :ok
         rescue ActionController::ParameterMissing, ArgumentError,
-               TimeTracking::ManualAllocationService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
+               TimeTracking::EmployeeMappingService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
                ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e

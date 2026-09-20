@@ -24,12 +24,20 @@ module TimeTracking
       raise Error, "Map this AIRE person to the payroll employee before linking hours" unless mapping
 
       entry_id = source_time_entry_id.to_s
-      version = Integer(source_time_entry_version.to_s, 10)
+      version = begin
+        Integer(source_time_entry_version.to_s, 10)
+      rescue ArgumentError
+        raise Error, "Refresh AIRE and choose a valid dated time entry with exact hours"
+      end
       raise Error, "Refresh the AIRE time entry before linking it" if version.negative?
       regular = decimal_hours!(regular_hours)
       overtime = decimal_hours!(overtime_hours)
       raise Error, "Choose at least some AIRE hours" unless (regular + overtime).positive?
-      work_date = Date.iso8601(original_work_date.to_s)
+      work_date = begin
+        Date.iso8601(original_work_date.to_s)
+      rescue Date::Error
+        raise Error, "Refresh AIRE and choose a valid dated time entry with exact hours"
+      end
       explanation = note.to_s.strip
       raise Error, "Explain which issued or committed payroll item covers these AIRE hours" if explanation.length < 10
 
@@ -68,8 +76,6 @@ module TimeTracking
       allocation
     rescue ActiveRecord::RecordNotFound
       raise Error, "This payroll item was not found in the selected pay period"
-    rescue ArgumentError, Date::Error
-      raise Error, "Refresh AIRE and choose a valid dated time entry with exact hours"
     end
 
     def sync!(allocation, raise_on_failure: false)

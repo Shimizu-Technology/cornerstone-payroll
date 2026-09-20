@@ -194,11 +194,13 @@ api_call 201 "publish the next available AIRE payroll period" POST \
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
-      publications = AirePayrollCalendarPublication.where(delivery_status: %w[pending failed]).order(:id).to_a
+      publications = AirePayrollCalendarPublication.order(:id).to_a
       abort "missing calendar publications" unless publications.size == 2
       publications.each do |publication|
-        result = AirePayrollCalendar::Delivery.new(publication_id: publication.id).call
-        abort "calendar delivery failed: #{result[:error]}" unless result.fetch(:status) == "delivered"
+        unless publication.delivered?
+          result = AirePayrollCalendar::Delivery.new(publication_id: publication.id).call
+          abort "calendar delivery failed: #{result[:error]}" unless result.fetch(:status) == "delivered"
+        end
       end
       puts "PASS: both published calendar periods reached AIRE"
     '
