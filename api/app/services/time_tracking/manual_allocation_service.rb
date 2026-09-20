@@ -17,9 +17,6 @@ module TimeTracking
 
       item = pay_period.payroll_items.find(payroll_item_id)
       raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
-      if item.effective_payment_delivery_method == "direct_deposit"
-        raise Error, "Direct-deposit AIRE hours need recorded bank payment confirmation before they can be marked paid"
-      end
       raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
 
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)
@@ -49,8 +46,8 @@ module TimeTracking
       allocation = nil
       item.with_lock do
         raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
-        if item.effective_payment_delivery_method == "direct_deposit"
-          raise Error, "Direct-deposit AIRE hours need recorded bank payment confirmation before they can be marked paid"
+        unless item.effective_payment_delivery_method.in?(%w[paper_check direct_deposit])
+          raise Error, "Choose a supported payroll payment method before linking AIRE hours"
         end
         raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
         if TimeTrackingManualAllocation.where(time_tracking_source: source, source_time_entry_id: entry_id,
@@ -135,6 +132,20 @@ module TimeTracking
 
     def sync_committed!(allocation)
       item = allocation.payroll_item.reload
+      if !item.voided? && item.effective_payment_delivery_method == "direct_deposit" &&
+         (confirmation = item.direct_deposit_payment_confirmation)
+        result = client_for(allocation).issue_payroll_manual_allocation(
+          allocation_id: allocation.remote_allocation_id,
+          command_id: allocation.issue_command_id,
+          expected_version: allocation.remote_version,
+          payment_method: "direct_deposit",
+          payment_reference: confirmation.bank_reference,
+          occurred_at: confirmation.created_at.iso8601,
+          reason: "Cornerstone bank payment #{confirmation.bank_reference} confirmed for #{confirmation.settled_on.iso8601}"
+        )
+        persist_remote_transition!(allocation, "committed", "issued", result)
+        return true
+      end
       if !item.voided? && (delivery = delivered_check_event(allocation))
         result = client_for(allocation).issue_payroll_manual_allocation(
           allocation_id: allocation.remote_allocation_id,

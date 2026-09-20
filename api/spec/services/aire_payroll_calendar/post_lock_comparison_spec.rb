@@ -163,6 +163,28 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     expect(result.fetch(:rows).map { |row| row[:source_time_entry_id] }).not_to include("999")
   end
 
+  it "shows bank settlement evidence for paid direct-deposit allocations" do
+    verified_event
+    item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+                                 hours_worked: 2, gross_pay: 30, net_pay: 25,
+                                 payment_delivery_method: "direct_deposit")
+    DirectDepositPaymentConfirmation.create!(payroll_item: item, user: actor,
+                                             settled_on: PayrollBusinessClock.today,
+                                             bank_reference: "BANK-POSTLOCK-123")
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: pay_period,
+      payroll_item: item, employee: employee, created_by: actor,
+      source_user_uuid: uuid, source_time_entry_id: "501", source_time_entry_version: 0,
+      original_work_date: Date.new(2026, 10, 5), regular_hours: 2, overtime_hours: 0,
+      reconciliation_note: "Exact AIRE source line reviewed", status: "issued"
+    )
+
+    paid = service.call.fetch(:rows).find { |row| row[:source_time_entry_id] == "501" }
+
+    expect(paid).to include(status: "paid", payment_method: "direct_deposit",
+                            payment_reference: "BANK-POSTLOCK-123")
+  end
+
   it "refuses a final batch whose immutable checksum changed" do
     verified_event
     payload.fetch("summary")["total_hours"] = 9

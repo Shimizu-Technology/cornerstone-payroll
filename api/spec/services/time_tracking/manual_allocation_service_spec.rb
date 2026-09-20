@@ -71,22 +71,42 @@ RSpec.describe TimeTracking::ManualAllocationService do
     )
   end
 
-  it "does not create an unpayable link for a direct-deposit item" do
-    item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+  it "links direct-deposit hours but waits for bank confirmation before marking them paid" do
+    item.update!(payment_delivery_method: "direct_deposit", check_number: nil, net_pay: 100)
+    allocation = create_link
+    expect(allocation.reload.status).to eq("committed")
+    allow(client).to receive(:issue_payroll_manual_allocation).and_return(
+      "manual_allocation" => { "id" => "501", "version" => 1 }
+    )
 
-    expect { create_link }.to raise_error(described_class::Error, /bank payment confirmation/)
-    expect(TimeTrackingManualAllocation.count).to eq(0)
+    service.sync!(allocation)
+    expect(allocation.reload.status).to eq("committed")
+    expect(client).not_to have_received(:issue_payroll_manual_allocation)
+
+    item.create_direct_deposit_payment_confirmation!(
+      user: actor, settled_on: PayrollBusinessClock.today, bank_reference: "BANK-TEST-123"
+    )
+    service.sync!(allocation.reload)
+
+    expect(allocation.reload.status).to eq("issued")
+    expect(client).to have_received(:issue_payroll_manual_allocation).with(
+      hash_including(payment_method: "direct_deposit", payment_reference: "BANK-TEST-123")
+    )
   end
 
-  it "rejects a payment-method change that wins the race before the item lock" do
+  it "links a concurrent deposit change but withholds paid status until bank confirmation" do
     item
+    allow(client).to receive(:issue_payroll_manual_allocation)
     allow_any_instance_of(PayrollItem).to receive(:with_lock).and_wrap_original do |original, *args, &block|
       original.receiver.update_columns(payment_delivery_method: "direct_deposit", check_number: nil)
       original.call(*args, &block)
     end
 
-    expect { create_link }.to raise_error(described_class::Error, /bank payment confirmation/)
-    expect(TimeTrackingManualAllocation.count).to eq(0)
+    allocation = create_link
+    expect(item.reload.effective_payment_delivery_method).to eq("direct_deposit")
+    expect(allocation.reload.status).to eq("committed")
+    expect(TimeTrackingManualAllocation.count).to eq(1)
+    expect(client).not_to have_received(:issue_payroll_manual_allocation)
   end
 
   it "releases committed AIRE hours when the paycheck is voided before delivery" do

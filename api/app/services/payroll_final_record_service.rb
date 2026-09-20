@@ -46,6 +46,7 @@ class PayrollFinalRecordService
       :employee,
       :check_events,
       :check_reconciliation_events,
+      :direct_deposit_payment_confirmation,
       :payroll_item_field_entries,
       payroll_item_deductions: :deduction_type
     ).order(:employee_id, :id).to_a
@@ -132,7 +133,12 @@ class PayrollFinalRecordService
     payable_items = items.select { |item| item.net_pay.to_d.positive? }
     rows = payable_items.map do |item|
       direct_deposit = item.effective_payment_delivery_method == "direct_deposit"
-      reconciliation_status = direct_deposit ? "not_tracked" : (item.check_number.present? ? CheckReconciliationStatus.for(item) : "not_assigned")
+      deposit_confirmed = direct_deposit && item.direct_deposit_payment_confirmation.present?
+      reconciliation_status = if direct_deposit
+        deposit_confirmed ? "bank_confirmed" : "not_confirmed"
+      else
+        item.check_number.present? ? CheckReconciliationStatus.for(item) : "not_assigned"
+      end
       {
         payroll_item_id: item.id,
         employee_id: item.employee_id,
@@ -140,7 +146,7 @@ class PayrollFinalRecordService
         amount: money(item.net_pay),
         payment_delivery_method: item.effective_payment_delivery_method,
         check_number: item.check_number,
-        issuance_status: direct_deposit ? "transfer_not_confirmed" : (item.check_status || "not_assigned"),
+        issuance_status: direct_deposit ? (deposit_confirmed ? "bank_confirmed" : "transfer_not_confirmed") : (item.check_status || "not_assigned"),
         reconciliation_status:
       }
     end
@@ -290,6 +296,12 @@ class PayrollFinalRecordService
 
     outstanding_checks = payload.dig(:employee_payments, :outstanding_count)
     open_items << "Reconcile #{outstanding_checks} employee #{outstanding_checks == 1 ? 'check' : 'checks'}" if outstanding_checks.positive?
+    unconfirmed_deposits = payload.dig(:employee_payments, :rows).count do |row|
+      row[:payment_delivery_method] == "direct_deposit" && row[:issuance_status] == "transfer_not_confirmed"
+    end
+    if unconfirmed_deposits.positive?
+      open_items << "Confirm #{unconfirmed_deposits} direct-deposit #{unconfirmed_deposits == 1 ? 'payment' : 'payments'} with bank evidence"
+    end
     outstanding_liability = payload.dig(:liabilities, :outstanding_amount).to_d
     open_items << "Settle #{format_currency(outstanding_liability)} in payroll liabilities" if outstanding_liability.positive?
 

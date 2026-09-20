@@ -16,6 +16,7 @@ import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberFie
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
+import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
@@ -68,7 +69,7 @@ function eventLabel(eventType: string): string {
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
-  const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>>([]);
+  const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number; payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string } | null }>>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +86,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
   const [deliveryTarget, setDeliveryTarget] = useState<CheckItem | null>(null);
+  const [depositTarget, setDepositTarget] = useState<(typeof directDepositItems)[number] | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
@@ -507,7 +509,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
             {directDepositItems.filter((item) => !normalizedSearch || item.employee_name.toLowerCase().includes(normalizedSearch)).map((item) => (
               <li key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
                 <span className="font-medium text-slate-800">{item.employee_name}</span>
-                <span className="tabular-nums text-slate-600">{formatCurrency(item.net_pay)}</span>
+                <span className="flex flex-col items-end gap-1">
+                  <span className="tabular-nums text-slate-600">{formatCurrency(item.net_pay)}</span>
+                  {item.payment_confirmation ? (
+                    <span className="text-xs text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setDepositTarget(item)}>Confirm bank payment</Button>
+                  )}
+                </span>
               </li>
             ))}
           </ul>
@@ -852,6 +861,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
           }}
         />
       )}
+      {depositTarget && <RecordDirectDepositPaymentDialog
+        item={depositTarget}
+        onClose={() => setDepositTarget(null)}
+        onComplete={async () => { setDepositTarget(null); await load(); }}
+      />}
 
       {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
       {previewUrl && previewItem && createPortal(

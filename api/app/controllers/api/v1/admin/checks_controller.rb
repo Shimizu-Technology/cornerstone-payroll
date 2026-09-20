@@ -35,7 +35,7 @@ module Api
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -55,7 +55,7 @@ module Api
 
           loaded_items = items.to_a
           deposit_items = @pay_period.payroll_items
-            .includes(:employee)
+            .includes(:employee, :direct_deposit_payment_confirmation)
             .where(payment_delivery_method: "direct_deposit", voided: false)
             .where("net_pay > 0")
             .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
@@ -63,7 +63,16 @@ module Api
           render json: {
             checks: loaded_items.map { |item| check_item_json(item) },
             direct_deposit_items: deposit_items.map do |item|
-              { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f }
+              confirmation = item.direct_deposit_payment_confirmation
+              {
+                id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name,
+                net_pay: item.net_pay.to_f,
+                payment_confirmation: confirmation && {
+                  settled_on: confirmation.settled_on.iso8601,
+                  bank_reference: confirmation.bank_reference,
+                  confirmed_at: confirmation.created_at.iso8601
+                }
+              }
             end,
             meta: {
               total: loaded_items.size,
@@ -280,6 +289,38 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           message = "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}"
           render json: { error: message, details: e.record.errors.messages }, status: :unprocessable_entity
+        end
+
+        # Records externally completed bank payment. This does not initiate ACH.
+        def confirm_direct_deposit_payment
+          user = User.find(current_user_id)
+          confirmation = nil
+          already_confirmed = false
+          @payroll_item.with_lock do
+            confirmation = @payroll_item.direct_deposit_payment_confirmation
+            if confirmation
+              already_confirmed = true
+            else
+              confirmation = @payroll_item.create_direct_deposit_payment_confirmation!(
+                user: user,
+                settled_on: Date.iso8601(params.require(:settled_on).to_s),
+                bank_reference: params.require(:bank_reference).to_s.strip,
+                note: params[:note].to_s.strip.presence,
+                ip_address: request.remote_ip
+              ) if ActiveModel::Type::Boolean.new.cast(params[:attestation])
+              raise ArgumentError, "Confirm that the bank transfer was completed" unless confirmation
+            end
+          end
+          render json: {
+            payment_confirmation: {
+              settled_on: confirmation.settled_on.iso8601,
+              bank_reference: confirmation.bank_reference,
+              confirmed_at: confirmation.created_at.iso8601
+            },
+            already_confirmed: already_confirmed
+          }
+        rescue ActiveRecord::RecordNotFound, ActionController::ParameterMissing, Date::Error, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
