@@ -1621,6 +1621,45 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("company_totals", "installment_loan_payments").to_f).to eq(300.0)
     end
 
+    it "includes saved bonus and 401(k) fields in their YTD categories without adding deduction mirrors twice" do
+      item = employee.payroll_items.first
+      bonus_field = PayrollFieldDefinition.create!(
+        company: company, name: "Shift Bonus", kind: "addition", tax_treatment: "taxable_addition", category: "other"
+      )
+      retirement_field = PayrollFieldDefinition.create!(
+        company: company, name: "401(k) Pre-Tax", kind: "deduction", tax_treatment: "pre_tax_deduction",
+        category: "retirement", reporting_group: "401k_pre_tax"
+      )
+      item.payroll_item_field_entries.create!(
+        payroll_field_definition: bonus_field, label: bonus_field.name, kind: bonus_field.kind,
+        tax_treatment: bonus_field.tax_treatment, category: bonus_field.category, amount: 12.50, source: "manual"
+      )
+      item.payroll_item_field_entries.create!(
+        payroll_field_definition: retirement_field, label: retirement_field.name, kind: retirement_field.kind,
+        tax_treatment: retirement_field.tax_treatment, category: retirement_field.category,
+        reporting_group: retirement_field.reporting_group, amount: 25.00, source: "manual", employee_paid: true
+      )
+      retirement_type = DeductionType.create!(
+        company: company, name: "Payroll Field: #{retirement_field.name}", category: "pre_tax", sub_category: "retirement",
+        reporting_group: "401k_pre_tax"
+      )
+      item.payroll_item_deductions.create!(
+        deduction_type: retirement_type, label: retirement_field.name, category: "pre_tax",
+        reporting_group: "401k_pre_tax", amount: 25.00
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      [ report.fetch("employees").find { |row| row.fetch("employee_id") == employee.id }, report.fetch("company_totals") ].each do |totals|
+        expect(totals.fetch("bonus").to_d).to eq(BigDecimal("112.50"))
+        expect(totals.fetch("retirement").to_d).to eq(BigDecimal("65.00"))
+      end
+      expect(report.dig("payroll_fields", "treatment_totals", "taxable_addition").to_d).to eq(BigDecimal("12.50"))
+      expect(report.dig("payroll_fields", "treatment_totals", "pre_tax_deduction").to_d).to eq(BigDecimal("25.00"))
+    end
+
     it "surfaces custom totals in employee pay history reports" do
       get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
 
