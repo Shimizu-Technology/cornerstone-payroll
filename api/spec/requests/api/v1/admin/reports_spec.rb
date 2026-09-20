@@ -1617,6 +1617,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("ytd", "custom_deductions_total").to_f).to eq(40.00)
       expect(report.dig("ytd", "total_deductions").to_f).to eq(275.63)
     end
+
+    it "reports the recorded payment method for a direct-deposit paycheck" do
+      employee.payroll_items.first.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+
+      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "history", 0)).to include(
+        "payment_delivery_method" => "direct_deposit",
+        "check_number" => nil
+      )
+    end
   end
 
   describe "locked QuickBooks payroll visibility" do
