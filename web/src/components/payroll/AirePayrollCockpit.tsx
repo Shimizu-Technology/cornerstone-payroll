@@ -183,10 +183,11 @@ function Metric({ label, value, detail, tone = 'neutral' }: { label: string; val
   );
 }
 
-function MappingBadge({ status }: { status: 'mapped' | 'unmapped' | 'inactive' | 'not_required' }) {
+function MappingBadge({ status }: { status: 'mapped' | 'unmapped' | 'inactive' | 'not_required' | 'needs_verification' }) {
   if (status === 'mapped') return <Badge variant="success">Mapped</Badge>;
   if (status === 'not_required') return <Badge variant="default">No time mapping needed</Badge>;
   if (status === 'inactive') return <Badge variant="warning">Inactive in Cornerstone</Badge>;
+  if (status === 'needs_verification') return <Badge variant="warning">Verify older link</Badge>;
   return <Badge variant="danger">Not mapped</Badge>;
 }
 
@@ -908,6 +909,11 @@ export function AirePayrollCockpit({
                               )}
                             </>
                           )}
+                          {employee.cornerstone.status === 'needs_verification' && employee.cornerstone.employee_id && (
+                            <Button type="button" size="sm" variant="outline" onClick={() => { setMappingTarget(employee); setMappingEmployeeId(String(employee.cornerstone.employee_id)); setMappingError(null); }}>
+                              Verify permanent link
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1042,15 +1048,22 @@ export function AirePayrollCockpit({
         {mappingTarget && (
           <DialogContent className="max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="text-left">
-              <DialogTitle>Match {mappingTarget.full_name} to payroll</DialogTitle>
-              <DialogDescription>Choose an existing Cornerstone profile only after verifying it is the same person. This permanent match is used for future AIRE hours.</DialogDescription>
+              <DialogTitle>{mappingTarget.cornerstone.status === 'needs_verification' ? 'Verify' : 'Match'} {mappingTarget.full_name} to payroll</DialogTitle>
+              <DialogDescription>{mappingTarget.cornerstone.status === 'needs_verification' ? 'This older link points to the payroll profile shown below. Confirm it is the same person; AIRE’s current permanent ID will be checked before the link is upgraded. This does not change their payroll status or pay settings.' : 'Choose an existing Cornerstone profile only after verifying it is the same person. This permanent match is used for future AIRE hours.'}</DialogDescription>
             </DialogHeader>
-            <label className="mt-4 block text-sm font-semibold text-neutral-800">Existing payroll employee
-              <select aria-label="Existing payroll employee" value={mappingEmployeeId} onChange={(event) => setMappingEmployeeId(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal">
-                <option value="">Choose a verified person</option>
-                {employees.filter((row) => row.status !== 'terminated').map((row) => <option key={row.id} value={row.id}>{row.first_name} {row.last_name}</option>)}
-              </select>
-            </label>
+            {mappingTarget.cornerstone.status === 'needs_verification' ? (
+              <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-neutral-800">
+                Existing payroll profile: <span className="font-semibold">{mappingTarget.cornerstone.employee_name}</span>
+                {mappingTarget.cornerstone.employee_active === false && <span className="ml-2 text-warning-800">Inactive — this action will not reactivate them.</span>}
+              </div>
+            ) : (
+              <label className="mt-4 block text-sm font-semibold text-neutral-800">Existing payroll employee
+                <select aria-label="Existing payroll employee" value={mappingEmployeeId} onChange={(event) => setMappingEmployeeId(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal">
+                  <option value="">Choose a verified person</option>
+                  {employees.filter((row) => row.status !== 'terminated').map((row) => <option key={row.id} value={row.id}>{row.first_name} {row.last_name}</option>)}
+                </select>
+              </label>
+            )}
             {mappingError && <p role="alert" className="mt-3 text-sm text-danger-700">{mappingError}</p>}
             <DialogFooter className="mt-5 gap-2"><Button type="button" variant="outline" disabled={mappingBusy} onClick={() => setMappingTarget(null)}>Cancel</Button><Button type="button" disabled={!mappingEmployeeId || mappingBusy} onClick={() => void saveEmployeeMapping()}>{mappingBusy ? 'Matching…' : 'Confirm permanent match'}</Button></DialogFooter>
           </DialogContent>

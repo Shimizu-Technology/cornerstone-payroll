@@ -656,9 +656,10 @@ export interface AirePayrollCalendarState {
 }
 
 export interface AirePayrollCockpitMapping {
-  status: 'mapped' | 'unmapped' | 'inactive' | 'not_required';
+  status: 'mapped' | 'unmapped' | 'inactive' | 'not_required' | 'needs_verification';
   employee_id?: number;
   employee_name?: string;
+  employee_active?: boolean;
 }
 
 export interface AirePayrollCockpitEmployee {
