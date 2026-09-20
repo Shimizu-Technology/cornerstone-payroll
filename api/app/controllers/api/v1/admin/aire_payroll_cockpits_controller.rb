@@ -40,7 +40,7 @@ module Api
           )
           render json: cockpit_presenter.manual_review(payload).merge(
             "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
-              .includes(:employee, :payroll_item)
+              .includes(:employee, payroll_item: :check_events)
               .order(:id)
               .map { |allocation| manual_allocation_json(allocation) }
           )
@@ -57,7 +57,7 @@ module Api
           ).fetch("employees", []).find { |person| person["id"].to_s == source_user_id }
           raise TimeTracking::ManualAllocationService::Error, "AIRE employee was not found; refresh the team list" unless live
 
-          source_uuid = TimeTrackingEmployeeMapping.normalize_uuid(live.fetch("payroll_integration_id"))
+          source_uuid = TimeTrackingEmployeeMapping.normalize_uuid(live["payroll_integration_id"])
           raise TimeTracking::ManualAllocationService::Error, "AIRE employee has no permanent payroll identity" if source_uuid.blank?
 
           mapping = TimeTrackingEmployeeMapping.resolve_source_identity!(
@@ -75,7 +75,8 @@ module Api
                                     source_user_uuid: mapping.source_user_uuid,
                                     employee_id: mapping.employee_id,
                                     employee_name: mapping.employee.full_name } }, status: :ok
-        rescue TimeTracking::ManualAllocationService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
+        rescue ActionController::ParameterMissing, ArgumentError,
+               TimeTracking::ManualAllocationService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
                ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
@@ -85,7 +86,8 @@ module Api
         def create_manual_allocation
           allocation = manual_allocation_service.create!(**manual_allocation_params.to_h.symbolize_keys)
           render json: { manual_allocation: manual_allocation_json(allocation) }, status: :created
-        rescue TimeTracking::ManualAllocationService::Error, ActiveRecord::RecordInvalid => e
+        rescue ActionController::ParameterMissing, ArgumentError,
+               TimeTracking::ManualAllocationService::Error, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
@@ -289,6 +291,8 @@ module Api
         end
 
         def manual_allocation_params
+          %i[payroll_item_id source_time_entry_id source_time_entry_version source_user_uuid
+             regular_hours overtime_hours original_work_date note].each { |key| params.require(key) }
           params.permit(:payroll_item_id, :source_time_entry_id, :source_time_entry_version,
                         :source_user_uuid, :regular_hours, :overtime_hours,
                         :original_work_date, :note)

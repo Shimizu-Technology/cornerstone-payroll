@@ -113,4 +113,21 @@ RSpec.describe TimeTracking::ManualAllocationService do
                       original_work_date: "2026-08-15", note: "These issued check hours are the old AIRE carryover")
     end.to raise_error(described_class::Error, /Map this AIRE person/)
   end
+
+  it "rejects source hours that exceed the committed paycheck" do
+    item.update!(hours_worked: 5)
+
+    expect { create_link }.to raise_error(described_class::Error, /exceed the regular or overtime hours/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
+  it "retains a pending link and visible error when AIRE is temporarily unavailable" do
+    allow(client).to receive(:commit_payroll_manual_allocation)
+      .and_raise(TimeTracking::Client::Error.new("AIRE temporarily unavailable", response_status: 503))
+
+    allocation = create_link
+
+    expect(allocation.reload).to have_attributes(status: "pending_commit", remote_allocation_id: nil)
+    expect(allocation.last_sync_error).to include("AIRE temporarily unavailable")
+  end
 end
