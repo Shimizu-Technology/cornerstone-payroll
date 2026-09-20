@@ -183,6 +183,7 @@ class PayrollItem < ApplicationRecord
   # @return [CheckEvent]
   def void!(user:, reason:, ip_address: nil)
     raise ArgumentError, "Already voided" if voided?
+    raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
     raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
     raise ArgumentError, "No check number assigned" if check_number.blank?
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
@@ -190,6 +191,7 @@ class PayrollItem < ApplicationRecord
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
       raise ArgumentError, "Already voided" if voided? # re-check under lock
+      raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
       update!(
