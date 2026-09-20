@@ -79,6 +79,28 @@ RSpec.describe NonEmployeeCheckSupersessionService do
       .to raise_error(ActiveRecord::StatementInvalid, /append-only/)
   end
 
+  it "keeps exactly one active payment when someone tries to void the linked payroll check" do
+    item
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
+
+    expect { item.void!(user: actor, reason: "This check should not be voided") }
+      .to raise_error(ArgumentError, /linked to a duplicate/)
+    expect {
+      ApplicationRecord.transaction(requires_new: true) do
+        PayrollItem.where(id: item.id).update_all(voided: true)
+      end
+    }.to raise_error(ActiveRecord::StatementInvalid, /linked to a duplicate/)
+
+    expect(item.reload.voided?).to eq(false)
+    expect(NonEmployeeCheck.active).not_to include(check)
+    register = CheckRegisterService.new(company: company, from: "2026-05-01", to: "2026-05-31").call
+    expect(register.fetch(:rows).map { |row| row.fetch(:source_type) }).to eq([ "payroll_item" ])
+    expect(register.dig(:summary, :amount)).to eq(183.to_d)
+  end
+
   it "rejects mismatched numbers and does not double count" do
     item.update!(check_number: "1046")
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_072500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3771,6 +3771,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
     CREATE TRIGGER enforce_check_supersession_rollout_approval_on_insert
     BEFORE INSERT ON non_employee_check_supersessions
     FOR EACH ROW EXECUTE FUNCTION enforce_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_superseded_payroll_item() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.voided = true AND OLD.voided = false
+        AND EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_superseded_payroll_item_on_update ON payroll_items;
+    CREATE TRIGGER prevent_voiding_superseded_payroll_item_on_update
+    BEFORE UPDATE OF voided ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_superseded_payroll_item();
 
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
