@@ -92,6 +92,10 @@ module TimeTracking
       end
 
       seen = Set.new
+      seen_users = Set.new
+      seen_uuids = Set.new
+      source_entry_owners = {}
+      source_totals = %w[total_hours regular_hours overtime_hours].index_with { 0.to_d }
       response.fetch("employees").each do |employee|
         unless employee.is_a?(Hash) && employee["source_user_id"].to_s.present? &&
                employee["adjustments"].is_a?(Array)
@@ -99,7 +103,11 @@ module TimeTracking
         end
         uuid = TimeTrackingEmployeeMapping.normalize_uuid(employee["source_user_uuid"])
         raise ArgumentError, "AIRE employee is missing a permanent identity" if uuid.blank?
+        unless seen_users.add?(employee["source_user_id"].to_s) && seen_uuids.add?(uuid)
+          raise ArgumentError, "AIRE live hours contain a duplicate employee identity"
+        end
 
+        employee_totals = %w[total_hours regular_hours overtime_hours].index_with { 0.to_d }
         Array(employee["adjustments"]).each do |adjustment|
           key = adjustment["line_key"].to_s
           entry_id = adjustment["source_time_entry_id"].to_s
@@ -108,15 +116,30 @@ module TimeTracking
           regular = BigDecimal(adjustment["regular_hours"].to_s)
           overtime = BigDecimal(adjustment["overtime_hours"].to_s)
           raise ArgumentError, "AIRE live hours contain a duplicate source line" unless seen.add?([ entry_id, key ])
+          if source_entry_owners[entry_id].present? && source_entry_owners[entry_id] != uuid
+            raise ArgumentError, "AIRE live hours assign one time entry to multiple employees"
+          end
+          source_entry_owners[entry_id] = uuid
           if key.blank? || entry_id.blank? || version.negative? || total != regular + overtime
             raise ArgumentError, "AIRE live hours contain an invalid source line"
           end
+          employee_totals["total_hours"] += total
+          employee_totals["regular_hours"] += regular
+          employee_totals["overtime_hours"] += overtime
           Date.iso8601(adjustment.fetch("original_work_date"))
           Date.iso8601(adjustment.fetch("original_week_start"))
         end
+        employee_totals.each do |key, value|
+          raise ArgumentError, "AIRE live hours contain inconsistent employee totals" unless BigDecimal(employee.fetch(key).to_s) == value
+
+          source_totals[key] += value
+        end
+      end
+      source_totals.each do |key, value|
+        raise ArgumentError, "AIRE live hours contain inconsistent summary totals" unless BigDecimal(response.fetch("summary").fetch(key).to_s) == value
       end
     rescue ArgumentError, TypeError, KeyError => e
-      raise if e.message == "AIRE live hours contain a duplicate source line"
+      raise if e.message.start_with?("AIRE live hours ")
 
       raise ArgumentError, "AIRE live hours contain an invalid source line"
     end
