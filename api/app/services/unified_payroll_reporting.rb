@@ -36,11 +36,14 @@ class UnifiedPayrollReporting
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
       total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f,
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
+      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
+      health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
+      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
@@ -59,11 +62,14 @@ class UnifiedPayrollReporting
     totals = historical_totals(paychecks, adjustments)
     row.merge(
       total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f,
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
+      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
+      health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
+      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
@@ -95,6 +101,27 @@ class UnifiedPayrollReporting
       employer_contributions: sum(rows, :employer_contributions),
       total_payroll_cost: sum(rows, :total_payroll_cost)
     }
+  end
+
+  # Keep the source's tax bucket and label intact. A label alone cannot prove
+  # whether a historical loan was straight/installment or a 401(k) was post-tax.
+  def historical_deduction_entries(paychecks, adjustments = [])
+    [ [ paychecks, "quickbooks" ], [ adjustments, "historical_adjustment" ] ].flat_map do |rows, source|
+      rows.flat_map do |row|
+        employee_id = source == "quickbooks" ? row.employee_id : row.historical_paycheck.employee_id
+        %i[pretax_deduction_breakdown after_tax_deduction_breakdown].flat_map do |field|
+          bucket = field == :pretax_deduction_breakdown ? "pre_tax_deduction" : "post_tax_deduction"
+          Array(row.public_send(field)).filter_map do |raw|
+            component = raw.to_h.with_indifferent_access
+            label = component[:label].to_s.strip
+            amount = BigDecimal(component[:amount].to_s, exception: false)
+            next if label.blank? || amount.nil?
+
+            { employee_id: employee_id, source: source, treatment: bucket, label: label, amount: amount }
+          end
+        end
+      end
+    end
   end
 
   def history_row(paycheck)
@@ -218,6 +245,7 @@ class UnifiedPayrollReporting
     rows = paychecks + adjustments
     {
       total_hours: sum(rows, :hours_total),
+      total_overtime_hours: component_sum(paychecks, :hours_breakdown, /\A(?:OT|Overtime(?: Pay)?)\z/i),
       gross_pay: sum(rows, :gross_pay),
       bonus: component_sum(rows, :earnings_breakdown, /bonus/i),
       employer_contributions: sum(rows, :employer_contributions),
@@ -227,6 +255,11 @@ class UnifiedPayrollReporting
       medicare_tax: sum(rows, :medicare_tax),
       retirement: component_sum(rows, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX),
       roth_retirement: component_sum(rows, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH),
+      historical_loan_deductions_unclassified: component_sum(rows, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN) +
+        component_sum(rows, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN),
+      health_insurance_deductions: component_sum(rows, :pretax_deduction_breakdown, /\AHealth Insurance\z/i) +
+        component_sum(rows, :after_tax_deduction_breakdown, /\AHealth Insurance\z/i),
+      source_labeled_after_tax_401k_in_pretax_bucket: component_sum(rows, :pretax_deduction_breakdown, /\A401\(k\) After Tax\z/i),
       tips: component_sum(rows, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
       # QuickBooks history does not distinguish reported tips from tips that
       # were paid out through payroll, so do not manufacture a paid-out value.
