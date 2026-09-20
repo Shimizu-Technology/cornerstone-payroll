@@ -84,6 +84,9 @@ class PayrollPaymentMethodService
     raise Error, "Confirm that no payment has been issued before switching methods" unless confirm_not_paid
 
     if old_method == "paper_check" && method == "direct_deposit"
+      if item.time_tracking_manual_allocations.where.not(status: "voided").exists?
+        raise Error, "AIRE hours are already linked to this paycheck. Keep paper check until bank-payment confirmation is available."
+      end
       old_number = item.check_number
       if item.check_printed_at.present? ||
          item.check_events.where(event_type: %w[printed batch_downloaded delivered]).exists? ||
