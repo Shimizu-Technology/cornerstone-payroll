@@ -21,7 +21,10 @@ class NonEmployeeCheckSupersessionService
     note = reason.to_s.strip
     raise Error, "Explain why these records represent one physical check (at least 20 characters)" if note.length < 20
     raise Error, "Confirm that both records name the recipient of the same physical check" unless recipient_verified == true
-    if check.company.live_payroll? && !ENV.fetch("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").split(",").map(&:strip).include?(check.company_id.to_s)
+    unless StaffRolePolicy.allowed?(actor, :manage_client_configuration) && actor.can_access_company?(check.company_id)
+      raise Error, "Only an authorized manager or administrator can link duplicate checks"
+    end
+    if check.company.live_payroll? && !CheckSupersessionRolloutApproval.exists?(company_id: check.company_id)
       raise Error, "Live-check reconciliation is disabled until this company is approved for rollout"
     end
 

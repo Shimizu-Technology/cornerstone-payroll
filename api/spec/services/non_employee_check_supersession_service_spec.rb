@@ -3,6 +3,7 @@ require "rails_helper"
 RSpec.describe NonEmployeeCheckSupersessionService do
   let(:company) { create(:company) }
   let(:actor) { create(:user, company: company, role: "admin") }
+  let(:approver) { create(:user, company: company, role: "org_admin") }
   let(:employee) { create(:employee, company: company) }
   let(:period) do
     create(:pay_period, :committed, company: company,
@@ -46,8 +47,11 @@ RSpec.describe NonEmployeeCheckSupersessionService do
   end
 
   before do
-    allow(ENV).to receive(:fetch).and_call_original
-    allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return(company.id.to_s)
+    unless RSpec.current_example.metadata[:unapproved]
+      CheckSupersessionRolloutApproval.create!(company: company, approved_by: approver,
+                                               reason: "Approved for isolated reconciliation test only",
+                                               approved_at: Time.current)
+    end
   end
 
   it "links matching printed records without deleting the standalone evidence" do
@@ -126,11 +130,10 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     expect(NonEmployeeCheckSupersession.count).to eq(0)
   end
 
-  it "blocks live-company reconciliation until that company is explicitly enabled" do
+  it "blocks live-company reconciliation until that company is explicitly enabled", :unapproved do
     item
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
                          effective_on: PayrollBusinessClock.today)
-    allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return("")
     expect { described_class.new(check: check, actor: actor).supersede!(
       payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true) }
       .to raise_error(described_class::Error, /disabled/)
@@ -164,5 +167,25 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(
       verified_facts: verified_facts.merge("delivery_event_id" => 0)
     ) ]) }.to raise_error(ActiveRecord::StatementInvalid, /delivery evidence/)
+  end
+
+  it "rejects a direct insert for an unapproved live company", :unapproved do
+    expect { NonEmployeeCheckSupersession.insert_all!([ raw_record ]) }
+      .to raise_error(ActiveRecord::StatementInvalid, /rollout approval/)
+  end
+
+  it "rejects a direct insert from an unauthorized reviewer" do
+    accountant = create(:user, company: company, role: "accountant")
+    expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(user_id: accountant.id) ]) }
+      .to raise_error(ActiveRecord::StatementInvalid, /manager or administrator/)
+  end
+
+  it "rejects a direct rollout approval from a non-administrator", :unapproved do
+    accountant = create(:user, company: company, role: "accountant")
+    expect { CheckSupersessionRolloutApproval.insert_all!([ {
+      company_id: company.id, approved_by_id: accountant.id,
+      reason: "Unauthorized approval must never enable a live company",
+      approved_at: Time.current, created_at: Time.current
+    } ]) }.to raise_error(ActiveRecord::StatementInvalid, /administrator/)
   end
 end

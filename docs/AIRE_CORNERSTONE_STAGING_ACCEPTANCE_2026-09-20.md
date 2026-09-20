@@ -37,8 +37,10 @@ production until Leon has tested the local UI and explicitly approves promotion.
    This preserves the audit trail and removes the duplicate representation
    from active totals; it does **not** void or delete the physical check.
    Live-client links are disabled by default. Only after local acceptance and
-   explicit production approval should operators enable the exact company ID
-   in `LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS`. Keep it unset otherwise.
+   Leon's explicit production approval should an active organization admin
+   create the append-only, company-specific rollout approval with a documented
+   reason. No production approval is seeded by migration. The database also
+   rejects links from unauthorized reviewers or unapproved live clients.
 
 ## Local acceptance cases for Leon
 
