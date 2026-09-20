@@ -176,6 +176,13 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
           "held_total_hours" => 1.5
         }
       ],
+      "payment_attestations" => [
+        {
+          "id" => "1", "source_time_entry_id" => "427", "source_user_uuid" => employee_uuid,
+          "display_name" => "AIRE Employee", "original_work_date" => "2026-08-18",
+          "hours" => 8.0, "status" => "pending_evidence"
+        }
+      ],
       "issues" => {},
       "summary" => { "total_hours" => 28.2 }
     )
@@ -193,6 +200,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       "employee_id" => employee.id
     )
     expect(response.parsed_body.dig("exclusions", 0, "cornerstone", "employee_id")).to eq(employee.id)
+    expect(response.parsed_body.dig("payment_attestations", 0, "cornerstone", "employee_id")).to eq(employee.id)
   end
 
   it "matches a live AIRE permanent identity to one existing Cornerstone employee" do

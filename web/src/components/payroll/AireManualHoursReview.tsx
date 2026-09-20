@@ -242,7 +242,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const mismatchCount = rows.length - matchedCount;
   const attentionCount = Number(review?.summary.exclusion_count || 0)
     + Number(review?.issues.missing_category_count || 0)
-    + Number(review?.issues.negative_adjustment_count || 0);
+    + Number(review?.issues.negative_adjustment_count || 0)
+    + Number(review?.payment_attestations?.length || 0);
   const bulkCandidates = isCommitted ? (review?.employees || []).flatMap((employee) => {
     if (employee.cornerstone.status !== 'mapped' || !employee.source_user_uuid ||
         employee.adjustments.some((adjustment) => adjustment.regular_hours < 0 || adjustment.overtime_hours < 0)) return [];
@@ -326,7 +327,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{attentionCount}</p>
-                <p className="mt-2 text-xs text-neutral-600">Review exclusions, categories, and negative corrections</p>
+                <p className="mt-2 text-xs text-neutral-600">Review exclusions, categories, corrections, and payment evidence</p>
               </div>
             </div>
 
@@ -406,6 +407,23 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                     <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-lg border border-warning-200 bg-white p-4 text-sm">
                       <p className="font-semibold text-neutral-950">{exclusion.cornerstone.employee_name || exclusion.display_name} · {hours(exclusion.held_total_hours)} hrs</p>
                       <p className="mt-2 text-xs text-neutral-600">{formatDate(exclusion.original_work_date)} · {exclusionLabel(exclusion.reason)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Boolean(review.payment_attestations?.length) && (
+              <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">
+                <h4 className="font-semibold text-neutral-950">Payment reported; check details pending</h4>
+                <p className="mt-1 text-sm font-medium text-warning-950">{review.payment_attestations?.length} {review.payment_attestations?.length === 1 ? 'entry' : 'entries'} · {hours(review.payment_attestations?.reduce((total, attestation) => total + attestation.hours, 0) || 0)} hours held</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">These exact AIRE hours are held out of new payroll to prevent a duplicate payment. The owner reported they were paid, but Cornerstone has not yet matched the check, amount, and delivery date. They are not counted as verified paid hours.</p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {review.payment_attestations?.map((attestation) => (
+                    <div key={attestation.id} className="rounded-lg border border-warning-200 bg-white p-4 text-sm">
+                      <p className="font-semibold text-neutral-950">{attestation.cornerstone?.employee_name || attestation.display_name} · {hours(attestation.hours)} hrs</p>
+                      <p className="mt-2 text-xs text-neutral-700">Worked {formatDate(attestation.original_work_date)} · AIRE entry #{attestation.source_time_entry_id}</p>
+                      {attestation.source_changed && <p className="mt-2 text-xs font-semibold text-danger-800">The time entry changed after the owner statement. Review it before matching payment evidence.</p>}
                     </div>
                   ))}
                 </div>

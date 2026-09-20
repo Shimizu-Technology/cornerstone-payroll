@@ -176,6 +176,26 @@ describe('AireManualHoursReview', () => {
     expect(within(attentionCard as HTMLElement).getByText('1')).toBeTruthy();
   });
 
+  it('separates payment-reported holds from verified paid hours', async () => {
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      payment_attestations: [{
+        id: '1', source_time_entry_id: '427', source_user_uuid: review.employees[0].source_user_uuid,
+        display_name: 'Jeremiah Brantley', original_work_date: '2026-05-11', hours: 8,
+        source_changed: false, cornerstone: { status: 'mapped', employee_id: 105, employee_name: 'Jeremiah Brantley' },
+      }],
+    });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText('Payment reported; check details pending')).toBeTruthy();
+    expect(screen.getByText('1 entry · 8.00 hours held')).toBeTruthy();
+    expect(screen.getByText(/not counted as verified paid hours/i)).toBeTruthy();
+    expect(screen.getByText('Jeremiah Brantley · 8.00 hrs')).toBeTruthy();
+    expect(screen.getByText(/AIRE entry #427/)).toBeTruthy();
+    const attentionCard = screen.getByText('Needs attention').parentElement;
+    expect(within(attentionCard as HTMLElement).getByText('2')).toBeTruthy();
+  });
+
   it('refreshes live AIRE totals and explains automatic paid-state sync for a linked run', async () => {
     const user = userEvent.setup();
     render(

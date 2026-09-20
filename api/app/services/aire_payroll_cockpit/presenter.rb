@@ -70,6 +70,11 @@ module AirePayrollCockpit
           allocation.merge(
             "cornerstone" => mapping_payload(allocation["source_user_uuid"], required: true)
           )
+        end,
+        "payment_attestations" => payload.fetch("payment_attestations", []).map do |attestation|
+          attestation.merge(
+            "cornerstone" => mapping_payload(attestation["source_user_uuid"], required: true)
+          )
         end
       )
     end
