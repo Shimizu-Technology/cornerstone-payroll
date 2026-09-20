@@ -58,6 +58,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
                      recipient_verified: true }, as: :json
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("non_employee_check", "check_status")).to eq("superseded")
+      expect(response.parsed_body.dig("non_employee_check", "supersession", "payroll_check_number")).to eq("01045")
 
       get "/api/v1/admin/non_employee_checks", params: { active: "true" }
       expect(response.parsed_body.fetch("non_employee_checks").map { |entry| entry.fetch("id") })

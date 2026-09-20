@@ -167,6 +167,7 @@ export function ChecksPayments() {
   const [payrollMatches, setPayrollMatches] = useState<Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }>>([]);
   const [selectedPayrollItemId, setSelectedPayrollItemId] = useState<number | null>(null);
   const [linkReason, setLinkReason] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [recipientVerified, setRecipientVerified] = useState(false);
   const [linkLoading, setLinkLoading] = useState(false);
   const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
@@ -401,13 +402,13 @@ export function ChecksPayments() {
     setLinkReason('');
     setRecipientVerified(false);
     setLinkLoading(true);
-    setError(null);
+    setLinkError(null);
     try {
       const response = await nonEmployeeChecksApi.payrollMatches(check.id);
       setPayrollMatches(response.payroll_matches);
       if (response.payroll_matches.length === 1) setSelectedPayrollItemId(response.payroll_matches[0].payroll_item_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load matching payroll checks');
+      setLinkError(err instanceof Error ? err.message : 'Could not load matching payroll checks');
     } finally {
       setLinkLoading(false);
     }
@@ -416,7 +417,7 @@ export function ChecksPayments() {
   const confirmPayrollLink = async () => {
     if (!linkingCheck || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified) return;
     setBusyId(linkingCheck.id);
-    setError(null);
+    setLinkError(null);
     try {
       const response = await nonEmployeeChecksApi.supersedeWithPayrollItem(linkingCheck.id, selectedPayrollItemId, linkReason.trim(), recipientVerified);
       handleSavedCheck(response.non_employee_check);
@@ -424,7 +425,7 @@ export function ChecksPayments() {
       await loadChecks();
       setCheckRegisterRefreshVersion(value => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not link this check');
+      setLinkError(err instanceof Error ? err.message : 'Could not link this check');
     } finally {
       setBusyId(null);
     }
@@ -869,7 +870,7 @@ export function ChecksPayments() {
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
                       )}
                       {check.supersession && (
-                        <p className="mt-2 text-sm text-blue-800">Linked duplicate of payroll check #{check.supersession.payroll_item_id}. Preserved for audit; excluded from active totals. {check.supersession.reason}</p>
+                        <p className="mt-2 text-sm text-blue-800">Linked duplicate of payroll check #{check.supersession.payroll_check_number}. Preserved for audit; excluded from active totals. {check.supersession.reason}</p>
                       )}
                       {check.check_type === 'grt' && (
                         <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -983,6 +984,7 @@ export function ChecksPayments() {
               <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={recipientVerified} onChange={event => setRecipientVerified(event.target.checked)} /><span>I verified that the standalone payee and payroll employee received the same physical check, even if the names are written differently.</span></label>
             </div>
           )}
+          {linkError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{linkError}</p>}
           <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setLinkingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void confirmPayrollLink()} disabled={busyId !== null || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified}>Link duplicate</Button></DialogFooter>
         </DialogContent>}
       </Dialog>
