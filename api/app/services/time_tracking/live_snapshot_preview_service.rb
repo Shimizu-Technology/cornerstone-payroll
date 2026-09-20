@@ -38,6 +38,14 @@ module TimeTracking
         captured_at: source_response.fetch("generated_at")
       )
       processed[:rows].each do |row|
+        matched_item = pay_period.payroll_items.find_by(employee_id: row[:employee_id]) if row[:employee_id]
+        if matched_item&.effective_payment_delivery_method == "direct_deposit"
+          row[:warnings] << {
+            code: "direct_deposit_aire_payment_pending",
+            message: "AIRE direct-deposit hours need bank-settlement confirmation before this payroll can be imported. Use manual payroll for this person until that setup is available."
+          }
+          row[:ready] = false
+        end
         source_employee = source_response.fetch("employees").find do |employee|
           employee.fetch("source_user_id").to_s == row.fetch(:source_user_id)
         end
