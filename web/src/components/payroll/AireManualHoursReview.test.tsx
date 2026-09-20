@@ -212,6 +212,22 @@ describe('AireManualHoursReview', () => {
     })));
   });
 
+  it('keeps direct-deposit items out of the paper-check payment-link flow', async () => {
+    render(<AireManualHoursReview
+      payPeriodId={67}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 27.2, overtime: 1 } }}
+      payrollItems={[{ id: 200, employee_id: 7, hours_worked: 27.2, overtime_hours: 1,
+        effective_payment_delivery_method: 'direct_deposit', voided: false } as import('@/types').PayrollItem]}
+      aireRecordLinked={false}
+    />);
+
+    expect(await screen.findByText(/Direct-deposit items stay unpaid in AIRE/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Link to paycheck' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Link to paycheck' }).every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(apiMocks.link).not.toHaveBeenCalled();
+  });
+
   it('explains why an AIRE entry with missing identity cannot be linked', async () => {
     const user = userEvent.setup();
     apiMocks.manualReview.mockResolvedValue({

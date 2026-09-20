@@ -33,7 +33,7 @@ module Api
 
         def manual_review
           require_aire_source!
-          payload = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_manual_review(
+          payload = cockpit_client(with_delegation: true).payroll_cockpit_manual_review(
             start_date: @pay_period.start_date.iso8601,
             end_date: @pay_period.end_date.iso8601,
             external_pay_period_id: @pay_period.id

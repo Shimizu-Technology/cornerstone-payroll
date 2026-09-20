@@ -79,7 +79,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   };
 
   const openLink = (employee: AirePayrollManualReviewEmployee, adjustment: AirePayrollManualReviewAdjustment) => {
-    const item = payrollItems.find((candidate) => candidate.employee_id === employee.cornerstone.employee_id && !candidate.voided);
+    const item = payrollItems.find((candidate) => candidate.employee_id === employee.cornerstone.employee_id && !candidate.voided && candidate.effective_payment_delivery_method !== 'direct_deposit');
     setLinkTarget({ employee, adjustment });
     setSelectedItemId(item ? String(item.id) : '');
     setRegularToLink(String(Math.max(0, adjustment.regular_hours)));
@@ -250,7 +250,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     if (candidates.length < 2 || new Set(candidates.map((entry) => entry.source_time_entry_id)).size !== candidates.length) return [];
     if (new Set(candidates.map((entry) => entry.category?.id || entry.category?.name).filter(Boolean)).size !== 1 ||
         candidates.some((entry) => !entry.category?.id && !entry.category?.name)) return [];
-    const items = payrollItems.filter((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided);
+    const items = payrollItems.filter((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit');
     if (items.length !== 1) return [];
     const item = items[0];
     const linked = (review?.cornerstone_manual_allocations || []).filter((allocation) =>
@@ -413,6 +413,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <div className="border-t border-neutral-200 px-6 py-6">
               <h4 className="font-semibold text-neutral-950">AIRE hours and payment history</h4>
               <p className="mt-1 text-sm text-neutral-600">Hours below remain owed until linked to a committed paycheck. A recorded check delivery marks linked hours paid automatically.</p>
+              {payrollItems.some((item) => item.effective_payment_delivery_method === 'direct_deposit' && !item.voided) && <p className="mt-2 text-sm text-warning-800">Direct-deposit items stay unpaid in AIRE until bank payment confirmation can be recorded. They cannot be linked through the paper-check flow.</p>}
               {linkError && !linkTarget && !bulkLinkTarget && <p role="alert" className="mt-3 text-sm text-danger-800">{linkError}</p>}
               {pendingSyncIds.length > 1 && <Button type="button" size="sm" variant="outline" className="mt-4" disabled={linkBusy} onClick={() => void retryAllLinks(pendingSyncIds)}>
                 {linkBusy ? 'Syncing…' : `Sync all ${pendingSyncIds.length} pending AIRE updates`}
@@ -430,7 +431,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       <p className="mt-1 text-xs text-neutral-600">{formatDate(adjustment.original_work_date)} · {adjustment.source_kind === 'carryover' ? 'Carryover still owed' : adjustment.source_kind === 'correction' ? 'Correction still owed' : 'Current period still owed'}</p>
                     </div>
                     {isCommitted && adjustment.regular_hours >= 0 && adjustment.overtime_hours >= 0 && (
-                      <Button type="button" size="sm" variant="outline" disabled={employee.cornerstone.status !== 'mapped' || !payrollItems.some((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided)} onClick={() => openLink(employee, adjustment)}>Link to paycheck</Button>
+                      <Button type="button" size="sm" variant="outline" disabled={employee.cornerstone.status !== 'mapped' || !payrollItems.some((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit')} onClick={() => openLink(employee, adjustment)}>Link to paycheck</Button>
                     )}
                   </div>
                 )))}
@@ -480,7 +481,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <label className="block font-medium text-neutral-700">Paycheck
                 <select className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2" value={selectedItemId} onChange={(event) => setSelectedItemId(event.target.value)}>
                   <option value="">Choose paycheck</option>
-                  {payrollItems.filter((item) => item.employee_id === linkTarget.employee.cornerstone.employee_id && !item.voided).map((item) => <option key={item.id} value={item.id}>#{item.check_number || item.id} · {hours(Number(item.hours_worked || 0))} regular / {hours(Number(item.overtime_hours || 0))} OT</option>)}
+                  {payrollItems.filter((item) => item.employee_id === linkTarget.employee.cornerstone.employee_id && !item.voided && item.effective_payment_delivery_method !== 'direct_deposit').map((item) => <option key={item.id} value={item.id}>#{item.check_number || item.id} · {hours(Number(item.hours_worked || 0))} regular / {hours(Number(item.overtime_hours || 0))} OT</option>)}
                 </select>
               </label>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">

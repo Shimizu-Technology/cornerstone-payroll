@@ -71,6 +71,13 @@ RSpec.describe TimeTracking::ManualAllocationService do
     )
   end
 
+  it "does not create an unpayable link for a direct-deposit item" do
+    item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+
+    expect { create_link }.to raise_error(described_class::Error, /bank payment confirmation/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   it "releases committed AIRE hours when the paycheck is voided before delivery" do
     allocation = create_link
     item.update_columns(voided: true, voided_at: Time.current)
