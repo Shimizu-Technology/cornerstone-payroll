@@ -60,6 +60,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
     : false;
   const batch = calendar.finalized_batch;
   const batchCopy = lockedBatchCopy(batch);
+  const adjustmentRun = calendar.eligibility_code === 'unsupported_run' && !calendar.publication;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -89,6 +90,25 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
     'cutoff_time_invalid',
     'workweek_confirmation_required',
   ].includes(calendar.eligibility_code || '');
+
+  if (adjustmentRun) {
+    return (
+      <Card className="border-neutral-200 bg-neutral-50/70">
+        <CardContent className="flex items-start gap-3 px-6 py-5">
+          <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-neutral-500" aria-hidden="true" />
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-display text-base font-bold text-neutral-950">AIRE payroll cutoff</h3>
+              <Badge variant="default">Not applicable to this run</Badge>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">
+              Adjustment runs do not create or move an AIRE cutoff. The regular pay period keeps its own deadline. Use the manual AIRE hours check below to link any source hours paid by this adjustment.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="overflow-hidden border-primary-200 bg-gradient-to-br from-primary-50/90 via-white to-white">
