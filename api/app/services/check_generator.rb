@@ -313,7 +313,7 @@ class CheckGenerator
       padding_x: stub_cfg["table_padding_x"].to_f
     )
 
-    draw_section_table(pdf,
+    deductions_height = draw_section_table(pdf,
       x: rx, y: table_y2, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
@@ -346,7 +346,7 @@ class CheckGenerator
     draw_summary_box(
       pdf,
       x: rx + stub_cfg["summary_x_offset"].to_f,
-      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg),
+      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
       w: right_w,
       stub_cfg: stub_cfg
     )
@@ -367,9 +367,10 @@ class CheckGenerator
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
+    rendered_height = 0.0
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6.5) do
-        pdf.table(data, column_widths: col_widths, cell_style: {
+        table = pdf.table(data, column_widths: col_widths, cell_style: {
           padding: [padding_y, padding_x], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
           row(0).borders = [:bottom]
@@ -381,12 +382,15 @@ class CheckGenerator
             row(last_idx).border_color = "999999"
           end
         end
+        rendered_height = table.height
       end
     end
+    rendered_height
   rescue Prawn::Errors::CannotFit
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
+    table_height
   end
 
   # -----------------------------------------------------------------------
@@ -402,7 +406,7 @@ class CheckGenerator
         hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
         if hourly_earnings.any?
           hourly_earnings.each do |earning|
-            rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+            rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
           end
         else
           rp = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
@@ -421,7 +425,7 @@ class CheckGenerator
       hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
       if hourly_earnings.any?
         hourly_earnings.each do |earning|
-          rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+          rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
         end
       else
         dept = employee.department&.name || "Regular"
@@ -451,18 +455,18 @@ class CheckGenerator
 
     Array(payroll_item.custom_earnings).each do |ce|
       amt = ce["amount"].to_f
-      rows << [truncate_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
+      rows << [stub_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
     end
 
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless adjustment["treatment"] == "taxable_addition"
 
       amt = adjustment["amount"].to_f
-      rows << [truncate_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
+      rows << [stub_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
     end
 
     payroll_field_entries_for("taxable_addition").each do |entry|
-      rows << [truncate_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
     end
 
     rows << [
@@ -513,13 +517,13 @@ class CheckGenerator
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless adjustment["treatment"] == "non_taxable_addition"
 
-      rows << [truncate_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
+      rows << [stub_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
     end
     payroll_field_entries_for("non_taxable_addition").each do |entry|
-      rows << [truncate_label(entry.label), fn(entry.amount), "-"] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), fn(entry.amount), "-"] if entry.amount.to_f.positive?
     end
     payroll_field_entries_for("employer_contribution").each do |entry|
-      rows << [truncate_label("ER #{entry.label}"), fn(entry.amount), "-"] if entry.amount.to_f.positive?
+      rows << [stub_label("ER #{entry.label}"), fn(entry.amount), "-"] if entry.amount.to_f.positive?
     end
     rows
   end
@@ -537,17 +541,17 @@ class CheckGenerator
       next unless amount.positive?
 
       label = deduction["label"].presence || "Other Deduction"
-      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
+      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
     end
     payroll_item.active_payroll_adjustments.each do |adjustment|
       next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
 
       amount = adjustment["amount"].to_f
       label = adjustment["label"].presence || "Payroll Adjustment"
-      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
+      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
     end
     payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
-      rows << [truncate_label(entry.label), fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+      rows << [stub_label(entry.label), fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
     end
 
     if rows.any?
@@ -693,9 +697,8 @@ class CheckGenerator
       .to_a
   end
 
-  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg)
-    estimated_deductions_height = ((deduction_rows.size + 1) * 9.0) + 4.0
-    non_overlapping_top = deductions_top - estimated_deductions_height - 6.0
+  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height)
+    non_overlapping_top = deductions_top - deductions_height - 6.0
     minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
 
     [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
@@ -881,8 +884,11 @@ class CheckGenerator
     default
   end
 
-  def truncate_label(text, max = 20)
-    text.to_s.length > max ? "#{text[0, max - 2]}.." : text.to_s
+  def stub_label(text)
+    # Keep enough of the label to identify distinct fields, while bounding the
+    # row height in this fixed-size check stub. Full names remain in reports.
+    label = text.to_s
+    label.length > 48 ? "#{label[0, 45].rstrip}..." : label
   end
 
   def layout_section(name)

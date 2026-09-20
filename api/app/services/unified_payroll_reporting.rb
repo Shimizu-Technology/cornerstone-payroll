@@ -202,6 +202,10 @@ class UnifiedPayrollReporting
 
   def source_summary(native_items:, historical_paychecks:, historical_adjustments: [], excluded_unlinked_paychecks: [])
     includes_quickbooks = historical_paychecks.any? || historical_adjustments.any? || excluded_unlinked_paychecks.any?
+    native_employee_dates = native_items.map { |item| [ item.employee_id, item.pay_period.pay_date ] }.uniq
+    historical_employee_dates = historical_paychecks.select { |paycheck| paycheck.historical_pay_period.period_type == "regular" }
+      .map { |paycheck| [ paycheck.employee_id, paycheck.pay_date ] }.uniq
+    overlapping_employee_dates = native_employee_dates & historical_employee_dates
     {
       mode: includes_quickbooks ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
       source_statement: SOURCE_STATEMENT,
@@ -222,6 +226,9 @@ class UnifiedPayrollReporting
         count: historical_adjustments.length,
         gross_pay_delta: sum(historical_adjustments, :gross_pay),
         net_pay_delta: sum(historical_adjustments, :net_pay)
+      },
+      source_overlap: {
+        employee_pay_date_count: overlapping_employee_dates.length
       },
       historical_ytd_bridge: bridge_summary
     }
