@@ -859,6 +859,19 @@ export interface AirePayrollManualReview {
     payment_reference?: string | null;
     cornerstone?: AirePayrollCockpitMapping;
   }>;
+  payment_attestations?: Array<{
+    id: string;
+    source_time_entry_id: string;
+    source_user_uuid: string;
+    display_name: string;
+    original_work_date: string;
+    hours: number;
+    status: 'pending_evidence';
+    attested_at: string;
+    source_changed: boolean;
+    evidence_needed: string;
+    cornerstone?: AirePayrollCockpitMapping;
+  }>;
   cornerstone_manual_allocations?: Array<{
     id: number;
     payroll_item_id: number;
@@ -874,6 +887,7 @@ export interface AirePayrollManualReview {
     last_sync_error?: string | null;
   }>;
   issues: {
+    payment_attestation_pending_count?: number;
     missing_category_count: number;
     negative_adjustment_count: number;
     pending_approval_count: number;
