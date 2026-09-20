@@ -149,11 +149,7 @@ class AnnualPayrollSummary
     return item.loan_payment.to_d + item.insurance_payment.to_d if deductions.empty?
 
     itemized = deductions.select(&:post_tax?).sum(0.to_d) { |deduction| deduction.amount.to_d }
-    return itemized unless item.loan_deduction.to_d.positive?
-
-    itemized_loans = deductions.select { |deduction| deduction.post_tax? && deduction.deduction_type&.loan? }
-                               .sum(0.to_d) { |deduction| deduction.amount.to_d }
-    itemized - itemized_loans + item.loan_deduction.to_d
+    itemized + item.loan_deduction.to_d
   end
 
   def native_non_taxable_pay(item)

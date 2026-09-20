@@ -565,9 +565,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_payment
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    payroll_item.loan_payment.to_f
+    field_total = payroll_field_entries_for("post_tax_deduction")
+      .select { |entry| entry.category == "loan" }
+      .sum { |entry| entry.amount.to_f }
+    [ payroll_item.loan_payment.to_f - field_total, 0.0 ].max
   end
 
   def ytd_visible_deds
@@ -582,9 +583,10 @@ class CheckGenerator
   end
 
   def visible_legacy_loan_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
-
-    ytd[:loan]
+    field_total = ytd_payroll_field_totals.sum do |(_label, treatment, category), amount|
+      treatment == "post_tax_deduction" && category == "loan" ? amount.to_f : 0.0
+    end
+    [ ytd[:loan] - field_total, 0.0 ].max
   end
 
   def ytd_payroll_field_deductions_total
