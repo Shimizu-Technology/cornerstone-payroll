@@ -94,7 +94,7 @@ function SortableTh({
     <th className={`pb-2 pr-4 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
       <button
         type="button"
-        className={`text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
+        className={`whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
         onClick={onClick}
       >
         {label}{activeLabel}
@@ -1692,7 +1692,7 @@ export function YtdSummaryPanel() {
                     {showSourceColumns && (report.component_columns || []).map((column) => (
                       <th key={column.key} title={column.label} className="min-w-44 px-3 py-3 text-right">
                         <span className="block text-[10px] font-bold uppercase text-primary-700">{sourceGroupLabel(column.source_group)}</span>
-                        <span className="mt-1 block break-words font-semibold text-slate-800">{column.short_label}</span>
+                        <span className="mt-1 block break-words font-semibold normal-case text-slate-800">{column.short_label}</span>
                         <span className="mt-1 block text-[10px] font-normal normal-case text-slate-500">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
                       </th>
                     ))}
