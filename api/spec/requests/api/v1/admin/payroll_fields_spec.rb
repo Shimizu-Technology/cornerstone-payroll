@@ -251,8 +251,9 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
     it "keeps both sources unchanged when the legacy row is stale or the new setup is invalid" do
       stale = conversion_payload.deep_merge(legacy: { amount: 200 })
       invalid = conversion_payload.deep_merge(employee_payroll_field: { end_date: "2026-09-20" })
+      malformed_date = conversion_payload.deep_merge(employee_payroll_field: { start_date: "not-a-date" })
 
-      [ stale, invalid ].each do |payload|
+      [ stale, invalid, malformed_date ].each do |payload|
         expect {
           post "/api/v1/admin/employees/#{employee.id}/payroll_fields/convert_legacy", params: payload
         }.not_to change(PayrollFieldDefinition, :count)
