@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_073000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3805,6 +3805,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073000) do
     CREATE TRIGGER prevent_voiding_period_with_superseded_checks_on_update
     BEFORE UPDATE OF correction_status ON pay_periods
     FOR EACH ROW EXECUTE FUNCTION prevent_voiding_period_with_superseded_checks();
+
+    CREATE OR REPLACE FUNCTION protect_superseded_payroll_item_facts() RETURNS trigger AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id)
+        AND (
+          NEW.check_number IS DISTINCT FROM OLD.check_number OR
+          NEW.net_pay IS DISTINCT FROM OLD.net_pay OR
+          NEW.employee_id IS DISTINCT FROM OLD.employee_id OR
+          NEW.pay_period_id IS DISTINCT FROM OLD.pay_period_id OR
+          NEW.company_id IS DISTINCT FROM OLD.company_id OR
+          NEW.payment_delivery_method IS DISTINCT FROM OLD.payment_delivery_method
+        ) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot change verified payment facts';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_superseded_payroll_item_facts_on_update ON payroll_items;
+    CREATE TRIGGER protect_superseded_payroll_item_facts_on_update
+    BEFORE UPDATE OF check_number, net_pay, employee_id, pay_period_id, company_id, payment_delivery_method ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION protect_superseded_payroll_item_facts();
 
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
