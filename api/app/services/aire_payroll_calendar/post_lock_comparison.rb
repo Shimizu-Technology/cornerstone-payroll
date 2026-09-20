@@ -26,7 +26,7 @@ module AirePayrollCalendar
         raise Error, "AIRE's final hours no longer match the verified cutoff. Do not use this comparison."
       end
 
-      rows = final_rows(batch) + allocation_rows + held_rows(batch)
+      rows = final_rows(batch) + allocation_rows(batch) + held_rows(batch)
       {
         batch_id: event.payroll_batch_id,
         cutoff_at: batch.fetch("cutoff_at"),
@@ -64,16 +64,39 @@ module AirePayrollCalendar
       end
     end
 
-    def allocation_rows
+    def allocation_rows(batch)
+      final_entries = batch.fetch("employees").flat_map do |person|
+        Array(person.fetch("adjustments")).map do |adjustment|
+          [ adjustment.fetch("source_time_entry_id").to_s, person["source_user_uuid"], adjustment.fetch("original_work_date") ]
+        end
+      end
+      final_by_id = final_entries.group_by(&:first)
+      source_entry_ids = final_by_id.keys + batch.fetch("exclusions").map { |row| row.fetch("source_time_entry_id").to_s }
       period_ids = TimeTrackingManualAllocation.where(time_tracking_source: source, pay_period: pay_period).select(:id)
       scope = TimeTrackingManualAllocation.where(time_tracking_source: source)
         .where(original_work_date: pay_period.start_date..pay_period.end_date)
         .or(TimeTrackingManualAllocation.where(time_tracking_source: source, id: period_ids))
+      if source_entry_ids.any?
+        scope = scope.or(TimeTrackingManualAllocation.where(time_tracking_source: source,
+                                                            source_time_entry_id: source_entry_ids.uniq))
+      end
+      scope = scope.distinct
         .includes(:employee, :payroll_item)
       scope.filter_map do |allocation|
         next if allocation.status == "voided"
 
-        status = allocation.status == "issued" ? "paid" : "awaiting_payment"
+        final_identity = final_by_id[allocation.source_time_entry_id.to_s]
+        mismatched = final_identity.present? && final_identity.none? do |(_id, uuid, work_date)|
+          TimeTrackingEmployeeMapping.normalize_uuid(uuid) == allocation.source_user_uuid &&
+            work_date == allocation.original_work_date.iso8601
+        end
+        status = if mismatched
+          "mismatch"
+        elsif allocation.status == "issued"
+          "paid"
+        else
+          "awaiting_payment"
+        end
         {
           employee_name: allocation.employee.full_name,
           employee_id: allocation.employee_id,
@@ -87,7 +110,8 @@ module AirePayrollCalendar
           payroll_item_id: allocation.payroll_item_id,
           pay_period_id: allocation.pay_period_id,
           payment_method: allocation.payroll_item.effective_payment_delivery_method,
-          payment_reference: (allocation.payroll_item.check_number if status == "paid")
+          payment_reference: (allocation.payroll_item.check_number if status == "paid"),
+          reason: ("AIRE entry identity or work date differs from its payroll link" if mismatched)
         }.compact
       end
     end
@@ -130,7 +154,7 @@ module AirePayrollCalendar
           entry_count: group.size
         }
       end
-      %w[paid awaiting_payment owed held correction].each do |status|
+      %w[paid awaiting_payment owed held correction mismatch].each do |status|
         totals[status] ||= { regular_hours: 0.0, overtime_hours: 0.0, entry_count: 0 }
       end
       totals.merge(

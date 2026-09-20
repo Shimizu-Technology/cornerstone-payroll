@@ -893,7 +893,7 @@ export interface AirePayrollManualReview {
   };
 }
 
-export type AirePostLockStatus = 'paid' | 'awaiting_payment' | 'owed' | 'held' | 'correction';
+export type AirePostLockStatus = 'paid' | 'awaiting_payment' | 'owed' | 'held' | 'correction' | 'mismatch';
 
 export interface AirePostLockComparison {
   batch_id: string;

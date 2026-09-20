@@ -17,6 +17,7 @@ beforeEach(() => {
       owed: { regular_hours: 8, overtime_hours: 0, entry_count: 1 },
       held: { regular_hours: 4, overtime_hours: 0, entry_count: 1 },
       correction: { regular_hours: 0, overtime_hours: 0, entry_count: 0 },
+      mismatch: { regular_hours: 0, overtime_hours: 0, entry_count: 0 },
       needs_attention: true, unmapped_count: 0,
     },
     rows: [
@@ -28,12 +29,12 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-it('shows actual paid evidence separately from final AIRE hours still owed', async () => {
+it('shows actual paid evidence separately from AIRE unallocated hours at cutoff', async () => {
   render(<AirePostLockComparison payPeriodId={11} />);
 
   expect(await screen.findByText('Final AIRE cutoff vs. payroll payments')).toBeTruthy();
   expect(screen.getByText('Linked · payment not confirmed')).toBeTruthy();
-  expect(screen.getAllByText('Still owed')).toHaveLength(2);
+  expect(screen.getAllByText('AIRE unallocated at cutoff')).toHaveLength(2);
   expect(screen.getByText(/payment 1001/)).toBeTruthy();
   expect(apiMocks.compare).toHaveBeenCalledWith(11);
 });
@@ -43,5 +44,5 @@ it('withholds a stale comparison when AIRE verification fails', async () => {
   render(<AirePostLockComparison payPeriodId={11} />);
 
   expect((await screen.findByRole('alert')).textContent).toContain('No final comparison is being shown');
-  expect(screen.queryByText('Still owed')).toBeNull();
+  expect(screen.queryByText('AIRE unallocated at cutoff')).toBeNull();
 });
