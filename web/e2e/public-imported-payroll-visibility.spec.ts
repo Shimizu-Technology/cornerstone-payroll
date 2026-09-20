@@ -219,7 +219,7 @@ test('payroll summary can show or hide active employees with $0 pay', async ({ p
   await page.getByRole('button', { name: 'View Report' }).click();
   await expect(page.getByRole('row').filter({ hasText: 'Unpaid Worker' })).toHaveCount(0);
   await expect(page.getByText('1 active $0-pay employee hidden')).toBeVisible();
-  await expect(page.getByText('Only employee rows are filtered; company totals still include all payroll activity.')).toBeVisible();
+  await expect(page.getByText('Employee filters change the rows below, not the company-wide totals above. The totals always include all reportable payroll activity in this period.')).toBeVisible();
   expect(requestedVisibility).toEqual(['true', 'false']);
 });
 
