@@ -21,6 +21,62 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
     allow_any_instance_of(Api::V1::Admin::NonEmployeeChecksController).to receive(:current_user).and_return(admin_user)
   end
 
+  describe "linking a duplicate standalone check to payroll" do
+    let(:employee) { create(:employee, company: company) }
+    let(:committed_period) { create(:pay_period, :committed, company: company) }
+    let(:payroll_item) do
+      create(:payroll_item, :printed, company: company, employee: employee,
+             pay_period: committed_period, check_number: "01045", net_pay: 183,
+             payment_delivery_method: "paper_check")
+    end
+    let(:standalone_check) do
+      create(:non_employee_check, :standalone, company: company, check_type: "other",
+             payment_period_type: "none", tax_year: nil, tax_month: nil,
+             payable_to: employee.full_name, amount: 183, check_number: "1045",
+             printed_at: Time.current, payment_method: "check")
+    end
+
+    it "shows only exact matches and preserves the linked duplicate in the full register" do
+      payroll_item
+      create(:check_event, payroll_item: payroll_item, user: admin_user, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+      get "/api/v1/admin/non_employee_checks/#{standalone_check.id}/payroll_matches"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("payroll_matches").pluck("payroll_item_id")).to eq([ payroll_item.id ])
+
+      post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/supersede_with_payroll_item",
+           params: { payroll_item_id: payroll_item.id,
+                     reason: "One physical check verified against the payroll record" }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("non_employee_check", "check_status")).to eq("superseded")
+
+      get "/api/v1/admin/non_employee_checks", params: { active: "true" }
+      expect(response.parsed_body.fetch("non_employee_checks").map { |entry| entry.fetch("id") })
+        .not_to include(standalone_check.id)
+      get "/api/v1/admin/non_employee_checks"
+      expect(response.parsed_body.fetch("non_employee_checks").map { |entry| entry.fetch("id") })
+        .to include(standalone_check.id)
+
+      post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/mark_paid",
+           params: { payment_date: Date.current.iso8601 }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(standalone_check.reload.paid_at).to be_nil
+    end
+
+    it "requires configuration-management access for the irreversible link" do
+      payroll_item
+      accountant = create(:user, company: company, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::NonEmployeeChecksController).to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/supersede_with_payroll_item",
+           params: { payroll_item_id: payroll_item.id,
+                     reason: "One physical check verified against the payroll record" }, as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(NonEmployeeCheckSupersession.count).to eq(0)
+    end
+  end
+
   describe "POST /api/v1/admin/non_employee_checks" do
     let(:valid_params) do
       {
