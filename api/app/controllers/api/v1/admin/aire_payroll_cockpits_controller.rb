@@ -13,11 +13,13 @@ module Api
           period_payload = cockpit_client.payroll_cockpit_period(
             external_pay_period_id: external_pay_period_id
           )
-          employees_payload = cockpit_client.payroll_cockpit_employees(
+          employee_options = {
             page: bounded_page(:employee_page),
             per_page: bounded_per_page(:employee_per_page, maximum: 100),
             active: params[:active]
-          )
+          }
+          employee_options[:employee_id] = params[:employee_id] if params[:employee_id].present?
+          employees_payload = cockpit_client.payroll_cockpit_employees(**employee_options)
 
           render json: {
             aire_payroll_cockpit: presenter.overview(

@@ -398,8 +398,8 @@ export const employeesApi = {
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
   get: (id: number, companyId?: number): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
-  create: (data: EmployeeFormData & { company_id: number }) =>
-    api.post<{ data: Employee }>('/admin/employees', { employee: data }),
+  create: (data: EmployeeFormData & { company_id: number }, aireLink?: { pay_period_id: number; source_user_id: string }) =>
+    api.post<{ data: Employee }>('/admin/employees', { employee: data, ...(aireLink ? { aire_link: aireLink } : {}) }),
   update: (id: number, data: Partial<EmployeeFormData>) =>
     api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
@@ -1083,7 +1083,7 @@ export const payPeriodsApi = {
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/retry_delivery`
     ),
-  airePayrollCockpit: (id: number, params?: { employee_page?: number }) =>
+  airePayrollCockpit: (id: number, params?: { employee_page?: number; employee_id?: string }) =>
     api.get<{ aire_payroll_cockpit: import('@/types').AirePayrollCockpitOverview }>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit`,
       { ...params, employee_per_page: 100 }

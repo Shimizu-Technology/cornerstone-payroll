@@ -95,6 +95,19 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(cockpit.dig("command_access", "can_command")).to be(false)
   end
 
+  it "can load one AIRE candidate for payroll profile setup" do
+    allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
+    allow(client).to receive(:payroll_cockpit_employees).with(
+      page: 1, per_page: 100, active: nil, employee_id: "91"
+    ).and_return(employee_payload)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit", params: { employee_id: "91" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone", "status"))
+      .to eq("unmapped")
+  end
+
   it "compares manual-entry hours even when the pay period was never published to AIRE" do
     unpublished = create(
       :pay_period,
