@@ -696,7 +696,7 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
     : <DetailedRegisterPreview report={report} />;
 
   return (
-    <div className="space-y-5">
+    <div className="reports-tables space-y-5">
       {report.meta?.provisional && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950" role="status">
           <p className="font-bold">Test-only payroll register</p>

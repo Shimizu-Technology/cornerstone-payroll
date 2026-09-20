@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
+import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YtdSummaryReport } from '@/services/api';
+import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
+
+function renderReportPanel(panel: ReactNode) {
+  return render(<PdfPreviewProvider>{panel}</PdfPreviewProvider>);
+}
 
 const apiMocks = vi.hoisted(() => ({
   ytdSummary: vi.fn(),
@@ -82,18 +88,25 @@ describe('YtdSummaryPanel', () => {
   });
 
   it('renders the new company totals and employee-level report values', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(screen.getByText('All loan deductions (in deductions)').nextElementSibling?.textContent).toBe('$75.00');
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Total Hours').nextElementSibling?.textContent).toBe('82.50');
     expect(screen.getByText('Total OT Hours').nextElementSibling?.textContent).toBe('2.25');
     expect(screen.getByText('Straight Loans').nextElementSibling?.textContent).toBe('$25.00');
-    expect(screen.getByText('Installment Loans').nextElementSibling?.textContent).toBe('$50.00');
+    expect(screen.getByText('Other native loans (named or recurring)').nextElementSibling?.textContent).toBe('$50.00');
+    expect(screen.getByText('Bonus (in gross)').nextElementSibling?.textContent).toBe('$100.00');
+    expect(screen.getByText('Pre-tax 401(k) (in deductions)').nextElementSibling?.textContent).toBe('$84.00');
     expect(screen.getByText('Employer Contributions').nextElementSibling?.textContent).toBe('$75.00');
     expect(screen.getByText('Employer Payroll Cost').nextElementSibling?.textContent).toBe('$2,325.00');
 
+    const compactRow = screen.getByText('Test Employee').closest('tr');
+    expect(compactRow?.textContent).not.toContain('$25.00');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show deduction and earnings categories' }));
     const employeeRow = screen.getByText('Test Employee').closest('tr');
     expect(employeeRow?.textContent).toContain('82.50');
     expect(employeeRow?.textContent).toContain('2.25');
@@ -103,8 +116,42 @@ describe('YtdSummaryPanel', () => {
     expect(employeeRow?.textContent).toContain('$2,325.00');
   });
 
+  it('keeps historical loan and conflicting 401(k) source labels visible without misclassifying them', async () => {
+    apiMocks.ytdSummary.mockResolvedValue({ report: {
+      ...report,
+      company_totals: { ...report.company_totals,
+        historical_loan_deductions_unclassified: 60.06,
+        health_insurance_deductions: 48.11,
+        source_labeled_after_tax_401k_in_pretax_bucket: 15.45 },
+      employees: [{ ...report.employees[0],
+        historical_loan_deductions_unclassified: 60.06,
+        health_insurance_deductions: 48.11,
+        source_labeled_after_tax_401k_in_pretax_bucket: 15.45,
+        component_values: { 'historical:quickbooks:post_tax_deduction:Health Insurance': 29.99 } }],
+      historical_deductions: {
+        source_bucket_totals: [{ source: 'quickbooks', treatment: 'post_tax_deduction', amount: 90.05 }],
+        classification_note: 'QuickBooks source labels need classification review.',
+      },
+      component_columns: [{ key: 'historical:quickbooks:post_tax_deduction:Health Insurance',
+        label: 'QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)',
+        short_label: 'Health Insurance', identity_label: 'QuickBooks source', treatment: 'post_tax_deduction' }],
+    } });
+    renderReportPanel(<YtdSummaryPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(screen.getByText('QuickBooks source labels need classification review.')).toBeTruthy();
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
+    expect(screen.getByText('Historical Loans (type unclassified)').nextElementSibling?.textContent).toBe('$60.06');
+    expect(screen.getByText('Health Insurance (payroll fields + historical)').nextElementSibling?.textContent).toBe('$48.11');
+    expect(screen.getByText('Source-labeled after-tax 401(k) in pre-tax bucket').nextElementSibling?.textContent).toBe('$15.45');
+    expect(screen.queryByText(/post tax deduction · QuickBooks source/)).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show source breakdown columns/ }));
+    expect(screen.getByText(/post tax deduction · QuickBooks source/)).toBeTruthy();
+  });
+
   it('uses a year-to-date pay-date range by default and offers a rolling year preset', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     await screen.findByText('Payroll Summary — 2026');
@@ -121,7 +168,7 @@ describe('YtdSummaryPanel', () => {
   });
 
   it('includes active $0-pay employees by default and sends the changed selection to the report', async () => {
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     const checkbox = screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
 
@@ -140,7 +187,7 @@ describe('YtdSummaryPanel', () => {
   it('does not show a stale report when the visibility selection changes during loading', async () => {
     let resolveRequest!: (value: { report: typeof report }) => void;
     apiMocks.ytdSummary.mockReturnValue(new Promise((resolve) => { resolveRequest = resolve; }));
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }));
@@ -154,7 +201,7 @@ describe('YtdSummaryPanel', () => {
     apiMocks.ytdSummary.mockResolvedValue({
       report: { ...report, meta: { provisional: true, payroll_status_note: 'TEST ONLY — calculated rehearsal payroll, not committed or paid' } },
     });
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText(/Test-only projection/)).toBeTruthy();
@@ -179,12 +226,14 @@ describe('YtdSummaryPanel', () => {
         payroll_field_post_tax_deductions_total: '1.75',
       }],
     } });
-    render(<YtdSummaryPanel />);
+    renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Payroll Field Additions').nextElementSibling?.textContent).toBe('$15.75');
     expect(screen.getByText('Payroll Field Deductions').nextElementSibling?.textContent).toBe('$5.75');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show deduction and earnings categories' }));
     const employeeRow = screen.getByText('Test Employee').closest('tr');
     expect(employeeRow?.textContent).toContain('$15.75');
     expect(employeeRow?.textContent).toContain('$5.75');
@@ -210,7 +259,7 @@ describe('PayrollRegisterPanel', () => {
   });
 
   it('loads every reportable page and labels approved rehearsal runs as test-only', async () => {
-    render(<PayrollRegisterPanel />);
+    renderReportPanel(<PayrollRegisterPanel />);
 
     const select = await screen.findByRole('combobox', { name: 'Pay Period' });
     expect(await screen.findByRole('option', { name: /TEST ONLY · Cornerstone/ })).toBeTruthy();

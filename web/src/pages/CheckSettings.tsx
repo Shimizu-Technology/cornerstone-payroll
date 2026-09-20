@@ -3,8 +3,8 @@
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { Download } from 'lucide-react';
+import { Eye } from 'lucide-react';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -122,13 +122,12 @@ export function CheckSettingsPage() {
   const [requireDistinctCheckPrintConfirmer, setRequireDistinctCheckPrintConfirmer] = useState(false);
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
-  const [downloadingAlignment, setDownloadingAlignment] = useState(false);
+  const [preparingAlignment, setPreparingAlignment] = useState(false);
   const [checkLayout, setCheckLayout] = useState<CheckLayoutResponse | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
   const [testCheckType, setTestCheckType] = useState<TestCheckType>('payroll');
   const [generatingTestCheck, setGeneratingTestCheck] = useState(false);
-  const [testCheckPreviewUrl, setTestCheckPreviewUrl] = useState<string | null>(null);
-  const [testCheckPreviewFilename, setTestCheckPreviewFilename] = useState('test_check.pdf');
+  const [checkPreview, setCheckPreview] = useState<PdfArtifact | null>(null);
   const [activePrinterProfileId, setActivePrinterProfileId] = useState<number | null>(null);
   const [activePrinterProfileName, setActivePrinterProfileName] = useState<string | null>(null);
 
@@ -231,8 +230,10 @@ export function CheckSettingsPage() {
       const target = event.target instanceof Element ? event.target : null;
       const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
       if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+      if (anchor.hasAttribute('download')) return;
 
       const nextUrl = new URL(anchor.href, window.location.href);
+      if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') return;
       if (nextUrl.origin !== window.location.origin) return;
       if (
         nextUrl.pathname === window.location.pathname &&
@@ -249,12 +250,6 @@ export function CheckSettingsPage() {
     document.addEventListener('click', handleDocumentClick, true);
     return () => document.removeEventListener('click', handleDocumentClick, true);
   }, [hasUnsavedCheckSettings]);
-
-  useEffect(() => {
-    return () => {
-      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
-    };
-  }, [testCheckPreviewUrl]);
 
   const confirmDiscardUnsavedChanges = useCallback((message: string) => {
     return !hasUnsavedCheckSettings || window.confirm(message);
@@ -411,19 +406,14 @@ export function CheckSettingsPage() {
 
   const handleAlignmentTest = async () => {
     setError(null);
-    setDownloadingAlignment(true);
+    setPreparingAlignment(true);
     try {
       const blob = await checksApi.alignmentTestPdf();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'alignment_test.pdf';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      setCheckPreview({ blob, filename: 'alignment_test.pdf', title: 'Alignment test preview', note: 'Review the check-face anchors and stub baselines, then print on plain paper or download a copy.' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to download alignment test PDF');
+      setError(err instanceof Error ? err.message : 'Failed to prepare alignment test PDF');
     } finally {
-      setDownloadingAlignment(false);
+      setPreparingAlignment(false);
     }
   };
 
@@ -457,38 +447,11 @@ export function CheckSettingsPage() {
         sample_type: testCheckType,
         check_settings: currentDraftCheckSettings(layoutConfig),
       });
-      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
-      setTestCheckPreviewUrl(URL.createObjectURL(blob));
-      setTestCheckPreviewFilename(filename || `test_check_${testCheckType}.pdf`);
+      setCheckPreview({ blob, filename: filename || `test_check_${testCheckType}.pdf`, title: 'Test check preview', note: 'This uses your current draft settings. Nothing is saved until you click Save Settings.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate test check PDF');
     } finally {
       setGeneratingTestCheck(false);
-    }
-  };
-
-  const handleCloseTestCheckPreview = () => {
-    if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
-    setTestCheckPreviewUrl(null);
-  };
-
-  const handleDownloadTestCheckPreview = () => {
-    if (!testCheckPreviewUrl) return;
-    const a = document.createElement('a');
-    a.href = testCheckPreviewUrl;
-    a.download = testCheckPreviewFilename;
-    a.click();
-  };
-
-  const handlePrintTestCheckPreview = () => {
-    if (!testCheckPreviewUrl) return;
-    const printWindow = window.open(testCheckPreviewUrl);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        printWindow.print();
-      });
-    } else {
-      setError('Pop-up blocked. Please allow pop-ups for this site to print checks.');
     }
   };
 
@@ -928,7 +891,7 @@ export function CheckSettingsPage() {
             <div className="rounded-lg border bg-blue-50 px-4 py-3 text-sm text-blue-900">
               <p className="font-medium">Recommended workflow</p>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs sm:text-sm">
-                <li>Download the alignment test PDF.</li>
+                <li>Preview the alignment test PDF.</li>
                 <li>Print it on plain paper or a photocopy of real check stock.</li>
                 <li>Hold it behind your real check stock and see what is off.</li>
                 <li>Use X and Y offset for small overall shifts.</li>
@@ -1103,17 +1066,17 @@ export function CheckSettingsPage() {
                       {generatingTestCheck ? (
                         <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Generating...</>
                       ) : (
-                        <><Download className="w-4 h-4 mr-2" /> Preview Test Check</>
+                        <><Eye className="w-4 h-4 mr-2" /> Preview Test Check</>
                       )}
                     </Button>
                   </div>
                 </div>
               </div>
-              <Button variant="outline" onClick={handleAlignmentTest} type="button" disabled={downloadingAlignment}>
-                {downloadingAlignment ? (
-                  <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Downloading...</>
+              <Button variant="outline" onClick={handleAlignmentTest} type="button" disabled={preparingAlignment}>
+                {preparingAlignment ? (
+                  <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Preparing...</>
                 ) : (
-                  <><Download className="w-4 h-4 mr-2" /> Download Alignment Test PDF</>
+                  <><Eye className="w-4 h-4 mr-2" /> Preview Alignment Test PDF</>
                 )}
               </Button>
               <p className="text-xs text-gray-500">
@@ -1292,41 +1255,7 @@ export function CheckSettingsPage() {
 
       </div>
 
-      {testCheckPreviewUrl && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
-          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Test Check Preview
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  This preview uses the current draft settings. Nothing is saved until you click Save Settings.
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={handlePrintTestCheckPreview}>
-                  Print
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleDownloadTestCheckPreview}>
-                  Download PDF
-                </Button>
-                <Button size="sm" onClick={handleCloseTestCheckPreview}>
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 bg-gray-100 p-5">
-              <iframe
-                src={`${testCheckPreviewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
-                className="h-full w-full rounded-xl border bg-white shadow-lg"
-                title="Test Check Preview"
-              />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <PdfPreview artifact={checkPreview} onClose={() => setCheckPreview(null)} />
     </div>
   );
 }

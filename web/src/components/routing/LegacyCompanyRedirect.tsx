@@ -3,7 +3,6 @@ import { Navigate, useLocation, useParams } from 'react-router';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
-  employeeEditPath,
   employeePath,
   employeesPath,
   newEmployeePath,
@@ -40,9 +39,7 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
   if (destination === 'employees') target = employeesPath(activeCompanyId, location.search);
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
   if (destination === 'employee' && recordId) {
-    target = clientMode
-      ? employeeEditPath(activeCompanyId, recordId, { returnTo })
-      : employeePath(activeCompanyId, recordId, 'overview', { returnTo });
+    target = employeePath(activeCompanyId, recordId, 'overview', { returnTo });
   }
   if (destination === 'pay-runs') target = payRunsPath(activeCompanyId, location.search);
   if (destination === 'pay-run' && recordId) {
