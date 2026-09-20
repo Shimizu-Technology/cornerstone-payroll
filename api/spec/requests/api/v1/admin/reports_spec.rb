@@ -26,7 +26,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
   end
 
-  def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300)
+  def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300,
+                                       hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil)
     batch = HistoricalImportBatch.create!(
       company: company,
       source_label: "QuickBooks #{suffix}",
@@ -83,9 +84,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       medicare_tax: 10,
       after_tax_deductions: 30,
       net_pay: net_pay,
+      hours_breakdown: hours_breakdown,
       earnings_breakdown: [ { "label" => "Reported Tips", "amount" => "25.00" } ],
-      pretax_deduction_breakdown: [ { "label" => "401(k) pre-tax", "amount" => "20.00" } ],
-      after_tax_deduction_breakdown: [ { "label" => "Roth 401(k)", "amount" => "10.00" } ]
+      pretax_deduction_breakdown: pretax_deduction_breakdown || [ { "label" => "401(k) pre-tax", "amount" => "20.00" } ],
+      after_tax_deduction_breakdown: after_tax_deduction_breakdown || [ { "label" => "Roth 401(k)", "amount" => "10.00" } ]
     )
     [ batch, period, paycheck ]
   end
@@ -1604,6 +1606,21 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    it "includes an explicitly labeled installment payroll adjustment in the loan subtotal once" do
+      employee.payroll_items.first.update!(
+        payroll_adjustments: [ { "label" => "Loan - Installment", "treatment" => "post_tax_deduction", "amount" => "250.00" } ]
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      row = report.fetch("employees").find { |entry| entry.fetch("employee_id") == employee.id }
+      expect(row.fetch("straight_loan_deductions").to_f).to eq(25.0)
+      expect(row.fetch("installment_loan_payments").to_f).to eq(300.0)
+      expect(report.dig("company_totals", "installment_loan_payments").to_f).to eq(300.0)
+    end
+
     it "surfaces custom totals in employee pay history reports" do
       get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
 
@@ -1650,6 +1667,67 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         medicare_tax: 14.5,
         total_deductions: 176.5,
         net_pay: 823.5)
+    end
+
+    it "reconciles source overtime and labeled deductions without guessing their classification" do
+      native_item.update!(overtime_hours: 2.3)
+      PayrollItemFieldEntry.create!(
+        payroll_item: native_item, label: "Health Insurance", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "insurance", source: "manual",
+        employee_paid: true, employer_paid: false, amount: 18.12
+      )
+      _batch, _period, historical_paycheck = create_locked_historical_paycheck(
+        employee: employee, suffix: "components", pay_date: Date.new(2026, 4, 18),
+        hours_breakdown: [ { "label" => "Regular", "amount" => "40" }, { "label" => "OT", "amount" => "1.20" } ],
+        pretax_deduction_breakdown: [ { "label" => "401(k) After Tax", "amount" => "15.45" } ],
+        after_tax_deduction_breakdown: [
+          { "label" => "Health Insurance", "amount" => "29.99" },
+          { "label" => "Loan (Worker)", "amount" => "60.06" }
+        ]
+      )
+      HistoricalPaycheckAdjustment.create!(
+        company: company, historical_paycheck: historical_paycheck, created_by: admin_user,
+        kind: "correction", effective_pay_date: historical_paycheck.pay_date,
+        filing_year: 2026, filing_quarter: 2, reason: "Correct health deduction",
+        idempotency_key: "reports-component-adjustment-#{company.id}",
+        after_tax_deductions: 5, net_pay: -5,
+        after_tax_deduction_breakdown: [ { "label" => "Health Insurance", "amount" => "5.00" } ]
+      )
+      create_locked_historical_paycheck(
+        employee: nil, suffix: "unlinked-components", pay_date: Date.new(2026, 4, 18),
+        hours_breakdown: [ { "label" => "OT", "amount" => "99" } ],
+        after_tax_deduction_breakdown: [ { "label" => "Loan", "amount" => "999" } ]
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: { start_date: "2026-01-01", end_date: "2026-05-31" }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      row = report.fetch("employees").find { |entry| entry.fetch("employee_id") == employee.id }
+      [ row, report.fetch("company_totals") ].each do |totals|
+        expect(totals.fetch("total_overtime_hours").to_f).to eq(3.5)
+        expect(totals.fetch("historical_loan_deductions_unclassified").to_f).to eq(60.06)
+        expect(totals.fetch("health_insurance_deductions").to_f).to eq(53.11)
+        expect(totals.fetch("source_labeled_after_tax_401k_in_pretax_bucket").to_f).to eq(15.45)
+        expect(totals.fetch("straight_loan_deductions").to_f).to eq(0)
+        expect(totals.fetch("installment_loan_payments").to_f).to eq(0)
+      end
+      expect(report.dig("historical_deductions", "classification_note")).to include("pre-tax bucket")
+      columns = report.fetch("component_columns")
+      expect(columns.map { |column| column.fetch("label") }).to include(
+        "QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)",
+        "QuickBooks source - 401(k) After Tax (Pre tax deduction; QuickBooks source)"
+      )
+      expect(row.fetch("component_values").fetch("historical:quickbooks:post_tax_deduction:Health Insurance").to_f).to eq(29.99)
+      expect(row.fetch("component_values").fetch("historical:historical_adjustment:post_tax_deduction:Health Insurance").to_f).to eq(5)
+      expect(report.dig("source_summary", "quickbooks", "excluded_unlinked_paycheck_count")).to eq(1)
+
+      get "/api/v1/admin/reports/ytd_summary_csv", params: { start_date: "2026-01-01", end_date: "2026-05-31" }
+      expect(response).to have_http_status(:ok)
+      csv = CSV.parse(response.body, headers: true)
+      expect(csv.headers).to include("Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)")
+      expect(csv.first.fetch("Total OT Hours").to_f).to eq(3.5)
+      expect(csv.first.fetch("Historical Loans (Type Unclassified)").to_f).to eq(60.06)
     end
 
     it "combines linked snapshots with committed payroll and discloses excluded rows" do

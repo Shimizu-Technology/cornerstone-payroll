@@ -147,8 +147,20 @@ test('payroll summary explains combined sources and any excluded unlinked record
     report: {
       type: 'ytd_summary', year: 2026,
       period: { label: '2026', start_date: '2026-01-01', end_date: '2026-12-31', basis: 'pay_date' },
-      employees: [],
-      company_totals: { year: 2026, gross_pay: 1600, withholding_tax: 120, social_security_tax: 90, medicare_tax: 20, retirement: 0, net_pay: 1250, payroll_count: 2 },
+      employees: [{ employee_id: 10, name: 'Avery Example', first_name: 'Avery', last_name: 'Example',
+        employment_type: 'hourly', status: 'active', total_hours: 82, total_overtime_hours: 122.4,
+        gross_pay: 1600, withholding_tax: 120, social_security_tax: 90, medicare_tax: 20,
+        retirement: 0, net_pay: 1250, historical_loan_deductions_unclassified: 60061.76,
+        health_insurance_deductions: 31809, source_labeled_after_tax_401k_in_pretax_bucket: 15454.13,
+        component_values: { 'historical:quickbooks:post_tax_deduction:Health Insurance': 29997 } }],
+      company_totals: { year: 2026, gross_pay: 1600, withholding_tax: 120, social_security_tax: 90, medicare_tax: 20, retirement: 0, net_pay: 1250, payroll_count: 2,
+        total_overtime_hours: 122.4, historical_loan_deductions_unclassified: 60061.76,
+        health_insurance_deductions: 31809, source_labeled_after_tax_401k_in_pretax_bucket: 15454.13 },
+      historical_deductions: { source_bucket_totals: [{ source: 'quickbooks', treatment: 'post_tax_deduction', amount: 90058.76 }],
+        classification_note: 'QuickBooks loan labels are unclassified; 401(k) After Tax remains in its source pre-tax bucket.' },
+      component_columns: [{ key: 'historical:quickbooks:post_tax_deduction:Health Insurance', short_label: 'Health Insurance',
+        label: 'QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)',
+        identity_label: 'QuickBooks source', treatment: 'post_tax_deduction' }],
       source_summary: {
         mode: 'locked_quickbooks_plus_committed_cornerstone',
         source_statement: 'QuickBooks values are authoritative locked snapshots and were not recalculated by Cornerstone Payroll.',
@@ -167,6 +179,10 @@ test('payroll summary explains combined sources and any excluded unlinked record
   await expect(page.getByText(/1 linked QuickBooks paycheck/)).toBeVisible();
   await expect(page.getByText(/1 QuickBooks record was excluded/)).toBeVisible();
   await expect(page.getByText(/Payroll field reconciliation below covers Cornerstone records only/)).toBeVisible();
+  await expect(page.getByText('QuickBooks loan labels are unclassified; 401(k) After Tax remains in its source pre-tax bucket.')).toBeVisible();
+  await expect(page.getByText('Historical Loans (type unclassified)').locator('..')).toContainText('$60,061.76');
+  await expect(page.getByText('Health Insurance (payroll fields + historical)').locator('..')).toContainText('$31,809.00');
+  await expect(page.getByRole('row').filter({ hasText: 'Avery Example' })).toContainText('$29,997.00');
 });
 
 test('payroll summary can show or hide active employees with $0 pay', async ({ page }) => {
@@ -203,6 +219,28 @@ test('payroll summary can show or hide active employees with $0 pay', async ({ p
   await expect(page.getByText('1 active $0-pay employee hidden')).toBeVisible();
   await expect(page.getByText('Only employee rows are filtered; company totals still include all payroll activity.')).toBeVisible();
   expect(requestedVisibility).toEqual(['true', 'false']);
+});
+
+test('client payroll summary shows the source-aware historical categories', async ({ page }) => {
+  await mockShell(page, 'client');
+  await page.route('**/api/v1/client/pay_periods**', (route) => fulfillJson(route, { pay_periods: [] }));
+  await page.route('**/api/v1/client/reports/annual_payroll_summary', (route) => fulfillJson(route, { report: { years: [], totals: {} } }));
+  await page.route('**/api/v1/client/reports/ytd_summary**', (route) => fulfillJson(route, { report: {
+    employees: [{ employee_id: 1, name: 'Avery Example', gross_pay: 100, net_pay: 80, withholding_tax: 10,
+      total_overtime_hours: 122.4, health_insurance_deductions: 31809, historical_loan_deductions_unclassified: 60061.76 }],
+    company_totals: { gross_pay: 100, net_pay: 80, payroll_count: 1, total_overtime_hours: 122.4,
+      health_insurance_deductions: 31809, historical_loan_deductions_unclassified: 60061.76,
+      source_labeled_after_tax_401k_in_pretax_bucket: 15454.13 },
+    historical_deductions: { source_bucket_totals: [{ source: 'quickbooks', treatment: 'post_tax_deduction', amount: 90058.76 }],
+      classification_note: 'QuickBooks source bucket needs classification review.' },
+    payroll_fields: { totals: [], entries: [], treatment_totals: {} },
+  } }));
+
+  await page.goto('/reports');
+
+  await expect(page.getByText('QuickBooks source bucket needs classification review.')).toBeVisible();
+  await expect(page.getByText('Historical Loans (type unclassified)').locator('..')).toContainText('$60,061.76');
+  await expect(page.getByRole('row').filter({ hasText: 'Avery Example' })).toContainText('122.40');
 });
 
 test('client summary keeps the latest $0-pay selection when an older request finishes later', async ({ page }) => {
