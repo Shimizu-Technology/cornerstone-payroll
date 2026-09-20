@@ -65,13 +65,17 @@ module AirePayrollCalendar
     end
 
     def allocation_rows(batch)
-      final_entries = batch.fetch("employees").flat_map do |person|
+      payable_entries = batch.fetch("employees").flat_map do |person|
         Array(person.fetch("adjustments")).map do |adjustment|
           [ adjustment.fetch("source_time_entry_id").to_s, person["source_user_uuid"], adjustment.fetch("original_work_date") ]
         end
       end
+      held_entries = batch.fetch("exclusions").map do |exclusion|
+        [ exclusion.fetch("source_time_entry_id").to_s, exclusion["source_user_uuid"], exclusion.fetch("original_work_date") ]
+      end
+      final_entries = payable_entries + held_entries
       final_by_id = final_entries.group_by(&:first)
-      source_entry_ids = final_by_id.keys + batch.fetch("exclusions").map { |row| row.fetch("source_time_entry_id").to_s }
+      source_entry_ids = final_by_id.keys
       period_ids = TimeTrackingManualAllocation.where(time_tracking_source: source, pay_period: pay_period).select(:id)
       scope = TimeTrackingManualAllocation.where(time_tracking_source: source)
         .where(original_work_date: pay_period.start_date..pay_period.end_date)

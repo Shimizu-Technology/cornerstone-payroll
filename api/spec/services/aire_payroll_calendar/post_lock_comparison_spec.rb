@@ -123,6 +123,25 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id }.fetch(:reason)).to include("identity")
   end
 
+  it "does not classify a held entry as paid when the linked employee identity differs" do
+    payload.fetch("exclusions").first["source_user_uuid"] = uuid
+    payload.fetch("export")["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    verified_event
+    item = create(:payroll_item, :with_check, company: company, pay_period: pay_period, employee: employee, hours_worked: 2)
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: pay_period,
+      payroll_item: item, employee: employee, created_by: actor, source_user_uuid: SecureRandom.uuid,
+      source_time_entry_id: "202", source_time_entry_version: 0,
+      original_work_date: Date.new(2026, 10, 6), regular_hours: 2, overtime_hours: 0,
+      reconciliation_note: "Held AIRE entry linked to wrong identity", status: "issued"
+    )
+
+    result = service.call
+
+    expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id }.fetch(:status)).to eq("mismatch")
+    expect(result.dig(:summary, "paid", :regular_hours)).to eq(0.0)
+  end
+
   it "refuses a final batch whose immutable checksum changed" do
     verified_event
     payload.fetch("summary")["total_hours"] = 9
