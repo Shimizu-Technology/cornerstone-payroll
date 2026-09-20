@@ -66,6 +66,8 @@ RSpec.describe CheckGenerator do
     payroll_item.update!(loan_deduction: 300.00, loan_payment: 550.00)
 
     expect(generator.send(:visible_legacy_loan_payment)).to eq(300.00)
+    expect(generator.send(:visible_legacy_loan_ytd)).to eq(300.00)
+    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, 300.00))
     expect(generator.send(:cur_deds)).to eq(550.00)
   end
 
