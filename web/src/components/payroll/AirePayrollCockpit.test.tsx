@@ -645,4 +645,28 @@ describe('AirePayrollCockpit', () => {
       source_user_id: '91', employee_id: 7,
     }));
   });
+
+  it('shows an older numeric match as a fixed profile to verify without creating a duplicate employee', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.employees[0] = {
+      ...data.overview.employees[0],
+      cornerstone: { status: 'needs_verification', employee_id: 7, employee_name: 'Rei Cruz', employee_active: false },
+    };
+    companyContext.activeCompanyId = 1;
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.mapEmployee.mockResolvedValue({ mapping: { employee_id: 7 } });
+
+    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[]} onRefresh={vi.fn()} /></MemoryRouter>);
+    await screen.findByText('AIRE payroll workspace');
+    await user.click(screen.getByRole('button', { name: /Team 1/i }));
+    expect(screen.getByText('Verify older link')).not.toBeNull();
+    expect(screen.queryByRole('link', { name: 'Set up new payroll profile' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Verify permanent link' }));
+    expect(screen.getByText(/this action will not reactivate them/i)).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Confirm permanent match' }));
+    await waitFor(() => expect(apiMocks.mapEmployee).toHaveBeenCalledWith(17, {
+      source_user_id: '91', employee_id: 7,
+    }));
+  });
 });

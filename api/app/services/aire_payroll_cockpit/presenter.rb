@@ -45,6 +45,7 @@ module AirePayrollCockpit
           employee.merge(
             "cornerstone" => mapping_payload(
               employee["source_user_uuid"] || employee["payroll_integration_id"],
+              source_user_id: employee["source_user_id"],
               required: true
             )
           )
@@ -53,6 +54,7 @@ module AirePayrollCockpit
           exclusion.merge(
             "cornerstone" => mapping_payload(
               exclusion["source_user_uuid"] || exclusion["payroll_integration_id"],
+              source_user_id: exclusion["source_user_id"],
               required: true
             )
           )
@@ -80,6 +82,7 @@ module AirePayrollCockpit
       employee.merge(
         "cornerstone" => mapping_payload(
           employee["payroll_integration_id"],
+          source_user_id: employee["id"],
           required: employee["time_tracking_enabled"] != false
         )
       )
@@ -88,26 +91,34 @@ module AirePayrollCockpit
     def decorate_entry(entry)
       employee = entry.fetch("employee", {})
       entry.merge(
-        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], required: true))
+        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], source_user_id: employee["id"], required: true))
       )
     end
 
     def decorate_leave(request_record)
       employee = request_record.fetch("employee", {})
       request_record.merge(
-        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], required: true))
+        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], source_user_id: employee["id"], required: true))
       )
     end
 
     def decorate_settlement_case(settlement_case)
       employee = settlement_case.fetch("employee", {})
       settlement_case.merge(
-        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], required: true))
+        "employee" => employee.merge("cornerstone" => mapping_payload(employee["payroll_integration_id"], source_user_id: employee["id"], required: true))
       )
     end
 
-    def mapping_payload(source_user_uuid, required:)
+    def mapping_payload(source_user_uuid, required:, source_user_id: nil)
       mapping = mappings_by_uuid[TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)]
+      if mapping.nil? && source_user_id.present? && (legacy = legacy_mappings_by_id[source_user_id.to_s])
+        return {
+          "status" => "needs_verification",
+          "employee_id" => legacy.employee_id,
+          "employee_name" => legacy.employee.full_name,
+          "employee_active" => legacy.employee.active?
+        }
+      end
       return { "status" => required ? "unmapped" : "not_required" } unless mapping
 
       employee = mapping.employee
@@ -123,6 +134,13 @@ module AirePayrollCockpit
         .includes(:employee)
         .where.not(source_user_uuid: nil)
         .index_by { |mapping| TimeTrackingEmployeeMapping.normalize_uuid(mapping.source_user_uuid) }
+    end
+
+    def legacy_mappings_by_id
+      @legacy_mappings_by_id ||= @source.time_tracking_employee_mappings
+        .includes(:employee)
+        .where(source_user_uuid: nil)
+        .index_by { |mapping| mapping.source_user_id.to_s }
     end
   end
 end
