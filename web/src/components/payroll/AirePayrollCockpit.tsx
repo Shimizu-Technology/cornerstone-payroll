@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
 import { AireManualHoursReview } from './AireManualHoursReview';
+import { AirePostLockComparison } from './AirePostLockComparison';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -556,6 +557,10 @@ export function AirePayrollCockpit({
         employees={employees}
         aireRecordLinked={aireRecordLinked}
       />
+
+      {calendar.finalized_batch?.verification_status === 'verified' && (
+        <AirePostLockComparison payPeriodId={payPeriodId} />
+      )}
 
       {calendar.external_pay_period_id && cockpitPublished && (
         <Card className="overflow-hidden">
