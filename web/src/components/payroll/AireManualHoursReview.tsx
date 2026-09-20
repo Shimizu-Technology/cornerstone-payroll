@@ -61,9 +61,11 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const [mapEmployeeId, setMapEmployeeId] = useState('');
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapBusy, setMapBusy] = useState(false);
+  const mapSourceEmployee = review?.employees.find((employee) => employee.source_user_id === mapSourceId);
+  const mapTargetEmployee = employees.find((employee) => String(employee.id) === mapEmployeeId);
 
   const saveMapping = async () => {
-    if (!mapSourceId || !mapEmployeeId) return;
+    if (!mapSourceId || !mapSourceEmployee || !mapEmployeeId) return;
     setMapBusy(true);
     setMapError(null);
     try {
@@ -512,15 +514,22 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
       </Dialog>
       <Dialog open={Boolean(mapSourceId)} onOpenChange={(open) => { if (!open && !mapBusy) setMapSourceId(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Match AIRE employee</DialogTitle><DialogDescription>Link one permanent AIRE identity to one Cornerstone payroll employee. Existing links cannot be silently reassigned.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Match AIRE employee</DialogTitle><DialogDescription>Confirm these are the same person before saving. This permanent link cannot be silently reassigned.</DialogDescription></DialogHeader>
+          {mapSourceEmployee && <div className="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Person in AIRE</p>
+            <p className="mt-1 font-semibold text-neutral-950">{mapSourceEmployee.display_name}</p>
+            {mapSourceEmployee.email && <p className="text-neutral-600">{mapSourceEmployee.email}</p>}
+            <p className="mt-1 break-all text-xs text-neutral-500">AIRE ID: {mapSourceEmployee.source_user_uuid || mapSourceEmployee.source_user_id}</p>
+          </div>}
           <label className="block text-sm font-medium text-neutral-700">Cornerstone employee
             <select className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2" value={mapEmployeeId} onChange={(event) => setMapEmployeeId(event.target.value)}>
               <option value="">Choose the same person</option>
               {employees.map((employee) => <option key={employee.id} value={employee.id}>{[employee.first_name, employee.last_name].filter(Boolean).join(' ')}</option>)}
             </select>
           </label>
+          {mapTargetEmployee && <p className="text-sm text-neutral-700">You are linking AIRE’s <strong>{mapSourceEmployee?.display_name}</strong> to Cornerstone’s <strong>{[mapTargetEmployee.first_name, mapTargetEmployee.last_name].filter(Boolean).join(' ')}</strong>{mapTargetEmployee.email ? ` (${mapTargetEmployee.email})` : ''}.</p>}
           {mapError && <p role="alert" className="text-sm text-danger-800">{mapError}</p>}
-          <DialogFooter><Button type="button" variant="outline" disabled={mapBusy} onClick={() => setMapSourceId(null)}>Cancel</Button><Button type="button" disabled={mapBusy || !mapEmployeeId} onClick={() => void saveMapping()}>{mapBusy ? 'Saving…' : 'Save match'}</Button></DialogFooter>
+          <DialogFooter><Button type="button" variant="outline" disabled={mapBusy} onClick={() => setMapSourceId(null)}>Cancel</Button><Button type="button" disabled={mapBusy || !mapSourceEmployee || !mapEmployeeId} onClick={() => void saveMapping()}>{mapBusy ? 'Saving…' : 'Save match'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>
