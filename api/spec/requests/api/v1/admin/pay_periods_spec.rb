@@ -1545,7 +1545,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       )
     end
 
-    it "marks an imported direct-loan field as non-editable to prevent double deduction" do
+    it "keeps a separate loan field editable when a direct loan is entered" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
         name: "MoSa Loan",
@@ -1568,8 +1568,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_field_inputs"
 
       assignment = response.parsed_body.dig("payroll_field_inputs", "assignments", 0)
-      expect(assignment).to include("editable" => false)
-      expect(assignment.fetch("skipped_reason")).to eq("Supplied by this payroll's direct loan deduction")
+      expect(assignment).to include("editable" => true)
+      expect(assignment.fetch("skipped_reason")).to be_nil
     end
   end
 
