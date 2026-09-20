@@ -468,7 +468,7 @@ RSpec.describe HourlyPayrollCalculator do
       )
     end
 
-    it "does not double-count an imported loan when an employee loan deduction already exists" do
+    it "adds a separate imported loan to an employee's named loan deduction" do
       loan_type = DeductionType.create!(
         company: company,
         name: "Employee Loan",
@@ -487,13 +487,13 @@ RSpec.describe HourlyPayrollCalculator do
       calculator = described_class.new(employee, payroll_item)
       calculator.calculate
 
-      expect(payroll_item.loan_payment).to eq(25.00)
+      expect(payroll_item.loan_payment).to eq(50.00)
       expect(payroll_item.total_deductions).to eq(
         payroll_item.withholding_tax.to_f +
         payroll_item.social_security_tax.to_f +
         payroll_item.medicare_tax.to_f +
         payroll_item.insurance_payment.to_f +
-        25.00
+        50.00
       )
     end
   end

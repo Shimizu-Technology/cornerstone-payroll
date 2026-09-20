@@ -196,7 +196,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions).to eq(310.0)
     end
 
-    it "uses imported loan_deduction as the paycheck loan payment even when itemized loan setup exists" do
+    it "adds an imported direct loan to a separate itemized loan deduction" do
       loan_type = DeductionType.create!(
         company: company,
         name: "Loan",
@@ -216,9 +216,9 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.loan_payment).to eq(200.0)
-      expect(payroll_item.total_deductions.to_f).to be >= 200.0
-      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
+      expect(payroll_item.loan_payment).to eq(240.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 240.0
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.deduction_type&.loan? }.amount).to eq(40.0)
     end
 
     it "reduces a loan linked to an assigned payroll field when payroll is committed" do
@@ -261,7 +261,7 @@ RSpec.describe PayrollCalculator do
       )
     end
 
-    it "uses a manual paycheck loan deduction without duplicating configured loan deductions" do
+    it "adds a manual paycheck loan deduction to a separately configured loan deduction" do
       loan_type = DeductionType.create!(
         company: company,
         name: "Manual loan test",
@@ -281,9 +281,9 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.loan_payment).to eq(50.0)
-      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
-      expect(payroll_item.total_deductions).to be >= 50.0
+      expect(payroll_item.loan_payment).to eq(90.0)
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.deduction_type&.loan? }.amount).to eq(40.0)
+      expect(payroll_item.total_deductions).to be >= 90.0
     end
 
     it "applies recurring payroll adjustments according to their tax treatment" do
@@ -528,7 +528,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
-    it "deactivates manually overridden loan field entries when a MoSa import loan becomes authoritative" do
+    it "keeps a manually overridden loan field alongside a separate MoSa direct loan" do
       field = PayrollFieldDefinition.create!(
         company: company,
         name: "Manual Loan",
@@ -548,9 +548,10 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(entry).not_to be_active
-      expect(payroll_item.loan_payment.to_f).to eq(200.0)
-      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(0.0)
+      expect(entry).to be_active
+      expect(entry.amount.to_f).to eq(150.0)
+      expect(payroll_item.loan_payment.to_f).to eq(350.0)
+      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(150.0)
     end
 
     it "adds newly assigned default payroll fields after another field was manually overridden" do
@@ -685,7 +686,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.retirement_rule_snapshot.fetch("explanations")).to include(/enough available pay/)
     end
 
-    it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
+    it "deducts a MoSa direct loan and an independently assigned loan field" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
         name: "MoSa Auto Loan",
@@ -701,8 +702,55 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.payroll_item_field_entries.map(&:label)).not_to include("MoSa Auto Loan")
-      expect(payroll_item.loan_payment).to eq(200.0)
+      expect(payroll_item.payroll_item_field_entries.map(&:label)).to include("MoSa Auto Loan")
+      expect(payroll_item.loan_payment).to eq(275.0)
+    end
+
+    it "charges Madela's separate $250 loan field in addition to a $428.36 direct loan" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan - Madela Severin",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 250.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: 250.0)
+
+      described_class.for(employee, payroll_item).calculate
+      without_direct_loan = payroll_item.net_pay.to_f
+
+      payroll_item.loan_deduction = 428.36
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Loan - Madela Severin" }).to be_active
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.label == "Loan - Madela Severin" }.amount).to eq(250.0)
+      expect(payroll_item.loan_payment).to eq(678.36)
+      expect(payroll_item.net_pay.to_f).to eq((without_direct_loan - 428.36).round(2))
+    end
+
+    it "keeps the direct and named loan totals consistent when deductions are capped by available pay" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Separate loan installment",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 250.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: 250.0)
+      payroll_item.loan_deduction = 2_000.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      named_amount = payroll_item.payroll_item_deductions
+        .select { |deduction| deduction.deduction_type&.loan? }
+        .sum { |deduction| deduction.amount.to_f }
+      expect(payroll_item.loan_payment.to_f).to eq((payroll_item.loan_deduction.to_f + named_amount).round(2))
+      expect(payroll_item.total_deductions.to_f).to be <= payroll_item.gross_pay.to_f
+      expect(payroll_item.net_pay.to_f).to eq(0.0)
     end
 
     it "preserves benefit sub-category for employer contribution payroll fields" do

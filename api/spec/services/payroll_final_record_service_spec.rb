@@ -44,6 +44,16 @@ RSpec.describe PayrollFinalRecordService do
     expect(result[:record_fingerprint]).to match(/\A[0-9a-f]{64}\z/)
   end
 
+  it "records direct and separately itemized loans in the same loan journal category" do
+    type = DeductionType.create!(company: company, name: "Loan - Madela Severin",
+      category: "post_tax", sub_category: "loan", active: true)
+    item.payroll_item_deductions.create!(deduction_type: type, category: "post_tax", amount: 250,
+      label: type.name)
+    item.update!(loan_deduction: 428.36, loan_payment: 678.36)
+
+    expect(described_class.new(pay_period: period).send(:employee_loan_repayments, item)).to eq(678.36)
+  end
+
   it "distinguishes blocking record gaps from open settlement work" do
     result = described_class.new(pay_period: period).call
 

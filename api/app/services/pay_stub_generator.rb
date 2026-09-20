@@ -345,10 +345,10 @@ class PayStubGenerator
     end
 
     # Loan
-    if payroll_item.loan_payment.to_f > 0 && payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").none? { |entry| entry.category == "loan" }
+    if visible_legacy_loan_payment.positive?
       deductions_data << [
         "Loan Repayment",
-        format_currency(payroll_item.loan_payment),
+        format_currency(visible_legacy_loan_payment),
         format_currency(visible_legacy_loan_ytd)
       ]
     end
@@ -614,9 +614,17 @@ class PayStubGenerator
   end
 
   def visible_legacy_loan_ytd
-    return 0.to_d if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
+    field_total = ytd_payroll_field_totals.sum(0.to_d) do |(_label, treatment, category), amount|
+      treatment == "post_tax_deduction" && category == "loan" ? amount.to_d : 0.to_d
+    end
+    [ employee_ytd_totals[:loans].to_d - field_total, 0.to_d ].max
+  end
 
-    employee_ytd_totals[:loans].to_d
+  def visible_legacy_loan_payment
+    field_total = payroll_field_entries_for("post_tax_deduction")
+      .select { |entry| entry.category == "loan" }
+      .sum { |entry| entry.amount.to_f }
+    [ payroll_item.loan_payment.to_f - field_total, 0.0 ].max
   end
 
   def retirement_totals

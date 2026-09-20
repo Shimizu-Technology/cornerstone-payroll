@@ -150,20 +150,22 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(item.payroll_item_deductions.first.employee_loan).to eq(loan)
   end
 
-  it "rejects a direct amount that would suppress a tracked balance, then commits a named override correctly" do
+  it "deducts a direct amount separately from a tracked loan and posts only the named payment to its ledger" do
     item.loan_deduction = 40
     applier = PayrollFieldInputApplier.new(pay_period: period, company_id: company.id)
     expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "default" } }) }.not_to raise_error
-    expect { calculate }.to raise_error(ArgumentError, /direct amount is not recorded in that ledger/i)
-    expect(loan.reload.current_balance).to eq(75)
-    expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 30 } }) }.to raise_error(ArgumentError, /only one loan deduction source/)
-    item.loan_deduction = 0
-    applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 40 } })
     calculate
-    expect(item.payroll_item_deductions.sum(&:amount)).to eq(40)
+    expect(item.loan_payment).to eq(115)
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(75)
+    expect(loan.reload.current_balance).to eq(75)
+    expect { applier.apply!(payroll_item: item, employee: employee, inputs: { field.id.to_s => { mode: "override", amount: 30 } }) }.not_to raise_error
+    calculate
+    expect(item.loan_payment).to eq(70)
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(30)
     period.update!(status: "approved")
     PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
-    expect(loan.reload.current_balance).to eq(35)
+    expect(loan.reload.current_balance).to eq(45)
+    expect(loan.loan_transactions.payments.sum(:amount)).to eq(30)
   end
 
   it "allows an unrelated direct payment when the tracked schedule is not due or has stopped" do
@@ -177,13 +179,15 @@ RSpec.describe "Tracked payroll loan repayment" do
     expect(loan.reload.current_balance).to eq(75)
   end
 
-  it "protects a legacy loan repayment schedule from the same direct override" do
+  it "adds a direct amount to a separate legacy tracked repayment" do
     assignment.destroy!
     deduction_type = DeductionType.create!(company: company, name: "Legacy loan", category: "post_tax", sub_category: "loan")
     loan.update!(deduction_type: deduction_type)
     employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
     item.loan_deduction = 40
-    expect { calculate }.to raise_error(ArgumentError, /named deduction/)
+    calculate
+    expect(item.loan_payment).to eq(115)
+    expect(item.payroll_item_deductions.sum(&:amount)).to eq(75)
   end
 
   it "also blocks committing an older saved direct payment that bypassed the tracked schedule" do
@@ -236,11 +240,15 @@ RSpec.describe "Tracked payroll loan repayment" do
       expect(loan.reload.current_balance).to be_nil
     end
 
-    it "rejects an unidentified direct import amount that would bypass its ledger" do
+    it "keeps a direct import amount separate from the named no-balance repayment" do
       item.loan_deduction = 40
 
-      expect { calculate }.to raise_error(ArgumentError, /named deduction/)
-      expect(loan.loan_transactions).to be_empty
+      calculate
+      expect(item.loan_payment).to eq(90)
+      expect(item.payroll_item_deductions.sum(&:amount)).to eq(50)
+      period.update!(status: "approved")
+      PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+      expect(loan.loan_transactions.payments.sum(:amount)).to eq(50)
     end
 
     it "never allows payoff or balance additions for the no-balance mode" do
@@ -259,9 +267,11 @@ RSpec.describe "Tracked payroll loan repayment" do
         employee.employee_deductions.create!(deduction_type: deduction_type, amount: 100, active: true)
       end
 
-      it "rejects a direct deduction that would bypass the active legacy repayment" do
+      it "adds a direct deduction to the active legacy repayment" do
         item.loan_deduction = 40
-        expect { calculate }.to raise_error(ArgumentError, /named deduction/)
+        calculate
+        expect(item.loan_payment).to eq(115)
+        expect(item.payroll_item_deductions.sum(&:amount)).to eq(75)
         expect(loan.reload.current_balance).to eq(75)
         expect(loan.loan_transactions).to be_empty
       end
