@@ -46,7 +46,8 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
 
       post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/supersede_with_payroll_item",
            params: { payroll_item_id: payroll_item.id,
-                     reason: "One physical check verified against the payroll record" }, as: :json
+                     reason: "One physical check verified against the payroll record",
+                     recipient_verified: true }, as: :json
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("non_employee_check", "check_status")).to eq("superseded")
 
@@ -61,6 +62,17 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
            params: { payment_date: Date.current.iso8601 }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(standalone_check.reload.paid_at).to be_nil
+    end
+
+    it "rejects a duplicate link without recipient verification" do
+      payroll_item
+      create(:check_event, payroll_item: payroll_item, user: admin_user, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+      post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/supersede_with_payroll_item",
+           params: { payroll_item_id: payroll_item.id,
+                     reason: "One physical check verified against the payroll record" }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(NonEmployeeCheckSupersession.count).to eq(0)
     end
 
     it "requires configuration-management access for the irreversible link" do
