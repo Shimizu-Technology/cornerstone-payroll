@@ -230,8 +230,10 @@ export function CheckSettingsPage() {
       const target = event.target instanceof Element ? event.target : null;
       const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
       if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+      if (anchor.hasAttribute('download')) return;
 
       const nextUrl = new URL(anchor.href, window.location.href);
+      if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') return;
       if (nextUrl.origin !== window.location.origin) return;
       if (
         nextUrl.pathname === window.location.pathname &&
