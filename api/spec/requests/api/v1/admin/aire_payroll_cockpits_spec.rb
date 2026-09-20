@@ -95,6 +95,45 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(cockpit.dig("command_access", "can_command")).to be(false)
   end
 
+  it "shows an older numeric-only match as needing permanent identity verification, then upgrades it" do
+    employee = create(:employee, company: company, department: create(:department, company: company))
+    employee_uuid = SecureRandom.uuid
+    mapping = TimeTrackingEmployeeMapping.create!(
+      company: company, time_tracking_source: source,
+      employee: employee, source_user_id: "91", source_user_uuid: nil
+    )
+    allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
+    allow(client).to receive(:payroll_cockpit_employees).and_return(employee_payload(employee_uuid: employee_uuid))
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone")).to include(
+      "status" => "needs_verification", "employee_id" => employee.id,
+      "employee_name" => employee.full_name
+    )
+    expect(mapping.reload.source_user_uuid).to be_nil
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping",
+         params: { source_user_id: "91", employee_id: employee.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(mapping.reload.source_user_uuid).to eq(employee_uuid)
+  end
+
+  it "can load one AIRE candidate for payroll profile setup" do
+    allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
+    allow(client).to receive(:payroll_cockpit_employees).with(
+      page: 1, per_page: 100, active: nil, employee_id: "91"
+    ).and_return(employee_payload)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit", params: { employee_id: "91" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone", "status"))
+      .to eq("unmapped")
+  end
+
   it "compares manual-entry hours even when the pay period was never published to AIRE" do
     unpublished = create(
       :pay_period,

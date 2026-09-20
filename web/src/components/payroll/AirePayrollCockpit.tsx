@@ -31,9 +31,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ApiError, payPeriodsApi } from '@/services/api';
+import { useCompany } from '@/contexts/CompanyContext';
+import { employeePath, newEmployeePath, payRunPath } from '@/lib/routes';
 import { formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
 import type {
   AirePayrollCalendarState,
+  AirePayrollCockpitEmployee,
   AirePayrollCockpitOverview,
   AirePayrollExceptionsResponse,
   AirePayrollTimeEntriesResponse,
@@ -180,10 +183,11 @@ function Metric({ label, value, detail, tone = 'neutral' }: { label: string; val
   );
 }
 
-function MappingBadge({ status }: { status: 'mapped' | 'unmapped' | 'inactive' | 'not_required' }) {
+function MappingBadge({ status }: { status: 'mapped' | 'unmapped' | 'inactive' | 'not_required' | 'needs_verification' }) {
   if (status === 'mapped') return <Badge variant="success">Mapped</Badge>;
   if (status === 'not_required') return <Badge variant="default">No time mapping needed</Badge>;
   if (status === 'inactive') return <Badge variant="warning">Inactive in Cornerstone</Badge>;
+  if (status === 'needs_verification') return <Badge variant="warning">Verify older link</Badge>;
   return <Badge variant="danger">Not mapped</Badge>;
 }
 
@@ -293,6 +297,7 @@ export function AirePayrollCockpit({
   calendar,
   onRefresh,
 }: Props) {
+  const { activeCompanyId } = useCompany();
   const [overview, setOverview] = useState<AirePayrollCockpitOverview | null>(null);
   const [timeEntries, setTimeEntries] = useState<AirePayrollTimeEntriesResponse | null>(null);
   const [exceptions, setExceptions] = useState<AirePayrollExceptionsResponse | null>(null);
@@ -315,6 +320,10 @@ export function AirePayrollCockpit({
   const [leavePage, setLeavePage] = useState(1);
   const [employeePage, setEmployeePage] = useState(1);
   const [settlementPage, setSettlementPage] = useState(1);
+  const [mappingTarget, setMappingTarget] = useState<AirePayrollCockpitEmployee | null>(null);
+  const [mappingEmployeeId, setMappingEmployeeId] = useState('');
+  const [mappingError, setMappingError] = useState<string | null>(null);
+  const [mappingBusy, setMappingBusy] = useState(false);
   const requestGeneration = useRef(0);
 
   useEffect(() => {
@@ -362,6 +371,25 @@ export function AirePayrollCockpit({
       if (generation === requestGeneration.current) setLoading(false);
     }
   }, [calendar.external_pay_period_id, calendar.finalized_batch, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
+
+  const saveEmployeeMapping = async () => {
+    if (!mappingTarget || !mappingEmployeeId) return;
+    setMappingBusy(true);
+    setMappingError(null);
+    try {
+      await payPeriodsApi.mapAireEmployee(payPeriodId, {
+        source_user_id: mappingTarget.id,
+        employee_id: Number(mappingEmployeeId),
+      });
+      setMappingTarget(null);
+      setMappingEmployeeId('');
+      await load();
+    } catch (caught) {
+      setMappingError(caught instanceof Error ? caught.message : 'Could not link this AIRE person');
+    } finally {
+      setMappingBusy(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -854,13 +882,39 @@ export function AirePayrollCockpit({
 
                 {view === 'team' && (
                   <div className="divide-y divide-neutral-100">
+                    <div className="bg-primary-50/60 px-4 py-4 text-sm leading-6 text-primary-900 sm:px-6">
+                      AIRE people appear here automatically. Match someone to an existing payroll profile, or set up a new profile with their pay and tax details. No one becomes payable from an AIRE name alone.
+                    </div>
                     {overview.employees.length === 0 && (
                       <p className="px-6 py-10 text-center text-sm text-neutral-500">AIRE has no employees on this page.</p>
                     )}
                     {overview.employees.map((employee) => (
                       <div key={employee.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                         <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-100 text-neutral-600"><Users className="h-4 w-4" /></div><div><p className="font-semibold text-neutral-950">{employee.full_name}</p><p className="text-xs text-neutral-500">{employee.email || 'No email'} · {employee.time_tracking_enabled ? 'Time tracking on' : 'Time tracking off'}</p></div></div>
-                        <div className="flex flex-wrap items-center gap-2"><MappingBadge status={employee.cornerstone.status} />{employee.cornerstone.employee_name && <span className="text-xs text-neutral-500">{employee.cornerstone.employee_name}</span>}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <MappingBadge status={employee.cornerstone.status} />
+                          {employee.cornerstone.employee_name && <span className="text-xs text-neutral-500">{employee.cornerstone.employee_name}</span>}
+                          {activeCompanyId && employee.cornerstone.employee_id && (
+                            <Link className="text-xs font-semibold text-primary-700 hover:underline" to={employeePath(activeCompanyId, employee.cornerstone.employee_id, 'overview')}>
+                              Review payroll profile
+                            </Link>
+                          )}
+                          {employee.cornerstone.status === 'unmapped' && (
+                            <>
+                              <Button type="button" size="sm" variant="outline" onClick={() => { setMappingTarget(employee); setMappingEmployeeId(''); setMappingError(null); }}>Match existing</Button>
+                              {activeCompanyId && employee.payroll_integration_id && (
+                                <Link className="rounded-lg bg-primary-700 px-3 py-2 text-xs font-semibold text-white hover:bg-primary-800" to={`${newEmployeePath(activeCompanyId, { returnTo: payRunPath(activeCompanyId, payPeriodId, 'work') })}&aire_pay_period_id=${payPeriodId}&aire_staff_id=${encodeURIComponent(employee.id)}`}>
+                                  Set up new payroll profile
+                                </Link>
+                              )}
+                            </>
+                          )}
+                          {employee.cornerstone.status === 'needs_verification' && employee.cornerstone.employee_id && (
+                            <Button type="button" size="sm" variant="outline" onClick={() => { setMappingTarget(employee); setMappingEmployeeId(String(employee.cornerstone.employee_id)); setMappingError(null); }}>
+                              Verify permanent link
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     ))}
                     <PageControls pagination={overview.employee_pagination} onPage={setEmployeePage} />
@@ -986,6 +1040,32 @@ export function AirePayrollCockpit({
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : 'Mark not payable'}</Button></DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      <Dialog open={Boolean(mappingTarget)} onOpenChange={(open) => { if (!open && !mappingBusy) setMappingTarget(null); }} dismissOnEscape={!mappingBusy}>
+        {mappingTarget && (
+          <DialogContent className="max-w-lg rounded-2xl p-5 sm:p-6">
+            <DialogHeader className="text-left">
+              <DialogTitle>{mappingTarget.cornerstone.status === 'needs_verification' ? 'Verify' : 'Match'} {mappingTarget.full_name} to payroll</DialogTitle>
+              <DialogDescription>{mappingTarget.cornerstone.status === 'needs_verification' ? 'This older link points to the payroll profile shown below. Confirm it is the same person; AIRE’s current permanent ID will be checked before the link is upgraded. This does not change their payroll status or pay settings.' : 'Choose an existing Cornerstone profile only after verifying it is the same person. This permanent match is used for future AIRE hours.'}</DialogDescription>
+            </DialogHeader>
+            {mappingTarget.cornerstone.status === 'needs_verification' ? (
+              <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-neutral-800">
+                Existing payroll profile: <span className="font-semibold">{mappingTarget.cornerstone.employee_name}</span>
+                {mappingTarget.cornerstone.employee_active === false && <span className="ml-2 text-warning-800">Inactive — this action will not reactivate them.</span>}
+              </div>
+            ) : (
+              <label className="mt-4 block text-sm font-semibold text-neutral-800">Existing payroll employee
+                <select aria-label="Existing payroll employee" value={mappingEmployeeId} onChange={(event) => setMappingEmployeeId(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal">
+                  <option value="">Choose a verified person</option>
+                  {employees.filter((row) => row.status !== 'terminated').map((row) => <option key={row.id} value={row.id}>{row.first_name} {row.last_name}</option>)}
+                </select>
+              </label>
+            )}
+            {mappingError && <p role="alert" className="mt-3 text-sm text-danger-700">{mappingError}</p>}
+            <DialogFooter className="mt-5 gap-2"><Button type="button" variant="outline" disabled={mappingBusy} onClick={() => setMappingTarget(null)}>Cancel</Button><Button type="button" disabled={!mappingEmployeeId || mappingBusy} onClick={() => void saveEmployeeMapping()}>{mappingBusy ? 'Matching…' : 'Confirm permanent match'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

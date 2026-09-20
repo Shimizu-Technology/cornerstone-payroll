@@ -135,7 +135,9 @@ module AirePayrollCalendar
 
     def base_row(person, entry, status:, regular:, overtime:, reason: nil)
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(person["source_user_uuid"])
-      mapping = mappings_by_uuid[uuid] || mappings_by_id[person["source_user_id"].to_s]
+      mapping = mappings_by_uuid[uuid]
+      legacy_mapping = mappings_by_id[person["source_user_id"].to_s] if mapping.nil?
+      mapping ||= legacy_mapping
       {
         employee_name: mapping&.employee&.full_name || person["display_name"].presence || "AIRE person ##{person['source_user_id']}",
         employee_id: mapping&.employee_id,
@@ -147,7 +149,7 @@ module AirePayrollCalendar
         regular_hours: regular.to_f,
         overtime_hours: overtime.to_f,
         reason: reason,
-        mapping_status: mapping ? (mapping.employee.active? ? "mapped" : "inactive") : "unmapped"
+        mapping_status: legacy_mapping ? "needs_verification" : (mapping ? (mapping.employee.active? ? "mapped" : "inactive") : "unmapped")
       }.compact
     end
 
@@ -156,7 +158,8 @@ module AirePayrollCalendar
     end
 
     def mappings_by_id
-      @mappings_by_id ||= mappings.index_by { |mapping| mapping.source_user_id.to_s }
+      @mappings_by_id ||= mappings.select { |mapping| mapping.source_user_uuid.blank? }
+        .index_by { |mapping| mapping.source_user_id.to_s }
     end
 
     def mappings
@@ -175,8 +178,9 @@ module AirePayrollCalendar
         totals[status] ||= { regular_hours: 0.0, overtime_hours: 0.0, entry_count: 0 }
       end
       totals.merge(
-        needs_attention: rows.any? { |row| row.fetch(:status) != "paid" || row[:mapping_status] == "unmapped" },
-        unmapped_count: rows.count { |row| row[:mapping_status] == "unmapped" }
+        needs_attention: rows.any? { |row| row.fetch(:status) != "paid" || row[:mapping_status].in?(%w[unmapped needs_verification]) },
+        unmapped_count: rows.count { |row| row[:mapping_status] == "unmapped" },
+        needs_verification_count: rows.count { |row| row[:mapping_status] == "needs_verification" }
       )
     end
   end

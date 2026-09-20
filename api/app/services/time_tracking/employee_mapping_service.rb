@@ -9,13 +9,24 @@ module TimeTracking
       @source = source
     end
 
-    def link!(source_user_id:, employee_id:)
+    def live_identity!(source_user_id:)
       source_user_id = source_user_id.to_s
-      employee = @pay_period.company.employees.find(employee_id)
       live = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_employees(
         page: 1, per_page: 1, employee_id: source_user_id
       ).fetch("employees", []).find { |person| person["id"].to_s == source_user_id }
       raise Error, "AIRE employee was not found; refresh the team list" unless live
+
+      source_uuid = TimeTrackingEmployeeMapping.normalize_uuid(live["payroll_integration_id"])
+      raise Error, "AIRE employee has no permanent payroll identity" if source_uuid.blank?
+
+      live
+    end
+
+    def link!(source_user_id:, employee_id:, live: nil)
+      source_user_id = source_user_id.to_s
+      employee = @pay_period.company.employees.find(employee_id)
+      live ||= live_identity!(source_user_id: source_user_id)
+      raise Error, "AIRE employee changed; refresh the team list" unless live["id"].to_s == source_user_id
 
       source_uuid = TimeTrackingEmployeeMapping.normalize_uuid(live["payroll_integration_id"])
       raise Error, "AIRE employee has no permanent payroll identity" if source_uuid.blank?

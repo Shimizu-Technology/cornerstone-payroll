@@ -163,6 +163,20 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     expect(result.fetch(:rows).map { |row| row[:source_time_entry_id] }).not_to include("999")
   end
 
+  it "calls out numeric-only legacy links without treating them as permanent employee matches" do
+    payload.fetch("employees").first["source_user_uuid"] = uuid
+    payload.fetch("export")["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    verified_event
+    TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+                                        employee: employee, source_user_id: "42", source_user_uuid: nil)
+
+    result = service.call
+
+    expect(result.dig(:summary, :needs_verification_count)).to be_positive
+    expect(result.fetch(:rows).select { |row| row[:source_kind] != "held" }.first.fetch(:mapping_status))
+      .to eq("needs_verification")
+  end
+
   it "shows bank settlement evidence for paid direct-deposit allocations" do
     verified_event
     item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
