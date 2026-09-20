@@ -730,6 +730,23 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay.to_f).to eq((without_direct_loan - 428.36).round(2))
     end
 
+    it "keeps Emma's legacy $250 installment separate from a direct loan deduction" do
+      payroll_item.payroll_adjustments = [
+        { "label" => "Loan - Installment", "amount" => 250.0,
+          "treatment" => "post_tax_deduction", "active" => true }
+      ]
+
+      described_class.for(employee, payroll_item).calculate
+      without_direct_loan = payroll_item.net_pay.to_f
+
+      payroll_item.loan_deduction = 428.36
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.post_tax_payroll_adjustments_total).to eq(250.0)
+      expect(payroll_item.loan_payment).to eq(428.36)
+      expect(payroll_item.net_pay.to_f).to eq((without_direct_loan - 428.36).round(2))
+    end
+
     it "keeps the direct and named loan totals consistent when deductions are capped by available pay" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
