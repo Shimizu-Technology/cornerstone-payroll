@@ -47,6 +47,9 @@ module Api
 
         # POST /api/v1/admin/employees
         def create
+          require_capability!(:manage_client_configuration) if params[:aire_link].present?
+          return if performed?
+          @aire_link_context = aire_link_context if params[:aire_link].present?
           attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(nil, attributes)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
@@ -63,6 +66,7 @@ module Api
               reason: w4_reason
             ).call!
             EmployeeDocumentReadiness.seed_new_hire!(employee: @employee, actor: current_user)
+            link_aire_identity!(@employee) if @aire_link_context
           end
 
           render json: {
@@ -81,6 +85,10 @@ module Api
           render json: { error: "Validation failed", details: { w4_effective_on: [ e.message ] } }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
+        rescue ActionController::ParameterMissing, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique,
+               TimeTracking::EmployeeMappingService::Error, TimeTrackingEmployeeMapping::IdentityConflict,
+               TimeTracking::Client::Error => e
+          render json: { error: "AIRE link failed; no employee was created", details: { aire_link: [ e.message ] } }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/employees/:id
@@ -196,6 +204,24 @@ module Api
         end
 
         private
+
+        def link_aire_identity!(employee)
+          service, source_user_id, live = @aire_link_context
+          service.link!(source_user_id: source_user_id, employee_id: employee.id, live: live)
+        end
+
+        def aire_link_context
+          link = params.require(:aire_link).permit(:pay_period_id, :source_user_id)
+          pay_period = current_company.pay_periods.find(link.fetch(:pay_period_id))
+          source = pay_period.aire_payroll_calendar_period&.time_tracking_source
+          unless source&.active? && source.company_id == current_company.id && source.source_type == "aire_services"
+            raise TimeTracking::EmployeeMappingService::Error,
+                  "This pay period has no active AIRE connection. Open its AIRE workspace and review the calendar first."
+          end
+          source_user_id = link.fetch(:source_user_id)
+          service = TimeTracking::EmployeeMappingService.new(pay_period: pay_period, source: source)
+          [ service, source_user_id, service.live_identity!(source_user_id: source_user_id) ]
+        end
 
         def audit_record
           @employee

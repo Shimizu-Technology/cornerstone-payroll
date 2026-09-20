@@ -26,7 +26,11 @@ const apiMocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   publish: vi.fn(),
   retry: vi.fn(),
+  mapEmployee: vi.fn(),
 }));
+const companyContext = vi.hoisted(() => ({ activeCompanyId: null as number | null }));
+
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => companyContext }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ isManager: true }),
@@ -50,6 +54,7 @@ vi.mock('@/services/api', () => ({
     finalizeAirePayrollPeriod: apiMocks.finalize,
     publishAireCalendar: apiMocks.publish,
     retryAireCalendarDelivery: apiMocks.retry,
+    mapAireEmployee: apiMocks.mapEmployee,
   },
 }));
 
@@ -246,6 +251,7 @@ function mockLoads(canCommand = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  companyContext.activeCompanyId = null;
   mockLoads();
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
@@ -610,5 +616,57 @@ describe('AirePayrollCockpit', () => {
       'AIRE was locked, but Cornerstone could not refresh: pay period reload failed'
     );
     expect(apiMocks.finalize).toHaveBeenCalledOnce();
+  });
+
+  it('shows an unmapped AIRE person as a payroll setup candidate and can match an existing profile', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.employees[0] = {
+      ...data.overview.employees[0],
+      first_name: 'Malia', last_name: 'Cruz',
+      cornerstone: { status: 'unmapped' },
+    };
+    companyContext.activeCompanyId = 1;
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.mapEmployee.mockResolvedValue({ mapping: { employee_id: 7 } });
+
+    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[
+      { id: 7, first_name: 'Malia', last_name: 'Cruz', status: 'active' } as import('@/types').Employee,
+    ]} onRefresh={vi.fn()} /></MemoryRouter>);
+    await screen.findByText('AIRE payroll workspace');
+    await user.click(screen.getByRole('button', { name: /Team 1/i }));
+
+    const setup = screen.getByRole('link', { name: 'Set up new payroll profile' });
+    expect(setup.getAttribute('href')).toContain('aire_pay_period_id=17&aire_staff_id=91');
+    await user.click(screen.getByRole('button', { name: 'Match existing' }));
+    fireEvent.change(screen.getByLabelText('Existing payroll employee'), { target: { value: '7' } });
+    await user.click(screen.getByRole('button', { name: 'Confirm permanent match' }));
+    await waitFor(() => expect(apiMocks.mapEmployee).toHaveBeenCalledWith(17, {
+      source_user_id: '91', employee_id: 7,
+    }));
+  });
+
+  it('shows an older numeric match as a fixed profile to verify without creating a duplicate employee', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.employees[0] = {
+      ...data.overview.employees[0],
+      cornerstone: { status: 'needs_verification', employee_id: 7, employee_name: 'Rei Cruz', employee_active: false },
+    };
+    companyContext.activeCompanyId = 1;
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.mapEmployee.mockResolvedValue({ mapping: { employee_id: 7 } });
+
+    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[]} onRefresh={vi.fn()} /></MemoryRouter>);
+    await screen.findByText('AIRE payroll workspace');
+    await user.click(screen.getByRole('button', { name: /Team 1/i }));
+    expect(screen.getByText('Verify older link')).not.toBeNull();
+    expect(screen.queryByRole('link', { name: 'Set up new payroll profile' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Verify permanent link' }));
+    expect(screen.getByText(/this action will not reactivate them/i)).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Confirm permanent match' }));
+    await waitFor(() => expect(apiMocks.mapEmployee).toHaveBeenCalledWith(17, {
+      source_user_id: '91', employee_id: 7,
+    }));
   });
 });

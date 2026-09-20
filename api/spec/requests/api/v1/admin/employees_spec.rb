@@ -375,6 +375,73 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       }
     end
 
+    context "when creating from an AIRE person" do
+      let!(:unrelated_source) { create(:time_tracking_source, company: company, source_type: "aire_services", active: false) }
+      let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+      let(:period) { create(:pay_period, company: company) }
+      let(:source_uuid) { SecureRandom.uuid }
+      let(:aire_params) do
+        valid_params.deep_merge(aire_link: { pay_period_id: period.id, source_user_id: "91" })
+      end
+
+      before do
+        create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+        client = instance_double(TimeTracking::Client)
+        allow(TimeTracking::Client).to receive(:new).and_return(client)
+        allow(client).to receive(:payroll_cockpit_employees).and_return(
+          "employees" => [ { "id" => "91", "payroll_integration_id" => source_uuid } ]
+        )
+      end
+
+      it "creates the payroll profile and permanent AIRE match together" do
+        expect { post "/api/v1/admin/employees", params: aire_params }
+          .to change(Employee, :count).by(1)
+          .and change(TimeTrackingEmployeeMapping, :count).by(1)
+
+        expect(response).to have_http_status(:created)
+        expect(TimeTrackingEmployeeMapping.last).to have_attributes(
+          employee_id: Employee.last.id, source_user_id: "91", source_user_uuid: source_uuid,
+          time_tracking_source_id: source.id
+        )
+      end
+
+      it "rolls back the employee if the AIRE person is already matched" do
+        existing = create(:employee, company: company)
+        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+                                            employee: existing, source_user_id: "91", source_user_uuid: source_uuid)
+
+        expect { post "/api/v1/admin/employees", params: aire_params }.not_to change(Employee, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("no employee was created")
+      end
+
+      it "does not link an AIRE person through another company's pay period" do
+        other_period = create(:pay_period, company: create(:company))
+        request_params = valid_params.deep_merge(aire_link: { pay_period_id: other_period.id, source_user_id: "91" })
+
+        expect { post "/api/v1/admin/employees", params: request_params }.not_to change(Employee, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      it "does not switch an older period to a replacement AIRE source" do
+        source.update!(active: false)
+        unrelated_source.update!(active: true)
+
+        expect { post "/api/v1/admin/employees", params: aire_params }.not_to change(Employee, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "aire_link")).to include(a_string_including("no active AIRE connection"))
+      end
+
+      it "does not create an AIRE-linked employee when the operator lacks mapping access" do
+        allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+        expect { post "/api/v1/admin/employees", params: aire_params }
+          .not_to change(Employee, :count)
+        expect(response).to have_http_status(:forbidden)
+        expect(TimeTrackingEmployeeMapping.count).to eq(0)
+      end
+    end
+
     context "with valid params" do
       it "creates an employee" do
         expect {

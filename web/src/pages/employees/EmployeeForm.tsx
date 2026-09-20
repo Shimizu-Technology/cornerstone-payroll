@@ -14,12 +14,12 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
-import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
+import type { AirePayrollCockpitEmployee, Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -232,6 +232,9 @@ export function EmployeeForm() {
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
+  const airePayPeriodId = Number(searchParams.get('aire_pay_period_id'));
+  const aireSourceUserId = searchParams.get('aire_staff_id') || '';
+  const hasAireOnboarding = !isEditing && !isClient && Number.isSafeInteger(airePayPeriodId) && airePayPeriodId > 0 && Boolean(aireSourceUserId);
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -258,6 +261,8 @@ export function EmployeeForm() {
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [aireCandidate, setAireCandidate] = useState<AirePayrollCockpitEmployee | null>(null);
+  const [aireCandidateLoading, setAireCandidateLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
@@ -524,6 +529,29 @@ export function EmployeeForm() {
       quickPayrollFieldRequestIdRef.current += 1;
     };
   }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
+
+  useEffect(() => {
+    if (!hasAireOnboarding) return;
+    let cancelled = false;
+    setAireCandidate(null);
+    setAireCandidateLoading(true);
+    void payPeriodsApi.airePayrollCockpit(airePayPeriodId, { employee_id: aireSourceUserId })
+      .then(({ aire_payroll_cockpit: cockpit }) => {
+        if (cancelled) return;
+        const person = cockpit.employees.find((row) => row.id === aireSourceUserId);
+        if (!person || !person.payroll_integration_id || person.cornerstone.status !== 'unmapped') {
+          setGeneralError('This AIRE person is already linked or is no longer available. Return to the AIRE team and refresh.');
+          return;
+        }
+        setAireCandidate(person);
+        setForm((current) => ({ ...current, first_name: person.first_name || '', last_name: person.last_name || '' }));
+      })
+      .catch((caught) => {
+        if (!cancelled) setGeneralError(caught instanceof Error ? caught.message : 'Could not load the AIRE person');
+      })
+      .finally(() => { if (!cancelled) setAireCandidateLoading(false); });
+    return () => { cancelled = true; };
+  }, [airePayPeriodId, aireSourceUserId, hasAireOnboarding]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -872,6 +900,10 @@ export function EmployeeForm() {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    if (hasAireOnboarding && !aireCandidate) {
+      setGeneralError('Refresh the AIRE person before creating a payroll profile.');
+      return;
+    }
     
     if (!validateForm()) return;
 
@@ -956,7 +988,10 @@ export function EmployeeForm() {
           portalNotice = response.message || null;
           portalChangeRequestId = response.change_request?.id || null;
         } else {
-          const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
+          const response = await employeesApi.create(
+            { ...employeePayload, company_id: companyId },
+            hasAireOnboarding ? { pay_period_id: airePayPeriodId, source_user_id: aireSourceUserId } : undefined
+          );
           savedEmployeeId = response.data.id;
         }
       }
@@ -1111,6 +1146,13 @@ export function EmployeeForm() {
       )}
 
       <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-6 pb-32 lg:p-8 lg:pb-32">
+        {hasAireOnboarding && (
+          <div className="mb-6 rounded-2xl border border-primary-200 bg-primary-50 p-4 text-primary-950">
+            <p className="font-semibold">Set up {aireCandidate?.full_name || 'this AIRE person'} for payroll</p>
+            <p className="mt-2 text-sm leading-6">AIRE supplied the identity and name. Verify the person, complete their pay rate, tax and payment details, then save. Cornerstone will link the two records together only if the whole setup succeeds. No one is added to a pay run automatically.</p>
+            {aireCandidateLoading && <p className="mt-2 text-sm">Loading AIRE identity…</p>}
+          </div>
+        )}
         {generalError && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
