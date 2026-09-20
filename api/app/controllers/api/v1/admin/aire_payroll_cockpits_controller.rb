@@ -48,6 +48,16 @@ module Api
           render_source_error(e)
         end
 
+        def post_lock_comparison
+          require_aire_source!
+          comparison = AirePayrollCalendar::PostLockComparison.new(pay_period: @pay_period, source: @source).call
+          render json: { comparison: comparison }
+        rescue AirePayrollCalendar::PostLockComparison::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def create_employee_mapping
           require_aire_source!
           mapping = TimeTracking::EmployeeMappingService.new(pay_period: @pay_period, source: @source).link!(
