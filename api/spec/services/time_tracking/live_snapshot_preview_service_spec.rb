@@ -122,6 +122,39 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
       .to raise_error(ArgumentError, /duplicate source line/)
   end
 
+  it "rejects employee or summary totals that disagree with exact source lines" do
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    malformed = response.deep_dup
+    malformed["employees"][0]["regular_hours"] = 9.0
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(malformed)
+    expect { described_class.new(pay_period: pay_period, source: source, actor: actor).call }
+      .to raise_error(ArgumentError, /inconsistent employee totals/)
+
+    malformed = response.deep_dup
+    malformed["summary"]["regular_hours"] = 9.0
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(malformed)
+    expect { described_class.new(pay_period: pay_period, source: source, actor: actor).call }
+      .to raise_error(ArgumentError, /inconsistent summary totals/)
+  end
+
+  it "rejects duplicate people or one time entry assigned to multiple people" do
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    malformed = response.deep_dup
+    other = malformed["employees"].first.deep_dup
+    other["source_user_id"] = "18"
+    malformed["employees"] << other
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(malformed)
+    expect { described_class.new(pay_period: pay_period, source: source, actor: actor).call }
+      .to raise_error(ArgumentError, /duplicate employee identity/)
+
+    other["source_user_uuid"] = SecureRandom.uuid
+    other["adjustments"][0]["line_key"] = "current:other"
+    expect { described_class.new(pay_period: pay_period, source: source, actor: actor).call }
+      .to raise_error(ArgumentError, /one time entry to multiple employees/)
+  end
+
   it "shows a negative AIRE correction as a blocking payroll review item" do
     correction = response.deep_dup
     adjustment = correction.fetch("employees").first.fetch("adjustments").first
