@@ -142,6 +142,27 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     expect(result.dig(:summary, "paid", :regular_hours)).to eq(0.0)
   end
 
+  it "does not count an unrelated different-payroll payment merely because its work date is in range" do
+    verified_event
+    other_period = create(:pay_period, :committed, company: company,
+                                                 start_date: Date.new(2026, 9, 16), end_date: Date.new(2026, 9, 30),
+                                                 pay_date: Date.new(2026, 10, 15))
+    item = create(:payroll_item, :with_check, company: company, pay_period: other_period,
+                                            employee: employee, hours_worked: 3)
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: other_period,
+      payroll_item: item, employee: employee, created_by: actor, source_user_uuid: uuid,
+      source_time_entry_id: "999", source_time_entry_version: 0,
+      original_work_date: Date.new(2026, 10, 5), regular_hours: 3, overtime_hours: 0,
+      reconciliation_note: "Unrelated earlier payroll payment", status: "issued"
+    )
+
+    result = service.call
+
+    expect(result.dig(:summary, "paid", :regular_hours)).to eq(0.0)
+    expect(result.fetch(:rows).map { |row| row[:source_time_entry_id] }).not_to include("999")
+  end
+
   it "refuses a final batch whose immutable checksum changed" do
     verified_event
     payload.fetch("summary")["total_hours"] = 9
