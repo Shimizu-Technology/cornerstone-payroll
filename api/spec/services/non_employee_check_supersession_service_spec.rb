@@ -18,6 +18,32 @@ RSpec.describe NonEmployeeCheckSupersessionService do
            payable_to: employee.full_name, amount: 183, check_number: "1045",
            printed_at: Time.current, payment_method: "check")
   end
+  let(:delivery) do
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+  end
+  let(:verified_facts) do
+    {
+      "standalone_payee" => check.payable_to,
+      "payroll_employee_id" => employee.id,
+      "payroll_employee_name" => employee.full_name,
+      "standalone_check_number" => check.check_number,
+      "payroll_check_number" => item.check_number,
+      "normalized_check_number" => "1045",
+      "standalone_amount" => check.amount.to_s,
+      "payroll_net_amount" => item.net_pay.to_s,
+      "delivery_event_id" => delivery.id,
+      "delivered_on" => delivery.effective_on.iso8601,
+      "delivery_evidence_type" => delivery.evidence_type,
+      "delivery_evidence_reference" => delivery.evidence_reference,
+      "recipient_verified" => true
+    }
+  end
+  let(:raw_record) do
+    { non_employee_check_id: check.id, payroll_item_id: item.id, company_id: company.id,
+      user_id: actor.id, reason: "One physical check verified against payroll item",
+      verified_facts: verified_facts, created_at: Time.current }
+  end
 
   before do
     allow(ENV).to receive(:fetch).and_call_original
@@ -120,6 +146,23 @@ RSpec.describe NonEmployeeCheckSupersessionService do
       non_employee_check_id: check.id, payroll_item_id: other_item.id, company_id: company.id,
       user_id: actor.id, reason: "This would incorrectly hide another company's check",
       verified_facts: { recipient_verified: true }, created_at: Time.current
-    } ]) }.to raise_error(ActiveRecord::StatementInvalid, /same company/)
+    } ]) }.to raise_error(ActiveRecord::StatementInvalid, /matching company/)
+  end
+
+  it "rejects a direct insert with missing verified facts" do
+    expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(verified_facts: {}) ]) }
+      .to raise_error(ActiveRecord::StatementInvalid, /recipient attestation/)
+  end
+
+  it "rejects a direct insert with a mismatched amount snapshot" do
+    expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(
+      verified_facts: verified_facts.merge("standalone_amount" => "999.00")
+    ) ]) }.to raise_error(ActiveRecord::StatementInvalid, /amount/)
+  end
+
+  it "rejects a direct insert without the matching delivery event" do
+    expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(
+      verified_facts: verified_facts.merge("delivery_event_id" => 0)
+    ) ]) }.to raise_error(ActiveRecord::StatementInvalid, /delivery evidence/)
   end
 end
