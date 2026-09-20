@@ -80,6 +80,7 @@ export function AirePostLockComparison({ payPeriodId }: { payPeriodId: number })
           })}
         </div>
         {comparison.summary.unmapped_count > 0 && <p className="mx-6 mb-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900">{comparison.summary.unmapped_count} final AIRE lines have no active Cornerstone employee match. Review the employee identity before processing them.</p>}
+        {Boolean(comparison.summary.needs_verification_count) && <p className="mx-6 mb-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900">{comparison.summary.needs_verification_count} final AIRE lines have older numeric-only employee links. Verify their permanent identity in the Team tab before importing future hours.</p>}
         <div className="border-t border-neutral-200 px-6 py-5">
           <h4 className="font-semibold text-neutral-950">Exact source lines</h4>
           <p className="mt-1 text-sm text-neutral-600">Unallocated and held lines are not new checks by themselves. AIRE subtracts linked payroll hours before creating the final batch, so these categories are not additive. Resolve approvals, later payment evidence, and corrections before routing hours into another run.</p>
@@ -88,7 +89,7 @@ export function AirePostLockComparison({ payPeriodId }: { payPeriodId: number })
               <thead className="sticky top-0 bg-neutral-100 text-xs uppercase tracking-wide text-neutral-600"><tr><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Work date / source</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Regular</th><th className="px-4 py-3">OT</th></tr></thead>
               <tbody className="divide-y divide-neutral-100">
                 {comparison.rows.map((row, index) => <tr key={`${row.status}-${row.source_time_entry_id}-${row.payroll_item_id || index}`}>
-                  <td className="px-4 py-3 font-medium text-neutral-950">{row.employee_name}{row.mapping_status === 'unmapped' && <span className="block text-xs text-warning-800">Employee match needed</span>}</td>
+                  <td className="px-4 py-3 font-medium text-neutral-950">{row.employee_name}{row.mapping_status === 'unmapped' && <span className="block text-xs text-warning-800">Employee match needed</span>}{row.mapping_status === 'needs_verification' && <span className="block text-xs text-warning-800">Permanent AIRE link needs verification</span>}</td>
                   <td className="px-4 py-3 text-neutral-700">{formatDate(row.work_date)}<span className="block text-xs text-neutral-500">AIRE entry {row.source_time_entry_id} · {row.source_kind.replaceAll('_', ' ')}{row.payment_reference ? ` · payment ${row.payment_reference}` : ''}</span></td>
                   <td className="px-4 py-3"><Badge variant={tones[row.status]}>{labels[row.status]}</Badge>{row.reason && <span className="mt-1 block text-xs text-neutral-500">{row.reason.replaceAll('_', ' ')}</span>}</td>
                   <td className="px-4 py-3 tabular-nums">{hours(row.regular_hours)}</td><td className="px-4 py-3 tabular-nums">{hours(row.overtime_hours)}</td>
