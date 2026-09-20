@@ -56,6 +56,7 @@ class CheckNumberCorrectionService
     raise Error, "Check number cannot exceed 9,999,999" if new_check_number.to_i > 9_999_999
     raise Error, "Check number corrections are only available for committed pay periods" unless pay_period.committed?
     raise Error, "Cannot change the number on a voided check" if payroll_item.voided?
+    raise Error, "This payroll check is linked to a duplicate software record and cannot be renumbered" if payroll_item.duplicate_check_linked?
     if %w[issued cleared replacement_required].include?(CheckReconciliationStatus.for(payroll_item))
       raise Error, "Check numbers cannot be changed after a check is issued or enters reconciliation"
     end

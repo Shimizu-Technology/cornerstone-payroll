@@ -53,6 +53,9 @@ class CheckReconciliationEventService
   end
 
   def validate_transition!(source, status)
+    if source.is_a?(NonEmployeeCheck) && source.non_employee_check_supersession
+      raise Error, "This software check is linked to a payroll check; reconcile the payroll check instead"
+    end
     raise Error, "Only paper checks can be reconciled" if source.is_a?(NonEmployeeCheck) && source.payment_method != "check"
     raise Error, "Check number is required" if source.check_number.blank?
     raise Error, "Effective date cannot be in the future" if parsed_effective_on > PayrollBusinessClock.today
