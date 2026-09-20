@@ -76,10 +76,10 @@ module AirePayrollCalendar
       final_entries = payable_entries + held_entries
       final_by_id = final_entries.group_by(&:first)
       source_entry_ids = final_by_id.keys
-      period_ids = TimeTrackingManualAllocation.where(time_tracking_source: source, pay_period: pay_period).select(:id)
-      scope = TimeTrackingManualAllocation.where(time_tracking_source: source)
-        .where(original_work_date: pay_period.start_date..pay_period.end_date)
-        .or(TimeTrackingManualAllocation.where(time_tracking_source: source, id: period_ids))
+      # A fully allocated entry can disappear from AIRE's residual final batch.
+      # Keep links from this payroll, plus exact final-batch entries paid in a
+      # different run; work-date-only matching would pull unrelated payments.
+      scope = TimeTrackingManualAllocation.where(time_tracking_source: source, pay_period: pay_period)
       if source_entry_ids.any?
         scope = scope.or(TimeTrackingManualAllocation.where(time_tracking_source: source,
                                                             source_time_entry_id: source_entry_ids.uniq))
@@ -107,7 +107,7 @@ module AirePayrollCalendar
           source_user_uuid: allocation.source_user_uuid,
           source_time_entry_id: allocation.source_time_entry_id.to_s,
           work_date: allocation.original_work_date.iso8601,
-          source_kind: "linked_payroll",
+          source_kind: final_identity.present? ? "linked_payroll" : "linked_payroll_not_in_final_batch",
           status: status,
           regular_hours: allocation.regular_hours.to_f,
           overtime_hours: allocation.overtime_hours.to_f,
@@ -115,9 +115,16 @@ module AirePayrollCalendar
           pay_period_id: allocation.pay_period_id,
           payment_method: allocation.payroll_item.effective_payment_delivery_method,
           payment_reference: (allocation.payroll_item.check_number if status == "paid"),
-          reason: ("AIRE entry identity or work date differs from its payroll link" if mismatched)
+          reason: allocation_reason(mismatched: mismatched, final_identity: final_identity)
         }.compact
       end
+    end
+
+    def allocation_reason(mismatched:, final_identity:)
+      return "AIRE entry identity or work date differs from its payroll link" if mismatched
+      return "Linked to this payroll; no remaining source line in the final AIRE batch" if final_identity.nil?
+
+      nil
     end
 
     def base_row(person, entry, status:, regular:, overtime:, reason: nil)
