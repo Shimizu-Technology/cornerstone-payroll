@@ -34,6 +34,30 @@ RSpec.describe TimeTracking::Client do
     end
     let(:external_id) { SecureRandom.uuid }
 
+    it "uses the one-time linked AIRE administrator for sensitive payroll reads" do
+      actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
+      probe = instance_double(described_class, payroll_account_link: { "account_link" => { "connected" => true } })
+      allow(described_class).to receive(:new).and_call_original
+      allow(described_class).to receive(:new).with(source).and_return(probe)
+
+      client = described_class.for_payroll_actor(source, actor: actor)
+
+      expect(client.instance_variable_get(:@actor)).to eq(actor)
+    end
+
+    it "uses an existing delegation when the administrator has not linked an account" do
+      actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
+      delegation = instance_double(TimeTrackingDelegation, token: "legacy-token")
+      allow(source).to receive(:delegation_for).with(actor).and_return(delegation)
+      probe = instance_double(described_class, payroll_account_link: { "account_link" => { "connected" => false } })
+      allow(described_class).to receive(:new).and_call_original
+      allow(described_class).to receive(:new).with(source).and_return(probe)
+
+      client = described_class.for_payroll_actor(source, actor: actor)
+
+      expect(client.instance_variable_get(:@delegation)).to eq(delegation)
+    end
+
     it "reads a manual payroll review by date range without requiring a published calendar ID" do
       actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
       review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")

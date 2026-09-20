@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3052,7 +3052,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_010000) do
     t.datetime "updated_at", null: false
     t.jsonb "warnings", default: [], null: false
     t.index ["applied_by_id"], name: "index_time_tracking_imports_on_applied_by_id"
-    t.index ["pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash"], name: "idx_time_tracking_imports_idempotency", unique: true
+    t.index ["pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash"], name: "idx_time_tracking_imports_idempotency", unique: true, where: "((status)::text <> 'superseded'::text)"
     t.index ["pay_period_id"], name: "index_time_tracking_imports_on_pay_period_id"
     t.index ["reconciled_by_id"], name: "index_time_tracking_imports_on_reconciled_by_id"
     t.index ["source_processing_status"], name: "index_time_tracking_imports_on_source_processing_status"

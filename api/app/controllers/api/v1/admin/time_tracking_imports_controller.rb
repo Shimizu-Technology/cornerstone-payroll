@@ -8,12 +8,15 @@ module Api
 
         def preview
           source = TimeTrackingSource.find_by!(id: params[:source_id], company_id: current_company_id)
-          import = TimeTracking::ImportPreviewService.new(
+          preview_options = {
             pay_period: @pay_period,
             source: source,
             start_date: params[:start_date],
             end_date: params[:end_date]
-          ).call
+          }
+          preview_options[:mode] = params[:mode] if params[:mode].present?
+          preview_options[:actor] = current_user if params[:mode] == "live"
+          import = TimeTracking::ImportPreviewService.new(**preview_options).call
 
           render json: { import: import_json(import) }
         rescue TimeTracking::Client::Error, ArgumentError => e
@@ -33,7 +36,8 @@ module Api
 
           status = results[:errors].any? ? :unprocessable_entity : :ok
           render json: { results: results, import: import_json(import.reload) }, status: status
-        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
+        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTracking::Client::Error,
+               TimeTrackingEmployeeMapping::IdentityConflict => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Time tracking import not found" }, status: :not_found
