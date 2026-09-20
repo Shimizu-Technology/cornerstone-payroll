@@ -117,7 +117,7 @@ module TimeTracking
         pay_date: allocation.pay_period.pay_date.iso8601,
         reason: allocation.reconciliation_note
       )
-      remote = result.fetch("manual_allocation")
+      remote = remote_allocation_acknowledgement!(result)
       allocation.with_lock do
         next unless allocation.status == "pending_commit"
 
@@ -172,13 +172,25 @@ module TimeTracking
     end
 
     def persist_remote_transition!(allocation, from, to, result)
-      remote = result.fetch("manual_allocation")
+      remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
       allocation.with_lock do
         next unless allocation.status == from
 
         allocation.update!(status: to, remote_version: remote.fetch("version"),
                            last_sync_error: nil, last_synced_at: Time.current)
       end
+    end
+
+    def remote_allocation_acknowledgement!(result, expected_id: nil)
+      remote = result.is_a?(Hash) ? result["manual_allocation"] : nil
+      id = remote.is_a?(Hash) ? remote["id"].to_s : ""
+      version = remote.is_a?(Hash) ? remote["version"] : nil
+      valid_version = version.is_a?(Integer) && version >= 0
+      unless id.match?(/\A[1-9]\d*\z/) && valid_version && (expected_id.nil? || id == expected_id.to_s)
+        raise TimeTracking::Client::Error, "AIRE returned an invalid manual allocation acknowledgement; retry the sync"
+      end
+
+      remote
     end
 
     def verify_live_source!(entry_id, uuid, version, work_date, regular, overtime)

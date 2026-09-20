@@ -166,7 +166,9 @@ module TimeTracking
       query = bounded_pagination(page, per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
       query[:active] = active unless active.nil?
       query[:employee_id] = normalized_cockpit_id(employee_id, label: "employee") if employee_id.present?
-      request_json(payroll_cockpit_uri("/employees", query), validate_source: false, surface_remote_error: true)
+      uri = payroll_cockpit_uri("/employees", query)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, surface_remote_error: true)
     end
 
     def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
