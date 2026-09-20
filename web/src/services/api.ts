@@ -2079,6 +2079,7 @@ export interface PayrollSourceSummary {
     gross_pay_delta: number;
     net_pay_delta: number;
   };
+  source_overlap?: { employee_pay_date_count: number };
   historical_ytd_bridge: {
     applied: boolean;
     tax_years: number[];
@@ -2271,7 +2272,7 @@ export interface YtdSummaryReport {
       source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
       classification_note: string;
     };
-    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; treatment: string }>;
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
   };
 }
 

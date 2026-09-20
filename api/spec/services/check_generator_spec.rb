@@ -125,6 +125,21 @@ RSpec.describe CheckGenerator do
       expect(text).to include("40.00")
     end
 
+    it "keeps the full names of distinct loan fields and other pay on the stub" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+        kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+      payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+        label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+        category: "loan", amount: BigDecimal("250"), source: "employee_default")
+      payroll_item.update!(custom_earnings: [ { "label" => "Auto Loan Reimbursement", "amount" => 121.0 } ])
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Loan - Madela Severin")
+      expect(text).to include("Auto Loan Reimbursement")
+      expect(text).not_to include("Auto Loan Reimburs..")
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,
