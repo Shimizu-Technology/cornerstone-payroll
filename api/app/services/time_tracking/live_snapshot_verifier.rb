@@ -2,10 +2,10 @@
 
 module TimeTracking
   class LiveSnapshotVerifier
-    def self.call!(import:)
+    def self.call!(import:, actor:)
       raise ArgumentError, "This is not a pre-pay AIRE snapshot" unless import.live_snapshot?
 
-      latest = Client.new(import.time_tracking_source).payroll_cockpit_manual_review(
+      latest = Client.for_payroll_actor(import.time_tracking_source, actor: actor).payroll_cockpit_manual_review(
         start_date: import.start_date.iso8601,
         end_date: import.end_date.iso8601,
         external_pay_period_id: import.pay_period_id
