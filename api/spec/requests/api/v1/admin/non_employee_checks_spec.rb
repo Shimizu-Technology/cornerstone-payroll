@@ -22,6 +22,10 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
   end
 
   describe "linking a duplicate standalone check to payroll" do
+    before do
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return(company.id.to_s)
+    end
     let(:employee) { create(:employee, company: company) }
     let(:committed_period) { create(:pay_period, :committed, company: company) }
     let(:payroll_item) do
@@ -73,6 +77,19 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
                      reason: "One physical check verified against the payroll record" }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(NonEmployeeCheckSupersession.count).to eq(0)
+    end
+
+    it "rejects live-company reconciliation unless that company is enabled" do
+      payroll_item
+      create(:check_event, payroll_item: payroll_item, user: admin_user, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+      allow(ENV).to receive(:fetch).with("LIVE_CHECK_SUPERSESSION_APPROVED_COMPANY_IDS", "").and_return("")
+      post "/api/v1/admin/non_employee_checks/#{standalone_check.id}/supersede_with_payroll_item",
+           params: { payroll_item_id: payroll_item.id,
+                     reason: "One physical check verified against the payroll record",
+                     recipient_verified: true }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("disabled")
     end
 
     it "requires configuration-management access for the irreversible link" do

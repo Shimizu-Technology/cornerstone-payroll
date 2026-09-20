@@ -6,8 +6,10 @@ class NonEmployeeCheckSupersession < ApplicationRecord
   belongs_to :non_employee_check
   belongs_to :payroll_item
   belongs_to :user
+  belongs_to :company
 
   validates :reason, presence: true, length: { minimum: 20 }
+  validates :verified_facts, presence: true
   validate :same_company
 
   before_update :prevent_mutation
@@ -17,7 +19,8 @@ class NonEmployeeCheckSupersession < ApplicationRecord
 
   def same_company
     return if non_employee_check.blank? || payroll_item.blank?
-    return if non_employee_check.company_id == payroll_item.company_id &&
+    return if company_id == non_employee_check.company_id &&
+              non_employee_check.company_id == payroll_item.company_id &&
               user&.organization_id == non_employee_check.company.organization_id
 
     errors.add(:base, "The duplicate check, payroll item, and reviewer must belong to the same company")
