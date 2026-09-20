@@ -15,6 +15,7 @@ module Api
             end_date: params[:end_date]
           }
           preview_options[:mode] = params[:mode] if params[:mode].present?
+          preview_options[:actor] = current_user if params[:mode] == "live"
           import = TimeTracking::ImportPreviewService.new(**preview_options).call
 
           render json: { import: import_json(import) }

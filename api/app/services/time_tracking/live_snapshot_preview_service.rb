@@ -7,12 +7,17 @@ module TimeTracking
   class LiveSnapshotPreviewService < BatchImportPreviewService
     VALIDATION_VERSION = "aire_live_snapshot_v1"
 
+    def initialize(pay_period:, source:, start_date: nil, end_date: nil, actor:)
+      super(pay_period: pay_period, source: source, start_date: start_date, end_date: end_date)
+      @actor = actor
+    end
+
     def call
       validate_request!
       raise ArgumentError, "Capture live AIRE hours before committing payroll" unless pay_period.can_edit?
 
       workweek = legal_workweek!
-      source_response = Client.new(source).payroll_cockpit_manual_review(
+      source_response = Client.for_payroll_actor(source, actor: @actor).payroll_cockpit_manual_review(
         start_date: start_date.iso8601,
         end_date: end_date.iso8601,
         external_pay_period_id: pay_period.id

@@ -57,7 +57,7 @@ class PayPeriodLifecycleService
 
   def commit!
     pay_period.time_tracking_imports.where(status: "applied").find_each do |import|
-      TimeTracking::LiveSnapshotVerifier.call!(import: import) if import.live_snapshot?
+      TimeTracking::LiveSnapshotVerifier.call!(import: import, actor: actor) if import.live_snapshot?
     end
     acknowledgement_ids = { batch: [], entries: [] }
     imported_entry_link_ids = []

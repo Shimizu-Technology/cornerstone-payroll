@@ -23,6 +23,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
                                base_url: "https://aire.example.com", shared_secret: "secret")
   end
   let(:uuid) { "c7fdfadb-4221-4fca-9bea-ab897fc71465" }
+  let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) do
     create(:employee, company: company, department: create(:department, company: company),
                       email: "pilot@example.com", pay_rate: 25)
@@ -60,6 +61,9 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
   end
 
   before do
+    allow(TimeTracking::Client).to receive(:for_payroll_actor) do |linked_source, actor:|
+      TimeTracking::Client.new(linked_source)
+    end
     employee.employee_wage_rates.create!(label: "Regular", rate: 25, is_primary: true, active: true)
     TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
                                         employee: employee, source_user_id: "17",
@@ -71,7 +75,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(response)
 
-    import = described_class.new(pay_period: pay_period, source: source).call
+    import = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     row = import.processed_payload.fetch("rows").first
 
     expect(import).to be_live_snapshot
@@ -94,12 +98,12 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(response)
     other_employee = create(:employee, company: company, department: employee.department)
-    import = described_class.new(pay_period: pay_period, source: source).call
+    import = described_class.new(pay_period: pay_period, source: source, actor: actor).call
 
     result = TimeTracking::ApplyImportService.new(
       import: import,
       mappings: [ { source_user_id: "17", employee_id: other_employee.id } ],
-      applied_by: create(:user, company: company)
+      applied_by: actor
     ).call
 
     expect(result.fetch(:errors).first.fetch(:error)).to include("permanent employee link")
@@ -114,7 +118,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(duplicate)
 
-    expect { described_class.new(pay_period: pay_period, source: source).call }
+    expect { described_class.new(pay_period: pay_period, source: source, actor: actor).call }
       .to raise_error(ArgumentError, /duplicate source line/)
   end
 
@@ -131,7 +135,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(correction)
 
-    import = described_class.new(pay_period: pay_period, source: source).call
+    import = described_class.new(pay_period: pay_period, source: source, actor: actor).call
 
     expect(import.processed_payload.fetch("ready")).to be(false)
     expect(import.processed_payload.dig("rows", 0, "warnings").pluck("code")).to include("negative_correction")
@@ -142,9 +146,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review) { current_response }
-    actor = create(:user, company: company)
-
-    first = described_class.new(pay_period: pay_period, source: source).call
+    first = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     first_result = TimeTracking::ApplyImportService.new(import: first, mappings: [], applied_by: actor).call
     expect(first_result.fetch(:errors)).to be_empty
     item = pay_period.payroll_items.find_by!(employee: employee)
@@ -161,10 +163,10 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     current_response.fetch("summary")["total_hours"] = 6.0
     current_response.fetch("summary")["regular_hours"] = 6.0
 
-    expect { TimeTracking::LiveSnapshotVerifier.call!(import: first) }
+    expect { TimeTracking::LiveSnapshotVerifier.call!(import: first, actor: actor) }
       .to raise_error(ArgumentError, /AIRE hours changed/)
 
-    replacement = described_class.new(pay_period: pay_period, source: source).call
+    replacement = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     result = TimeTracking::ApplyImportService.new(import: replacement, mappings: [], applied_by: actor).call
 
     expect(result.fetch(:errors)).to be_empty
@@ -175,7 +177,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     expect(replacement.time_tracking_entry_allocations.sum(:regular_hours)).to eq(6)
 
     current_response = response.deep_dup.merge("generated_at" => "2026-09-14T03:00:00Z")
-    restored = described_class.new(pay_period: pay_period, source: source).call
+    restored = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     expect(restored.id).not_to eq(first.id)
     restored_result = TimeTracking::ApplyImportService.new(import: restored, mappings: [], applied_by: actor).call
     expect(restored_result.fetch(:errors)).to be_empty
@@ -187,8 +189,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(response)
-    actor = create(:user, company: company)
-    import = described_class.new(pay_period: pay_period, source: source).call
+    import = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     result = TimeTracking::ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
     expect(result.fetch(:errors)).to be_empty
 

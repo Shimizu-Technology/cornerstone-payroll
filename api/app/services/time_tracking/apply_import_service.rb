@@ -14,7 +14,7 @@ module TimeTracking
     end
 
     def call
-      LiveSnapshotVerifier.call!(import: @import) if live_snapshot?
+      LiveSnapshotVerifier.call!(import: @import, actor: @applied_by) if live_snapshot?
       acknowledgement_ids = { batch: [], entries: [] }
       results = @pay_period.with_lock { apply_locked!(acknowledgement_ids) }
       AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?

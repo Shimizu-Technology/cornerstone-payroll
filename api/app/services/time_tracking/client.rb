@@ -20,6 +20,25 @@ module TimeTracking
       app.aireservicesguam.com
     ].freeze
 
+    def self.for_payroll_actor(source, actor:)
+      raise Error, "Sign in as a payroll administrator before reviewing AIRE hours" unless actor
+
+      delegation = source.delegation_for(actor)
+      connected = begin
+        new(source).payroll_account_link(external_actor_id: actor.id)
+          .dig("account_link", "connected") == true
+      rescue Error
+        false
+      end
+      if connected
+        new(source, actor: actor)
+      elsif delegation.present?
+        new(source, delegation: delegation)
+      else
+        raise Error, "Connect your AIRE administrator account in payroll before reviewing AIRE hours"
+      end
+    end
+
     def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
       @delegation = delegation
