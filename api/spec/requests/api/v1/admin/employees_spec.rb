@@ -420,6 +420,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect { post "/api/v1/admin/employees", params: request_params }.not_to change(Employee, :count)
         expect(response).to have_http_status(:unprocessable_entity)
       end
+
+      it "does not create an AIRE-linked employee when the operator lacks mapping access" do
+        allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+        expect { post "/api/v1/admin/employees", params: aire_params }
+          .not_to change(Employee, :count)
+        expect(response).to have_http_status(:forbidden)
+        expect(TimeTrackingEmployeeMapping.count).to eq(0)
+      end
     end
 
     context "with valid params" do
