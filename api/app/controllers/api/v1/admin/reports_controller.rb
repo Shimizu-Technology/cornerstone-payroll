@@ -1916,6 +1916,7 @@ module Api
         def payroll_period_employee_row(employee, items, historical_paychecks = [], historical_adjustments = [], unified: nil)
           custom_totals = custom_ytd_totals_for_items(items)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+          retirement_totals = payroll_summary_retirement_totals(items)
 
           row = {
             employee_id: employee.id,
@@ -1940,11 +1941,11 @@ module Api
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: items.sum { |item| item.retirement_payment.to_f },
-            roth_retirement: items.sum { |item| item.roth_retirement_payment.to_f },
+            retirement: retirement_totals[:retirement].to_f,
+            roth_retirement: retirement_totals[:roth_retirement].to_f,
             tips: items.sum { |item| item.reported_tips.to_f },
             tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
-            bonus: items.sum { |item| item.bonus.to_f },
+            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -1963,6 +1964,7 @@ module Api
 
         def payroll_period_company_totals(items, period, historical_paychecks = [], historical_adjustments = [], unified: nil)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+          retirement_totals = payroll_summary_retirement_totals(items)
 
           row = {
             year: period.year,
@@ -1972,7 +1974,7 @@ module Api
             gross_pay: items.sum { |item| item.gross_pay.to_f },
             total_hours: items.sum { |item| item.hours_worked.to_f },
             total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
-            bonus: items.sum { |item| item.bonus.to_f },
+            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -1989,8 +1991,8 @@ module Api
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: items.sum { |item| item.retirement_payment.to_f },
-            roth_retirement: items.sum { |item| item.roth_retirement_payment.to_f },
+            retirement: retirement_totals[:retirement].to_f,
+            roth_retirement: retirement_totals[:roth_retirement].to_f,
             total_deductions: items.sum { |item| item.total_deductions.to_f },
             custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
             net_pay: items.sum { |item| item.net_pay.to_f },
@@ -2547,6 +2549,30 @@ module Api
 
         def straight_loan_amount(item)
           BigDecimal(item[:loan_deduction].to_s.presence || "0")
+        end
+
+        def payroll_summary_retirement_totals(items)
+          items.each_with_object({ retirement: BigDecimal("0"), roth_retirement: BigDecimal("0") }) do |item, totals|
+            PayrollRetirementTotals.for_item(item).each { |key, amount| totals[key] += amount }
+          end
+        end
+
+        # These saved additions are independent of the one-time bonus column.
+        # Do not use payroll_item_earnings here: it can mirror flexible fields.
+        def payroll_summary_bonus_amount(item)
+          bonus_label = /\bbonus(?:es)?\b/i
+          amount = item.bonus.to_d
+          amount += Array(item.custom_earnings).sum(BigDecimal("0")) do |entry|
+            entry["label"].to_s.match?(bonus_label) ? BigDecimal(entry["amount"].to_s.presence || "0") : BigDecimal("0")
+          end
+          amount += item.active_payroll_adjustments.sum(BigDecimal("0")) do |entry|
+            entry["treatment"] == "taxable_addition" && entry["label"].to_s.match?(bonus_label) ?
+              BigDecimal(entry["amount"].to_s.presence || "0") : BigDecimal("0")
+          end
+          amount + item.payroll_item_field_entries.active.sum(BigDecimal("0")) do |entry|
+            entry.kind == "addition" && entry.tax_treatment == "taxable_addition" && entry.label.match?(bonus_label) ?
+              entry.amount.to_d : BigDecimal("0")
+          end
         end
 
         def installment_loan_amount(item)
@@ -3704,12 +3730,12 @@ module Api
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
             "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
-            "Tips", "Tips Paid Out", "Bonus", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
+            "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
             "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
             "401(k) After Tax Label in Source Pre-Tax Bucket",
             "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
-          ] + component_columns.map { |column| column[:label] } + provisional_column ]
+          ] + component_columns.map { |column| "Breakdown Already Included - #{column[:label]}" } + provisional_column ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
@@ -3730,7 +3756,11 @@ module Api
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),
-            report_info_sheet(report, title: "Payroll Summary by Period")
+            report_info_sheet(
+              report,
+              title: "Payroll Summary by Period",
+              description: "Bonus is included in gross. Retirement and loan payments are included in deductions. Payroll field and source breakdown columns are views of these totals, not additional money."
+            )
           ]
         end
 

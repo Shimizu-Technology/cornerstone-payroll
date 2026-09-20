@@ -1299,6 +1299,8 @@ export function YtdSummaryPanel() {
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
   const [includeZeroPay, setIncludeZeroPay] = useState(true);
+  const [showCategoryColumns, setShowCategoryColumns] = useState(false);
+  const [showSourceColumns, setShowSourceColumns] = useState(false);
   const [sortBy, setSortBy] = useState<NonNullable<YtdSummaryParams['sort_by']>>('name');
   const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
@@ -1578,40 +1580,68 @@ export function YtdSummaryPanel() {
               {report.employee_visibility && !report.employee_visibility.include_zero_pay && (
                 <p className="text-xs text-gray-600">Only employee rows are filtered; company totals still include all payroll activity.</p>
               )}
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700" role="note">
+                Bonus is part of gross pay. Retirement and loan payments are part of deductions. Payroll field and source amounts below show where those same totals came from; do not add the breakdowns to the totals again.
+              </p>
               {report.company_totals && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-                  <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
-                  <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
-                  <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
-                  <TotalBox label="Total Bonus" value={report.company_totals.bonus ?? 0} />
-                  <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
-                  <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
-                  <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
-                  <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
-                  <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
-                  <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
-                  <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
-                  <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
-                  <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
-                  <TotalBox label="Installment Loans" value={report.company_totals.installment_loan_payments ?? 0} />
-                  <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
-                  <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
-                  <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
-                  <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
-                  <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
-                  <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
-                  <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
+                <div className="space-y-5" aria-label="Payroll totals and included breakdowns">
+                  <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
+                    <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
+                    <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
+                    <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
+                  </div>
+                  <div>
+                    <h3 className="mb-3 text-sm font-semibold text-slate-800">Included in those totals</h3>
+                    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                      <TotalBox label="Bonus (in gross)" value={report.company_totals.bonus ?? 0} />
+                      <TotalBox label="Pre-tax 401(k) (in deductions)" value={report.company_totals.retirement} />
+                      <TotalBox label="Roth 401(k) (in deductions)" value={report.company_totals.roth_retirement ?? 0} />
+                      <TotalBox label="All loan deductions (in deductions)" value={Number(report.company_totals.straight_loan_deductions ?? 0) + Number(report.company_totals.installment_loan_payments ?? 0) + Number(report.company_totals.historical_loan_deductions_unclassified ?? 0)} />
+                    </div>
+                  </div>
+                  <details className="rounded-xl border border-slate-200 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-slate-800">More payroll categories and field reconciliation</summary>
+                    <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                      <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
+                      <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
+                      <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                      <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
+                      <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
+                      <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
+                      <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
+                      <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                      <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
+                      <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
+                      <TotalBox label="Other native loans (named or recurring)" value={report.company_totals.installment_loan_payments ?? 0} />
+                      <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
+                      <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
+                      <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
+                      <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
+                    </div>
+                    <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
+                  </details>
                 </div>
               )}
-              <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Employee Detail</CardTitle>
+              <CardDescription>Category and source columns are views of the same saved paychecks, not extra amounts to add.</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
+              <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={showCategoryColumns} onChange={(event) => setShowCategoryColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
+                Show deduction and earnings categories
+              </label>
+              {(report.component_columns?.length ?? 0) > 0 && (
+                <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={showSourceColumns} onChange={(event) => setShowSourceColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
+                  Show source breakdown columns
+                </label>
+              )}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500">
@@ -1621,6 +1651,7 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Hours</th>
                     <th className="py-2 pr-4 text-right font-medium">OT Hours</th>
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    {showCategoryColumns && <>
                     <th className="py-2 pr-4 text-right font-medium">Bonus</th>
                     <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
@@ -1631,15 +1662,16 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
                     <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
-                    <th className="py-2 pr-4 text-right font-medium">Installment Loan</th>
+                    <th className="py-2 pr-4 text-right font-medium">Other Native Loans</th>
                     <th className="py-2 pr-4 text-right font-medium">Historical Loans (unclassified)</th>
                     <th className="py-2 pr-4 text-right font-medium">Health Insurance</th>
                     <th className="py-2 pr-4 text-right font-medium">401(k) After Tax (source pre-tax)</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
+                    </>}
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
-                    {(report.component_columns || []).map((column) => (
+                    {showSourceColumns && (report.component_columns || []).map((column) => (
                       <th key={column.key} title={column.label} className="min-w-36 py-2 pr-4 text-right font-medium">{column.short_label}<span className="block text-xs font-normal">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span></th>
                     ))}
                   </tr>
@@ -1657,6 +1689,7 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_overtime_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      {showCategoryColumns && <>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.bonus ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_taxable_additions_total ?? 0) + Number(emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
@@ -1673,16 +1706,17 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
+                      </>}
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
-                      {(report.component_columns || []).map((column) => (
+                      {showSourceColumns && (report.component_columns || []).map((column) => (
                         <td key={column.key} className="py-2 pr-4 text-right tabular-nums">{emp.component_values?.[column.key] == null ? '—' : fmt(emp.component_values[column.key])}</td>
                       ))}
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={25 + (report.component_columns?.length || 0)} className="py-6 text-center text-gray-400">
+                      <td colSpan={8 + (showCategoryColumns ? 16 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
