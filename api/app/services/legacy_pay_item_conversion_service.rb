@@ -20,6 +20,8 @@ class LegacyPayItemConversionService
     Employee.transaction do
       employee.lock!
       entries, index, legacy_item = find_source!
+      @first_payday = parse_assignment_date!(:start_date)
+      @last_payday = parse_assignment_date!(:end_date)
       ensure_open_payroll_can_refresh!(legacy_item)
       treatment = source_kind == "custom_earning" ? "taxable_addition" : legacy_item.fetch("treatment")
       kind = treatment.end_with?("_addition") ? "addition" : "deduction"
@@ -141,11 +143,15 @@ class LegacyPayItemConversionService
   end
 
   def assignment_applies_on?(pay_date)
-    start_date = assignment_attributes[:start_date].presence && Date.parse(assignment_attributes[:start_date].to_s)
-    end_date = assignment_attributes[:end_date].presence && Date.parse(assignment_attributes[:end_date].to_s)
-    (start_date.nil? || start_date <= pay_date) && (end_date.nil? || pay_date <= end_date)
-  rescue ArgumentError
-    # The assignment validation will return the date error later in the same transaction.
-    false
+    (@first_payday.nil? || @first_payday <= pay_date) && (@last_payday.nil? || pay_date <= @last_payday)
+  end
+
+  def parse_assignment_date!(key)
+    value = assignment_attributes[key]
+    return nil if value.blank?
+
+    Date.iso8601(value.to_s)
+  rescue Date::Error
+    raise InvalidSource, "Enter a valid #{key == :start_date ? 'first' : 'last'} payday"
   end
 end
