@@ -56,7 +56,11 @@ class PayPeriodLifecycleService
   end
 
   def commit!
+    pay_period.time_tracking_imports.where(status: "applied").find_each do |import|
+      TimeTracking::LiveSnapshotVerifier.call!(import: import) if import.live_snapshot?
+    end
     acknowledgement_ids = { batch: [], entries: [] }
+    imported_entry_link_ids = []
     with_financial_pay_period_lock do
       validate_current_intake!
       unless pay_period.approved?
@@ -93,6 +97,7 @@ class PayPeriodLifecycleService
       apply_ytd_and_loan_effects!(committed_items)
       PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
       assign_check_numbers!(committed_items)
+      imported_entry_link_ids.concat(TimeTracking::ImportedEntryLinker.new(pay_period: pay_period, actor: actor).call!)
       create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
       tax_sync_enabled = pay_period.prepare_tax_sync_if_configured!
       record_correction_commit! if pay_period.correction_run?
@@ -104,6 +109,7 @@ class PayPeriodLifecycleService
 
     AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
     AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
+    imported_entry_link_ids.uniq.each { |id| AireManualAllocationSyncJob.perform_later(id) }
 
     pay_period
   end
