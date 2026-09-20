@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_071000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_072000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -281,6 +281,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_071000) do
     t.check_constraint "amount > 0::numeric", name: "check_reconciliation_events_positive_amount"
     t.check_constraint "event_type::text = ANY (ARRAY['cleared'::character varying, 'clearing_reversed'::character varying, 'replacement_required'::character varying]::text[])", name: "check_reconciliation_events_event_type"
     t.check_constraint "evidence_type IS NULL OR (evidence_type::text = ANY (ARRAY['bank_statement'::character varying, 'bank_portal'::character varying, 'accountant_review'::character varying, 'payee_confirmation'::character varying, 'other'::character varying]::text[]))", name: "check_reconciliation_events_evidence_type"
+  end
+
+  create_table "check_supersession_rollout_approvals", force: :cascade do |t|
+    t.bigint "approved_by_id", null: false
+    t.datetime "approved_at", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "reason", null: false
+    t.index ["approved_by_id"], name: "index_check_supersession_rollout_approvals_on_approved_by_id"
+    t.index ["company_id"], name: "index_check_supersession_rollout_approvals_on_company_id", unique: true
   end
 
   create_table "check_signoff_sheets", force: :cascade do |t|
@@ -3303,6 +3313,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_071000) do
   add_foreign_key "check_reconciliation_events", "pay_periods", on_delete: :restrict
   add_foreign_key "check_reconciliation_events", "payroll_items", on_delete: :restrict
   add_foreign_key "check_reconciliation_events", "users", column: "recorded_by_id", on_delete: :restrict
+  add_foreign_key "check_supersession_rollout_approvals", "companies"
+  add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
@@ -3715,6 +3727,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_071000) do
     CREATE TRIGGER validate_non_employee_check_supersession_tenant_on_insert
     BEFORE INSERT ON non_employee_check_supersessions
     FOR EACH ROW EXECUTE FUNCTION validate_non_employee_check_supersession_tenant();
+
+    CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'Check supersession rollout approvals are append-only';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
+        WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
+          AND u.organization_id = c.organization_id AND u.active = true
+          AND u.role IN (5, 6)
+      ) OR length(btrim(NEW.reason)) < 20 THEN
+        RAISE EXCEPTION 'Live-check rollout approval requires an active organization administrator and documented reason';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_check_supersession_rollout_approvals ON check_supersession_rollout_approvals;
+    CREATE TRIGGER protect_check_supersession_rollout_approvals
+    BEFORE INSERT OR UPDATE OR DELETE ON check_supersession_rollout_approvals
+    FOR EACH ROW EXECUTE FUNCTION protect_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.user_id
+        WHERE c.id = NEW.company_id AND u.organization_id = c.organization_id
+          AND u.active = true AND u.role IN (5, 6, 0, 1)
+      ) THEN
+        RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
+      END IF;
+      IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
+        AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
+        RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS enforce_check_supersession_rollout_approval_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER enforce_check_supersession_rollout_approval_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION enforce_check_supersession_rollout_approval();
 
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
