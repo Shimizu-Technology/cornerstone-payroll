@@ -48,6 +48,7 @@ module Api
         # POST /api/v1/admin/employees
         def create
           require_capability!(:manage_client_configuration) if params[:aire_link].present?
+          return if performed?
           @aire_link_context = aire_link_context if params[:aire_link].present?
           attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(nil, attributes)
