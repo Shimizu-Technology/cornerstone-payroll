@@ -8,13 +8,14 @@ module Api
 
         def preview
           source = TimeTrackingSource.find_by!(id: params[:source_id], company_id: current_company_id)
-          import = TimeTracking::ImportPreviewService.new(
+          preview_options = {
             pay_period: @pay_period,
             source: source,
             start_date: params[:start_date],
-            end_date: params[:end_date],
-            mode: params[:mode]
-          ).call
+            end_date: params[:end_date]
+          }
+          preview_options[:mode] = params[:mode] if params[:mode].present?
+          import = TimeTracking::ImportPreviewService.new(**preview_options).call
 
           render json: { import: import_json(import) }
         rescue TimeTracking::Client::Error, ArgumentError => e

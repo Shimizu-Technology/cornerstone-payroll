@@ -57,7 +57,9 @@ module TimeTracking
           include_value = override.key?(:include) || override.key?("include") ? (override[:include] || override["include"]) : true
           include_row = ActiveModel::Type::Boolean.new.cast(include_value)
           if exact_aire_import? && !include_row
-            results[:errors] << { source_user_id: source_user_id, error: "AIRE payable rows cannot be skipped. Resolve the employee setup before importing." }
+            error = finalized_batch? ? "Finalized AIRE batch rows cannot be skipped" :
+              "AIRE payable rows cannot be skipped. Resolve the employee setup before importing."
+            results[:errors] << { source_user_id: source_user_id, error: error }
             next
           end
           unless include_row
@@ -68,6 +70,14 @@ module TimeTracking
           employee_id = (override[:employee_id] || override["employee_id"] || row["employee_id"]).presence
           if employee_id.blank?
             results[:errors] << { source_user_id: source_user_id, error: "Employee mapping required" }
+            next
+          end
+          if exact_aire_import? && row["match_method"] == "saved_mapping" &&
+             row["employee_id"].present? && row["employee_id"].to_i != employee_id.to_i
+            results[:errors] << {
+              source_user_id: source_user_id,
+              error: "This AIRE person is already linked to another payroll employee. Review the permanent employee link first."
+            }
             next
           end
 

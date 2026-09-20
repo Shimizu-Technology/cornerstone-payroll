@@ -761,9 +761,11 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2">
                     <Clock3 className="h-4 w-4 text-neutral-600" aria-hidden="true" />
-                    <h3 className="font-semibold text-neutral-950">Tracked but not paid in this batch</h3>
+                    <h3 className="font-semibold text-neutral-950">{isLiveAireSnapshot ? 'Tracked but not included in this payroll' : 'Tracked but not paid in this batch'}</h3>
                   </div>
-                  <p className="mt-2 text-sm text-neutral-600">These entries stay in AIRE. A later approval can appear as a carryover in a future finalized batch.</p>
+                  <p className="mt-2 text-sm text-neutral-600">{isLiveAireSnapshot
+                    ? 'These held entries stay in AIRE and are not added to this paycheck. Once approved, review them for a later payroll.'
+                    : 'These entries stay in AIRE. A later approval can appear as a carryover in a future finalized batch.'}</p>
                   <div className="mt-4 grid gap-2 lg:grid-cols-2">
                     {exclusions.map((exclusion) => (
                       <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -871,7 +873,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceIsAire ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>
+                {loading ? 'Retrieving…' : selectedSourceIsAire ? (isHistoricalReconciliation ? 'Retrieve Finalized Batch' : 'Review Live AIRE Hours') : 'Fetch Hours'}
+              </Button>
             </>
           )}
           {step === 'review' && (

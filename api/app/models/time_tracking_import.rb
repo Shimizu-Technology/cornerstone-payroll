@@ -113,7 +113,10 @@ class TimeTrackingImport < ApplicationRecord
     changed_fields = FINALIZED_IMMUTABLE_ATTRIBUTES.select { |attribute| will_save_change_to_attribute?(attribute) }
     return if changed_fields.empty?
 
-    errors.add(:base, "AIRE source snapshot and provenance cannot be changed after preview creation")
+    message = finalized_batch_persisted? ?
+      "Finalized payroll batch provenance and payload cannot be changed after preview creation" :
+      "AIRE source snapshot and provenance cannot be changed after preview creation"
+    errors.add(:base, message)
   end
 
   def finalized_batch_persisted?
