@@ -102,6 +102,10 @@ class CheckGenerator
     render_document(voided: true)
   end
 
+  def generate_rehearsal_preview
+    render_document(rehearsal_preview: true)
+  end
+
   def alignment_test
     render_alignment_test
   end
@@ -176,14 +180,14 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # Main render
   # -----------------------------------------------------------------------
-  def render_document(voided: false)
+  def render_document(voided: false, rehearsal_preview: false)
     Prawn::Document.new(
       page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)
-      draw_check_face(pdf, check_y, voided)
-      draw_stub(pdf, stub1_y, voided)
-      draw_stub(pdf, stub2_y, voided)
+      draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
+      draw_stub(pdf, stub1_y, voided, rehearsal_preview: rehearsal_preview)
+      draw_stub(pdf, stub2_y, voided, rehearsal_preview: rehearsal_preview)
     end.render
   end
 
@@ -199,8 +203,9 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # CHECK FACE  – keep the top third clean like QuickBooks
   # -----------------------------------------------------------------------
-  def draw_check_face(pdf, sect_bot, voided)
+  def draw_check_face(pdf, sect_bot, voided, rehearsal_preview: false)
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
+    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
     date_cfg = layout_field(:check_face, :date)
     payee_cfg = layout_field(:check_face, :payee)
     payee_address_cfg = layout_field(:check_face, :payee_address)
@@ -247,7 +252,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # STUB – Cornerstone 4-quadrant layout
   # -----------------------------------------------------------------------
-  def draw_stub(pdf, sect_bot, voided)
+  def draw_stub(pdf, sect_bot, voided, rehearsal_preview: false)
     stub_cfg = layout_section(:stub)
     usable = PAGE_WIDTH - stub_cfg["left"].to_f - stub_cfg["right"].to_f
     left_w = usable * stub_cfg["left_ratio"].to_f
@@ -347,6 +352,7 @@ class CheckGenerator
     )
 
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
+    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
   end
 
   # -----------------------------------------------------------------------
@@ -749,8 +755,25 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # Void watermark
+  # Non-negotiable rehearsal and void watermarks
   # -----------------------------------------------------------------------
+  def draw_rehearsal_watermark(pdf, sect_bot)
+    center = [ PAGE_WIDTH / 2, sect_bot + SECTION_HEIGHT / 2 ]
+    pdf.save_graphics_state do
+      pdf.fill_color "B91C1C"
+      pdf.font_size(10) do
+        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 205, sect_bot + SECTION_HEIGHT - 13 ], style: :bold
+      end
+      pdf.transparent(0.28) do
+        pdf.font_size(55) do
+          pdf.rotate(20, origin: center) do
+            pdf.draw_text "VOID - TEST", at: [ 118, sect_bot + 100 ], style: :bold
+          end
+        end
+      end
+    end
+  end
+
   def draw_void_watermark(pdf, sect_bot, sect_top)
     cx = PAGE_WIDTH / 2
     cy = sect_bot + SECTION_HEIGHT / 2
