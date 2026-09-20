@@ -114,7 +114,7 @@ module AirePayrollCalendar
           payroll_item_id: allocation.payroll_item_id,
           pay_period_id: allocation.pay_period_id,
           payment_method: allocation.payroll_item.effective_payment_delivery_method,
-          payment_reference: (allocation.payroll_item.check_number if status == "paid"),
+          payment_reference: (payment_reference_for(allocation.payroll_item) if status == "paid"),
           reason: allocation_reason(mismatched: mismatched, final_identity: final_identity)
         }.compact
       end
@@ -125,6 +125,12 @@ module AirePayrollCalendar
       return "Linked to this payroll; no remaining source line in the final AIRE batch" if final_identity.nil?
 
       nil
+    end
+
+    def payment_reference_for(item)
+      return item.direct_deposit_payment_confirmation&.bank_reference if item.effective_payment_delivery_method == "direct_deposit"
+
+      item.check_number
     end
 
     def base_row(person, entry, status:, regular:, overtime:, reason: nil)
