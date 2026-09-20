@@ -104,9 +104,10 @@ class LegacyPayItemConversionService
   # refresh from employee defaults on recalculation. If it still contains this
   # legacy row, adding the typed field for the same payday would double count.
   def ensure_open_payroll_can_refresh!(legacy_item)
-    employee.payroll_items.includes(:pay_period).find_each do |item|
+    employee.payroll_items.joins(:pay_period)
+      .where(pay_periods: { status: %w[draft calculated approved] })
+      .includes(:pay_period).find_each do |item|
       period = item.pay_period
-      next unless period&.status.in?(%w[draft calculated approved])
       next unless period.recurring_items_enabled?
       next unless assignment_applies_on?(period.pay_date)
 

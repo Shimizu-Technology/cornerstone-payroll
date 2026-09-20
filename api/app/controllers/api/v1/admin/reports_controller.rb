@@ -1925,7 +1925,8 @@ module Api
 
         def payroll_period_employee_row(employee, items, historical_paychecks = [], historical_adjustments = [], unified: nil)
           custom_totals = custom_ytd_totals_for_items(items)
-          treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+          disclosure = PayrollFieldDisclosure.new(items)
+          treatment_totals = disclosure.treatment_totals
           retirement_totals = payroll_summary_retirement_totals(items)
 
           row = {
@@ -1946,7 +1947,7 @@ module Api
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
             payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
-            health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
+            health_insurance_deductions: disclosure.rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
@@ -1973,7 +1974,8 @@ module Api
         end
 
         def payroll_period_company_totals(items, period, historical_paychecks = [], historical_adjustments = [], unified: nil)
-          treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+          disclosure = PayrollFieldDisclosure.new(items)
+          treatment_totals = disclosure.treatment_totals
           retirement_totals = payroll_summary_retirement_totals(items)
 
           row = {
@@ -1996,7 +1998,7 @@ module Api
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
             payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
-            health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
+            health_insurance_deductions: disclosure.rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
@@ -2579,7 +2581,7 @@ module Api
             entry["treatment"] == "taxable_addition" && entry["label"].to_s.match?(bonus_label) ?
               BigDecimal(entry["amount"].to_s.presence || "0") : BigDecimal("0")
           end
-          amount + item.payroll_item_field_entries.active.sum(BigDecimal("0")) do |entry|
+          amount + item.payroll_item_field_entries.select(&:active?).sum(BigDecimal("0")) do |entry|
             entry.kind == "addition" && entry.tax_treatment == "taxable_addition" && entry.label.match?(bonus_label) ?
               entry.amount.to_d : BigDecimal("0")
           end

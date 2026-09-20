@@ -701,7 +701,11 @@ class PayrollCalculator
       remaining = reduce_numeric_deduction_field_by!(field, remaining)
       break unless remaining.positive?
     end
-    sync_aggregate_deductions_from_itemized! if had_itemized_deductions || had_direct_loan_deduction
+    if had_itemized_deductions
+      sync_aggregate_deductions_from_itemized!
+    elsif had_direct_loan_deduction
+      payroll_item.loan_payment = payroll_item.loan_deduction.to_d.round(2)
+    end
 
     payroll_item.total_deductions = [ (payroll_item.total_deductions.to_f - (excess - remaining)).round(2), available_pay ].min
   end

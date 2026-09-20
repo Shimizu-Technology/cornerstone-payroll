@@ -1059,6 +1059,32 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to eq(0.0)
     end
 
+    it "preserves legacy insurance while capping a direct loan without itemized deductions" do
+      payroll_item.assign_attributes(
+        gross_pay: 100.0,
+        total_deductions: 150.0,
+        additional_withholding: 0,
+        withholding_tax: 100.0,
+        roth_retirement_payment: 0,
+        retirement_payment: 0,
+        loan_deduction: 30.0,
+        loan_payment: 30.0,
+        insurance_payment: 20.0,
+        medicare_tax: 0,
+        social_security_tax: 0,
+        tips_paid_out: 0,
+        custom_deductions: []
+      )
+
+      described_class.for(employee, payroll_item).send(:cap_deductions_to_available_pay!)
+
+      expect(payroll_item.loan_deduction).to eq(30.0)
+      expect(payroll_item.loan_payment).to eq(30.0)
+      expect(payroll_item.insurance_payment).to eq(20.0)
+      expect(payroll_item.withholding_tax).to eq(50.0)
+      expect(payroll_item.total_deductions).to eq(100.0)
+    end
+
     it "promotes tips paid out into reported tips before calculating taxable gross" do
       payroll_item.reported_tips = 0.0
       payroll_item.tips_paid_out = 50.0
