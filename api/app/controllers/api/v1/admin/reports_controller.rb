@@ -1892,16 +1892,26 @@ module Api
               else
                 "#{first[:employee_name]}, item ##{first[:payroll_item_id]}/#{first[:position].to_i + 1}"
               end
+              source_group = if first[:source] == "quickbooks"
+                "quickbooks_history"
+              elsif first[:source] == "historical_adjustment"
+                "historical_adjustment"
+              elsif field
+                "cornerstone_field"
+              else
+                "cornerstone_adjustment"
+              end
               {
                 key: key,
                 label: "#{historical ? identity : (field ? 'Payroll Field' : 'Payroll Adjustment')} - #{first[:label]} (#{treatment.to_s.humanize}; #{identity})",
                 short_label: first[:label],
                 identity_label: identity,
+                source_group: source_group,
                 treatment: treatment,
                 entries: grouped
               }
             end
-            .sort_by { |column| [ column[:treatment].to_s, column[:short_label].to_s, column[:key] ] }
+            .sort_by { |column| [ column[:source_group], column[:treatment].to_s, column[:short_label].to_s, column[:key] ] }
         end
 
         def period_summary_component_values(columns, employee_id)

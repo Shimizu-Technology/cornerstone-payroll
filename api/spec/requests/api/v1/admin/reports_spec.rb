@@ -1708,6 +1708,20 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         net_pay: 823.5)
     end
 
+    it "flags an employee and pay date present in both sources without silently dropping either paycheck" do
+      create_locked_historical_paycheck(
+        employee: employee, suffix: "overlap", pay_date: native_period.pay_date,
+        gross_pay: 250, net_pay: 200
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.dig("source_summary", "source_overlap", "employee_pay_date_count")).to eq(1)
+      expect(report.dig("company_totals", "gross_pay")).to eq(1_250.0)
+    end
+
     it "reconciles source overtime and labeled deductions without guessing their classification" do
       native_item.update!(overtime_hours: 2.3)
       PayrollItemFieldEntry.create!(
@@ -1757,6 +1771,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)",
         "QuickBooks source - 401(k) After Tax (Pre tax deduction; QuickBooks source)"
       )
+      expect(columns.find { |column| column.fetch("key") == "historical:quickbooks:post_tax_deduction:Health Insurance" }.fetch("source_group")).to eq("quickbooks_history")
+      expect(columns.find { |column| column.fetch("key") == "historical:historical_adjustment:post_tax_deduction:Health Insurance" }.fetch("source_group")).to eq("historical_adjustment")
       expect(row.fetch("component_values").fetch("historical:quickbooks:post_tax_deduction:Health Insurance").to_f).to eq(29.99)
       expect(row.fetch("component_values").fetch("historical:historical_adjustment:post_tax_deduction:Health Insurance").to_f).to eq(5)
       expect(report.dig("source_summary", "quickbooks", "excluded_unlinked_paycheck_count")).to eq(1)

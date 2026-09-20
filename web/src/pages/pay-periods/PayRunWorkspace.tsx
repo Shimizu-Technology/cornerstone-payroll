@@ -19,6 +19,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { Header } from '@/components/layout/Header';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
@@ -263,7 +264,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
   const [mockPreviewError, setMockPreviewError] = useState<string | null>(null);
-  const [mockDownloaded, setMockDownloaded] = useState(false);
+  const [mockPreview, setMockPreview] = useState<PdfArtifact | null>(null);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [hasNonEmployeeChecks, setHasNonEmployeeChecks] = useState<boolean | null>(null);
   const [printRefreshError, setPrintRefreshError] = useState<string | null>(null);
@@ -276,21 +277,17 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const mockPreviewEligible = items.filter((item) => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay || 0) > 0).length;
   const canPreviewMockChecks = isRehearsal && (payRun.status === 'calculated' || payRun.status === 'approved');
 
-  const downloadMockChecks = async () => {
+  const previewMockChecks = async () => {
     setMockPreviewBusy(true);
     setMockPreviewError(null);
-    setMockDownloaded(false);
     try {
       const result = await checksApi.rehearsalPreviewPdf(payRun.id);
-      const url = URL.createObjectURL(result.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = result.filename || 'test_only_rehearsal_checks.pdf';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setMockDownloaded(true);
+      setMockPreview({
+        blob: result.blob,
+        filename: result.filename || 'test_only_rehearsal_checks.pdf',
+        title: 'Preview mock checks',
+        note: 'TEST ONLY — NOT NEGOTIABLE. Review here, then print on plain paper or download a copy.',
+      });
     } catch (error) {
       setMockPreviewError(error instanceof Error ? error.message : 'Could not prepare the mock checks.');
     } finally {
@@ -349,18 +346,18 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
 
   return (
     <>
+      <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-4">
           <div>
             <CardTitle>Checks and direct deposit</CardTitle>
-            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Download watermarked mock checks, then print the PDF on plain paper. These are test documents, not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
+            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview watermarked mock checks, then print on plain paper or download the PDF. These are test documents, not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
             {printRefreshError && <p role="alert" className="mt-2 text-sm text-danger-700">{printRefreshError}</p>}
             {mockPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{mockPreviewError}</p>}
-            {mockDownloaded && <p role="status" className="mt-2 text-sm text-success-700">Test PDF downloaded. Open it in your PDF viewer and print on plain paper.</p>}
           </div>
           {canPreviewMockChecks && (
-            <Button onClick={() => void downloadMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
-              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Download mock checks'}
+            <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
+              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview mock checks'}
             </Button>
           )}
           {!isRehearsal && payRun.status === 'committed' && (
@@ -371,7 +368,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         </CardHeader>
         {isRehearsal && (
           <div role="note" className="mx-4 mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:mx-6">
-            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check TEST ONLY - NOT NEGOTIABLE. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before downloading mock checks.'} Downloading does not assign check numbers or mark checks printed.
+            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check TEST ONLY - NOT NEGOTIABLE. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before previewing mock checks.'} Previewing, downloading, and printing do not assign check numbers or mark checks printed.
           </div>
         )}
         <CardContent className="p-0">
