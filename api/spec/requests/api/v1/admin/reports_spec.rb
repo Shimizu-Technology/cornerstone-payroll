@@ -1678,7 +1678,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
       _batch, _period, historical_paycheck = create_locked_historical_paycheck(
         employee: employee, suffix: "components", pay_date: Date.new(2026, 4, 18),
-        hours_breakdown: [ { "label" => "Regular", "amount" => "40" }, { "label" => "OT", "amount" => "1.20" } ],
+        hours_breakdown: [ { "label" => "Regular", "amount" => "40" }, { "label" => "OT", "amount" => "10.10" } ],
         pretax_deduction_breakdown: [ { "label" => "401(k) After Tax", "amount" => "15.45" } ],
         after_tax_deduction_breakdown: [
           { "label" => "Health Insurance", "amount" => "29.99" },
@@ -1705,7 +1705,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       report = response.parsed_body.fetch("report")
       row = report.fetch("employees").find { |entry| entry.fetch("employee_id") == employee.id }
       [ row, report.fetch("company_totals") ].each do |totals|
-        expect(totals.fetch("total_overtime_hours").to_f).to eq(3.5)
+        expect(totals.fetch("total_overtime_hours")).to eq(12.4)
         expect(totals.fetch("historical_loan_deductions_unclassified").to_f).to eq(60.06)
         expect(totals.fetch("health_insurance_deductions").to_f).to eq(53.11)
         expect(totals.fetch("source_labeled_after_tax_401k_in_pretax_bucket").to_f).to eq(15.45)
@@ -1726,7 +1726,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       csv = CSV.parse(response.body, headers: true)
       expect(csv.headers).to include("Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)")
-      expect(csv.first.fetch("Total OT Hours").to_f).to eq(3.5)
+      expect(csv.first.fetch("Total OT Hours").to_f).to eq(12.4)
       expect(csv.first.fetch("Historical Loans (Type Unclassified)").to_f).to eq(60.06)
     end
 
