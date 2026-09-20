@@ -43,6 +43,21 @@ RSpec.describe PayrollPaymentMethodService do
     expect(company.reload.next_check_number).to eq(2002)
   end
 
+  it "does not strand linked AIRE hours by switching an unissued paper check to deposit" do
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    TimeTrackingManualAllocation.create!(
+      company: company, time_tracking_source: source, pay_period: period,
+      payroll_item: item, employee: employee, created_by: actor,
+      source_user_uuid: SecureRandom.uuid, source_time_entry_id: "101",
+      source_time_entry_version: 1, original_work_date: period.start_date,
+      regular_hours: 1, overtime_hours: 0,
+      reconciliation_note: "One hour included in this committed paycheck"
+    )
+
+    expect { switch_to("direct_deposit") }.to raise_error(described_class::Error, /AIRE hours are already linked/)
+    expect(item.reload.payment_delivery_method).to eq("paper_check")
+  end
+
   it "refuses to switch a check after it was printed" do
     item.update!(check_printed_at: Time.current)
 
