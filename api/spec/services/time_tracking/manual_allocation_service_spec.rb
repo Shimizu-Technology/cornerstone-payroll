@@ -94,15 +94,19 @@ RSpec.describe TimeTracking::ManualAllocationService do
     )
   end
 
-  it "rejects a payment-method change that wins the race before the item lock" do
+  it "links a concurrent deposit change but withholds paid status until bank confirmation" do
     item
+    allow(client).to receive(:issue_payroll_manual_allocation)
     allow_any_instance_of(PayrollItem).to receive(:with_lock).and_wrap_original do |original, *args, &block|
       original.receiver.update_columns(payment_delivery_method: "direct_deposit", check_number: nil)
       original.call(*args, &block)
     end
 
-    expect { create_link }.to raise_error(described_class::Error, /bank payment confirmation/)
-    expect(TimeTrackingManualAllocation.count).to eq(0)
+    allocation = create_link
+    expect(item.reload.effective_payment_delivery_method).to eq("direct_deposit")
+    expect(allocation.reload.status).to eq("committed")
+    expect(TimeTrackingManualAllocation.count).to eq(1)
+    expect(client).not_to have_received(:issue_payroll_manual_allocation)
   end
 
   it "releases committed AIRE hours when the paycheck is voided before delivery" do
