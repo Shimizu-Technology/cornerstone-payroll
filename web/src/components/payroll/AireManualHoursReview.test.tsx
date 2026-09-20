@@ -75,6 +75,31 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
+  it('shows both identities before saving a permanent employee match', async () => {
+    const user = userEvent.setup();
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      employees: [{ ...review.employees[0], email: 'worker@aire.test', cornerstone: { status: 'unmapped', employee_id: null, employee_name: null } }],
+    });
+    render(<AireManualHoursReview
+      payPeriodId={67}
+      payPeriodStatus="draft"
+      payrollHours={{}}
+      employees={[{ id: 7, first_name: 'Test', last_name: 'Worker A', email: 'worker@payroll.test' } as import('@/types').Employee]}
+      aireRecordLinked={false}
+    />);
+
+    await user.click(await screen.findByRole('button', { name: 'Match Test Worker A' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Person in AIRE')).toBeTruthy();
+    expect(within(dialog).getByText('worker@aire.test')).toBeTruthy();
+    expect(within(dialog).getByText(/AIRE ID: 282bf986/)).toBeTruthy();
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Cornerstone employee' }), '7');
+    expect(within(dialog).getByText(/worker@payroll.test/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Save match' }));
+    await waitFor(() => expect(apiMocks.map).toHaveBeenCalledWith(67, { source_user_id: '91', employee_id: 7 }));
+  });
+
   it('shows exact AIRE regular, overtime, carryover, and the Payroll correction to make', async () => {
     render(
       <AireManualHoursReview
