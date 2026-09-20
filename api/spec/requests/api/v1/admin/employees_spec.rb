@@ -376,6 +376,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "when creating from an AIRE person" do
+      let!(:unrelated_source) { create(:time_tracking_source, company: company, source_type: "aire_services", active: false) }
       let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
       let(:period) { create(:pay_period, company: company) }
       let(:source_uuid) { SecureRandom.uuid }
@@ -384,7 +385,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       end
 
       before do
-        source
+        create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
         client = instance_double(TimeTracking::Client)
         allow(TimeTracking::Client).to receive(:new).and_return(client)
         allow(client).to receive(:payroll_cockpit_employees).and_return(
@@ -399,7 +400,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
         expect(response).to have_http_status(:created)
         expect(TimeTrackingEmployeeMapping.last).to have_attributes(
-          employee_id: Employee.last.id, source_user_id: "91", source_user_uuid: source_uuid
+          employee_id: Employee.last.id, source_user_id: "91", source_user_uuid: source_uuid,
+          time_tracking_source_id: source.id
         )
       end
 
@@ -419,6 +421,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
         expect { post "/api/v1/admin/employees", params: request_params }.not_to change(Employee, :count)
         expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      it "does not switch an older period to a replacement AIRE source" do
+        source.update!(active: false)
+        unrelated_source.update!(active: true)
+
+        expect { post "/api/v1/admin/employees", params: aire_params }.not_to change(Employee, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "aire_link")).to include(a_string_including("no active AIRE connection"))
       end
 
       it "does not create an AIRE-linked employee when the operator lacks mapping access" do
