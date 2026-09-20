@@ -893,6 +893,35 @@ export interface AirePayrollManualReview {
   };
 }
 
+export type AirePostLockStatus = 'paid' | 'awaiting_payment' | 'owed' | 'held' | 'correction' | 'mismatch';
+
+export interface AirePostLockComparison {
+  batch_id: string;
+  cutoff_at: string;
+  verified_at?: string | null;
+  summary: Record<AirePostLockStatus, { regular_hours: number; overtime_hours: number; entry_count: number }> & {
+    needs_attention: boolean;
+    unmapped_count: number;
+  };
+  rows: Array<{
+    employee_name: string;
+    employee_id?: number | null;
+    source_user_uuid?: string | null;
+    source_time_entry_id: string;
+    work_date: string;
+    source_kind: string;
+    status: AirePostLockStatus;
+    regular_hours: number;
+    overtime_hours: number;
+    reason?: string | null;
+    mapping_status?: 'mapped' | 'inactive' | 'unmapped';
+    payroll_item_id?: number;
+    pay_period_id?: number;
+    payment_method?: string;
+    payment_reference?: string | null;
+  }>;
+}
+
 export interface AirePayrollRoutingOption {
   external_pay_period_id: string;
   pay_period_id: number;
