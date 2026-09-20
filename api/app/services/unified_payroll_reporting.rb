@@ -36,7 +36,7 @@ class UnifiedPayrollReporting
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
       total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f + totals[:total_overtime_hours],
+      total_overtime_hours: (row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours].to_d).round(2).to_f,
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
@@ -62,7 +62,7 @@ class UnifiedPayrollReporting
     totals = historical_totals(paychecks, adjustments)
     row.merge(
       total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_f + totals[:total_overtime_hours],
+      total_overtime_hours: (row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours].to_d).round(2).to_f,
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
