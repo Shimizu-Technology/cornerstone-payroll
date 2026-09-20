@@ -47,11 +47,16 @@ RSpec.describe PayrollFinalRecordService do
   it "records direct and separately itemized loans in the same loan journal category" do
     type = DeductionType.create!(company: company, name: "Loan - Devon Holbrook",
       category: "post_tax", sub_category: "loan", active: true)
-    item.payroll_item_deductions.create!(deduction_type: type, category: "post_tax", amount: 250,
+    item.payroll_item_deductions.create!(deduction_type: type, category: "post_tax", amount: BigDecimal("250"),
       label: type.name)
-    item.update!(loan_deduction: 300.00, loan_payment: 550.00)
+    item.update!(loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"),
+      total_deductions: BigDecimal("1003.36"), net_pay: BigDecimal("21.64"))
 
-    expect(described_class.new(pay_period: period).send(:employee_loan_repayments, item)).to eq(550.00)
+    journal = described_class.new(pay_period: period).call.fetch(:journal)
+    expect(journal.fetch(:lines).index_by { |line| line[:account_key] }).to include(
+      "employee_loan_receivable" => include(credit: "550.00")
+    )
+    expect(journal).to include(balanced: true, difference: "0.0")
   end
 
   it "distinguishes blocking record gaps from open settlement work" do

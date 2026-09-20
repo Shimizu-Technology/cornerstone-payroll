@@ -10,13 +10,13 @@ RSpec.describe AnnualPayrollSummary do
   it "includes both a direct loan and a separately itemized loan in after-tax totals" do
     period = create(:pay_period, :committed, company: company)
     item = create(:payroll_item, company: company, employee: employee, pay_period: period,
-      loan_deduction: 300.00, loan_payment: 550.00)
+      loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
     type = DeductionType.create!(company: company, name: "Loan - Devon Holbrook",
       category: "post_tax", sub_category: "loan", active: true)
-    item.payroll_item_deductions.create!(deduction_type: type, category: "post_tax", amount: 250,
+    item.payroll_item_deductions.create!(deduction_type: type, category: "post_tax", amount: BigDecimal("250"),
       label: type.name)
 
-    expect(described_class.new(company: company).send(:native_itemized_or_legacy_post_tax, item)).to eq(550.00)
+    expect(described_class.new(company: company).send(:native_itemized_or_legacy_post_tax, item)).to eq(BigDecimal("550.00"))
   end
 
   def historical_paycheck(status:, suffix:, year:, employee:, gross_pay:, net_pay:, period_type: "regular")

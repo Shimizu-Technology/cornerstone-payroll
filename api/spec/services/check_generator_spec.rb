@@ -62,13 +62,13 @@ RSpec.describe CheckGenerator do
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
     payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
       label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
-      category: "loan", amount: 250, source: "employee_default")
-    payroll_item.update!(loan_deduction: 300.00, loan_payment: 550.00)
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+    payroll_item.update!(loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
 
-    expect(generator.send(:visible_legacy_loan_payment)).to eq(300.00)
-    expect(generator.send(:visible_legacy_loan_ytd)).to eq(300.00)
-    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, 300.00))
-    expect(generator.send(:cur_deds)).to eq(550.00)
+    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("300.00"))
+    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("300.00"))
+    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("300.00")))
+    expect(generator.send(:cur_deds)).to eq(BigDecimal("550.00"))
   end
 
   describe "#generate" do

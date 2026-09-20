@@ -97,8 +97,8 @@ RSpec.describe PayStubGenerator do
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
     payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
       label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
-      category: "loan", amount: 250, source: "employee_default")
-    payroll_item.update!(loan_deduction: 300.00, loan_payment: 550.00)
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+    payroll_item.update!(loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
 
     text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
 
