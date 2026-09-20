@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -295,6 +295,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
     t.index ["company_id"], name: "index_check_signoff_sheets_on_company_id"
     t.index ["pay_period_id"], name: "index_check_signoff_sheets_on_pay_period_id", unique: true
     t.index ["updated_by_id"], name: "index_check_signoff_sheets_on_updated_by_id"
+  end
+
+  create_table "check_supersession_rollout_approvals", force: :cascade do |t|
+    t.bigint "approved_by_id", null: false
+    t.datetime "approved_at", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "reason", null: false
+    t.index ["approved_by_id"], name: "index_check_supersession_rollout_approvals_on_approved_by_id"
+    t.index ["company_id"], name: "index_check_supersession_rollout_approvals_on_company_id", unique: true
   end
 
   create_table "client_documents", force: :cascade do |t|
@@ -1868,6 +1878,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
     t.check_constraint "amount > 0::numeric", name: "non_employee_check_line_items_amount_positive"
   end
 
+  create_table "non_employee_check_supersessions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "non_employee_check_id", null: false
+    t.bigint "payroll_item_id", null: false
+    t.text "reason", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "verified_facts", default: {}, null: false
+    t.index ["company_id"], name: "index_non_employee_check_supersessions_on_company_id"
+    t.index ["non_employee_check_id"], name: "idx_on_non_employee_check_id_9b0b859cc0", unique: true
+    t.index ["payroll_item_id"], name: "index_non_employee_check_supersessions_on_payroll_item_id", unique: true
+    t.index ["user_id"], name: "index_non_employee_check_supersessions_on_user_id"
+  end
+
   create_table "non_employee_checks", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2, null: false
     t.string "auto_generated_type"
@@ -3292,6 +3316,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
+  add_foreign_key "check_supersession_rollout_approvals", "companies"
+  add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "client_documents", "companies"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
@@ -3479,6 +3505,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "non_employee_check_supersessions", "non_employee_checks"
+  add_foreign_key "non_employee_check_supersessions", "companies"
+  add_foreign_key "non_employee_check_supersessions", "payroll_items"
+  add_foreign_key "non_employee_check_supersessions", "users"
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
@@ -3635,6 +3665,169 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_060000) do
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 
   execute <<~SQL
+    CREATE OR REPLACE FUNCTION protect_non_employee_check_supersession()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'Non-employee check supersession evidence is append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_non_employee_check_supersessions ON non_employee_check_supersessions;
+    CREATE TRIGGER protect_non_employee_check_supersessions
+    BEFORE UPDATE OR DELETE ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION protect_non_employee_check_supersession();
+
+    CREATE OR REPLACE FUNCTION validate_non_employee_check_supersession_tenant() RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM non_employee_checks c
+        JOIN payroll_items p ON p.id = NEW.payroll_item_id
+        JOIN pay_periods pp ON pp.id = p.pay_period_id
+        JOIN employees e ON e.id = p.employee_id
+        JOIN companies co ON co.id = c.company_id
+        JOIN users u ON u.id = NEW.user_id
+        JOIN check_events d ON d.id = (NEW.verified_facts->>'delivery_event_id')::bigint
+        WHERE c.id = NEW.non_employee_check_id
+          AND c.company_id = NEW.company_id
+          AND p.company_id = NEW.company_id
+          AND pp.company_id = NEW.company_id
+          AND e.company_id = NEW.company_id
+          AND u.organization_id = co.organization_id
+          AND c.pay_period_id IS NULL AND c.voided = false
+          AND c.printed_at IS NOT NULL AND c.paid_at IS NULL
+          AND c.payment_method = 'check'
+          AND NOT EXISTS (SELECT 1 FROM payroll_liability_check_allocations a WHERE a.non_employee_check_id = c.id)
+          AND pp.status = 'committed' AND p.voided = false
+          AND (p.payment_delivery_method IS NULL OR p.payment_delivery_method = 'paper_check')
+          AND d.payroll_item_id = p.id AND d.event_type = 'delivered'
+          AND d.check_number = p.check_number
+          AND c.check_number ~ '^[0-9]+$' AND p.check_number ~ '^[0-9]+$'
+          AND coalesce(nullif(ltrim(c.check_number, '0'), ''), '0') = coalesce(nullif(ltrim(p.check_number, '0'), ''), '0')
+          AND c.amount = p.net_pay
+          AND NEW.verified_facts->'recipient_verified' = 'true'::jsonb
+          AND NEW.verified_facts->>'standalone_payee' = c.payable_to
+          AND NEW.verified_facts->>'payroll_employee_id' = p.employee_id::text
+          AND NEW.verified_facts->>'payroll_employee_name' = concat_ws(' ', nullif(btrim(e.first_name), ''), nullif(btrim(e.middle_name), ''), nullif(btrim(e.last_name), ''))
+          AND NEW.verified_facts->>'standalone_check_number' = c.check_number
+          AND NEW.verified_facts->>'payroll_check_number' = p.check_number
+          AND NEW.verified_facts->>'normalized_check_number' = coalesce(nullif(ltrim(p.check_number, '0'), ''), '0')
+          AND (NEW.verified_facts->>'standalone_amount')::numeric = c.amount
+          AND (NEW.verified_facts->>'payroll_net_amount')::numeric = p.net_pay
+          AND NEW.verified_facts->>'delivered_on' = d.effective_on::text
+          AND NEW.verified_facts->>'delivery_evidence_type' IS NOT DISTINCT FROM d.evidence_type
+          AND NEW.verified_facts->>'delivery_evidence_reference' IS NOT DISTINCT FROM d.evidence_reference
+      ) THEN
+        RAISE EXCEPTION 'Supersession requires matching company, check, amount, recipient attestation, and delivery evidence';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS validate_non_employee_check_supersession_tenant_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER validate_non_employee_check_supersession_tenant_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION validate_non_employee_check_supersession_tenant();
+
+    CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'Check supersession rollout approvals are append-only';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
+        WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
+          AND u.organization_id = c.organization_id AND u.active = true
+          AND u.role IN (5, 6)
+      ) OR length(btrim(NEW.reason)) < 20 THEN
+        RAISE EXCEPTION 'Live-check rollout approval requires an active organization administrator and documented reason';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_check_supersession_rollout_approvals ON check_supersession_rollout_approvals;
+    CREATE TRIGGER protect_check_supersession_rollout_approvals
+    BEFORE INSERT OR UPDATE OR DELETE ON check_supersession_rollout_approvals
+    FOR EACH ROW EXECUTE FUNCTION protect_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.user_id
+        WHERE c.id = NEW.company_id AND u.organization_id = c.organization_id
+          AND u.active = true AND u.role IN (5, 6, 0, 1)
+      ) THEN
+        RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
+      END IF;
+      IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
+        AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
+        RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS enforce_check_supersession_rollout_approval_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER enforce_check_supersession_rollout_approval_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION enforce_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_superseded_payroll_item() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.voided = true AND OLD.voided = false
+        AND EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_superseded_payroll_item_on_update ON payroll_items;
+    CREATE TRIGGER prevent_voiding_superseded_payroll_item_on_update
+    BEFORE UPDATE OF voided ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_superseded_payroll_item();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_period_with_superseded_checks() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.correction_status = 'voided' AND OLD.correction_status IS DISTINCT FROM 'voided'
+        AND EXISTS (
+          SELECT 1 FROM payroll_items p
+          JOIN non_employee_check_supersessions s ON s.payroll_item_id = p.id
+          WHERE p.pay_period_id = OLD.id
+        ) THEN
+        RAISE EXCEPTION 'A pay period with a payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_period_with_superseded_checks_on_update ON pay_periods;
+    CREATE TRIGGER prevent_voiding_period_with_superseded_checks_on_update
+    BEFORE UPDATE OF correction_status ON pay_periods
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_period_with_superseded_checks();
+
+    CREATE OR REPLACE FUNCTION protect_superseded_payroll_item_facts() RETURNS trigger AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id)
+        AND (
+          NEW.check_number IS DISTINCT FROM OLD.check_number OR
+          NEW.net_pay IS DISTINCT FROM OLD.net_pay OR
+          NEW.employee_id IS DISTINCT FROM OLD.employee_id OR
+          NEW.pay_period_id IS DISTINCT FROM OLD.pay_period_id OR
+          NEW.company_id IS DISTINCT FROM OLD.company_id OR
+          NEW.payment_delivery_method IS DISTINCT FROM OLD.payment_delivery_method
+        ) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot change verified payment facts';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_superseded_payroll_item_facts_on_update ON payroll_items;
+    CREATE TRIGGER protect_superseded_payroll_item_facts_on_update
+    BEFORE UPDATE OF check_number, net_pay, employee_id, pay_period_id, company_id, payment_delivery_method ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION protect_superseded_payroll_item_facts();
+
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
     BEGIN

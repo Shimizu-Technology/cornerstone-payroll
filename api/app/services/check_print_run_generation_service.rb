@@ -117,7 +117,7 @@ class CheckPrintRunGenerationService
       raise ArgumentError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"
     end
 
-    invalid_non_employee = non_employee_checks.find { |check| check.voided? || check.check_number.blank? }
+    invalid_non_employee = non_employee_checks.find { |check| check.voided? || check.non_employee_check_supersession || check.check_number.blank? }
     if invalid_non_employee
       raise ArgumentError, "Non-employee check ##{invalid_non_employee.check_number.presence || invalid_non_employee.id} is no longer printable"
     end

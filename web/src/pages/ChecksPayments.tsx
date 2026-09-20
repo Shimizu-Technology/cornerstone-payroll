@@ -65,6 +65,7 @@ const STATUS_COLORS: Record<string, string> = {
   printed: 'bg-success-100 text-success-800',
   paid: 'bg-success-100 text-success-800',
   voided: 'bg-danger-100 text-danger-700',
+  superseded: 'bg-blue-100 text-blue-800',
 };
 
 interface FormState {
@@ -162,6 +163,14 @@ export function ChecksPayments() {
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
   const [payingCheck, setPayingCheck] = useState<NonEmployeeCheck | null>(null);
+  const [linkingCheck, setLinkingCheck] = useState<NonEmployeeCheck | null>(null);
+  const [payrollMatches, setPayrollMatches] = useState<Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }>>([]);
+  const [selectedPayrollItemId, setSelectedPayrollItemId] = useState<number | null>(null);
+  const [linkReason, setLinkReason] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [recipientVerified, setRecipientVerified] = useState(false);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
   const [paymentConfirmation, setPaymentConfirmation] = useState('');
   const [paymentDate, setPaymentDate] = useState(localDateString());
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
@@ -227,7 +236,7 @@ export function ChecksPayments() {
   }, [checks, search]);
 
   const totals = useMemo(() => {
-    const active = visibleChecks.filter(check => !check.voided);
+    const active = visibleChecks.filter(check => !check.voided && !check.supersession);
     return {
       count: active.length,
       amount: active.reduce((sum, check) => sum + Number(check.amount), 0),
@@ -381,6 +390,42 @@ export function ChecksPayments() {
       await loadLiabilities();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark payment paid');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openPayrollLink = async (check: NonEmployeeCheck) => {
+    setLinkingCheck(check);
+    setPayrollMatches([]);
+    setSelectedPayrollItemId(null);
+    setLinkReason('');
+    setRecipientVerified(false);
+    setLinkLoading(true);
+    setLinkError(null);
+    try {
+      const response = await nonEmployeeChecksApi.payrollMatches(check.id);
+      setPayrollMatches(response.payroll_matches);
+      if (response.payroll_matches.length === 1) setSelectedPayrollItemId(response.payroll_matches[0].payroll_item_id);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Could not load matching payroll checks');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const confirmPayrollLink = async () => {
+    if (!linkingCheck || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified) return;
+    setBusyId(linkingCheck.id);
+    setLinkError(null);
+    try {
+      const response = await nonEmployeeChecksApi.supersedeWithPayrollItem(linkingCheck.id, selectedPayrollItemId, linkReason.trim(), recipientVerified);
+      handleSavedCheck(response.non_employee_check);
+      setLinkingCheck(null);
+      await loadChecks();
+      setCheckRegisterRefreshVersion(value => value + 1);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Could not link this check');
     } finally {
       setBusyId(null);
     }
@@ -741,7 +786,7 @@ export function ChecksPayments() {
           onUpdated={setLiabilityCenter}
         />
 
-        <CheckRegister companyId={activeCompanyId} />
+        <CheckRegister companyId={activeCompanyId} refreshVersion={checkRegisterRefreshVersion} />
 
         <Card className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -761,7 +806,7 @@ export function ChecksPayments() {
               </select>
               <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="active">Active only</option>
-                <option value="all">Include voided</option>
+                <option value="all">Include voided and linked duplicates</option>
               </select>
               {company?.check_stock_type === 'first_hawaiian_4up' && (
                 <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={startingSlot} onChange={e => setStartingSlot(Number(e.target.value))}>
@@ -797,7 +842,7 @@ export function ChecksPayments() {
           ) : (
             <div className="divide-y">
               {visibleChecks.map(check => (
-                <div key={check.id} className={check.voided ? 'bg-red-50' : 'bg-white'}>
+                <div key={check.id} className={check.voided ? 'bg-red-50' : check.supersession ? 'bg-blue-50' : 'bg-white'}>
                   <div className="flex flex-col gap-3 p-4 xl:flex-row xl:items-center xl:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -824,6 +869,9 @@ export function ChecksPayments() {
                       {(check.memo || check.description) && (
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
                       )}
+                      {check.supersession && (
+                        <p className="mt-2 text-sm text-blue-800">Linked duplicate of payroll check #{check.supersession.payroll_check_number}. Preserved for audit; excluded from active totals. {check.supersession.reason}</p>
+                      )}
                       {check.check_type === 'grt' && (
                         <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -840,18 +888,18 @@ export function ChecksPayments() {
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
-                      {check.payment_method === 'check' && <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
+                      {check.payment_method === 'check' && !check.supersession && <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Preview
                       </Button>}
                       <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Voucher
                       </Button>
-                      {!check.voided && check.payment_method === 'check' && !check.printed_at && (
+                      {!check.voided && !check.supersession && check.payment_method === 'check' && !check.printed_at && (
                         <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check)} disabled={busyId === check.id}>
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Printed
                         </Button>
                       )}
-                      {!check.voided && !check.paid_at && (
+                      {!check.voided && !check.supersession && !check.paid_at && (
                         <Button
                           size="sm"
                           onClick={() => {
@@ -865,11 +913,14 @@ export function ChecksPayments() {
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Paid
                         </Button>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => handleCloneCheck(check)}>
+                      {!check.voided && !check.supersession && check.printed_at && !check.paid_at && check.payment_method === 'check' && !check.liability_payment && (
+                        <Button size="sm" variant="outline" onClick={() => void openPayrollLink(check)} disabled={busyId === check.id}>Link payroll duplicate</Button>
+                      )}
+                      {!check.supersession && <Button size="sm" variant="outline" onClick={() => handleCloneCheck(check)}>
                         <Copy className="mr-1.5 h-3.5 w-3.5" /> Clone
-                      </Button>
-                      {!check.voided && <Button size="sm" variant="outline" onClick={() => setEditingCheck(check)}>Edit</Button>}
-                      {!check.voided && voidingId !== check.id && (
+                      </Button>}
+                      {!check.voided && !check.supersession && <Button size="sm" variant="outline" onClick={() => setEditingCheck(check)}>Edit</Button>}
+                      {!check.voided && !check.supersession && voidingId !== check.id && (
                         <Button size="sm" variant="outline" className="border-red-300 text-red-600" onClick={() => setVoidingId(check.id)}>Void</Button>
                       )}
                       {voidingId === check.id && (
@@ -909,6 +960,32 @@ export function ChecksPayments() {
           </div>
           <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-5 text-warning-900">Confirm only after the check was issued or the electronic transfer succeeded. A prepared payment is not the same as a paid liability.</div>
           <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setPayingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void handleMarkPaid()} disabled={busyId !== null || !paymentDate || (['ach', 'eftps', 'wire', 'card'].includes(payingCheck.payment_method) && !paymentConfirmation.trim())}>{busyId !== null ? 'Confirming…' : 'Confirm Paid'}</Button></DialogFooter>
+        </DialogContent>}
+      </Dialog>
+
+      <Dialog open={linkingCheck !== null} onOpenChange={(open) => { if (!open && busyId === null) setLinkingCheck(null); }}>
+        {linkingCheck && <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link duplicate to payroll</DialogTitle>
+            <DialogDescription>Use this only when this software record and a committed payroll item represent the same physical check. The standalone record remains in the audit history; this does not issue, void, or pay a check.</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm"><span className="font-medium">Standalone record:</span> {linkingCheck.payable_to} · Check #{linkingCheck.check_number} · {formatCurrency(Number(linkingCheck.amount))}</div>
+          {linkLoading ? <p className="mt-4 text-sm text-neutral-500">Finding matching payroll checks…</p> : payrollMatches.length === 0 ? (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">No issued payroll check matches this check number and net amount. Confirm payroll check delivery, then refresh this match. Do not link a merely prepared check.</p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <div className="space-y-2" role="radiogroup" aria-label="Matching payroll check">
+                {payrollMatches.map(match => <label key={match.payroll_item_id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-3 text-sm">
+                  <input type="radio" name="payroll-match" checked={selectedPayrollItemId === match.payroll_item_id} onChange={() => setSelectedPayrollItemId(match.payroll_item_id)} />
+                  <span><span className="font-medium">{match.employee_name}</span> · Check #{match.check_number} · {formatCurrency(Number(match.net_pay))}<br /><span className="text-neutral-500">Pay period #{match.pay_period_id} · pay date {formatDate(match.pay_date)}</span></span>
+                </label>)}
+              </div>
+              <div><label htmlFor="payroll-duplicate-reason" className="mb-1 block text-sm font-medium">Why are these the same physical check?</label><textarea id="payroll-duplicate-reason" className="w-full rounded-xl border border-neutral-300 p-3 text-sm" rows={3} value={linkReason} onChange={event => setLinkReason(event.target.value)} placeholder="Verified check number, recipient, amount, and paper check issued…" /><p className="text-xs text-neutral-500">At least 20 characters; saved permanently in the audit record.</p></div>
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={recipientVerified} onChange={event => setRecipientVerified(event.target.checked)} /><span>I verified that the standalone payee and payroll employee received the same physical check, even if the names are written differently.</span></label>
+            </div>
+          )}
+          {linkError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{linkError}</p>}
+          <DialogFooter className="mt-4"><Button type="button" variant="outline" onClick={() => setLinkingCheck(null)} disabled={busyId !== null}>Cancel</Button><Button type="button" onClick={() => void confirmPayrollLink()} disabled={busyId !== null || !selectedPayrollItemId || linkReason.trim().length < 20 || !recipientVerified}>Link duplicate</Button></DialogFooter>
         </DialogContent>}
       </Dialog>
 
