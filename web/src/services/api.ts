@@ -2218,6 +2218,7 @@ export interface YtdSummaryReport {
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      roth_retirement?: number;
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
@@ -2246,6 +2247,7 @@ export interface YtdSummaryReport {
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      roth_retirement?: number;
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
