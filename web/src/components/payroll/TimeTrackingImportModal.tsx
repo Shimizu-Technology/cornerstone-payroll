@@ -210,6 +210,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
   const isFinalizedBatch = preview?.processed_payload?.validation_version === 'payroll_batch_v2';
+  const isLiveAireSnapshot = preview?.processed_payload?.validation_version === 'aire_live_snapshot_v1';
+  const isExactAireImport = isFinalizedBatch || isLiveAireSnapshot;
   const exclusions = preview?.processed_payload?.exclusions || [];
   const negativeAdjustmentCount = Number(preview?.processed_payload?.negative_adjustment_count || 0);
   const alreadyApplied = preview?.status === 'applied';
@@ -251,7 +253,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     if (categories.length === 0) return true;
 
     const activeRates = activeWageRatesFor(employeeId);
-    if (!isFinalizedBatch && activeRates.length <= 1) return true;
+    if (!isExactAireImport && activeRates.length <= 1) return true;
     if (activeRates.length === 0) return false;
     const rowMappings = wageRateMappings.get(row.source_user_id) || {};
     return categories.every((category) => Boolean(rowMappings[categoryMappingKey(category)]));
@@ -288,7 +290,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     rowsNeedingWageRateMapping.length === 0;
   const canApply = isHistoricalReconciliation
     ? finalizedRowsComplete && duplicateEmployeeIds.size === 0 && reconciliationNote.trim().length >= 10
-    : isFinalizedBatch
+    : isExactAireImport
     ? finalizedRowsComplete && warningCount === 0 && duplicateEmployeeIds.size === 0 && negativeReviewComplete
     : mappedIncludedRows.length > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
 
@@ -305,8 +307,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         source_id: selectedSource.id,
         start_date: selectedSource.source_type === 'aire_services' ? payPeriod.start_date : startDate,
         end_date: selectedSource.source_type === 'aire_services' ? payPeriod.end_date : endDate,
+        mode: selectedSource.source_type === 'aire_services' ? (isHistoricalReconciliation ? 'finalized' : 'live') : undefined,
       });
-      const finalized = res.import.processed_payload.validation_version === 'payroll_batch_v2';
+      const finalized = ['payroll_batch_v2', 'aire_live_snapshot_v1'].includes(res.import.processed_payload.validation_version ?? '');
       const nextMappings = new Map<string, number | null>();
       const nextWageRateMappings: WageRateMappingState = new Map();
       const included = new Set<string>();
@@ -407,14 +410,16 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-4 sm:px-8 sm:py-6">
           <div>
             <h2 id="time-import-title" className="text-lg font-semibold tracking-tight text-neutral-950 sm:text-xl">
-              {isFinalizedBatch ? 'Review finalized AIRE batch' : 'Import time tracking'}
+              {isFinalizedBatch ? 'Review finalized AIRE batch' : isLiveAireSnapshot ? 'Review live AIRE hours' : 'Import time tracking'}
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-neutral-600">
               {isFinalizedBatch
                 ? isHistoricalReconciliation
                   ? 'Link this committed payroll to its immutable AIRE cutoff without recalculating or changing any pay.'
                   : 'Verify the immutable cutoff, employee mappings, and any corrections before adding the batch to this payroll.'
-                : 'Pull approved hours from this client’s configured time tracking source.'}
+                : isLiveAireSnapshot
+                  ? 'Review the exact AIRE entries and rates before adding hours to payroll. If AIRE changes, refresh the snapshot.'
+                  : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
           </div>
           <button ref={closeButtonRef} onClick={onClose} className="rounded-full p-2 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900" aria-label="Close">
@@ -463,7 +468,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                       <div className="text-sm font-semibold text-neutral-950">{selectedSource.name}</div>
                       <div className="mt-2 text-sm text-neutral-600">
                         {selectedSourceIsAire
-                          ? 'Cornerstone will retrieve the one finalized AIRE batch that exactly matches this pay period.'
+                          ? isHistoricalReconciliation
+                            ? 'Cornerstone will retrieve the finalized AIRE batch for this committed pay period.'
+                            : 'Cornerstone will capture the currently approved AIRE entries before the post-pay lock.'
                           : 'This is the active time source configured for the client.'}
                       </div>
                     </div>
@@ -474,12 +481,12 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                       <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 sm:col-span-2">
                         <div className="flex items-center gap-2 text-sm font-semibold text-primary-900">
                           <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                          Finalized-batch import
+                          {isHistoricalReconciliation ? 'Finalized-batch reconciliation' : 'Pre-pay AIRE snapshot'}
                         </div>
                         <p className="mt-2 text-sm leading-6 text-primary-800">
                           {isHistoricalReconciliation
                             ? 'This is a read-only reconciliation. Cornerstone will verify each employee’s regular and overtime hours before it links the records; payroll values, taxes, deductions, and checks will not change.'
-                            : 'Pending, denied, and open entries remain visible as unpaid exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.'}
+                            : 'Only approved, payable entries are imported. Held time stays visible. The exact source entries are captured so changes can be detected before payment.'}
                         </p>
                       </div>
                       <div className="rounded-xl border border-neutral-200 p-4">
@@ -539,19 +546,26 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 </section>
               )}
 
+              {isLiveAireSnapshot && (
+                <section className="rounded-2xl border border-primary-200 bg-primary-50/50 p-4 text-sm text-primary-950 sm:p-6">
+                  <div className="font-semibold">AIRE snapshot captured {formatTimestamp(preview.processed_payload.captured_at)}</div>
+                  <p className="mt-2 text-primary-800">Cornerstone checks for changed AIRE hours before applying. Review held time below; it is not included in this payroll.</p>
+                </section>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="text-neutral-600">
                   {includedPreviewRows.length} included · {excludedCount} skipped · {readyRows} ready · {unmappedIncludedCount} unmapped · {warningCount} warning{warningCount === 1 ? '' : 's'}
                 </span>
                 <span className="text-xs text-neutral-500">
-                  {isFinalizedBatch ? `Finalized ${formatTimestamp(preview.processed_payload.finalized_at)}` : `OT window: ${preview.fetch_start_date} → ${preview.fetch_end_date}`}
+                  {isFinalizedBatch ? `Finalized ${formatTimestamp(preview.processed_payload.finalized_at)}` : isLiveAireSnapshot ? `Captured ${formatTimestamp(preview.processed_payload.captured_at)}` : `OT window: ${preview.fetch_start_date} → ${preview.fetch_end_date}`}
                 </span>
               </div>
 
               {(warningCount > 0 || unmappedIncludedCount > 0 || duplicateMappingCount > 0 || rowsNeedingWageRateMapping.length > 0) && (
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">
-                  {isFinalizedBatch
-                    ? 'Resolve every employee and earning-type mapping before applying. Finalized AIRE rows cannot be skipped; AIRE’s exclusions are shown separately and remain unpaid.'
+                  {isExactAireImport
+                    ? 'Resolve every employee and earning-type mapping before applying. AIRE payable rows cannot be skipped; held time stays unpaid and visible below.'
                     : 'Resolve included employee and earning-type mappings before applying. Ordinary import rows may be skipped when they should not be added to this payroll.'}
                 </div>
               )}
@@ -577,10 +591,10 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   const effectiveWarnings = effectiveWarningsFor(row);
                   const activeWageRates = activeWageRatesFor(mappedEmployeeId);
                   const categories = rowCategories(row);
-                  const lacksActiveWageRates = Boolean(!isHistoricalReconciliation && isFinalizedBatch && included && mapped &&
+                  const lacksActiveWageRates = Boolean(!isHistoricalReconciliation && isExactAireImport && included && mapped &&
                     employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 && activeWageRates.length === 0);
                   const needsRateMapping = !isHistoricalReconciliation && included && mapped && employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 &&
-                    (isFinalizedBatch || activeWageRates.length > 1);
+                    (isExactAireImport || activeWageRates.length > 1);
                   const rowRateMappings = wageRateMappings.get(row.source_user_id) || {};
 
                   return (
@@ -588,7 +602,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            {!isFinalizedBatch && (
+                            {!isExactAireImport && (
                               <label className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-700">
                                 <input
                                   type="checkbox"
@@ -640,7 +654,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                               setMappings((previous) => new Map(previous).set(row.source_user_id, nextEmployeeId));
                               setWageRateMappings((previous) => {
                                 const next = new Map(previous);
-                                next.set(row.source_user_id, defaultWageRateMappingFor(row, nextEmployeeId, Boolean(isFinalizedBatch)));
+                                next.set(row.source_user_id, defaultWageRateMappingFor(row, nextEmployeeId, isExactAireImport));
                                 return next;
                               });
                             }}
@@ -685,7 +699,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                                 </div>
                                 {needsRateMapping && lacksActiveWageRates && (
                                   <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-2 text-xs font-medium text-warning-900">
-                                    Add an active wage rate for this employee before applying the finalized batch.
+                                    Add an active wage rate for this employee before applying AIRE hours.
                                   </p>
                                 )}
                                 {needsRateMapping && !lacksActiveWageRates && (
@@ -743,13 +757,15 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 })}
               </div>
 
-              {isFinalizedBatch && exclusions.length > 0 && (
+              {isExactAireImport && exclusions.length > 0 && (
                 <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2">
                     <Clock3 className="h-4 w-4 text-neutral-600" aria-hidden="true" />
-                    <h3 className="font-semibold text-neutral-950">Tracked but not paid in this batch</h3>
+                    <h3 className="font-semibold text-neutral-950">{isLiveAireSnapshot ? 'Tracked but not included in this payroll' : 'Tracked but not paid in this batch'}</h3>
                   </div>
-                  <p className="mt-2 text-sm text-neutral-600">These entries stay in AIRE. A later approval can appear as a carryover in a future finalized batch.</p>
+                  <p className="mt-2 text-sm text-neutral-600">{isLiveAireSnapshot
+                    ? 'These held entries stay in AIRE and are not added to this paycheck. Once approved, review them for a later payroll.'
+                    : 'These entries stay in AIRE. A later approval can appear as a carryover in a future finalized batch.'}</p>
                   <div className="mt-4 grid gap-2 lg:grid-cols-2">
                     {exclusions.map((exclusion) => (
                       <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -857,7 +873,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceIsAire ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>
+                {loading ? 'Retrieving…' : selectedSourceIsAire ? (isHistoricalReconciliation ? 'Retrieve Finalized Batch' : 'Review Live AIRE Hours') : 'Fetch Hours'}
+              </Button>
             </>
           )}
           {step === 'review' && (

@@ -14,6 +14,7 @@ module TimeTracking
     end
 
     def call
+      LiveSnapshotVerifier.call!(import: @import, actor: @applied_by) if live_snapshot?
       acknowledgement_ids = { batch: [], entries: [] }
       results = @pay_period.with_lock { apply_locked!(acknowledgement_ids) }
       AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
@@ -34,6 +35,7 @@ module TimeTracking
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
         validate_preview_provenance!
         validate_negative_adjustment_acknowledgement!
+        supersede_previous_live_snapshot! if live_snapshot?
 
         rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
         mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
@@ -54,8 +56,10 @@ module TimeTracking
           override = mapping_by_source_id[source_user_id] || {}
           include_value = override.key?(:include) || override.key?("include") ? (override[:include] || override["include"]) : true
           include_row = ActiveModel::Type::Boolean.new.cast(include_value)
-          if finalized_batch? && !include_row
-            results[:errors] << { source_user_id: source_user_id, error: "Finalized AIRE batch rows cannot be skipped" }
+          if exact_aire_import? && !include_row
+            error = finalized_batch? ? "Finalized AIRE batch rows cannot be skipped" :
+              "AIRE payable rows cannot be skipped. Resolve the employee setup before importing."
+            results[:errors] << { source_user_id: source_user_id, error: error }
             next
           end
           unless include_row
@@ -66,6 +70,14 @@ module TimeTracking
           employee_id = (override[:employee_id] || override["employee_id"] || row["employee_id"]).presence
           if employee_id.blank?
             results[:errors] << { source_user_id: source_user_id, error: "Employee mapping required" }
+            next
+          end
+          if exact_aire_import? && row["match_method"] == "saved_mapping" &&
+             row["employee_id"].present? && row["employee_id"].to_i != employee_id.to_i
+            results[:errors] << {
+              source_user_id: source_user_id,
+              error: "This AIRE person is already linked to another payroll employee. Review the permanent employee link first."
+            }
             next
           end
 
@@ -142,7 +154,7 @@ module TimeTracking
             time_tracking_import: @import,
             payroll_item: item,
             source_employee: source_employee_for(row)
-          ).call if finalized_batch?
+          ).call if exact_aire_import?
 
           results[:applied] << {
             employee_id: employee.id,
@@ -186,6 +198,8 @@ module TimeTracking
       payload = @import.processed_payload
       if finalized_batch?
         validate_finalized_batch_provenance!(payload)
+      elsif live_snapshot?
+        validate_live_snapshot_provenance!(payload)
       elsif payload["validation_version"] != "time_summary_v1" || payload["schema_version"] != PayloadValidator::CONTRACT_VERSION
         raise ArgumentError, "Refresh this time import preview before applying it"
       end
@@ -245,6 +259,47 @@ module TimeTracking
       @import.finalized_batch?
     end
 
+    def live_snapshot?
+      @import.live_snapshot?
+    end
+
+    def exact_aire_import?
+      finalized_batch? || live_snapshot?
+    end
+
+    def supersede_previous_live_snapshot!
+      previous = @pay_period.time_tracking_imports.where(status: "applied", time_tracking_source: @source)
+        .where.not(id: @import.id).to_a.select(&:live_snapshot?)
+      raise ArgumentError, "More than one active AIRE snapshot exists; review this payroll before refreshing" if previous.many?
+
+      previous.each do |old_import|
+        old_source_key = "time_tracking:#{@source.source_type}:#{@source.id}:live:#{old_import.id}"
+        old_import.time_tracking_entry_allocations.includes(:payroll_item).group_by(&:payroll_item).each do |item, lines|
+          unless item.import_source == old_source_key &&
+                 item.hours_worked.to_d.round(2) == lines.sum(&:regular_hours).to_d.round(2) &&
+                 item.overtime_hours.to_d.round(2) == lines.sum(&:overtime_hours).to_d.round(2)
+            raise ArgumentError, "Imported payroll hours were edited. Review the existing AIRE hours before replacing this snapshot."
+          end
+
+          item.wage_rate_hours = item.wage_rate_hours.map do |rate|
+            rate.merge("regular_hours" => 0.0, "overtime_hours" => 0.0)
+          end
+          item.update!(hours_worked: 0, overtime_hours: 0, import_source: nil)
+        end
+        old_import.update!(status: "superseded")
+      end
+    end
+
+    def validate_live_snapshot_provenance!(payload)
+      checksum = LiveSnapshotPreviewService.snapshot_checksum(@import.raw_payload)
+      unless payload["validation_version"] == LiveSnapshotPreviewService::VALIDATION_VERSION &&
+             payload["snapshot_checksum"] == checksum && @import.source_payload_hash == checksum &&
+             @import.raw_payload["batch_id"] == "LIVE-#{checksum}" &&
+             @import.raw_payload["generated_at"] == payload["captured_at"]
+        raise ArgumentError, "AIRE live snapshot changed; refresh the import before applying"
+      end
+    end
+
     def resolved_warning?(warning, employee_id)
       warning_code = warning.respond_to?(:[]) ? warning["code"] || warning[:code] : nil
 
@@ -261,19 +316,19 @@ module TimeTracking
     end
 
     def apply_imported_hours!(item, employee, row, override, preserved_holiday_hours:, preserved_pto_hours:)
-      if finalized_batch? && [ row["total_hours"], row["regular_hours"], row["overtime_hours"] ].any? { |value| value.to_d.negative? }
+      if exact_aire_import? && [ row["total_hours"], row["regular_hours"], row["overtime_hours"] ].any? { |value| value.to_d.negative? }
         return "This AIRE correction produces negative payroll hour totals; use the payroll correction workflow instead."
       end
 
       categories = Array(row["categories"] || row[:categories]).select do |category|
-        finalized_batch? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
+        exact_aire_import? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
       end
       active_rates = employee.active_wage_rates.to_a
-      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
+      if exact_aire_import? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
         return "This AIRE correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
       uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && categories.any? &&
-                        (finalized_batch? || active_rates.length > 1)
+                        (exact_aire_import? || active_rates.length > 1)
 
       unless uses_multi_rate
         item.clear_wage_rate_hours!
@@ -284,7 +339,7 @@ module TimeTracking
         return nil
       end
 
-      entries_or_error = if finalized_batch?
+      entries_or_error = if exact_aire_import?
         build_finalized_batch_wage_rate_entries(
           item,
           categories,
@@ -522,7 +577,7 @@ module TimeTracking
       return label_match if label_match
 
       effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
-      return if finalized_batch? || effective_rate_cents.blank?
+      return if exact_aire_import? || effective_rate_cents.blank?
 
       matches_by_rate = active_rates.select { |rate| wage_rate_cents(rate) == effective_rate_cents.to_i }
       matches_by_rate.one? ? matches_by_rate.first : nil
@@ -614,7 +669,7 @@ module TimeTracking
       values = [ source_category_id, source_category_key, source_category_name ].map { |value| normalize_match_key(value) }
       return if values.all?(&:blank?)
 
-      [ values.join("|"), (effective_rate_cents unless finalized_batch?), normalize_match_key(source_kind) ].compact_blank.join("|")
+      [ values.join("|"), (effective_rate_cents unless exact_aire_import?), normalize_match_key(source_kind) ].compact_blank.join("|")
     end
 
     def round_hours(value)
@@ -622,7 +677,11 @@ module TimeTracking
     end
 
     def import_source_key
-      suffix = finalized_batch? ? ":#{@import.external_batch_id}" : nil
+      suffix = if finalized_batch?
+        ":#{@import.external_batch_id}"
+      elsif live_snapshot?
+        ":live:#{@import.id}"
+      end
       "time_tracking:#{@source.source_type}:#{@source.id}#{suffix}"
     end
 
