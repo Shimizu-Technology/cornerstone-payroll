@@ -161,7 +161,7 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/Recording each check as issued updates the included AIRE hours/i);
+    await screen.findByText(/Recording payment evidence updates the included AIRE hours/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
