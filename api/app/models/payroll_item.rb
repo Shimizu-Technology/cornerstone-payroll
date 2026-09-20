@@ -13,6 +13,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
+  has_one :direct_deposit_payment_confirmation, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
   has_many :payroll_item_earnings, dependent: :destroy

@@ -3174,6 +3174,15 @@ export const checksApi = {
   }): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
     api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`, data),
 
+  confirmDirectDepositPayment: (payrollItemId: number, data: {
+    settled_on: string;
+    bank_reference: string;
+    note?: string;
+    attestation: boolean;
+  }) => api.post<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }>(
+    `/admin/payroll_items/${payrollItemId}/direct_deposit/confirm_payment`, data
+  ),
+
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>
     api.patch<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/check_number`, {

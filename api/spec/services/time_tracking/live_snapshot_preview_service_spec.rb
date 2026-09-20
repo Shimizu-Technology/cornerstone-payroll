@@ -88,20 +88,21 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     expect(import.update(raw_payload: {})).to be(false)
   end
 
-  it "holds direct-deposit AIRE hours until bank-settlement attribution is supported" do
-    create(:payroll_item, pay_period: pay_period, employee: employee,
-                          payment_delivery_method: "direct_deposit")
+  it "imports direct-deposit AIRE hours with exact-entry links awaiting bank settlement" do
+    item = create(:payroll_item, pay_period: pay_period, employee: employee,
+                                 payment_delivery_method: "direct_deposit")
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(response)
 
     import = described_class.new(pay_period: pay_period, source: source, actor: actor).call
     row = import.processed_payload.fetch("rows").first
-    expect(row.fetch("ready")).to be(false)
-    expect(row.fetch("warnings").map { |warning| warning.fetch("code") }).to include("direct_deposit_aire_payment_pending")
+    expect(row.fetch("ready")).to be(true)
 
     result = TimeTracking::ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
-    expect(result.fetch(:errors)).not_to be_empty
+    expect(result.fetch(:errors)).to be_empty
+    allocations = TimeTracking::ImportedEntryLinker.new(pay_period: pay_period, actor: actor).call!
+    expect(TimeTrackingManualAllocation.find(allocations.sole)).to have_attributes(status: "pending_commit", payroll_item_id: item.id)
   end
 
   it "keeps the checksum stable when only AIRE generation time changes" do
@@ -252,11 +253,6 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     )
     expect(allocation.payroll_item).to eq(pay_period.payroll_items.find_by!(employee: employee))
     expect(TimeTracking::ImportedEntryLinker.new(pay_period: pay_period, actor: actor).call!).to eq([ allocation.id ])
-
-    allocation.payroll_item.update!(payment_delivery_method: "direct_deposit")
-    expect { TimeTracking::ImportedEntryLinker.new(pay_period: pay_period, actor: actor).call! }
-      .to raise_error(ArgumentError, /bank-settlement confirmation/)
-    allocation.payroll_item.update!(payment_delivery_method: "paper_check")
 
     allocation.payroll_item.update!(hours_worked: 7)
     expect { TimeTracking::ImportedEntryLinker.new(pay_period: pay_period, actor: actor).call! }

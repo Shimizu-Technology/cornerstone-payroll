@@ -58,6 +58,16 @@ RSpec.describe PayrollPaymentMethodService do
     expect(item.reload.payment_delivery_method).to eq("paper_check")
   end
 
+  it "cannot turn an already confirmed bank payment into an apparently unpaid paper check" do
+    item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+    item.create_direct_deposit_payment_confirmation!(
+      user: actor, settled_on: PayrollBusinessClock.today, bank_reference: "BANK-TEST-PAID"
+    )
+
+    expect { switch_to("paper_check") }.to raise_error(described_class::Error, /Bank payment was already confirmed/)
+    expect(item.reload.payment_delivery_method).to eq("direct_deposit")
+  end
+
   it "refuses to switch a check after it was printed" do
     item.update!(check_printed_at: Time.current)
 

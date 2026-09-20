@@ -139,6 +139,44 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/payroll_items/:payroll_item_id/direct_deposit/confirm_payment" do
+    let!(:deposit_employee) { create(:employee, company: company, first_name: "Dina", last_name: "Deposit", payment_delivery_method: "direct_deposit") }
+    let!(:deposit_item) do
+      create(:payroll_item, pay_period: pay_period, employee: deposit_employee,
+        payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 600, net_pay: 500)
+    end
+    let(:endpoint) { "/api/v1/admin/payroll_items/#{deposit_item.id}/direct_deposit/confirm_payment" }
+    let(:evidence) { { settled_on: Date.current.iso8601, bank_reference: "BANK-TEST-123", attestation: true } }
+
+    it "requires actual bank evidence and records it only once" do
+      post endpoint, params: evidence.merge(attestation: false)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(DirectDepositPaymentConfirmation.count).to eq(0)
+
+      post endpoint, params: evidence
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payment_confirmation", "bank_reference")).to eq("BANK-TEST-123")
+      expect(DirectDepositPaymentConfirmation.count).to eq(1)
+
+      post endpoint, params: evidence
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["already_confirmed"]).to eq(true)
+      expect(DirectDepositPaymentConfirmation.count).to eq(1)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+      expect(response.parsed_body.fetch("direct_deposit_items").sole.dig("payment_confirmation", "settled_on")).to eq(Date.current.iso8601)
+    end
+
+    it "rejects a paper check or a future settlement date" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/direct_deposit/confirm_payment", params: evidence
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      post endpoint, params: evidence.merge(settled_on: (Date.current + 1).iso8601)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(DirectDepositPaymentConfirmation.count).to eq(0)
+    end
+  end
+
   # -----------------------------------------------------------------------
   # POST /checks/batch_pdf
   # -----------------------------------------------------------------------

@@ -138,7 +138,7 @@ AIRE_PID=$!
   export PATH="$RBENV_ROOT/shims:$PATH"
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
   exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
-    CORS_ORIGINS="http://127.0.0.1:44329" \
+    CORS_ORIGINS="${CORNERSTONE_WEB_ORIGIN:-http://127.0.0.1:44329}" \
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
 ) >"$CORNERSTONE_LOG" 2>&1 &
 CORNERSTONE_PID=$!
