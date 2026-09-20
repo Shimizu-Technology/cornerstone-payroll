@@ -216,6 +216,8 @@ Rails.application.routes.draw do
             end
           end
         end
+        get :aire_employee_candidates, to: "aire_employee_candidates#index"
+        post "aire_employee_candidates/link", to: "aire_employee_candidates#link"
 
         # Employee Bulk Import
         get  "employee_bulk_imports/template", to: "employee_bulk_imports#template"

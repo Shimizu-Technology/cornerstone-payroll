@@ -675,6 +675,7 @@ export interface AirePayrollCockpitEmployee {
   approval_groups?: Array<{ key: string; label: string }>;
   time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   cornerstone: AirePayrollCockpitMapping;
+  possible_payroll_matches?: Array<{ id: number; name: string; status: string }>;
 }
 
 export interface AirePayrollCockpitPeriod {

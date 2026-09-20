@@ -248,7 +248,7 @@ export function EmployeeForm() {
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const airePayPeriodId = Number(searchParams.get('aire_pay_period_id'));
   const aireSourceUserId = searchParams.get('aire_staff_id') || '';
-  const hasAireOnboarding = !isEditing && !isClient && Number.isSafeInteger(airePayPeriodId) && airePayPeriodId > 0 && Boolean(aireSourceUserId);
+  const hasAireOnboarding = !isEditing && !isClient && Boolean(aireSourceUserId);
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -554,10 +554,10 @@ export function EmployeeForm() {
     let cancelled = false;
     setAireCandidate(null);
     setAireCandidateLoading(true);
-    void payPeriodsApi.airePayrollCockpit(airePayPeriodId, { employee_id: aireSourceUserId })
-      .then(({ aire_payroll_cockpit: cockpit }) => {
+    void employeesApi.aireCandidates({ employee_id: aireSourceUserId })
+      .then(({ employees }) => {
         if (cancelled) return;
-        const person = cockpit.employees.find((row) => row.id === aireSourceUserId);
+        const person = employees.find((row) => row.id === aireSourceUserId);
         if (!person || !person.payroll_integration_id || person.cornerstone.status !== 'unmapped') {
           setGeneralError('This AIRE person is already linked or is no longer available. Return to the AIRE team and refresh.');
           return;
@@ -570,7 +570,7 @@ export function EmployeeForm() {
       })
       .finally(() => { if (!cancelled) setAireCandidateLoading(false); });
     return () => { cancelled = true; };
-  }, [airePayPeriodId, aireSourceUserId, hasAireOnboarding]);
+  }, [aireSourceUserId, hasAireOnboarding]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -1052,7 +1052,10 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create(
             { ...employeePayload, company_id: companyId },
-            hasAireOnboarding ? { pay_period_id: airePayPeriodId, source_user_id: aireSourceUserId } : undefined
+            hasAireOnboarding ? {
+              source_user_id: aireSourceUserId,
+              ...(Number.isSafeInteger(airePayPeriodId) && airePayPeriodId > 0 ? { pay_period_id: airePayPeriodId } : {}),
+            } : undefined
           );
           savedEmployeeId = response.data.id;
         }

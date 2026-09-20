@@ -398,8 +398,19 @@ export const employeesApi = {
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
   get: (id: number, companyId?: number): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
-  create: (data: EmployeeFormData & { company_id: number }, aireLink?: { pay_period_id: number; source_user_id: string }) =>
+  create: (data: EmployeeFormData & { company_id: number }, aireLink?: { pay_period_id?: number; source_user_id: string }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data, ...(aireLink ? { aire_link: aireLink } : {}) }),
+  aireCandidates: (params?: { page?: number; employee_id?: string }) =>
+    api.get<{
+      connected: boolean;
+      employees: import('@/types').AirePayrollCockpitEmployee[];
+      pagination: import('@/types').AirePayrollPagination;
+    }>('/admin/aire_employee_candidates', params),
+  linkAireCandidate: (sourceUserId: string, employeeId: number) =>
+    api.post<{ mapping: { source_user_id: string; source_user_uuid: string; employee_id: number; employee_name: string } }>(
+      '/admin/aire_employee_candidates/link',
+      { source_user_id: sourceUserId, employee_id: employeeId }
+    ),
   update: (id: number, data: Partial<EmployeeFormData>) =>
     api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>

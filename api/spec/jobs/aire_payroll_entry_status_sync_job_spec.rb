@@ -47,7 +47,8 @@ RSpec.describe AirePayrollEntryStatusSyncJob, type: :job do
       occurred_at: Time.zone.parse("2026-09-04 12:00:00"),
       payroll_item_id: item.id,
       payment_method: "paper_check",
-      payment_reference: "5001"
+      payment_reference: "5001",
+      payment_effective_on: Date.new(2026, 9, 4)
     )
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
@@ -67,7 +68,8 @@ RSpec.describe AirePayrollEntryStatusSyncJob, type: :job do
         company_id: company.id,
         pay_period_start: "2026-08-16",
         pay_period_end: "2026-08-31",
-        pay_date: "2026-09-04"
+        pay_date: "2026-09-04",
+        payment_effective_on: "2026-09-04"
       }
     ).and_return(true)
 

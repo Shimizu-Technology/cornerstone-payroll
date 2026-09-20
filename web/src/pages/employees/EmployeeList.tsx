@@ -39,7 +39,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
-import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
+import type { AirePayrollCockpitEmployee, AirePayrollPagination, Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
@@ -58,7 +58,7 @@ export function EmployeeList() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, isClient } = useAuth();
+  const { user, isClient, isManager, isSuperAdmin } = useAuth();
   const { activeCompanyId } = useCompany();
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
@@ -84,6 +84,16 @@ export function EmployeeList() {
     return state?.portalNotice ?? null;
   });
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [airePeople, setAirePeople] = useState<AirePayrollCockpitEmployee[]>([]);
+  const [airePagination, setAirePagination] = useState<AirePayrollPagination | null>(null);
+  const [aireConnected, setAireConnected] = useState(false);
+  const [aireLoading, setAireLoading] = useState(false);
+  const [aireError, setAireError] = useState<string | null>(null);
+  const [airePage, setAirePage] = useState(1);
+  const [aireRefresh, setAireRefresh] = useState(0);
+  const [confirmingAireLink, setConfirmingAireLink] = useState<string | null>(null);
+  const [linkingAireId, setLinkingAireId] = useState<string | null>(null);
+  const [showAllAire, setShowAllAire] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const employeeRequestIdRef = useRef(0);
   const departmentRequestIdRef = useRef(0);
@@ -96,7 +106,48 @@ export function EmployeeList() {
     setShowBulkImport(false);
     setIsLoading(true);
     setError(null);
+    setAirePeople([]);
+    setAirePagination(null);
+    setAireConnected(false);
+    setAirePage(1);
+    setConfirmingAireLink(null);
+    setShowAllAire(false);
   }, [companyId]);
+
+  useEffect(() => {
+    if (isClient) return;
+    let cancelled = false;
+    setAireLoading(true);
+    setAireError(null);
+    void employeesApi.aireCandidates({ page: airePage })
+      .then((payload) => {
+        if (cancelled) return;
+        setAireConnected(payload.connected);
+        setAirePeople(payload.employees);
+        setAirePagination(payload.pagination);
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setAirePeople([]);
+        setAireError(caught instanceof Error ? caught.message : 'Could not load AIRE people');
+      })
+      .finally(() => { if (!cancelled) setAireLoading(false); });
+    return () => { cancelled = true; };
+  }, [airePage, aireRefresh, companyId, isClient]);
+
+  const linkAirePerson = async (sourceUserId: string, employeeId: number): Promise<void> => {
+    setLinkingAireId(sourceUserId);
+    setAireError(null);
+    try {
+      await employeesApi.linkAireCandidate(sourceUserId, employeeId);
+      setConfirmingAireLink(null);
+      setAireRefresh((value) => value + 1);
+    } catch (caught) {
+      setAireError(caught instanceof Error ? caught.message : 'Could not link this AIRE person');
+    } finally {
+      setLinkingAireId(null);
+    }
+  };
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') ?? 'active';
@@ -282,6 +333,21 @@ export function EmployeeList() {
   }, [companyEmployees]);
 
   const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || status !== 'active');
+  const aireNeedsReview = airePeople
+    .filter((person) => !['mapped', 'not_required'].includes(person.cornerstone.status))
+    .sort((left, right) => {
+      const priority = (person: AirePayrollCockpitEmployee): number => {
+        if (person.cornerstone.status === 'inactive') return 0;
+        if (person.cornerstone.status === 'unmapped' && !person.possible_payroll_matches?.length && person.first_name && person.last_name) return 0;
+        if (person.cornerstone.status === 'unmapped' && person.possible_payroll_matches?.some((match) => match.status === 'terminated')) return 1;
+        if (person.cornerstone.status === 'needs_verification') return 2;
+        if (person.cornerstone.status === 'unmapped' && person.possible_payroll_matches?.length) return 3;
+        return 4;
+      };
+      return priority(left) - priority(right) || left.full_name.localeCompare(right.full_name);
+    });
+  const shownAirePeople = showAllAire ? aireNeedsReview : aireNeedsReview.slice(0, 4);
+  const canReviewAire = isManager || isSuperAdmin;
 
   return (
     <div>
@@ -305,6 +371,78 @@ export function EmployeeList() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        {!isClient && (aireConnected || aireLoading || aireError) && (
+          <Card className="mb-6 border-slate-200 bg-slate-50/60 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">AIRE people needing payroll review{aireNeedsReview.length ? ` · ${aireNeedsReview.length}` : ''}</h2>
+                <p className="mt-1 text-sm text-slate-600">New AIRE people appear here automatically. They cannot be paid until an admin verifies the identity and completes or links a payroll profile.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setAireRefresh((value) => value + 1)} disabled={aireLoading}>Refresh AIRE</Button>
+            </div>
+            {aireError && <p role="alert" className="mt-4 text-sm text-red-700">AIRE review is unavailable: {aireError}</p>}
+            {aireLoading ? <p className="mt-4 text-sm text-slate-600">Loading AIRE people…</p> : (
+              <div className="mt-4 space-y-3">
+                {aireNeedsReview.length === 0 && aireConnected && <p className="text-sm text-slate-600">No one needs review on this page.</p>}
+                {shownAirePeople.map((person) => {
+                  const match = person.possible_payroll_matches?.length === 1 ? person.possible_payroll_matches[0] : null;
+                  const legacyEmployeeId = person.cornerstone.status === 'needs_verification' ? person.cornerstone.employee_id : undefined;
+                  const targetEmployeeId = legacyEmployeeId || match?.id;
+                  const canLink = canReviewAire && !!person.payroll_integration_id && !!targetEmployeeId;
+                  const setupPath = newEmployeePath(companyId, { returnTo });
+                  const onboardingPath = `${setupPath}${setupPath.includes('?') ? '&' : '?'}aire_staff_id=${encodeURIComponent(person.id)}`;
+                  return (
+                    <div key={person.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 sm:flex sm:items-center sm:justify-between sm:gap-4">
+                      <div>
+                        <p className="font-medium text-slate-900">{person.full_name || 'Unnamed AIRE person'}</p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {person.cornerstone.status === 'needs_verification'
+                              ? `Existing payroll link to ${person.cornerstone.employee_name} needs permanent-ID verification.`
+                            : person.cornerstone.status === 'inactive'
+                              ? `Linked payroll profile is inactive. Review its status before paying.`
+                              : match
+                                ? `Possible existing payroll profile: ${match.name} (${match.status}). ${match.status === 'terminated' ? 'Linking will not reactivate it.' : 'Verify before linking.'}`
+                                : (person.possible_payroll_matches?.length || 0) > 1
+                                  ? 'Several possible payroll profiles match. Review the identity before adding or linking.'
+                                  : 'No payroll profile is linked yet.'}
+                        </p>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2 sm:mt-0">
+                        {targetEmployeeId && <Button size="sm" variant="outline" onClick={() => openEmployee(targetEmployeeId)}>Review profile</Button>}
+                        {canLink && confirmingAireLink !== person.id && (
+                          <Button size="sm" variant="outline" onClick={() => setConfirmingAireLink(person.id)}>Verify link</Button>
+                        )}
+                        {canLink && confirmingAireLink === person.id && (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => setConfirmingAireLink(null)}>Cancel</Button>
+                            <Button size="sm" disabled={linkingAireId === person.id} onClick={() => void linkAirePerson(person.id, targetEmployeeId)}>
+                              I verified — link
+                            </Button>
+                          </>
+                        )}
+                        {person.cornerstone.status === 'unmapped' && !targetEmployeeId && !(person.possible_payroll_matches?.length) && canReviewAire && !!person.payroll_integration_id && person.first_name && person.last_name && (
+                          <Button size="sm" onClick={() => navigate(onboardingPath)}>Set up payroll profile</Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {aireNeedsReview.length > 4 && (
+                  <Button variant="ghost" size="sm" onClick={() => setShowAllAire((value) => !value)}>
+                    {showAllAire ? 'Show fewer' : `Show all ${aireNeedsReview.length} people`}
+                  </Button>
+                )}
+              </div>
+            )}
+            {airePagination && airePagination.total_pages > 1 && (
+              <div className="mt-4 flex items-center justify-end gap-3 text-sm text-slate-600">
+                <Button variant="outline" size="sm" disabled={airePage <= 1 || aireLoading} onClick={() => setAirePage((value) => value - 1)}>Previous</Button>
+                <span>Page {airePage} of {airePagination.total_pages}</span>
+                <Button variant="outline" size="sm" disabled={airePage >= airePagination.total_pages || aireLoading} onClick={() => setAirePage((value) => value + 1)}>Next</Button>
+              </div>
+            )}
+          </Card>
+        )}
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row">
           <div className="relative flex-1 sm:max-w-md">

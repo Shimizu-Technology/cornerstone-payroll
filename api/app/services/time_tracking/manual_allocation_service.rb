@@ -140,6 +140,7 @@ module TimeTracking
           expected_version: allocation.remote_version,
           payment_method: "direct_deposit",
           payment_reference: confirmation.bank_reference,
+          payment_effective_on: confirmation.settled_on.iso8601,
           occurred_at: confirmation.created_at.iso8601,
           reason: "Cornerstone bank payment #{confirmation.bank_reference} confirmed for #{confirmation.settled_on.iso8601}"
         )
@@ -153,6 +154,7 @@ module TimeTracking
           expected_version: allocation.remote_version,
           payment_method: "paper_check",
           payment_reference: item.check_number,
+          payment_effective_on: delivery.effective_on.iso8601,
           occurred_at: delivery.created_at.iso8601,
           reason: "Cornerstone check #{item.check_number} delivered on #{delivery.effective_on.iso8601}"
         )

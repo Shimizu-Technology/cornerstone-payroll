@@ -13,10 +13,17 @@ module AirePayrollCockpit
         finalized_batch: period_payload["finalized_batch"],
         processing_history: period_payload.fetch("processing_history", []),
         carryovers: period_payload.fetch("carryovers", {}),
-        employees: employees_payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
+        employees: employees(employees_payload).fetch(:employees),
         employee_pagination: required(employees_payload, "pagination"),
         command_access: command_access,
         routing_options: routing_options
+      }
+    end
+
+    def employees(payload)
+      {
+        employees: payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
+        pagination: required(payload, "pagination")
       }
     end
 

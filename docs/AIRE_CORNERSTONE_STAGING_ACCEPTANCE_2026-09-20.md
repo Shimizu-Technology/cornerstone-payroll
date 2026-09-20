@@ -20,12 +20,14 @@ production until Leon has tested the local UI and explicitly approves promotion.
    time, OT, and the calculated checks. Refresh and recalculate if AIRE changed.
    Commit the payroll only after those checks pass. A committed item is not
    marked paid in AIRE until a paper-check delivery or bank-settlement event is
-   recorded.
+   recorded. AIRE should show the actual delivery or settlement date, not the
+   check-printing timestamp or the scheduled pay date.
 4. For manual payroll, enter and calculate checks as usual. After commit,
    attach each paid AIRE entry to the exact payroll item from the manual-hours
    review. The link records regular/OT hours and original work date; it remains
    awaiting payment until actual delivery/settlement evidence exists. A failed
-   AIRE sync remains visible and retryable.
+   AIRE sync remains visible and retryable. Historical issued allocations with
+   no recorded payment date must say that the date is unknown; do not infer it.
 5. After the AIRE cutoff, compare its verified final batch with the selected
    payroll's links and later payments of exact source entries. The final batch
    contains **residual hours at cutoff**: AIRE already subtracts active manual
@@ -54,6 +56,9 @@ production until Leon has tested the local UI and explicitly approves promotion.
 - Repeat with direct deposit: the AIRE link may commit, but must stay unpaid
   until a unique bank reference and settlement date are recorded. Printing a
   stub is not payment evidence.
+- Verify a paper check remains unpaid in AIRE after printing, then records the
+  actual delivery date after the operator documents issuance. Do not backfill
+  unknown historical dates from pay dates or audit timestamps.
 - Verify regular and overtime splits, a late-approved/held entry, a carryover
   from a prior work period, a source edit after snapshot, and a source identity
   conflict. No stale or held hour should slip into the paid amount.

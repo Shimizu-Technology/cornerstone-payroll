@@ -436,7 +436,7 @@ module Api
           @source.aire_payroll_calendar_periods
             .includes(:publications, :payroll_events, :pay_period)
             .joins(:pay_period)
-            .where(pay_periods: { cycle: "regular" })
+            .where(pay_periods: { cycle: "regular", run_purpose: "regular" })
             .where("pay_periods.start_date > ?", @pay_period.end_date)
             .order("pay_periods.start_date ASC, pay_periods.id ASC")
             .filter_map do |calendar_period|

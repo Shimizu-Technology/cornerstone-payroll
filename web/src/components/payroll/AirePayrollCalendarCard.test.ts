@@ -103,6 +103,20 @@ describe('lockedBatchCopy', () => {
 });
 
 describe('AirePayrollCalendarCard', () => {
+  it('does not imply an adjustment payroll needs its own AIRE cutoff', () => {
+    renderCard({
+      ...baseCalendar,
+      eligible: false,
+      can_publish: false,
+      eligibility_code: 'unsupported_run',
+      eligibility_error: 'Only regular payroll runs can be published to AIRE',
+    });
+
+    expect(screen.getByText('Not applicable to this run')).toBeTruthy();
+    expect(screen.getByText(/adjustment runs do not create or move an aire cutoff/i)).toBeTruthy();
+    expect(screen.queryByText('Not published')).toBeNull();
+  });
+
   it('refreshes the visible cutoff distance while the page remains open', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-18T06:59:00Z'));

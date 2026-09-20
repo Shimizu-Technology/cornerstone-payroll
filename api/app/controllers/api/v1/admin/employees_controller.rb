@@ -212,14 +212,18 @@ module Api
 
         def aire_link_context
           link = params.require(:aire_link).permit(:pay_period_id, :source_user_id)
-          pay_period = current_company.pay_periods.find(link.fetch(:pay_period_id))
-          source = pay_period.aire_payroll_calendar_period&.time_tracking_source
+          pay_period = current_company.pay_periods.find(link[:pay_period_id]) if link[:pay_period_id].present?
+          source = if pay_period
+            pay_period.aire_payroll_calendar_period&.time_tracking_source
+          else
+            current_company.time_tracking_sources.active.find_by(source_type: "aire_services")
+          end
           unless source&.active? && source.company_id == current_company.id && source.source_type == "aire_services"
             raise TimeTracking::EmployeeMappingService::Error,
-                  "This pay period has no active AIRE connection. Open its AIRE workspace and review the calendar first."
+                  "This company has no active AIRE connection. Review its time-tracking settings first."
           end
           source_user_id = link.fetch(:source_user_id)
-          service = TimeTracking::EmployeeMappingService.new(pay_period: pay_period, source: source)
+          service = TimeTracking::EmployeeMappingService.new(company: current_company, source: source)
           [ service, source_user_id, service.live_identity!(source_user_id: source_user_id) ]
         end
 
