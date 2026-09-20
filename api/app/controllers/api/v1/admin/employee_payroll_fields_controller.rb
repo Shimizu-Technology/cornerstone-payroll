@@ -46,14 +46,39 @@ module Api
           end
 
           render json: {
-            payroll_field: field.as_json(only: [
-              :id, :company_id, :owner_employee_id, :name, :description, :kind,
-              :tax_treatment, :category, :reporting_group, :amount_type,
-              :default_amount, :default_percentage, :show_in_payroll_grid,
-              :active, :sort_order, :payee_name, :reference_number
-            ]),
+            payroll_field: personal_field_json(field),
             employee_payroll_field: assignment_json(assignment)
           }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        end
+
+        # Atomically replace a legacy employee default with a typed, employee-
+        # owned field. The request identifies the exact source values so a stale
+        # screen cannot silently remove a different recurring item.
+        def convert_legacy
+          source = params.require(:legacy).permit(:kind, :label, :amount, :treatment, :notes)
+          field_attrs = params.require(:payroll_field).permit(
+            :name, :description, :category, :reporting_group, :payee_name, :reference_number
+          )
+          assignment_attrs = params.require(:employee_payroll_field).permit(
+            :start_date, :end_date, :notes
+          )
+          field, assignment = LegacyPayItemConversionService.new(
+            employee: @employee, actor: current_user, source: source,
+            field_attributes: field_attrs, assignment_attributes: assignment_attrs
+          ).call
+
+          render json: {
+            payroll_field: personal_field_json(field),
+            employee_payroll_field: assignment_json(assignment)
+          }, status: :created
+        rescue LegacyPayItemConversionService::SourceChanged,
+               LegacyPayItemConversionService::InvalidSource,
+               LegacyPayItemConversionService::UnsafeOpenPayroll => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
@@ -190,6 +215,15 @@ module Api
               active: field.active
             }
           }
+        end
+
+        def personal_field_json(field)
+          field.as_json(only: [
+            :id, :company_id, :owner_employee_id, :name, :description, :kind,
+            :tax_treatment, :category, :reporting_group, :amount_type,
+            :default_amount, :default_percentage, :show_in_payroll_grid,
+            :active, :sort_order, :payee_name, :reference_number
+          ])
         end
       end
     end
