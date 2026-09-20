@@ -103,6 +103,37 @@ describe('YtdSummaryPanel', () => {
     expect(employeeRow?.textContent).toContain('$2,325.00');
   });
 
+  it('keeps historical loan and conflicting 401(k) source labels visible without misclassifying them', async () => {
+    apiMocks.ytdSummary.mockResolvedValue({ report: {
+      ...report,
+      company_totals: { ...report.company_totals,
+        historical_loan_deductions_unclassified: 60.06,
+        health_insurance_deductions: 48.11,
+        source_labeled_after_tax_401k_in_pretax_bucket: 15.45 },
+      employees: [{ ...report.employees[0],
+        historical_loan_deductions_unclassified: 60.06,
+        health_insurance_deductions: 48.11,
+        source_labeled_after_tax_401k_in_pretax_bucket: 15.45,
+        component_values: { 'historical:quickbooks:post_tax_deduction:Health Insurance': 29.99 } }],
+      historical_deductions: {
+        source_bucket_totals: [{ source: 'quickbooks', treatment: 'post_tax_deduction', amount: 90.05 }],
+        classification_note: 'QuickBooks source labels need classification review.',
+      },
+      component_columns: [{ key: 'historical:quickbooks:post_tax_deduction:Health Insurance',
+        label: 'QuickBooks source - Health Insurance (Post tax deduction; QuickBooks source)',
+        short_label: 'Health Insurance', identity_label: 'QuickBooks source', treatment: 'post_tax_deduction' }],
+    } });
+    render(<YtdSummaryPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(screen.getByRole('note').textContent).toContain('classification review');
+    expect(screen.getByText('Historical Loans (type unclassified)').nextElementSibling?.textContent).toBe('$60.06');
+    expect(screen.getByText('Health Insurance (payroll fields + historical)').nextElementSibling?.textContent).toBe('$48.11');
+    expect(screen.getByText('Source-labeled after-tax 401(k) in pre-tax bucket').nextElementSibling?.textContent).toBe('$15.45');
+    expect(screen.getByText(/post tax deduction · QuickBooks source/)).toBeTruthy();
+  });
+
   it('uses a year-to-date pay-date range by default and offers a rolling year preset', async () => {
     render(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
