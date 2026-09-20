@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_072500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_073000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3786,6 +3786,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_072500) do
     CREATE TRIGGER prevent_voiding_superseded_payroll_item_on_update
     BEFORE UPDATE OF voided ON payroll_items
     FOR EACH ROW EXECUTE FUNCTION prevent_voiding_superseded_payroll_item();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_period_with_superseded_checks() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.correction_status = 'voided' AND OLD.correction_status IS DISTINCT FROM 'voided'
+        AND EXISTS (
+          SELECT 1 FROM payroll_items p
+          JOIN non_employee_check_supersessions s ON s.payroll_item_id = p.id
+          WHERE p.pay_period_id = OLD.id
+        ) THEN
+        RAISE EXCEPTION 'A pay period with a payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_period_with_superseded_checks_on_update ON pay_periods;
+    CREATE TRIGGER prevent_voiding_period_with_superseded_checks_on_update
+    BEFORE UPDATE OF correction_status ON pay_periods
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_period_with_superseded_checks();
 
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$

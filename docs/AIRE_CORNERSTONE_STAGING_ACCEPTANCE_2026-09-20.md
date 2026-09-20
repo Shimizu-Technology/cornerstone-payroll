@@ -36,8 +36,9 @@ production until Leon has tested the local UI and explicitly approves promotion.
    check, link the duplicate to the exact issued payroll item with a reason.
    This preserves the audit trail and removes the duplicate representation
    from active totals; it does **not** void or delete the physical check.
-   Once linked, the payroll item cannot be voided without a separate, reviewed
-   reversal workflow; the app and database both reject an ordinary void.
+   Once linked, neither its payroll item nor the containing pay period can be
+   voided without a separate, reviewed reversal workflow; the app and database
+   both reject an ordinary void.
    Live-client links are disabled by default. Only after local acceptance and
    Leon's explicit production approval should an active organization admin
    create the append-only, company-specific rollout approval with a documented

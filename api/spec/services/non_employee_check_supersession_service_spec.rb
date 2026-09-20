@@ -101,6 +101,28 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     expect(register.dig(:summary, :amount)).to eq(183.to_d)
   end
 
+  it "keeps the payment active when someone tries to void its whole pay period" do
+    item
+    create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                         effective_on: PayrollBusinessClock.today)
+    described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
+
+    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "This period should not be voided") }
+      .to raise_error(PayPeriodCorrectionService::InvalidStateError, /linked to a duplicate/)
+    expect {
+      ApplicationRecord.transaction(requires_new: true) do
+        PayPeriod.where(id: period.id).update_all(correction_status: "voided")
+      end
+    }.to raise_error(ActiveRecord::StatementInvalid, /linked to a duplicate/)
+
+    expect(period.reload.correction_status).not_to eq("voided")
+    expect(NonEmployeeCheck.active).not_to include(check)
+    register = CheckRegisterService.new(company: company, from: "2026-05-01", to: "2026-05-31").call
+    expect(register.fetch(:rows).map { |row| row.fetch(:source_type) }).to eq([ "payroll_item" ])
+    expect(register.dig(:summary, :amount)).to eq(183.to_d)
+  end
+
   it "rejects mismatched numbers and does not double count" do
     item.update!(check_number: "1046")
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
