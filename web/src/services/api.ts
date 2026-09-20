@@ -540,6 +540,17 @@ export const employeePayrollFieldsApi = {
       { payroll_field: field, employee_payroll_field: assignment },
       { companyId },
     ),
+  convertLegacy: (
+    employeeId: number,
+    legacy: { kind: 'adjustment' | 'custom_earning'; label: string; amount: number; treatment?: string; notes?: string },
+    field: Partial<PayrollFieldDefinition>,
+    assignment: Partial<EmployeePayrollField>,
+    companyId?: number,
+  ) => api.post<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
+    `/admin/employees/${employeeId}/payroll_fields/convert_legacy`,
+    { legacy, payroll_field: field, employee_payroll_field: assignment },
+    { companyId },
+  ),
   update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>) =>
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
@@ -2087,6 +2098,7 @@ export interface PayrollSourceSummary {
     gross_pay_delta: number;
     net_pay_delta: number;
   };
+  source_overlap?: { employee_pay_date_count: number };
   historical_ytd_bridge: {
     applied: boolean;
     tax_years: number[];
@@ -2122,6 +2134,7 @@ export interface EmployeePayHistoryRecord {
   total_deductions: number;
   net_pay: number;
   check_number: string | null;
+  payment_delivery_method?: import('@/types').PaymentDeliveryMethod;
   reason?: string;
   source: {
     system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
@@ -2221,6 +2234,9 @@ export interface YtdSummaryReport {
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
+      historical_loan_deductions_unclassified?: number;
+      health_insurance_deductions?: number;
+      source_labeled_after_tax_401k_in_pretax_bucket?: number;
       employer_contributions?: number;
       employer_payroll_cost?: number;
       custom_earnings_total?: number;
@@ -2233,6 +2249,7 @@ export interface YtdSummaryReport {
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      roth_retirement?: number;
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
@@ -2246,6 +2263,9 @@ export interface YtdSummaryReport {
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
+      historical_loan_deductions_unclassified?: number;
+      health_insurance_deductions?: number;
+      source_labeled_after_tax_401k_in_pretax_bucket?: number;
       employer_contributions?: number;
       employer_payroll_cost?: number;
       custom_earnings_total?: number;
@@ -2258,6 +2278,7 @@ export interface YtdSummaryReport {
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      roth_retirement?: number;
       total_deductions?: number;
       custom_deductions_total?: number;
       net_pay: number;
@@ -2266,7 +2287,11 @@ export interface YtdSummaryReport {
     source_summary: PayrollSourceSummary;
     payroll_fields: PayrollFieldsDisclosure;
     payroll_adjustments?: PayrollAdjustmentsDisclosure;
-    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; treatment: string }>;
+    historical_deductions?: {
+      source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
+      classification_note: string;
+    };
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
   };
 }
 
@@ -3117,6 +3142,11 @@ export const checksApi = {
 
   printQueue: (payPeriodId: number) =>
     api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
+
+  rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
+      starting_slot: startingSlot,
+    }),
 
   updateCheckNumbers: (
     payPeriodId: number,

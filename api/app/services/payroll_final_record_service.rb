@@ -336,14 +336,12 @@ class PayrollFinalRecordService
   end
 
   def employee_loan_repayments(item)
-    return item.loan_deduction.to_d if item.loan_deduction.to_d.nonzero?
-
     deductions = item.payroll_item_deductions.select do |deduction|
       deduction.post_tax? && (deduction.employee_loan_id.present? || deduction.deduction_type&.loan?)
     end
-    return deductions.sum(0.to_d) { |deduction| deduction.amount.to_d } if deductions.any?
+    return item.loan_deduction.to_d + deductions.sum(0.to_d) { |deduction| deduction.amount.to_d } if deductions.any?
 
-    item.loan_payment.to_d
+    item.loan_deduction.to_d.nonzero? || item.loan_payment.to_d
   end
 
   def non_taxable_pay(item)

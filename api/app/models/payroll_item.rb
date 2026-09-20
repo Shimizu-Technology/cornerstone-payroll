@@ -398,7 +398,6 @@ class PayrollItem < ApplicationRecord
       next unless field&.active?
       next unless field.amount_type == "percentage"
       next if field.tax_treatment == "taxable_addition"
-      next if direct_loan_field_should_be_skipped?(field)
 
       entry = payroll_item_field_entries.detect { |candidate| candidate.payroll_field_definition_id == field.id }
       next unless entry&.active?
@@ -428,7 +427,6 @@ class PayrollItem < ApplicationRecord
     assignments.filter_map do |assignment|
       field = assignment.payroll_field_definition
       next unless field&.active?
-      next if direct_loan_field_should_be_skipped?(field)
 
       field.id
     end
@@ -438,7 +436,7 @@ class PayrollItem < ApplicationRecord
     payroll_item_field_entries.each do |entry|
       next if entry.payroll_field_definition_id.blank?
       next if entry.source == "import"
-      next if entry.source == "manual" && !direct_loan_entry_should_be_deactivated?(entry)
+      next if entry.source == "manual"
       next if entry.payroll_field_definition_id.in?(active_definition_ids)
 
       entry.active = false
@@ -447,14 +445,6 @@ class PayrollItem < ApplicationRecord
 
   def active_payroll_field_entries_total(treatment)
     payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
-  end
-
-  def direct_loan_field_should_be_skipped?(field)
-    loan_deduction.to_f.positive? && field.category == "loan" && field.tax_treatment == "post_tax_deduction"
-  end
-
-  def direct_loan_entry_should_be_deactivated?(entry)
-    loan_deduction.to_f.positive? && entry.category == "loan" && entry.tax_treatment == "post_tax_deduction"
   end
 
   def self.normalize_custom_deduction_entries(entries)

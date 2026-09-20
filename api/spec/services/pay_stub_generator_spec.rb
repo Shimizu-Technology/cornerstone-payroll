@@ -92,6 +92,22 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$20.00")
   end
 
+  it "prints a direct loan and a separate named loan field on the same stub" do
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
+    payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
+      label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
+      category: "loan", amount: BigDecimal("250"), source: "employee_default")
+    payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Loan Repayment")
+    expect(text).to include("Loan - Madela Severin")
+    expect(text).to include("$428.36")
+    expect(text).to include("$250.00")
+  end
+
   it "prints legacy itemized deductions and includes them in YTD total deductions" do
     deduction_type = DeductionType.create!(
       company: company,

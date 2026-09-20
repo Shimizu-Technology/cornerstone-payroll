@@ -1997,7 +1997,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }
   });
 
-  test('accepts a first direct loan entry with an untouched default and restores the default after clearing', async ({ browser }) => {
+  test('adds a direct loan entry to an untouched default and restores the default after clearing', async ({ browser }) => {
     const fieldResponse = await adminApi.post('admin/payroll_fields', { data: { payroll_field: {
       name: `Feedback loan ${randomUUID()}`, kind: 'deduction', tax_treatment: 'post_tax_deduction', category: 'loan',
       amount_type: 'fixed', default_amount: 50, show_in_payroll_grid: true, active: true,
@@ -2027,7 +2027,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       expect(body.results.errors).toEqual([]);
       const item = body.pay_period.payroll_items.find((row: { employee_id: number }) => row.employee_id === fixture.employee_id);
       expect(Number(item.loan_deduction)).toBe(75);
-      expect(Number(item.loan_payment)).toBe(75);
+      expect(Number(item.loan_payment)).toBe(125);
+      const namedLoan = item.payroll_field_entries.find((entry: { payroll_field_definition_id: number }) => entry.payroll_field_definition_id === field.id);
+      expect(namedLoan).toMatchObject({ active: true, source: 'employee_default' });
+      expect(Number(namedLoan.amount)).toBe(50);
       await page.reload();
       await expect(loan).toHaveValue('75.00');
       await loan.fill('0');
@@ -2041,8 +2044,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       const restoredDefault = finalItem.payroll_field_entries.find((entry: { payroll_field_definition_id: number }) => entry.payroll_field_definition_id === field.id);
       expect(restoredDefault).toMatchObject({ active: true, source: 'employee_default' });
       expect(Number(restoredDefault.amount)).toBe(50);
-      expect(Number(finalItem.total_deductions)).toBeCloseTo(Number(item.total_deductions) - 25, 2);
-      expect(Number(finalItem.net_pay)).toBeCloseTo(Number(item.net_pay) + 25, 2);
+      expect(Number(finalItem.loan_payment)).toBe(50);
+      expect(Number(finalItem.total_deductions)).toBeCloseTo(Number(item.total_deductions) - 75, 2);
+      expect(Number(finalItem.net_pay)).toBeCloseTo(Number(item.net_pay) + 75, 2);
     } finally {
       await context.close();
     }

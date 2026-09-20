@@ -196,7 +196,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions).to eq(310.0)
     end
 
-    it "uses imported loan_deduction as the paycheck loan payment even when itemized loan setup exists" do
+    it "adds an imported direct loan to a separate itemized loan deduction" do
       loan_type = DeductionType.create!(
         company: company,
         name: "Loan",
@@ -207,18 +207,18 @@ RSpec.describe PayrollCalculator do
       EmployeeDeduction.create!(
         employee: employee,
         deduction_type: loan_type,
-        amount: 40.0,
+        amount: BigDecimal("40"),
         is_percentage: false,
         active: true
       )
       payroll_item.import_source = "mosa_revel"
-      payroll_item.loan_deduction = 200.0
+      payroll_item.loan_deduction = BigDecimal("200")
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.loan_payment).to eq(200.0)
-      expect(payroll_item.total_deductions.to_f).to be >= 200.0
-      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
+      expect(payroll_item.loan_payment).to eq(BigDecimal("240"))
+      expect(payroll_item.total_deductions.to_d).to be >= BigDecimal("240")
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.deduction_type&.loan? }.amount).to eq(BigDecimal("40"))
     end
 
     it "reduces a loan linked to an assigned payroll field when payroll is committed" do
@@ -261,7 +261,7 @@ RSpec.describe PayrollCalculator do
       )
     end
 
-    it "uses a manual paycheck loan deduction without duplicating configured loan deductions" do
+    it "adds a manual paycheck loan deduction to a separately configured loan deduction" do
       loan_type = DeductionType.create!(
         company: company,
         name: "Manual loan test",
@@ -272,18 +272,18 @@ RSpec.describe PayrollCalculator do
       EmployeeDeduction.create!(
         employee: employee,
         deduction_type: loan_type,
-        amount: 40.0,
+        amount: BigDecimal("40"),
         is_percentage: false,
         active: true
       )
       payroll_item.import_source = nil
-      payroll_item.loan_deduction = 50.0
+      payroll_item.loan_deduction = BigDecimal("50")
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.loan_payment).to eq(50.0)
-      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
-      expect(payroll_item.total_deductions).to be >= 50.0
+      expect(payroll_item.loan_payment).to eq(BigDecimal("90"))
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.deduction_type&.loan? }.amount).to eq(BigDecimal("40"))
+      expect(payroll_item.total_deductions).to be >= BigDecimal("90")
     end
 
     it "applies recurring payroll adjustments according to their tax treatment" do
@@ -528,7 +528,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
-    it "deactivates manually overridden loan field entries when a MoSa import loan becomes authoritative" do
+    it "keeps a manually overridden loan field alongside a separate MoSa direct loan" do
       field = PayrollFieldDefinition.create!(
         company: company,
         name: "Manual Loan",
@@ -536,21 +536,22 @@ RSpec.describe PayrollCalculator do
         tax_treatment: "post_tax_deduction",
         category: "loan",
         amount_type: "fixed",
-        default_amount: 100.0
+        default_amount: BigDecimal("100")
       )
-      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: BigDecimal("100"))
 
       described_class.for(employee, payroll_item).calculate
       entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Loan" }
-      entry.assign_attributes(source: "manual", amount: 150.0)
+      entry.assign_attributes(source: "manual", amount: BigDecimal("150"))
       payroll_item.import_source = "mosa_revel"
-      payroll_item.loan_deduction = 200.0
+      payroll_item.loan_deduction = BigDecimal("200")
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(entry).not_to be_active
-      expect(payroll_item.loan_payment.to_f).to eq(200.0)
-      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(0.0)
+      expect(entry).to be_active
+      expect(entry.amount.to_d).to eq(BigDecimal("150"))
+      expect(payroll_item.loan_payment.to_d).to eq(BigDecimal("350"))
+      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(BigDecimal("150"))
     end
 
     it "adds newly assigned default payroll fields after another field was manually overridden" do
@@ -685,7 +686,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.retirement_rule_snapshot.fetch("explanations")).to include(/enough available pay/)
     end
 
-    it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
+    it "deducts a MoSa direct loan and an independently assigned loan field" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
         name: "MoSa Auto Loan",
@@ -693,16 +694,80 @@ RSpec.describe PayrollCalculator do
         tax_treatment: "post_tax_deduction",
         category: "loan",
         amount_type: "fixed",
-        default_amount: 75.0
+        default_amount: BigDecimal("75")
       )
-      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: 75.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: BigDecimal("75"))
       payroll_item.import_source = "mosa_revel"
-      payroll_item.loan_deduction = 200.0
+      payroll_item.loan_deduction = BigDecimal("200")
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.payroll_item_field_entries.map(&:label)).not_to include("MoSa Auto Loan")
-      expect(payroll_item.loan_payment).to eq(200.0)
+      expect(payroll_item.payroll_item_field_entries.map(&:label)).to include("MoSa Auto Loan")
+      expect(payroll_item.loan_payment).to eq(BigDecimal("275"))
+    end
+
+    it "charges Madela's separate $250 loan field in addition to a $428.36 direct loan" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan - Madela Severin",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: BigDecimal("250")
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: BigDecimal("250"))
+
+      described_class.for(employee, payroll_item).calculate
+      without_direct_loan = payroll_item.net_pay.to_d
+
+      payroll_item.loan_deduction = BigDecimal("428.36")
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Loan - Madela Severin" }).to be_active
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.label == "Loan - Madela Severin" }.amount).to eq(BigDecimal("250"))
+      expect(payroll_item.loan_payment).to eq(BigDecimal("678.36"))
+      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("428.36"))
+    end
+
+    it "keeps Emma's legacy $250 installment separate from a direct loan deduction" do
+      payroll_item.payroll_adjustments = [
+        { "label" => "Loan - Installment", "amount" => BigDecimal("250"),
+          "treatment" => "post_tax_deduction", "active" => true }
+      ]
+
+      described_class.for(employee, payroll_item).calculate
+      without_direct_loan = payroll_item.net_pay.to_d
+
+      payroll_item.loan_deduction = BigDecimal("428.36")
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.post_tax_payroll_adjustments_total).to eq(BigDecimal("250"))
+      expect(payroll_item.loan_payment).to eq(BigDecimal("428.36"))
+      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("428.36"))
+    end
+
+    it "keeps the direct and named loan totals consistent when deductions are capped by available pay" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Separate loan installment",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: BigDecimal("250")
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: BigDecimal("250"))
+      payroll_item.loan_deduction = BigDecimal("2000")
+
+      described_class.for(employee, payroll_item).calculate
+
+      named_amount = payroll_item.payroll_item_deductions
+        .select { |deduction| deduction.deduction_type&.loan? }
+        .sum(0.to_d) { |deduction| deduction.amount.to_d }
+      expect(payroll_item.loan_payment.to_d).to eq(payroll_item.loan_deduction.to_d + named_amount)
+      expect(payroll_item.total_deductions.to_d).to be <= payroll_item.gross_pay.to_d
+      expect(payroll_item.net_pay.to_d).to eq(BigDecimal("0"))
     end
 
     it "preserves benefit sub-category for employer contribution payroll fields" do
@@ -992,6 +1057,32 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.withholding_tax).to eq(62.35)
       expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
       expect(payroll_item.net_pay).to eq(0.0)
+    end
+
+    it "preserves legacy insurance while capping a direct loan without itemized deductions" do
+      payroll_item.assign_attributes(
+        gross_pay: BigDecimal("100.00"),
+        total_deductions: BigDecimal("150.00"),
+        additional_withholding: 0,
+        withholding_tax: BigDecimal("100.00"),
+        roth_retirement_payment: 0,
+        retirement_payment: 0,
+        loan_deduction: BigDecimal("30.00"),
+        loan_payment: BigDecimal("30.00"),
+        insurance_payment: BigDecimal("20.00"),
+        medicare_tax: 0,
+        social_security_tax: 0,
+        tips_paid_out: 0,
+        custom_deductions: []
+      )
+
+      described_class.for(employee, payroll_item).send(:cap_deductions_to_available_pay!)
+
+      expect(payroll_item.loan_deduction).to eq(BigDecimal("30.00"))
+      expect(payroll_item.loan_payment).to eq(BigDecimal("30.00"))
+      expect(payroll_item.insurance_payment).to eq(BigDecimal("20.00"))
+      expect(payroll_item.withholding_tax).to eq(BigDecimal("50.00"))
+      expect(payroll_item.total_deductions).to eq(BigDecimal("100.00"))
     end
 
     it "promotes tips paid out into reported tips before calculating taxable gross" do
