@@ -40,13 +40,16 @@ namespace :aire_rollout do
 
   desc "Fail closed if the verified AIRE history has not been reconciled"
   task ensure_complete: :environment do
+    expected_sha256 = ENV.fetch("AIRE_ROLLOUT_MANIFEST_SHA256")
     company = Company.find_by(id: 2)
     if company
       raise "AIRE rollout company identity changed" unless company.name == "AIRE Services"
 
       source = company.time_tracking_sources.find_by(id: 1, source_type: "aire_services")
       raise "AIRE rollout source identity changed" unless source
-      unless AireVerifiedHistoryRolloutReceipt.exists?(company: company, time_tracking_source: source)
+      unless AireVerifiedHistoryRolloutReceipt.exists?(
+        company: company, time_tracking_source: source, manifest_sha256: expected_sha256
+      )
         raise "Verified AIRE history has not been applied; provide the approved private manifest before deployment"
       end
     end

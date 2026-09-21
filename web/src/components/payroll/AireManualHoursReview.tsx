@@ -572,7 +572,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           </DialogHeader>
           {bulkLinkTargets && <div className="space-y-4 text-sm">
             <p className="text-neutral-700">Only the listed paychecks have one clear employee, wage category, and exact remaining regular/OT hour match. Other entries stay owed for individual review.</p>
-            <div className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+            <div className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-neutral-200 bg-neutral-50 p-4">
               {bulkLinkTargets.map((target) => <div key={target.employee.source_user_id} className="border-b border-neutral-200 pb-2 last:border-0 last:pb-0">
                 <p className="font-semibold text-neutral-950">{target.employee.display_name} · {target.adjustments.length} entries · {target.item.effective_payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : `Check #${target.item.check_number || target.item.id}`}</p>
                 <p className="text-neutral-600">{hours(target.adjustments.reduce((sum, entry) => sum + entry.regular_hours, 0))} regular · {hours(target.adjustments.reduce((sum, entry) => sum + entry.overtime_hours, 0))} OT · {target.adjustments[0]?.category?.name}</p>
