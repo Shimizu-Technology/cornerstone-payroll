@@ -165,7 +165,16 @@ export function PayRunWorkspace(): ReactElement {
   }
 
   const isTrainingBaseline = payRun.test_workspace_role === 'baseline';
-  if (isTrainingBaseline && (activeTab === 'work' || activeTab === 'checks')) {
+  const readOnlyWorkspace = activeCompany?.id === companyId && (
+    activeCompany.test_workspace_purpose === 'backup_snapshot'
+      || Boolean(activeCompany.test_workspace_sealed_at)
+  );
+  const readOnlyMode: 'training_baseline' | 'backup_snapshot' | null = isTrainingBaseline
+    ? 'training_baseline'
+    : readOnlyWorkspace
+      ? 'backup_snapshot'
+      : null;
+  if (readOnlyMode && (activeTab === 'work' || activeTab === 'checks')) {
     return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
   }
 
@@ -178,20 +187,21 @@ export function PayRunWorkspace(): ReactElement {
       <Header
         title={`Pay Period: ${formatDateRange(payRun.start_date, payRun.end_date)}`}
         description={`Pay date ${formatDate(payRun.pay_date)} · ${runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}`}
-        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{!isTrainingBaseline && activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
+        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{!readOnlyMode && activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
       />
 
       <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Pay run identity">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payRun.correction_status === 'voided' ? 'danger' : payRun.status === 'committed' ? 'success' : payRun.status === 'approved' ? 'info' : payRun.status === 'calculated' ? 'warning' : 'default'}>{payRun.correction_status === 'voided' ? 'Voided' : statusConfig?.label || payRun.status}</Badge>
           <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
-          {payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
+          {!readOnlyWorkspace && payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
           {isTrainingBaseline && <Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Locked training baseline</Badge>}
+          {readOnlyWorkspace && <Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Read-only snapshot</Badge>}
           <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
         </div>
       </section>
 
-      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.filter((tab) => !isTrainingBaseline || (tab.id !== 'work' && tab.id !== 'checks')).map((tab) => ({
+      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.filter((tab) => !readOnlyMode || (tab.id !== 'work' && tab.id !== 'checks')).map((tab) => ({
         ...tab,
         href: payRunPath(companyId, payRunId, tab.id, { returnTo }),
         count: tab.id === 'checks'
@@ -200,7 +210,7 @@ export function PayRunWorkspace(): ReactElement {
       }))} />
 
       <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
-        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} lockedBaseline={isTrainingBaseline} />}
+        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
         {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handlePayRunChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
         {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
         {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
@@ -225,13 +235,24 @@ interface PayRunOverviewProps {
   items: PayrollItem[];
   returnTo: string;
   workspaceReturnTo: string;
-  lockedBaseline: boolean;
+  readOnlyMode: 'training_baseline' | 'backup_snapshot' | null;
 }
 
-function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo, lockedBaseline }: PayRunOverviewProps): ReactElement {
+function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo, readOnlyMode }: PayRunOverviewProps): ReactElement {
   const totalGross = items.reduce((sum, item) => sum + Number(item.gross_pay || 0), 0);
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
   const sourceCount = new Set(items.map((item) => item.import_source || item.timekeeping_source || 'manual')).size;
+  const readOnly = readOnlyMode !== null;
+  const recordsTitle = readOnlyMode === 'training_baseline'
+    ? 'Locked baseline records'
+    : readOnlyMode === 'backup_snapshot'
+      ? 'Read-only payroll records'
+      : 'Payroll records';
+  const recordsDescription = readOnlyMode === 'training_baseline'
+    ? 'These verified results provide year-to-date context and cannot be edited.'
+    : readOnlyMode === 'backup_snapshot'
+      ? 'This sealed backup is preserved for review and recovery. It cannot be changed.'
+      : 'Open an employee or the exact calculated result.';
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -243,9 +264,9 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo,
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.7fr)]">
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-4"><div><CardTitle>{lockedBaseline ? 'Locked baseline records' : 'Payroll records'}</CardTitle><p className="mt-2 text-sm text-neutral-500">{lockedBaseline ? 'These verified results provide year-to-date context and cannot be edited.' : 'Open an employee or the exact calculated result.'}</p></div>{!lockedBaseline && <Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link>}</CardHeader>
+          <CardHeader className="flex-row items-center justify-between gap-4"><div><CardTitle>{recordsTitle}</CardTitle><p className="mt-2 text-sm text-neutral-500">{recordsDescription}</p></div>{!readOnly && <Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link>}</CardHeader>
           <CardContent className="p-0">
-            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div>{!lockedBaseline && <Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>}</div></div>)}</div> : lockedBaseline ? <div className="px-6 py-10 text-center text-sm text-neutral-500">No locked baseline records were copied for this period.</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
+            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div>{!readOnly && <Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>}</div></div>)}</div> : readOnly ? <div className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records were preserved for this period.</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
           </CardContent>
         </Card>
         <div className="space-y-6">

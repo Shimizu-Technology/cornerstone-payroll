@@ -5126,6 +5126,7 @@ export interface PayrollHistoryRecord {
   includes_recurring_items: boolean;
   correction_status?: import('@/types').CorrectionStatus | null;
   parallel_run?: boolean;
+  test_workspace_role?: 'baseline' | 'practice' | null;
   notes?: string | null;
   compliance_warnings?: string[];
   employee_count: number;

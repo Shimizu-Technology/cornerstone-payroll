@@ -9,11 +9,12 @@ import { PayRunWorkspace } from './PayRunWorkspace';
 const apiMocks = vi.hoisted(() => ({
   getPayPeriod: vi.fn(),
   rehearsalPreviewPdf: vi.fn(),
+  activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({
-    activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' },
+    activeCompany: apiMocks.activeCompany,
   }),
 }));
 
@@ -66,6 +67,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal' };
     apiMocks.getPayPeriod.mockResolvedValue({ pay_period: payRun });
     apiMocks.rehearsalPreviewPdf.mockResolvedValue({
       blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
@@ -113,5 +115,28 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.getByText('Locked baseline records')).toBeTruthy();
     expect(screen.queryByText('Process payroll')).toBeNull();
     expect(screen.queryByText('Checks & direct deposit')).toBeNull();
+  });
+
+  it('routes sealed backups to a review-only workspace', async () => {
+    apiMocks.activeCompany = {
+      id: 7,
+      payroll_environment: 'migration_rehearsal',
+      test_workspace_purpose: 'backup_snapshot',
+      test_workspace_sealed_at: '2026-09-22T00:00:00Z',
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Read-only snapshot')).toBeTruthy();
+    expect(screen.getByText('Read-only payroll records')).toBeTruthy();
+    expect(screen.queryByText('Process payroll')).toBeNull();
+    expect(screen.queryByText('Checks & direct deposit')).toBeNull();
+    expect(screen.queryByText('Open processing')).toBeNull();
   });
 });
