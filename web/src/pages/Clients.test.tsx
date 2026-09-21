@@ -150,6 +150,19 @@ describe('Clients migration promotion', () => {
     expect(screen.queryByText('Test workspace guide')).toBeNull();
   });
 
+  it('closes the workspace builder before opening client editing', async () => {
+    const user = userEvent.setup();
+    apiMocks.get.mockResolvedValue({ company: target });
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    expect(screen.getByRole('heading', { name: 'Create a test workspace' })).toBeTruthy();
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Edit Client' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create a test workspace' })).toBeNull();
+  });
+
   it('guides an admin through the backup gate before live application', async () => {
     const user = userEvent.setup();
     apiMocks.migrationPromotionPreview.mockResolvedValue({
@@ -158,9 +171,12 @@ describe('Clients migration promotion', () => {
     apiMocks.createMigrationPromotionBackup.mockResolvedValue({ company: { id: 8 } });
 
     render(<Clients />);
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    expect(screen.getByRole('heading', { name: 'Create a test workspace' })).toBeTruthy();
     await user.click((await screen.findAllByRole('button', { name: /promote rehearsal/i }))[0]);
 
     expect(await screen.findByText('Move rehearsal results to the clean client')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create a test workspace' })).toBeNull();
     expect(screen.getAllByText('57').length).toBeGreaterThan(0);
     const newEmployeeSummary = screen.getByText('New employees to add').parentElement;
     expect(newEmployeeSummary).not.toBeNull();

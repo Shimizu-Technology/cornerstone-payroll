@@ -333,6 +333,7 @@ export function Clients() {
   };
 
   const handleOpenPromotion = (company: CompanyListItem) => {
+    handleCloseWorkspaceBuilder();
     handleCloseRehearsal();
     handleCloseTraining();
     setPromotionRehearsalId(company.id);
@@ -435,6 +436,7 @@ export function Clients() {
   const workspaceBuilderSource = productionCompanies.find(company => company.id === workspaceBuilderSourceId);
 
   const handleEdit = async (id: number) => {
+    handleCloseWorkspaceBuilder();
     setLoadingEditId(id);
     try {
       const data = await companiesApi.get(id);

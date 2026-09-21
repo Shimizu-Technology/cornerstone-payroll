@@ -32,6 +32,18 @@ describe('HelpTip', () => {
     await user.click(trigger);
     expect(screen.getByRole('tooltip')).toBeTruthy();
 
+    await user.click(trigger);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('closes a hover-opened tooltip with Escape', async () => {
+    const user = userEvent.setup();
+    render(<HelpTip label="parallel payroll">A comparison-only payroll.</HelpTip>);
+
+    const trigger = screen.getByRole('button', { name: 'About parallel payroll' });
+    await user.hover(trigger);
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('tooltip')).toBeNull();
   });

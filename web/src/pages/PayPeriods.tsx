@@ -48,6 +48,7 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
 interface PayPeriodMobileCardProps {
   period: PayrollHistoryRecord;
   readOnly: boolean;
+  commitBlocked: boolean;
   actionInFlight: string | null;
   onView: () => void;
   onEdit: () => void;
@@ -61,6 +62,7 @@ interface PayPeriodMobileCardProps {
 function PayPeriodMobileCard({
   period,
   readOnly,
+  commitBlocked,
   actionInFlight,
   onView,
   onEdit,
@@ -124,7 +126,7 @@ function PayPeriodMobileCard({
             {period.capabilities.approve && <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>}
           </>
         )}
-        {!readOnly && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+        {!readOnly && !commitBlocked && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
         {readOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
       </MobileCardActions>
     </MobileRecordCard>
@@ -853,7 +855,8 @@ export function PayPeriods() {
                   <PayPeriodMobileCard
                     key={period.key}
                     period={period}
-                    readOnly={readOnlyWorkspace}
+                    readOnly={readOnlyWorkspace || period.test_workspace_role === 'baseline'}
+                    commitBlocked={trainingReplayWorkspace || Boolean(period.parallel_run)}
                     actionInFlight={actionInFlight}
                     onView={() => navigate(recordDestination(period, 'overview'))}
                     onEnterHours={() => navigate(recordDestination(period, 'work'))}
@@ -884,6 +887,8 @@ export function PayPeriods() {
                 {visiblePayPeriods.map((period, index) => {
                   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
                   const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                  const periodReadOnly = readOnlyWorkspace || period.test_workspace_role === 'baseline';
+                  const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
@@ -969,11 +974,11 @@ export function PayPeriods() {
                             >
                               View
                             </button>
-                            {!readOnlyWorkspace && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!readOnlyWorkspace && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
-                          {!readOnlyWorkspace && period.capabilities.enter_hours && (
+                          {!periodReadOnly && period.capabilities.enter_hours && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -982,7 +987,7 @@ export function PayPeriods() {
                               Enter Hours
                             </Button>
                           )}
-                          {!readOnlyWorkspace && period.capabilities.run && period.status === 'calculated' && (
+                          {!periodReadOnly && period.capabilities.run && period.status === 'calculated' && (
                             <div className="flex items-center gap-1.5">
                               <Button
                                 variant="outline"
@@ -1001,8 +1006,8 @@ export function PayPeriods() {
                               </Button>}
                             </div>
                           )}
-                          {!readOnlyWorkspace && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
-                          {!readOnlyWorkspace && period.capabilities.commit && (
+                          {!periodReadOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
+                          {!periodReadOnly && !commitBlocked && period.capabilities.commit && (
                             <Button
                               size="sm"
                               variant="primary"
@@ -1012,7 +1017,7 @@ export function PayPeriods() {
                               Commit
                             </Button>
                           )}
-                          {readOnlyWorkspace && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
+                          {periodReadOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
                         </div>
                       </TableCell>
                     </TableRow>

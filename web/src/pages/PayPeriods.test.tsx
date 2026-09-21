@@ -117,6 +117,10 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
     expect(screen.getAllByText('Locked baseline')).toHaveLength(2);
     expect(screen.getAllByText('Practice payroll')).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /enter hours/i })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   });
 
   it('suppresses every mutation action in both read-only row layouts', async () => {
