@@ -3361,6 +3361,34 @@ export interface MigrationRehearsalPreview {
   };
 }
 
+export interface TrainingReplayPreview {
+  source_company: { id: number; name: string };
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  existing_replay?: { id: number; name: string; status: 'pending' | 'ready' | 'failed' } | null;
+  practice_periods: Array<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: 'calculated' | 'approved' | 'committed';
+    employee_count: number;
+  }>;
+  copy_summary: {
+    employees: number;
+    active_employees: number;
+    baseline_pay_periods: number;
+    practice_pay_periods: number;
+  };
+  assignable_staff: Array<{
+    id: number;
+    name: string;
+    email: string;
+    role: 'manager' | 'accountant';
+  }>;
+}
+
 export interface CompanyDetail extends CompanyListItem {
   address_line1?: string;
   address_line2?: string;
@@ -3443,6 +3471,15 @@ export const companiesApi = {
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_rehearsal`, input),
   retryMigrationRehearsal: (id: number) =>
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_migration_rehearsal`),
+  trainingReplayPreview: (id: number) =>
+    api.get<{ training_replay: TrainingReplayPreview }>(`/admin/companies/${id}/training_replay_preview`),
+  createTrainingReplay: (id: number, input: {
+    name?: string;
+    acknowledgement: string;
+    assignments: Array<{ user_id: number; workspace_access_level: 'operator' | 'reviewer' | 'workspace_admin' }>;
+  }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/training_replay`, input),
+  retryTrainingReplay: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_training_replay`),
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));

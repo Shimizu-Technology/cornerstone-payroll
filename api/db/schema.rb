@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1020,6 +1020,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.string "state"
     t.string "status", default: "active"
     t.date "termination_date"
+    t.bigint "test_workspace_source_employee_id"
     t.datetime "updated_at", null: false
     t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
     t.date "w4_effective_on"
@@ -1032,12 +1033,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.boolean "w9_on_file", default: false, null: false
     t.string "zip"
     t.index ["company_id", "last_name", "first_name"], name: "index_employees_on_company_id_and_last_name_and_first_name"
+    t.index ["company_id", "test_workspace_source_employee_id"], name: "idx_employees_training_source_unique", unique: true, where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.index ["company_id"], name: "index_employees_on_company_id"
     t.index ["department_id"], name: "index_employees_on_department_id"
     t.index ["employment_type"], name: "index_employees_on_employment_type"
     t.index ["id", "company_id"], name: "idx_employees_document_readiness_tenant_key", unique: true
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
+    t.index ["test_workspace_source_employee_id"], name: "idx_employees_training_source", where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
@@ -2045,6 +2048,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.text "tax_sync_last_error"
     t.string "tax_sync_status", default: "pending"
     t.datetime "tax_synced_at"
+    t.string "test_workspace_role"
+    t.bigint "test_workspace_source_pay_period_id"
     t.datetime "unapproved_at"
     t.bigint "unapproved_by_id"
     t.datetime "updated_at", null: false
@@ -2058,6 +2063,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.index ["company_id", "run_purpose"], name: "idx_pay_periods_company_purpose"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
+    t.index ["company_id", "test_workspace_role"], name: "idx_pay_periods_training_role"
+    t.index ["company_id", "test_workspace_source_pay_period_id"], name: "idx_pay_periods_training_source_unique", unique: true, where: "(test_workspace_source_pay_period_id IS NOT NULL)"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
     t.index ["company_pay_schedule_id"], name: "index_pay_periods_on_company_pay_schedule_id"
     t.index ["company_workweek_id"], name: "index_pay_periods_on_company_workweek_id"
@@ -2071,6 +2078,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
+    t.index ["test_workspace_source_pay_period_id"], name: "idx_pay_periods_training_source", where: "(test_workspace_source_pay_period_id IS NOT NULL)"
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
@@ -2079,6 +2087,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
     t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
+    t.check_constraint "test_workspace_role IS NULL OR (test_workspace_role::text = ANY (ARRAY['baseline'::character varying, 'practice'::character varying]::text[]))", name: "pay_periods_test_workspace_role_check"
+    t.check_constraint "(test_workspace_role IS NULL) = (test_workspace_source_pay_period_id IS NULL)", name: "pay_periods_training_lineage_complete"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -3327,6 +3337,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
   add_foreign_key "employees", "employees", column: "previous_employee_id"
+  add_foreign_key "employees", "employees", column: "test_workspace_source_employee_id", on_delete: :restrict
   add_foreign_key "filing_status_configs", "annual_tax_configs"
   add_foreign_key "form500_filings", "companies"
   add_foreign_key "form500_filings", "pay_periods"
@@ -3458,6 +3469,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
+  add_foreign_key "pay_periods", "pay_periods", column: "test_workspace_source_pay_period_id", on_delete: :restrict
   add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"

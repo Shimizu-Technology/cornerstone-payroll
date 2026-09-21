@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollItemEarning < ApplicationRecord
+  include TrainingBaselineImmutable
   CATEGORIES = %w[regular overtime holiday pto salary bonus tips service_charge reimbursement non_taxable contract_fee other].freeze
 
   belongs_to :payroll_item

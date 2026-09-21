@@ -996,6 +996,9 @@ export interface PayPeriod {
   pay_date: string;
   status: PayPeriodStatus;
   parallel_run?: boolean;
+  test_workspace_role?: 'baseline' | 'practice' | null;
+  test_workspace_source_pay_period_id?: number | null;
+  training_baseline_locked?: boolean;
   run_purpose: PayRunPurpose;
   includes_base_salary: boolean;
   includes_recurring_items: boolean;
@@ -1213,6 +1216,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
+  comparison_kind: 'previous_period' | 'training_benchmark';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;

@@ -19,9 +19,11 @@ module Api
         skip_before_action :enforce_company_access!, only: [ :index ]
         skip_before_action :enforce_test_workspace_access!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+          training_replay_preview create_training_replay retry_training_replay
         ]
         skip_before_action :enforce_test_workspace_safety!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+          training_replay_preview create_training_replay retry_training_replay
         ]
 
         # GET /api/v1/admin/companies
@@ -120,6 +122,38 @@ module Api
           render json: { errors: messages }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/companies/:id/training_replay_preview
+        def training_replay_preview
+          source = accessible_company!
+          render json: { training_replay: TrainingReplay::Preview.new(source_company: source).call }
+        end
+
+        # POST /api/v1/admin/companies/:id/training_replay
+        def create_training_replay
+          source = accessible_company!
+          company = TrainingReplay::Create.new(
+            source_company: source,
+            actor: current_user,
+            name: params[:name],
+            acknowledgement: params[:acknowledgement],
+            assignments: training_replay_assignments
+          ).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/companies/:id/retry_training_replay
+        def retry_training_replay
+          company = accessible_company!
+          company = TrainingReplay::Retry.new(company: company, actor: current_user).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
+        end
+
         # PATCH/PUT /api/v1/admin/companies/:id
         def update
           company = Company.find(params[:id])
@@ -162,6 +196,10 @@ module Api
             :client_payroll_approval_required,
             check_layout_config: {}
           )
+        end
+
+        def training_replay_assignments
+          params.permit(assignments: %i[user_id workspace_access_level]).fetch(:assignments, [])
         end
 
         def staff_company_params

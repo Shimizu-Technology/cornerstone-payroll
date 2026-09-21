@@ -28,6 +28,7 @@ class PayPeriodComparisonBuilder
     employee_changes = @previous_period ? employee_changes_payload(current_items, previous_items) : []
 
     {
+      comparison_kind: training_benchmark? ? "training_benchmark" : "previous_period",
       current_pay_period: period_payload(@pay_period),
       previous_pay_period: @previous_period ? period_payload(@previous_period) : nil,
       summary: summary_payload(current_items, previous_items),
@@ -39,6 +40,8 @@ class PayPeriodComparisonBuilder
   private
 
   def previous_period
+    return @pay_period.test_workspace_source_pay_period if training_benchmark?
+
     PayPeriod
       .reportable_committed
       .regular_cycle
@@ -93,14 +96,14 @@ class PayPeriodComparisonBuilder
   end
 
   def employee_changes_payload(current_items, previous_items)
-    current_by_employee = current_items.index_by(&:employee_id)
+    current_by_employee = current_items.index_by { |item| comparison_employee_id(item, current: true) }
     previous_by_employee = previous_items.index_by(&:employee_id)
     employee_ids = (current_by_employee.keys + previous_by_employee.keys).uniq
 
     employee_ids.filter_map do |employee_id|
       current_item = current_by_employee[employee_id]
       previous_item = previous_by_employee[employee_id]
-      employee = current_item&.employee || previous_item&.employee
+      employee = current_item&.employee || training_employee_for(employee_id) || previous_item&.employee
       change_type = if current_item && previous_item
         "changed"
       elsif current_item
@@ -114,7 +117,7 @@ class PayPeriodComparisonBuilder
       next if change_type == "changed" && flags.empty?
 
       {
-        employee_id: employee_id,
+        employee_id: current_item&.employee_id || employee&.id || employee_id,
         employee_name: employee&.full_name || current_item&.employee_full_name || previous_item&.employee_full_name,
         department_name: employee&.department&.name,
         employment_type: current_item&.employment_type || previous_item&.employment_type,
@@ -153,8 +156,18 @@ class PayPeriodComparisonBuilder
 
   def employee_flags(employee, current_item, previous_item, deltas, change_type)
     flags = []
-    flags << flag("new_employee", "Employee is included this period but was not in the previous committed period.", "review") if change_type == "new"
-    flags << flag("missing_employee", "Employee was in the previous committed period but is missing from this period.", "warning") if change_type == "missing"
+    if change_type == "new"
+      message = training_benchmark? ?
+        "Employee is included in this practice payroll but was not in the training benchmark." :
+        "Employee is included this period but was not in the previous committed period."
+      flags << flag("new_employee", message, "review")
+    end
+    if change_type == "missing"
+      message = training_benchmark? ?
+        "Employee is in the training benchmark but is missing from this practice payroll." :
+        "Employee was in the previous committed period but is missing from this period."
+      flags << flag("missing_employee", message, "warning")
+    end
 
     if current_item && previous_item
       [
@@ -173,7 +186,10 @@ class PayPeriodComparisonBuilder
       if decimal(current_item.salary_override) <= 0
         flags << flag("variable_salary_missing", "Variable salary employee has no positive period pay entered.", "warning")
       elsif previous_item && decimal(current_item.salary_override) != decimal(previous_item.salary_override)
-        flags << flag("variable_salary_changed", "Variable salary period pay changed from the previous committed period.", "review")
+        message = training_benchmark? ?
+          "Variable salary period pay differs from the training benchmark." :
+          "Variable salary period pay changed from the previous committed period."
+        flags << flag("variable_salary_changed", message, "review")
       end
     end
 
@@ -200,13 +216,32 @@ class PayPeriodComparisonBuilder
       warning_count: warnings,
       review_count: reviews,
       message: if warnings.positive?
-        "Review required before approval."
-      elsif reviews.positive?
-        "Review recommended before approval."
-      else
-        "No material period-to-period changes detected."
-      end
+                 "Review required before approval."
+               elsif reviews.positive?
+                 "Review recommended before approval."
+               else
+                 "No material period-to-period changes detected."
+               end
     }
+  end
+
+  def training_benchmark?
+    @pay_period.training_practice? && @pay_period.test_workspace_source_pay_period.present?
+  end
+
+  def comparison_employee_id(item, current:)
+    return item.employee_id unless current && training_benchmark?
+
+    item.employee.test_workspace_source_employee_id || item.employee_id
+  end
+
+  def training_employee_for(source_employee_id)
+    return unless training_benchmark?
+
+    @training_employees_by_source ||= @pay_period.company.employees
+      .where.not(test_workspace_source_employee_id: nil)
+      .index_by(&:test_workspace_source_employee_id)
+    @training_employees_by_source[source_employee_id]
   end
 
   def material_delta?(delta_number, previous_number)
