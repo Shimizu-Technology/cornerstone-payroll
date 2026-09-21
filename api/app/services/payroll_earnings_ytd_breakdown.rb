@@ -20,14 +20,13 @@ class PayrollEarningsYtdBreakdown
     targets = current_components.map do |component|
       {
         component: component,
-        normalized_label: normalize_label(component.label),
         semantic: semantic_for(component.category, component.label),
         ytd: 0.to_d
       }
     end
 
-    live_components.each { |component| add_to_target!(targets, component) }
-    historical_components.each { |component| add_to_target!(targets, component) }
+    live_components.each { |component| add_to_target!(targets, component, semantic_fallback: false) }
+    historical_components.each { |component| add_to_target!(targets, component, semantic_fallback: true) }
 
     targets.map do |target|
       component = target.fetch(:component)
@@ -68,12 +67,15 @@ class PayrollEarningsYtdBreakdown
           pay_date: pay_date,
           period_id: pay_period.id
         )
+      prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
       items = employee.payroll_items.not_voided
         .where(company_id: company.id, pay_period_id: prior_periods.select(:id))
         .includes(:payroll_item_earnings, :payroll_item_field_entries)
         .to_a
 
-      if !payroll_item.voided? && pay_period.correction_status.in?([ nil, "correction" ])
+      if !payroll_item.voided? &&
+          pay_period.correction_status.in?([ nil, "correction" ]) &&
+          (historical_cutoff.nil? || pay_date > historical_cutoff)
         items << payroll_item
       end
       items
@@ -81,7 +83,18 @@ class PayrollEarningsYtdBreakdown
   end
 
   def historical_components
-    balance = HistoricalEmployeeYtdBalance
+    return [] unless historical_balance
+
+    historical_balance.source_breakdown.to_h.fetch("earnings_breakdown", {}).filter_map do |label, amount|
+      value = BigDecimal(amount.to_s, exception: false)
+      next if label.to_s.blank? || value.nil? || value.zero?
+
+      Component.new(label: label.to_s, category: nil, hours: nil, rate: nil, amount: value)
+    end
+  end
+
+  def historical_balance
+    @historical_balance ||= HistoricalEmployeeYtdBalance
       .joins(:historical_ytd_bridge)
       .where(
         company_id: company.id,
@@ -97,14 +110,10 @@ class PayrollEarningsYtdBreakdown
         id: :desc
       )
       .first
-    return [] unless balance
+  end
 
-    balance.source_breakdown.to_h.fetch("earnings_breakdown", {}).filter_map do |label, amount|
-      value = BigDecimal(amount.to_s, exception: false)
-      next if label.to_s.blank? || value.nil? || value.zero?
-
-      Component.new(label: label.to_s, category: nil, hours: nil, rate: nil, amount: value)
-    end
+  def historical_cutoff
+    historical_balance&.through_pay_date
   end
 
   def components_for(item)
@@ -184,15 +193,24 @@ class PayrollEarningsYtdBreakdown
       item.taxable_payroll_adjustments_total.to_d
   end
 
-  def add_to_target!(targets, component)
-    target = target_for(targets, component)
-    target[:ytd] += component.amount.to_d if target
+  def add_to_target!(targets, component, semantic_fallback:)
+    target = target_for(targets, component, semantic_fallback: semantic_fallback)
+    target ||= append_ytd_only_target!(targets, component)
+    target[:ytd] += component.amount.to_d
   end
 
-  def target_for(targets, component)
-    normalized = normalize_label(component.label)
+  def target_for(targets, component, semantic_fallback:)
     semantic = semantic_for(component.category, component.label)
-    exact = targets.select { |target| target.fetch(:normalized_label) == normalized }
+    exact = targets.select { |target| target.fetch(:component).label.to_s == component.label.to_s }
+    unless semantic_fallback
+      same_category = exact.select do |target|
+        target.fetch(:component).category.to_s == component.category.to_s
+      end
+      return same_category.first if same_category.one?
+
+      return nil
+    end
+
     return exact.first if exact.one?
 
     if exact.many?
@@ -209,6 +227,23 @@ class PayrollEarningsYtdBreakdown
     return semantic_matches.first if semantic_matches.one?
 
     nil
+  end
+
+  def append_ytd_only_target!(targets, component)
+    ytd_component = Component.new(
+      label: component.label,
+      category: component.category,
+      hours: nil,
+      rate: nil,
+      amount: 0.to_d
+    )
+    target = {
+      component: ytd_component,
+      semantic: semantic_for(component.category, component.label),
+      ytd: 0.to_d
+    }
+    targets << target
+    target
   end
 
   def semantic_for(category, label)
@@ -231,10 +266,6 @@ class PayrollEarningsYtdBreakdown
   def non_taxable_component?(component)
     component.category.to_s == "non_taxable" ||
       (component.category.blank? && semantic_for(component.category, component.label) == :non_taxable)
-  end
-
-  def normalize_label(label)
-    label.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
   end
 
   def display_label(component)
