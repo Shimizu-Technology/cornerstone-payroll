@@ -63,6 +63,17 @@ RSpec.describe "Training replay administration", type: :request do
     expect(source_company.test_workspaces.where(test_workspace_purpose: "training_replay")).to be_empty
   end
 
+  it "returns a validation error when an assignment omits its user" do
+    post "/api/v1/admin/companies/#{source_company.id}/training_replay", params: {
+      acknowledgement: "CREATE TRAINING REPLAY",
+      assignments: [ { workspace_access_level: "operator" } ]
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors").join).to include("requires a user_id")
+    expect(source_company.test_workspaces.where(test_workspace_purpose: "training_replay")).to be_empty
+  end
+
   private
 
   def create_source_period(start_date, end_date, pay_date)

@@ -15,11 +15,6 @@ module TestWorkspace
 
       department_map = copy_collection(source_company.departments, Department, company: target_company)
       deduction_type_map = copy_collection(source_company.deduction_types, DeductionType, company: target_company)
-      field_definition_map = copy_collection(
-        source_company.payroll_field_definitions,
-        PayrollFieldDefinition,
-        company: target_company
-      )
       pay_schedule_map = copy_collection(
         source_company.company_pay_schedules,
         CompanyPaySchedule,
@@ -33,6 +28,7 @@ module TestWorkspace
       copy_collection(source_company.pay_component_tax_rules, PayComponentTaxRule, company: target_company)
 
       employee_map = copy_employees!(department_map)
+      field_definition_map = copy_payroll_field_definitions!(employee_map)
       copy_employee_setup!(employee_map, deduction_type_map)
       loan_map = copy_loans!(employee_map, deduction_type_map)
       copy_payroll_fields!(employee_map, field_definition_map, loan_map)
@@ -112,23 +108,41 @@ module TestWorkspace
       end
     end
 
+    def copy_payroll_field_definitions!(employee_map)
+      source_company.payroll_field_definitions.order(:id).each_with_object({}) do |source, result|
+        result[source.id] = copy_record!(
+          source,
+          company: target_company,
+          owner_employee: source.owner_employee_id && employee_map.fetch(source.owner_employee_id)
+        )
+      end
+    end
+
     def copy_loans!(employee_map, deduction_type_map)
       source_company.employee_loans.order(:id).each_with_object({}) do |loan, result|
+        cutoff_attributes = loan_attributes_at_cutoff(loan)
         result[loan.id] = copy_record!(
           loan,
-          loan_attributes_at_cutoff(loan).merge(
+          cutoff_attributes.merge(
             company: target_company,
             employee: employee_map.fetch(loan.employee_id),
             deduction_type: loan.deduction_type_id && deduction_type_map.fetch(loan.deduction_type_id),
             created_by: actor,
-            stopped_by: loan.stopped_at.present? ? actor : nil
+            stopped_by: cutoff_attributes.fetch(:stopped_at, loan.stopped_at).present? ? actor : nil
           )
         )
       end
     end
 
     def loan_attributes_at_cutoff(loan)
-      return {} if loan_balance_on.blank? || loan.recurring_no_balance?
+      return {} if loan_balance_on.blank?
+
+      stopped_after_cutoff = loan.stopped_at.present? && loan.stopped_at.to_date > loan_balance_on
+      if loan.recurring_no_balance?
+        return {} unless stopped_after_cutoff
+
+        return { status: "active", stopped_at: nil, stopped_by_id: nil }
+      end
 
       transaction = loan.loan_transactions
         .where("transaction_date < ?", loan_balance_on)
@@ -137,7 +151,6 @@ module TestWorkspace
       balance = transaction&.balance_after || loan.opening_balance
       status = balance.to_d.zero? ? "paid_off" : loan.status
       status = "active" if status == "paid_off" && balance.to_d.positive?
-      stopped_after_cutoff = loan.stopped_at.present? && loan.stopped_at.to_date > loan_balance_on
       status = "active" if stopped_after_cutoff
 
       {

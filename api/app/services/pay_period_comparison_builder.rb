@@ -156,8 +156,18 @@ class PayPeriodComparisonBuilder
 
   def employee_flags(employee, current_item, previous_item, deltas, change_type)
     flags = []
-    flags << flag("new_employee", "Employee is included this period but was not in the previous committed period.", "review") if change_type == "new"
-    flags << flag("missing_employee", "Employee was in the previous committed period but is missing from this period.", "warning") if change_type == "missing"
+    if change_type == "new"
+      message = training_benchmark? ?
+        "Employee is included in this practice payroll but was not in the training benchmark." :
+        "Employee is included this period but was not in the previous committed period."
+      flags << flag("new_employee", message, "review")
+    end
+    if change_type == "missing"
+      message = training_benchmark? ?
+        "Employee is in the training benchmark but is missing from this practice payroll." :
+        "Employee was in the previous committed period but is missing from this period."
+      flags << flag("missing_employee", message, "warning")
+    end
 
     if current_item && previous_item
       [
@@ -176,7 +186,10 @@ class PayPeriodComparisonBuilder
       if decimal(current_item.salary_override) <= 0
         flags << flag("variable_salary_missing", "Variable salary employee has no positive period pay entered.", "warning")
       elsif previous_item && decimal(current_item.salary_override) != decimal(previous_item.salary_override)
-        flags << flag("variable_salary_changed", "Variable salary period pay changed from the previous committed period.", "review")
+        message = training_benchmark? ?
+          "Variable salary period pay differs from the training benchmark." :
+          "Variable salary period pay changed from the previous committed period."
+        flags << flag("variable_salary_changed", message, "review")
       end
     end
 

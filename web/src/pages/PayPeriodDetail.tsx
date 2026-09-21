@@ -1888,7 +1888,7 @@ export function PayPeriodDetail({
                       ? 'Comparison failed to load. Retry before approving this payroll.'
                       : comparison?.previous_pay_period
                         ? `${comparison.comparison_kind === 'training_benchmark' ? 'Expected result from' : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
-                        : comparisonLoading ? 'Loading previous period comparison…' : 'No previous committed pay period found for this company.'}
+                        : comparisonLoading ? 'Loading comparison…' : 'No comparison target found for this payroll.'}
                   </p>
                 </div>
                 {comparison && (
@@ -1982,7 +1982,9 @@ export function PayPeriodDetail({
                     </div>
                   ) : (
                     <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                      No material employee-level changes detected against the previous committed period.
+                      {comparison.comparison_kind === 'training_benchmark'
+                        ? 'No material employee-level differences from the training benchmark.'
+                        : 'No material employee-level changes detected against the previous committed period.'}
                     </div>
                   )}
                 </>
