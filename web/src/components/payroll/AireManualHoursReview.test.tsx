@@ -67,7 +67,7 @@ const review = {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.manualReview.mockResolvedValue(review);
-  apiMocks.link.mockResolvedValue({});
+  apiMocks.link.mockResolvedValue({ manual_allocation: { last_sync_error: null } });
   apiMocks.retry.mockResolvedValue({});
   apiMocks.map.mockResolvedValue({});
 });
@@ -318,13 +318,58 @@ describe('AireManualHoursReview', () => {
       aireRecordLinked={false}
     />);
 
-    await user.click(await screen.findByRole('button', { name: 'Link all 2 entries for Test Worker A' }));
+    await user.click(await screen.findByRole('button', { name: 'Link 2 entries for Test Worker A' }));
     expect(screen.getByText(/does not mark them paid until check delivery/i)).toBeTruthy();
     await user.click(screen.getByRole('checkbox', { name: /checked the wage category, rate, and gross pay/i }));
     await user.click(screen.getByRole('button', { name: 'Confirm all links' }));
     await waitFor(() => expect(apiMocks.link).toHaveBeenCalledTimes(2));
     expect(apiMocks.link).toHaveBeenNthCalledWith(1, 68, expect.objectContaining({ source_time_entry_id: '40', regular_hours: 1 }));
     expect(apiMocks.link).toHaveBeenNthCalledWith(2, 68, expect.objectContaining({ source_time_entry_id: '41', regular_hours: 5.1 }));
+  });
+
+  it('links exact matches across multiple paychecks from one reviewed action', async () => {
+    const user = userEvent.setup();
+    const first = {
+      ...review.employees[0], total_hours: 6, regular_hours: 6, overtime_hours: 0,
+      adjustments: [
+        { source_time_entry_id: '40', source_time_entry_version: 1, source_kind: 'current', original_work_date: '2026-08-11', category: { id: '2', name: 'Flight Hours' }, total_hours: 2, regular_hours: 2, overtime_hours: 0 },
+        { source_time_entry_id: '41', source_time_entry_version: 2, source_kind: 'current', original_work_date: '2026-08-15', category: { id: '2', name: 'Flight Hours' }, total_hours: 4, regular_hours: 4, overtime_hours: 0 },
+      ],
+    };
+    const second = {
+      ...first, source_user_id: '92', source_user_uuid: '384bf986-dd27-46fa-bd70-65ebbc9d9cea',
+      display_name: 'Test Worker B', cornerstone: { status: 'mapped', employee_id: 8, employee_name: 'Test Worker B' },
+      adjustments: first.adjustments.map((entry, index) => ({ ...entry, source_time_entry_id: String(50 + index) })),
+    };
+    apiMocks.manualReview.mockResolvedValue({
+      ...review, employees: [first, second],
+      summary: { ...review.summary, employee_count: 2, adjustment_count: 4, total_hours: 12, regular_hours: 12, overtime_hours: 0 },
+    });
+    render(<AireManualHoursReview
+      payPeriodId={68}
+      payPeriodStatus="committed"
+      payrollHours={{ '7': { regular: 6, overtime: 0 }, '8': { regular: 6, overtime: 0 } }}
+      payrollItems={[
+        { id: 200, employee_id: 7, hours_worked: 6, overtime_hours: 0, check_number: '01045', voided: false },
+        { id: 201, employee_id: 8, hours_worked: 6, overtime_hours: 0, check_number: '01046', voided: false },
+      ] as import('@/types').PayrollItem[]}
+      aireRecordLinked={false}
+    />);
+
+    await user.click(await screen.findByRole('button', { name: 'Review and link 4 exact entries across 2 paychecks' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Test Worker A · 2 entries/)).toBeTruthy();
+    expect(within(dialog).getByText(/Test Worker B · 2 entries/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMocks.link).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Review and link 4 exact entries across 2 paychecks' }));
+    const reopened = screen.getByRole('dialog');
+    await user.click(within(reopened).getByRole('checkbox', { name: /checked the wage category, rate, and gross pay/i }));
+    await user.click(within(reopened).getByRole('button', { name: 'Confirm all links' }));
+    await waitFor(() => expect(apiMocks.link).toHaveBeenCalledTimes(4));
+    expect(apiMocks.link).toHaveBeenNthCalledWith(3, 68, expect.objectContaining({ payroll_item_id: 201, source_time_entry_id: '50' }));
+    expect((await screen.findByRole('status')).textContent).toContain('4 exact AIRE entries linked to 2 paychecks');
   });
 
   it('offers a visible sync action when check delivery is recorded but AIRE has not confirmed payment', async () => {

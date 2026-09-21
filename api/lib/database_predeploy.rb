@@ -26,6 +26,12 @@ class DatabasePredeploy
     TASKS.each do |task|
       @command_runner.call(command_environment, rails_bin, *task)
     end
+    unless value("AIRE_ROLLOUT_MANIFEST_PATH").empty? && value("AIRE_ROLLOUT_MANIFEST_KEY").empty?
+      raise ConfigurationError, "AIRE_ROLLOUT_MANIFEST_SHA256 is required" if value("AIRE_ROLLOUT_MANIFEST_SHA256").empty?
+
+      @command_runner.call(command_environment, rails_bin, "aire_rollout:apply")
+    end
+    @command_runner.call(command_environment, rails_bin, "aire_rollout:ensure_complete") if production?
   end
 
   def migration_environment
