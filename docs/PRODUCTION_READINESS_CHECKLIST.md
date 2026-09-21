@@ -1,6 +1,6 @@
 # Production Readiness Checklist
 
-Last reviewed: `2026-09-14T15:38:01+10:00`
+Last reviewed: `2026-09-21T21:55:00+10:00`
 
 Current evidence: [September 14, 2026 production rerun](PRODUCTION_READINESS_EVIDENCE_2026-09-14.md). The deployed Cornerstone command passes 26 of 29 controls, and the deployed AIRE command passes 20 of 23. Both fail only the expected production Clerk, instance-bound MFA evidence, and authenticated Clerk-instance checks. The manual controls below remain no-go until their evidence is attached.
 
@@ -36,6 +36,14 @@ The command validates the effective Rails configuration rather than trusting fea
 The R2 and cache probes create random, non-customer test values and remove their exact keys in an `ensure` path. The command sends no email, creates no payroll/customer row, and never prints provider responses or secret-bearing exception messages. Its final `EVIDENCE` line is safe to retain with release artifacts.
 
 `REQUIRE_MFA=true` is an operational attestation: MFA must also be enforced and verified in the Clerk production dashboard. `CLERK_MFA_ATTESTED_INSTANCE_ID` binds that attestation to the instance returned by Clerk's authenticated API, and `CLERK_MFA_EVIDENCE_REF` records the non-secret reference for the independently reviewed provider evidence. The application still cannot inspect Clerk's provider-side MFA policy directly, so missing independent evidence is a failed control even when the runtime check passes.
+
+## Liveness and dependency health
+
+Render uses `GET /up` as the liveness check. That endpoint proves the Rails process booted; it intentionally does not query PostgreSQL or Solid Queue. Keep it as the platform health check so a temporary dependency problem does not create a restart loop.
+
+Use `GET /health/dependencies` for external readiness monitoring. It performs read-only checks for primary-database connectivity, `transaction_read_only`, `pg_is_in_recovery()`, and a Solid Queue worker heartbeat within five minutes. It returns `200 {"status":"ok"}` when all checks pass and `503 {"status":"degraded"}` otherwise. The public response does not expose exception text, database identifiers, payroll data, or individual check results.
+
+Rack::Attack counters and Clerk JWKS use a bounded in-process memory store. This keeps authenticated GET requests from attempting Solid Cache writes during a read-only database incident. The production web service currently runs one Puma process, so the rate limit is authoritative for the current topology. Move this request-path cache to shared Redis or Valkey before adding Puma workers or web instances; otherwise each process enforces its own limit.
 
 ## Release evidence
 
