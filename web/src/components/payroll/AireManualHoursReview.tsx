@@ -440,9 +440,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
             {Boolean(review.payment_attestations?.length) && (
               <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">
-                <h4 className="font-semibold text-neutral-950">Payment reported; check details pending</h4>
-                <p className="mt-1 text-sm font-medium text-warning-950">{review.payment_attestations?.length} {review.payment_attestations?.length === 1 ? 'entry' : 'entries'} · {hours(review.payment_attestations?.reduce((total, attestation) => total + attestation.hours, 0) || 0)} hours held</p>
-                <p className="mt-2 text-sm leading-6 text-neutral-700">These exact AIRE hours are held out of new payroll to prevent a duplicate payment. The owner reported they were paid, but Cornerstone has not yet matched the check, amount, and delivery date. They are not counted as verified paid hours.</p>
+                <h4 className="font-semibold text-neutral-950">Paid — owner attested; check details pending</h4>
+                <p className="mt-1 text-sm font-medium text-warning-950">{review.payment_attestations?.length} {review.payment_attestations?.length === 1 ? 'entry' : 'entries'} · {hours(review.payment_attestations?.reduce((total, attestation) => total + attestation.hours, 0) || 0)} hours protected from repayment</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">These exact AIRE hours are recorded as paid from the owner statement and protected from duplicate payment. Cornerstone has not yet matched the check, amount, and delivery date; those details can be added later without paying the hours again.</p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {review.payment_attestations?.map((attestation) => (
                     <div key={attestation.id} className="rounded-lg border border-warning-200 bg-white p-4 text-sm">
