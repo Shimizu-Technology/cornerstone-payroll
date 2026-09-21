@@ -3,6 +3,14 @@
 require "rails_helper"
 
 RSpec.describe Rack::Attack do
+  around do |example|
+    previously_enabled = described_class.enabled
+    described_class.enabled = true
+    example.run
+  ensure
+    described_class.enabled = previously_enabled
+  end
+
   it "uses a process-local store instead of the database-backed Rails cache" do
     expect(described_class.cache.store).to equal(RequestPathCache.store)
     expect(described_class.cache.store).to be_a(ActiveSupport::Cache::MemoryStore)
