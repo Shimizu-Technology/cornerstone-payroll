@@ -31,8 +31,14 @@ module MigrationRehearsal
         cleanup_existing_uploads!
         maps = copy_company_setup!
         target_batch = copy_historical_archive!(maps.fetch(:employees))
+        copy_backup_drafts!(maps) if company.backup_snapshot?
         verify_copy!(target_batch)
-        company.update!(migration_rehearsal_status: "ready", migration_rehearsal_completed_at: Time.current)
+        ready_at = Time.current
+        company.update!(
+          migration_rehearsal_status: "ready",
+          migration_rehearsal_completed_at: ready_at,
+          test_workspace_sealed_at: company.backup_snapshot? ? ready_at : company.test_workspace_sealed_at
+        )
 
         audit_ready!(target_batch)
       end
@@ -50,7 +56,9 @@ module MigrationRehearsal
     attr_reader :company, :source_company, :source_batch, :actor, :storage, :uploaded_keys
 
     def validate!
-      raise ArgumentError, "Target must be a migration rehearsal" unless company.migration_rehearsal?
+      unless company.migration_rehearsal? || company.backup_snapshot?
+        raise ArgumentError, "Target must be a migration rehearsal or backup snapshot"
+      end
       raise ArgumentError, "Migration rehearsal source changed" unless company.migration_source_company_id == source_company.id
       raise ArgumentError, "Migration rehearsal import source changed" unless company.migration_source_batch_id == source_batch.id
       raise ArgumentError, "Source and rehearsal must belong to the same organization" unless company.organization_id == source_company.organization_id
@@ -64,8 +72,46 @@ module MigrationRehearsal
       TestWorkspace::SetupCloner.new(
         source_company: source_company,
         target_company: company,
-        actor: actor
+        actor: actor,
+        employee_lineage: true
       ).call
+    end
+
+    def copy_backup_drafts!(maps)
+      raise ArgumentError, "Backup source contains processed Cornerstone payroll" if source_company.pay_periods.where.not(status: "draft").exists?
+      raise ArgumentError, "Backup source draft contains payroll data" if source_company.payroll_items.exists?
+
+      source_company.pay_periods.draft.period_chronological.each do |source|
+        attributes = source.attributes.except(
+          "id", "created_at", "updated_at", "company_id", "company_pay_schedule_id", "company_workweek_id",
+          "corrects_pay_period_id", "source_pay_period_id", "superseded_by_id", "intake_stale_session_id",
+          "test_workspace_source_pay_period_id", "test_workspace_role", "promotion_source_pay_period_id"
+        )
+        target = PayPeriod.create!(attributes.merge(
+          company: company,
+          company_pay_schedule: source.company_pay_schedule_id && maps.fetch(:pay_schedules).fetch(source.company_pay_schedule_id),
+          company_workweek: source.company_workweek_id && maps.fetch(:workweeks).fetch(source.company_workweek_id),
+          status: "draft",
+          parallel_run: true,
+          created_by_id: actor.id,
+          calculated_by_id: nil,
+          calculated_at: nil,
+          approved_by_id: nil,
+          approved_at: nil,
+          committed_by_id: nil,
+          committed_at: nil,
+          intake_stale_at: nil,
+          intake_stale_reason: nil,
+          intake_stale_session_id: nil
+        ))
+        source.pay_period_excluded_employees.order(:id).each do |excluded|
+          copy_record!(
+            excluded,
+            pay_period: target,
+            employee: maps.fetch(:employees).fetch(excluded.employee_id)
+          )
+        end
+      end
     end
 
     def copy_historical_archive!(employee_map)
@@ -211,6 +257,13 @@ module MigrationRehearsal
         ytd_balances: [ ytd_balance_count(source_batch), ytd_balance_count(target_batch) ],
         historical_adjustments: [ adjustment_count(source_batch), adjustment_count(target_batch) ]
       }
+      if company.backup_snapshot?
+        checks[:draft_pay_periods] = [ source_company.pay_periods.draft.count, company.pay_periods.draft.count ]
+        checks[:draft_exclusions] = [
+          PayPeriodExcludedEmployee.where(pay_period_id: source_company.pay_periods.draft.select(:id)).count,
+          PayPeriodExcludedEmployee.where(pay_period_id: company.pay_periods.draft.select(:id)).count
+        ]
+      end
       mismatches = checks.select { |_key, values| values.first != values.last }
       raise "Migration rehearsal record-count verification failed: #{mismatches.keys.join(', ')}" if mismatches.any?
       raise "Migration rehearsal source-file verification failed" unless target_batch.source_files_complete_and_verified?
@@ -277,7 +330,7 @@ module MigrationRehearsal
 
       company.update_columns(
         migration_rehearsal_status: "failed",
-        migration_rehearsal_error: "The rehearsal copy did not finish. No source data changed. Retry the verified copy.",
+        migration_rehearsal_error: "The test-workspace copy did not finish. No source data changed. Retry the verified copy.",
         updated_at: Time.current
       )
     rescue StandardError => e
@@ -289,7 +342,7 @@ module MigrationRehearsal
         user: actor,
         organization_id: company.organization_id,
         company_id: company.id,
-        action: "migration_rehearsal#ready",
+        action: company.backup_snapshot? ? "migration_promotion#backup_ready" : "migration_rehearsal#ready",
         record_type: "companies",
         record_id: company.id,
         subject_name: company.name,

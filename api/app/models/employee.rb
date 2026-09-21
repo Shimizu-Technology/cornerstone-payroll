@@ -477,10 +477,10 @@ class Employee < ApplicationRecord
 
   def test_workspace_source_employee_is_valid
     return if test_workspace_source_employee.blank?
-    return if company&.training_replay? &&
+    return if company&.test_workspace? &&
       test_workspace_source_employee.company_id == company.migration_source_company_id
 
-    errors.add(:test_workspace_source_employee, "must belong to the training workspace's live source client")
+    errors.add(:test_workspace_source_employee, "must belong to the test workspace's source client")
   end
 
   SOURCE_FIELD_CONFIGURATION_REVIEW_CODES = %w[

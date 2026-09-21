@@ -12,7 +12,7 @@ module MigrationRehearsal
       Company.transaction do
         company.lock!
         unless company.migration_rehearsal_status == "failed"
-          raise ArgumentError, "Only a failed migration rehearsal can be retried"
+          raise ArgumentError, "Only a failed test-workspace copy can be retried"
         end
         raise ArgumentError, "The source import is no longer locked" unless company.migration_source_batch&.locked?
 
@@ -47,7 +47,9 @@ module MigrationRehearsal
       allowed = actor&.organization_admin? && actor.can_access_company?(company.id) &&
         StaffRolePolicy.allowed?(actor, :manage_organization)
       raise ArgumentError, "An organization administrator with access to this rehearsal is required" unless allowed
-      raise ArgumentError, "Target must be a migration rehearsal" unless company.migration_rehearsal?
+      unless company.migration_rehearsal? || company.backup_snapshot?
+        raise ArgumentError, "Target must be a migration rehearsal or backup snapshot"
+      end
     end
   end
 end
