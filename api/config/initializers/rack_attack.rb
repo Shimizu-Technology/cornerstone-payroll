@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 class Rack::Attack
-  Rack::Attack.cache.store = Rails.cache
+  Rack::Attack.cache.store = RequestPathCache.store
+  Rack::Attack.enabled = !Rails.env.test?
 
   def self.throttle_ip(request)
     remote_addr = request.get_header("REMOTE_ADDR").to_s
