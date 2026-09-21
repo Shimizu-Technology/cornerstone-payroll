@@ -377,11 +377,7 @@ module Api
             platform_owner: user.platform_owner?
           }
 
-          assigned = if user.association(:company_assignments).loaded?
-            user.company_assignments.reject(&:expired?).map(&:company_id)
-          else
-            user.company_assignments.active_access.pluck(:company_id)
-          end
+          assigned = current_assignment_ids_for(user)
           data[:assigned_company_ids] = assigned if assigned.any?
 
           assigned_companies = if user.association(:company_assignments).loaded?

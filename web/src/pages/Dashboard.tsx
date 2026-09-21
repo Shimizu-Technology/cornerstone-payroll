@@ -140,7 +140,13 @@ export function Dashboard(): ReactElement {
                   Start with the current period, then move through checks, reports, and Guam compliance from one operational workspace.
                 </p>
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
-                  <Button onClick={() => navigate(currentPayPeriod ? payRunHref(currentPayPeriod.id, 'work') : payRunsHref)}>
+                  <Button onClick={() => navigate(
+                    readOnlyWorkspace
+                      ? payRunsHref
+                      : currentPayPeriod
+                        ? payRunHref(currentPayPeriod.id, 'work')
+                        : payRunsHref
+                  )}>
                     {readOnlyWorkspace ? 'Browse pay periods' : currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
