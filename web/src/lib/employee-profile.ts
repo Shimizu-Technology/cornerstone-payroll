@@ -4,10 +4,10 @@ export const canonicalSsn = (value?: string) => (value || '').replace(/\D/g, '')
 
 // Match the API's source-review exception. An unrelated edit must not clear it.
 export function importedProfileAllowsBlank(employee: Employee | null, field: string): boolean {
-  return employee?.configuration_source === 'quickbooks_history'
+  return (employee?.configuration_source === 'quickbooks_history' || employee?.configuration_source === 'aire_onboarding')
     && employee.configuration_review_status === 'needs_review'
     && Boolean(employee.configuration_review_items?.some((item) =>
-      ['verify_hire_date', 'quickbooks_nevada_address_suppressed', 'employee_address_missing'].includes(item.code)
+      ['verify_hire_date', 'quickbooks_nevada_address_suppressed', 'employee_address_missing', 'aire_filing_details_missing'].includes(item.code)
       && item.fields.includes(field)));
 }
 

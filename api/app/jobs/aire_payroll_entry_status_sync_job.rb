@@ -30,7 +30,8 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
         company_id: import.pay_period.company_id,
         pay_period_start: import.pay_period.start_date.iso8601,
         pay_period_end: import.pay_period.end_date.iso8601,
-        pay_date: import.pay_period.pay_date.iso8601
+        pay_date: import.pay_period.pay_date.iso8601,
+        payment_effective_on: acknowledgement.payment_effective_on&.iso8601
       }
     )
     acknowledgement.mark_delivered!(at: Time.current)

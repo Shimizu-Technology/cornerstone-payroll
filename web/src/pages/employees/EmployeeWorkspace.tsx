@@ -100,6 +100,7 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewSourceReferences, setReviewSourceReferences] = useState<Record<string, string>>({});
   const [reviewEffectiveDates, setReviewEffectiveDates] = useState<Record<string, string>>({});
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
+  const [activationBusy, setActivationBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
@@ -214,6 +215,20 @@ export function EmployeeWorkspace(): ReactElement {
     }
   };
 
+  const activateAireOnboarding = async (): Promise<void> => {
+    try {
+      setActivationBusy(true);
+      setReviewError(null);
+      const result = await employeesApi.activateAireOnboarding(employeeId);
+      setEmployee(result.data);
+      setReviewNotice('AIRE employee setup activated for future payroll.');
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : 'Could not activate this employee.');
+    } finally {
+      setActivationBusy(false);
+    }
+  };
+
   if (loading || activeCompanyId !== companyId || resolvedRouteKey !== routeKey) {
     return <WorkspaceLoader label="Loading employee workspace" />;
   }
@@ -278,6 +293,7 @@ export function EmployeeWorkspace(): ReactElement {
           <Badge variant="default">{employee.tax_classification?.toUpperCase() || (employee.employment_type === 'contractor' ? '1099' : 'W-2')}</Badge>
           <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{employeePaymentDelivery(employee).label}</Badge>
           {employee.configuration_source === 'quickbooks_history' && <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? 'Imported setup review' : 'Imported setup reviewed'}</Badge>}
+          {employee.configuration_source === 'aire_onboarding' && <Badge variant={employee.status === 'active' ? 'success' : 'warning'}>{employee.status === 'active' ? 'AIRE payroll setup active' : 'AIRE setup pending'}</Badge>}
           <span className="text-sm font-medium text-neutral-500">Employee #{employee.id}</span>
         </div>
       </section>
@@ -323,6 +339,8 @@ export function EmployeeWorkspace(): ReactElement {
             onReviewEffectiveDateChange={(code, value) => setReviewEffectiveDates((current) => ({ ...current, [code]: value }))}
             onResolveReview={(item) => void resolveConfigurationReview(item)}
             onEmployeeReload={load}
+            onActivateAireOnboarding={() => void activateAireOnboarding()}
+            activationBusy={activationBusy}
           />
         )}
         {activeTab === 'pay-history' && (
@@ -393,7 +411,9 @@ function EmployeeOverview({
             </div>
             <ContextRow
               label="Tax filing"
-              value={filingStatusLabels[employee.current_w4_election?.filing_status || employee.filing_status] || employee.current_w4_election?.filing_status || employee.filing_status}
+              value={employee.configuration_source === 'aire_onboarding' && employee.configuration_review_status === 'needs_review'
+                ? 'Needs W-4 review'
+                : filingStatusLabels[employee.current_w4_election?.filing_status || employee.filing_status] || employee.current_w4_election?.filing_status || employee.filing_status}
             />
           </CardContent>
         </Card>
@@ -414,21 +434,32 @@ interface PaySetupProps {
   onReviewEffectiveDateChange: (code: string, value: string) => void;
   onResolveReview: (item: ConfigurationReviewItem) => void;
   onEmployeeReload: () => Promise<void>;
+  onActivateAireOnboarding: () => void;
+  activationBusy: boolean;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, onActivateAireOnboarding, activationBusy }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
   const upcomingW4 = employee.upcoming_w4_election;
   return (
     <div className="space-y-6">
-      {employee.configuration_source === 'quickbooks_history' && (
+      {employee.configuration_source === 'aire_onboarding' && employee.status === 'inactive' && (
+        <Card className="border-primary-200 bg-primary-50/40">
+          <CardHeader><CardTitle>AIRE payroll setup</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4">
+            <p className="max-w-2xl text-sm leading-6 text-primary-900">This AIRE identity is permanently matched to this profile, but cannot enter payroll yet. Complete the filing details and setup review below, then activate it for future pay runs.</p>
+            {employee.configuration_review_status === 'complete' && <Button disabled={activationBusy} onClick={onActivateAireOnboarding}>{activationBusy ? 'Activating…' : 'Activate for payroll'}</Button>}
+          </CardContent>
+        </Card>
+      )}
+      {(employee.configuration_source === 'quickbooks_history' || employee.configuration_source === 'aire_onboarding') && (
         <Card className={employee.configuration_review_status === 'needs_review' ? 'border-warning-200 bg-warning-50/40' : 'border-success-200 bg-success-50/40'}>
           <CardHeader className="flex-row items-start justify-between gap-4">
             <div>
-              <CardTitle className="flex items-center gap-2">{employee.configuration_review_status === 'needs_review' ? <AlertTriangle className="h-5 w-5 text-warning-700" /> : <CheckCircle2 className="h-5 w-5 text-success-700" />}Imported setup review</CardTitle>
-              <p className="mt-2 text-sm leading-6 text-neutral-600">Correct employee fields on the standard form, then document each manual verification here. Paid QuickBooks payroll remains locked.</p>
+              <CardTitle className="flex items-center gap-2">{employee.configuration_review_status === 'needs_review' ? <AlertTriangle className="h-5 w-5 text-warning-700" /> : <CheckCircle2 className="h-5 w-5 text-success-700" />}{employee.configuration_source === 'aire_onboarding' ? 'AIRE setup review' : 'Imported setup review'}</CardTitle>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">Correct employee fields on the standard form, then document each verification here. {employee.configuration_source === 'quickbooks_history' ? 'Paid QuickBooks payroll remains locked.' : 'This AIRE employee stays inactive until all items are reviewed and activated.'}</p>
             </div>
             <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? `${employee.configuration_review_items?.length || 0} open` : 'Complete'}</Badge>
           </CardHeader>
@@ -505,7 +536,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
           <ContextRow label="Pay rate" value={employee.employment_type === 'salary' && employee.salary_type === 'variable' ? 'Set each pay period' : formatCurrency(Number(employee.pay_rate) || 0)} />
           <ContextRow label="Pay frequency" value={payFrequencyLabels[employee.pay_frequency] || employee.pay_frequency} />
           <ContextRow label="Paid by" value={employeePaymentDelivery(employee).label} />
-          <ContextRow label="Salary treatment" value={employee.salary_type?.replace('_', ' ') || 'Not applicable'} />
+          <ContextRow label="Salary treatment" value={employee.employment_type === 'salary' ? employee.salary_type?.replace('_', ' ') || 'Not recorded' : 'Not applicable'} />
           <ContextRow label="Active wage rates" value={String(wageRateCount || 1)} />
           <ContextRow label="Recurring adjustments" value={String(adjustmentCount)} />
           <ContextRow label="Traditional retirement" value={retirementContributionSummary(employee.current_retirement_election, 'traditional', employee.retirement_rate)} />

@@ -195,6 +195,7 @@ module TimeTracking
           occurred_at: event&.created_at || payment_state_timestamp(item, status),
           payment_method: "paper_check",
           payment_reference: item.check_number,
+          payment_effective_on: status == "payment_issued" ? event&.effective_on : nil,
           source_event_prefix: "reconciliation_payment_#{item.id}",
           payroll_item_id: item.id,
           allocations: item_allocations

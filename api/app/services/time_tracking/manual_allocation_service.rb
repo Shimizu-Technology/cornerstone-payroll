@@ -11,7 +11,8 @@ module TimeTracking
     end
 
     def create!(payroll_item_id:, source_time_entry_id:, source_time_entry_version:,
-                source_user_uuid:, regular_hours:, overtime_hours:, original_work_date:, note:)
+                source_user_uuid:, regular_hours:, overtime_hours:, original_work_date:, note:,
+                classification_reconciliation: nil)
       raise Error, "Commit the payroll before linking paid AIRE hours" unless pay_period.committed? && !pay_period.voided?
       raise Error, "Connect an active AIRE source first" unless source&.active? && source.company_id == pay_period.company_id
 
@@ -40,6 +41,10 @@ module TimeTracking
       end
       explanation = note.to_s.strip
       raise Error, "Explain which issued or committed payroll item covers these AIRE hours" if explanation.length < 10
+      validate_classification_reconciliation!(classification_reconciliation, item, entry_id, uuid, version, work_date, regular, overtime) if classification_reconciliation
+      if !classification_reconciliation && TimeTrackingClassificationReconciliation.exists?(payroll_item_id: item.id)
+        raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
+      end
 
       verify_live_source!(entry_id, uuid, version, work_date, regular, overtime)
 
@@ -50,13 +55,21 @@ module TimeTracking
           raise Error, "Choose a supported payroll payment method before linking AIRE hours"
         end
         raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
+        if !classification_reconciliation && TimeTrackingClassificationReconciliation.exists?(payroll_item_id: item.id)
+          raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
+        end
         if TimeTrackingManualAllocation.where(time_tracking_source: source, source_time_entry_id: entry_id,
                                               payroll_item_id: item.id).exists?
           raise Error, "This AIRE time entry is already linked to this payroll item"
         end
         allocated = item.pay_period.time_tracking_manual_allocations.where(payroll_item_id: item.id).where.not(status: "voided")
-        if allocated.sum(:regular_hours).to_d + regular > item.hours_worked.to_d.round(2) ||
-           allocated.sum(:overtime_hours).to_d + overtime > item.overtime_hours.to_d.round(2)
+        if classification_reconciliation
+          if allocated.sum(:regular_hours).to_d + allocated.sum(:overtime_hours).to_d + regular + overtime >
+             item.hours_worked.to_d.round(2) + item.overtime_hours.to_d.round(2)
+            raise Error, "Selected AIRE hours exceed the total hours on this issued paycheck"
+          end
+        elsif allocated.sum(:regular_hours).to_d + regular > item.hours_worked.to_d.round(2) ||
+              allocated.sum(:overtime_hours).to_d + overtime > item.overtime_hours.to_d.round(2)
           raise Error, "Selected AIRE hours exceed the regular or overtime hours on this paycheck"
         end
 
@@ -73,7 +86,8 @@ module TimeTracking
           original_work_date: work_date,
           regular_hours: regular,
           overtime_hours: overtime,
-          reconciliation_note: explanation
+          reconciliation_note: explanation,
+          classification_reconciliation: classification_reconciliation
         )
       end
 
@@ -105,6 +119,32 @@ module TimeTracking
     private
 
     attr_reader :pay_period, :source, :actor
+
+    def validate_classification_reconciliation!(reconciliation, item, entry_id, uuid, version, work_date, regular, overtime)
+      unless reconciliation.is_a?(TimeTrackingClassificationReconciliation) &&
+             reconciliation.persisted? && reconciliation.status == "pending" &&
+             reconciliation.pay_period_id == pay_period.id && reconciliation.payroll_item_id == item.id &&
+             reconciliation.time_tracking_source_id == source.id && reconciliation.employee_id == item.employee_id &&
+             reconciliation.source_user_uuid == uuid
+        raise Error, "Historical classification review does not match this AIRE person and issued check"
+      end
+      snapshot = Array(reconciliation.source_entries).find { |row| row["source_time_entry_id"].to_s == entry_id }
+      unless snapshot && snapshot["source_time_entry_version"].to_i == version &&
+             snapshot["original_work_date"] == work_date.iso8601 &&
+             BigDecimal(snapshot["regular_hours"].to_s) == regular &&
+             BigDecimal(snapshot["overtime_hours"].to_s) == overtime
+        raise Error, "This AIRE entry is not in the reviewed historical classification exception"
+      end
+      delivery = delivered_check_event_for(item)
+      unless item.effective_payment_delivery_method == "paper_check" && item.check_number == reconciliation.check_number &&
+             delivery&.effective_on == reconciliation.payment_effective_on && item.net_pay.to_d.positive? &&
+             item.hours_worked.to_d.round(2) == reconciliation.payroll_regular_hours &&
+             item.overtime_hours.to_d.round(2) == reconciliation.payroll_overtime_hours
+        raise Error, "Issued-check evidence changed; review the historical classification exception again"
+      end
+    rescue ArgumentError
+      raise Error, "Historical classification snapshot is invalid"
+    end
 
     def sync_commit!(allocation)
       result = client_for(allocation).commit_payroll_manual_allocation(
@@ -140,6 +180,7 @@ module TimeTracking
           expected_version: allocation.remote_version,
           payment_method: "direct_deposit",
           payment_reference: confirmation.bank_reference,
+          payment_effective_on: confirmation.settled_on.iso8601,
           occurred_at: confirmation.created_at.iso8601,
           reason: "Cornerstone bank payment #{confirmation.bank_reference} confirmed for #{confirmation.settled_on.iso8601}"
         )
@@ -153,6 +194,7 @@ module TimeTracking
           expected_version: allocation.remote_version,
           payment_method: "paper_check",
           payment_reference: item.check_number,
+          payment_effective_on: delivery.effective_on.iso8601,
           occurred_at: delivery.created_at.iso8601,
           reason: "Cornerstone check #{item.check_number} delivered on #{delivery.effective_on.iso8601}"
         )
@@ -257,6 +299,12 @@ module TimeTracking
     def delivered_check_event(allocation)
       item = allocation.payroll_item
       return unless item.effective_payment_delivery_method == "paper_check" && item.check_number.present?
+
+      item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
+    end
+
+    def delivered_check_event_for(item)
+      return unless item.check_number.present?
 
       item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
     end

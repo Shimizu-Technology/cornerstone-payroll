@@ -7,7 +7,7 @@ module Api
         include Auditable
         audit_actions :terminate, :reactivate
         before_action :set_employee, only: [
-          :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification,
+          :show, :update, :destroy, :terminate, :reactivate, :activate_aire_onboarding, :transition_tax_classification,
           :resolve_configuration_review_item
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
@@ -151,6 +151,38 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # An AIRE-created worker is linked while inactive. Only reviewed,
+        # complete filing data may move the profile into the payable roster.
+        def activate_aire_onboarding
+          require_capability!(:manage_client_configuration)
+          return if performed?
+
+          Employee.transaction do
+            @employee.lock!
+            unless @employee.configuration_source == "aire_onboarding" && @employee.status == "inactive"
+              raise ArgumentError, "Only an inactive AIRE onboarding profile can be activated"
+            end
+            unless @employee.configuration_review_status == "complete" && @employee.configuration_review_items.empty?
+              raise ArgumentError, "Complete and document every AIRE setup review item first"
+            end
+
+            @employee.update!(status: "active")
+            AuditLog.record!(
+              user: current_user,
+              organization_id: @employee.company.organization_id,
+              company_id: @employee.company_id,
+              action: "employees#activate_aire_onboarding",
+              record_type: "employees",
+              record_id: @employee.id,
+              subject_name: @employee.full_name,
+              metadata: { source: "aire_onboarding" }
+            )
+          end
+          render json: { data: serialize_employee(@employee.reload) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # POST /api/v1/admin/employees/:id/transition_tax_classification
         def transition_tax_classification
           result = EmployeeClassificationTransitionService.new(
@@ -212,14 +244,18 @@ module Api
 
         def aire_link_context
           link = params.require(:aire_link).permit(:pay_period_id, :source_user_id)
-          pay_period = current_company.pay_periods.find(link.fetch(:pay_period_id))
-          source = pay_period.aire_payroll_calendar_period&.time_tracking_source
+          pay_period = current_company.pay_periods.find(link[:pay_period_id]) if link[:pay_period_id].present?
+          source = if pay_period
+            pay_period.aire_payroll_calendar_period&.time_tracking_source
+          else
+            current_company.time_tracking_sources.active.find_by(source_type: "aire_services")
+          end
           unless source&.active? && source.company_id == current_company.id && source.source_type == "aire_services"
             raise TimeTracking::EmployeeMappingService::Error,
-                  "This pay period has no active AIRE connection. Open its AIRE workspace and review the calendar first."
+                  "This company has no active AIRE connection. Review its time-tracking settings first."
           end
           source_user_id = link.fetch(:source_user_id)
-          service = TimeTracking::EmployeeMappingService.new(pay_period: pay_period, source: source)
+          service = TimeTracking::EmployeeMappingService.new(company: current_company, source: source)
           [ service, source_user_id, service.live_identity!(source_user_id: source_user_id) ]
         end
 

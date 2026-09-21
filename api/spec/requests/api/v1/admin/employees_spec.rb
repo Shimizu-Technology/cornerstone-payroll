@@ -349,6 +349,50 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/employees/:id/activate_aire_onboarding" do
+    let!(:pending_employee) do
+      create(
+        :employee,
+        company:,
+        status: "inactive",
+        configuration_source: "aire_onboarding",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          { "code" => "aire_filing_details_missing", "message" => "Complete filing data", "fields" => %w[hire_date address_line1 city state zip ssn_encrypted w4_signed_on] }
+        ],
+        hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil,
+        ssn_encrypted: nil, w4_signed_on: nil
+      )
+    end
+
+    it "keeps the linked worker inactive until the filing review is complete" do
+      post "/api/v1/admin/employees/#{pending_employee.id}/activate_aire_onboarding"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(pending_employee.reload.status).to eq("inactive")
+      expect(pending_employee.update(status: "active")).to be(false)
+    end
+
+    it "activates a fully reviewed worker with an audit record" do
+      pending_employee.update!(
+        hire_date: Date.new(2026, 9, 1), address_line1: "123 Verified St",
+        city: "Hagatna", state: "GU", zip: "96910",
+        ssn_encrypted: "900-70-1234", w4_signed_on: Date.new(2026, 9, 1),
+        configuration_review_items: [], configuration_review_status: "complete"
+      )
+
+      expect do
+        post "/api/v1/admin/employees/#{pending_employee.id}/activate_aire_onboarding"
+      end.to change(AuditLog.where(action: "employees#activate_aire_onboarding"), :count).by(1)
+
+      expect(response).to have_http_status(:ok)
+      expect(pending_employee.reload.status).to eq("active")
+      expect(response.parsed_body.dig("data", "ssn_last_four")).to eq("1234")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn_encrypted")
+    end
+  end
+
   describe "POST /api/v1/admin/employees" do
     let(:valid_params) do
       {

@@ -240,17 +240,49 @@ module TimeTracking
     end
 
     def find_wage_rate(category, rates)
+      # AIRE keeps Solo as its own source category, but approved Solo work is
+      # paid through this employee's Flight Hours wage. Never infer a rate.
+      if normalize_match_key(category[:name]) == "solo"
+        flight_rates = rates.select { |rate| normalize_match_key(rate.label) == "flight hours" }
+        return [ flight_rates.first, "solo_to_flight_hours" ] if flight_rates.one?
+
+        return [ nil, nil ]
+      end
+
+      if normalize_match_key(category[:name]) == "ground instruction"
+        ground_rates = rates.select { |rate| normalize_match_key(rate.label) == "ground instruction hours" }
+        return [ ground_rates.first, "ground_instruction_hours" ] if ground_rates.one?
+
+        return [ nil, nil ]
+      end
+
+      if normalize_match_key(category[:name]) == "aircraft maintenance"
+        maintenance_rates = rates.select { |rate| normalize_match_key(rate.label) == "maintenance" }
+        return [ maintenance_rates.first, "aircraft_maintenance" ] if maintenance_rates.one?
+      end
+
       label_matches = rates.select do |rate|
         candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize_match_key(value) }
         candidates.include?(normalize_match_key(rate.label))
       end
       return [ label_matches.first, "label" ] if label_matches.one?
 
+      # Existing AIRE maintenance/admin/other workers may have only one
+      # configured Cornerstone wage, called Regular. Reuse that sole wage for
+      # these known source categories, but hold unfamiliar new categories.
+      if rates.one? && normalize_match_key(rates.first.label) == "regular" &&
+         normalize_match_key(category[:name]).in?(%w[other] + [ "admin duties", "aircraft maintenance" ])
+        return [ rates.first, "sole_regular_wage" ]
+      end
+
       [ nil, nil ]
     end
 
     def warnings_for(source_employee, match, categories, requires_category_mapping, total_hours:, regular_hours:, overtime_hours:, estimated_gross_delta_cents:)
       warnings = []
+      if match[:match_method] == "inactive_mapping"
+        warnings << warning("inactive_employee", "This AIRE person is permanently linked to an inactive payroll profile. Review its status before paying; do not link the hours to someone else.")
+      end
       if match[:employee_id].blank? && (total_hours.nonzero? || categories.any?)
         warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this AIRE user'} to a payroll employee before importing")
       end

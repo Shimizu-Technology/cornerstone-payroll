@@ -13,10 +13,17 @@ module AirePayrollCockpit
         finalized_batch: period_payload["finalized_batch"],
         processing_history: period_payload.fetch("processing_history", []),
         carryovers: period_payload.fetch("carryovers", {}),
-        employees: employees_payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
+        employees: employees(employees_payload).fetch(:employees),
         employee_pagination: required(employees_payload, "pagination"),
         command_access: command_access,
         routing_options: routing_options
+      }
+    end
+
+    def employees(payload)
+      {
+        employees: payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
+        pagination: required(payload, "pagination")
       }
     end
 
@@ -62,6 +69,11 @@ module AirePayrollCockpit
         "manual_allocations" => payload.fetch("manual_allocations", []).map do |allocation|
           allocation.merge(
             "cornerstone" => mapping_payload(allocation["source_user_uuid"], required: true)
+          )
+        end,
+        "payment_attestations" => payload.fetch("payment_attestations", []).map do |attestation|
+          attestation.merge(
+            "cornerstone" => mapping_payload(attestation["source_user_uuid"], required: true)
           )
         end
       )
