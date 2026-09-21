@@ -3389,6 +3389,40 @@ export interface TrainingReplayPreview {
   }>;
 }
 
+export interface MigrationPromotionPeriod {
+  id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  status: 'draft' | 'calculated' | 'approved' | 'committed';
+  employee_count: number;
+  gross_pay: number | string;
+  net_pay: number | string;
+}
+
+export interface MigrationPromotionPreview {
+  rehearsal: { id: number; name: string; status: 'pending' | 'ready' | 'failed'; employee_count: number };
+  target_company: { id: number; name: string; status: 'pending' | 'ready' | 'failed' | null; employee_count: number } | null;
+  ready_to_back_up: boolean;
+  ready_to_apply: boolean;
+  blockers: string[];
+  warnings: string[];
+  employee_mapping: {
+    matched: number;
+    new: number;
+    blockers: string[];
+  };
+  source_periods: MigrationPromotionPeriod[];
+  replaceable_drafts: MigrationPromotionPeriod[];
+  backup: {
+    id: number;
+    name: string;
+    status: 'pending' | 'ready' | 'failed';
+    employee_count: number;
+    current: boolean;
+  } | null;
+}
+
 export interface CompanyDetail extends CompanyListItem {
   address_line1?: string;
   address_line2?: string;
@@ -3480,6 +3514,12 @@ export const companiesApi = {
   }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/training_replay`, input),
   retryTrainingReplay: (id: number) =>
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_training_replay`),
+  migrationPromotionPreview: (id: number) =>
+    api.get<{ migration_promotion: MigrationPromotionPreview }>(`/admin/companies/${id}/migration_promotion_preview`),
+  createMigrationPromotionBackup: (id: number, acknowledgement: string) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_promotion_backup`, { acknowledgement }),
+  applyMigrationPromotion: (id: number, acknowledgement: string) =>
+    api.post<{ company: CompanyDetail; promoted_pay_period_ids: number[] }>(`/admin/companies/${id}/migration_promotion`, { acknowledgement }),
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));
