@@ -607,6 +607,31 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
     end
 
+    it "explains that a training baseline is locked benchmark evidence" do
+      source_company = create(:company, organization: organization)
+      source_period = create(:pay_period, :committed, company: source_company)
+      company.update!(
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "training_replay",
+        migration_source_company: source_company,
+        migration_rehearsal_status: "pending"
+      )
+      pay_period.update_columns(
+        status: "approved",
+        parallel_run: true,
+        test_workspace_source_pay_period_id: source_period.id,
+        test_workspace_role: "baseline"
+      )
+      company.update!(migration_rehearsal_status: "ready")
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { notes: "Try to update" }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to eq("Training baseline payrolls are locked benchmark evidence")
+    end
+
     it "rolls back date changes if reverting a non-draft period to draft fails" do
       original_pay_date = pay_period.pay_date
       pay_period.update!(status: "approved", approved_at: 1.hour.ago, approved_by_id: admin_user.id)

@@ -122,7 +122,13 @@ module Api
         # PATCH/PUT /api/v1/admin/pay_periods/:id
         def update
           unless @pay_period.can_edit?
-            message = @pay_period.voided? ? "Cannot edit a voided pay period" : "Cannot edit a committed pay period"
+            message = if @pay_period.voided?
+              "Cannot edit a voided pay period"
+            elsif @pay_period.training_baseline?
+              "Training baseline payrolls are locked benchmark evidence"
+            else
+              "Cannot edit a committed pay period"
+            end
             return render json: { error: message }, status: :unprocessable_entity
           end
 
