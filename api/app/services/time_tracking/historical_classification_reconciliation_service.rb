@@ -8,10 +8,12 @@ module TimeTracking
   class HistoricalClassificationReconciliationService
     class Error < StandardError; end
 
-    def initialize(pay_period:, source:, actor:)
+    def initialize(pay_period:, source:, actor:, expected_source_entry_ids: nil, before_source_entry: nil)
       @pay_period = pay_period
       @source = source
       @actor = actor
+      @expected_source_entry_ids = expected_source_entry_ids&.map(&:to_s)&.sort
+      @before_source_entry = before_source_entry
     end
 
     def call(payroll_item_id:, source_user_uuid:)
@@ -33,6 +35,7 @@ module TimeTracking
 
       allocation_service = TimeTracking::ManualAllocationService.new(pay_period: pay_period, source: source, actor: actor)
       Array(reconciliation.source_entries).each do |entry|
+        @before_source_entry&.call
         existing = item.time_tracking_manual_allocations.find_by(
           time_tracking_source: source, source_time_entry_id: entry.fetch("source_time_entry_id")
         )
@@ -73,7 +76,7 @@ module TimeTracking
 
     private
 
-    attr_reader :pay_period, :source, :actor
+    attr_reader :pay_period, :source, :actor, :expected_source_entry_ids
 
     def verify_issued_coverage!(reconciliation)
       allocations = reconciliation.time_tracking_manual_allocations.where.not(status: "voided").to_a
@@ -115,6 +118,12 @@ module TimeTracking
         Date.iso8601(entry.fetch("original_work_date")).between?(pay_period.start_date, pay_period.end_date)
       rescue Date::Error, KeyError, TypeError
         raise Error, "AIRE returned an invalid historical work date"
+      end
+      if expected_source_entry_ids
+        entries = entries.select { |entry| expected_source_entry_ids.include?(entry["source_time_entry_id"].to_s) }
+        unless expected_source_entry_ids.any? && entries.map { |entry| entry["source_time_entry_id"].to_s }.sort == expected_source_entry_ids
+          raise Error, "The verified historical AIRE source entries changed; refresh the rollout manifest"
+        end
       end
       raise Error, "No current-period AIRE source entries were found for this check" if entries.empty?
       snapshots = entries.map { |entry| source_entry_snapshot!(entry) }.sort_by { |entry| entry.fetch("source_time_entry_id").to_i }
@@ -171,6 +180,10 @@ module TimeTracking
     end
 
     def validate_saved!(reconciliation, item:, uuid:)
+      if expected_source_entry_ids &&
+         reconciliation.source_entries.map { |entry| entry.fetch("source_time_entry_id").to_s }.sort != expected_source_entry_ids
+        raise Error, "Saved historical AIRE entries differ from the verified rollout manifest"
+      end
       delivery = item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
       unless reconciliation.time_tracking_source_id == source.id && reconciliation.pay_period_id == pay_period.id &&
              reconciliation.employee_id == item.employee_id && reconciliation.source_user_uuid == uuid &&

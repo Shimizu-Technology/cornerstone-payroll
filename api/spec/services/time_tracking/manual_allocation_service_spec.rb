@@ -22,8 +22,7 @@ RSpec.describe TimeTracking::ManualAllocationService do
   before do
     TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
                                         employee: employee, source_user_id: "91", source_user_uuid: uuid)
-    allow(TimeTracking::Client).to receive(:new).and_return(client)
-    allow(client).to receive(:payroll_account_link).and_return("account_link" => { "connected" => false })
+    allow(TimeTracking::Client).to receive(:for_payroll_actor).with(source, actor: actor).and_return(client)
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(
       "employees" => [ { "source_user_uuid" => uuid,
                          "adjustments" => [ { "source_time_entry_id" => "41",

@@ -58,6 +58,18 @@ RSpec.describe TimeTracking::Client do
       expect(client.instance_variable_get(:@delegation)).to eq(delegation)
     end
 
+    it "surfaces an account-link failure instead of silently using delegation" do
+      actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
+      allow(source).to receive(:delegation_for).with(actor).and_return(instance_double(TimeTrackingDelegation))
+      probe = instance_double(described_class)
+      allow(probe).to receive(:payroll_account_link).and_raise(described_class::Error, "AIRE unavailable")
+      allow(described_class).to receive(:new).and_call_original
+      allow(described_class).to receive(:new).with(source).and_return(probe)
+
+      expect { described_class.for_payroll_actor(source, actor: actor) }
+        .to raise_error(described_class::Error, "AIRE unavailable")
+    end
+
     it "reads a manual payroll review by date range without requiring a published calendar ID" do
       actor = create(:user, company: source.company, organization: source.company.organization, role: "admin")
       review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")

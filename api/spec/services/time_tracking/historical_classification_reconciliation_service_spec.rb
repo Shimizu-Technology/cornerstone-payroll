@@ -75,6 +75,33 @@ RSpec.describe TimeTracking::HistoricalClassificationReconciliationService do
       .not_to change(TimeTrackingManualAllocation, :count)
   end
 
+  it "reconciles only verified historical entries when a newer entry appears in the old period" do
+    review["employees"][0]["adjustments"] << {
+      "source_time_entry_id" => "99", "source_time_entry_version" => 0,
+      "source_kind" => "current", "original_work_date" => "2026-08-15",
+      "total_hours" => "2.00", "regular_hours" => "2.00", "overtime_hours" => "0.00"
+    }
+    scoped = described_class.new(
+      pay_period: period, source: source, actor: actor, expected_source_entry_ids: %w[41 42]
+    )
+
+    reconciliation = scoped.call(payroll_item_id: item.id, source_user_uuid: uuid)
+
+    expect(reconciliation.reload.status).to eq("complete")
+    expect(reconciliation.source_entries.map { |entry| entry.fetch("source_time_entry_id") }).to eq(%w[41 42])
+    expect(TimeTrackingManualAllocation.pluck(:source_time_entry_id)).to match_array(%w[41 42])
+  end
+
+  it "refuses a verified historical subset when one source entry disappeared" do
+    scoped = described_class.new(
+      pay_period: period, source: source, actor: actor, expected_source_entry_ids: %w[41 99]
+    )
+
+    expect { scoped.call(payroll_item_id: item.id, source_user_uuid: uuid) }
+      .to raise_error(described_class::Error, /verified historical AIRE source entries changed/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   it "refuses to mark hours paid when AIRE and the issued check have different totals" do
     review["employees"][0]["adjustments"][1]["total_hours"] = "1.10"
     review["employees"][0]["adjustments"][1]["overtime_hours"] = "1.10"

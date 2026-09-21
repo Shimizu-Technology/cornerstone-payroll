@@ -24,12 +24,11 @@ module TimeTracking
       raise Error, "Sign in as a payroll administrator before reviewing AIRE hours" unless actor
 
       delegation = source.delegation_for(actor)
-      connected = begin
-        new(source).payroll_account_link(external_actor_id: actor.id)
-          .dig("account_link", "connected") == true
-      rescue Error
-        false
-      end
+      # A transport or rate-limit failure is not evidence that the account is
+      # disconnected. Surface it so callers can retry without a false setup
+      # warning or an unauthenticated follow-up request.
+      connected = new(source).payroll_account_link(external_actor_id: actor.id)
+        .dig("account_link", "connected") == true
       if connected
         new(source, actor: actor)
       elsif delegation.present?

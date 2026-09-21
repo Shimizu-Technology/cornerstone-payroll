@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_21_010400) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_21_010500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -132,6 +132,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010400) do
     t.check_constraint "event_type::text = 'payroll_batch.finalized'::text", name: "aire_payroll_events_type_check"
     t.check_constraint "verification_attempts >= 0", name: "aire_payroll_events_attempts_check"
     t.check_constraint "verification_status::text = ANY (ARRAY['pending'::character varying::text, 'failed'::character varying::text, 'rejected'::character varying::text, 'verified'::character varying::text])", name: "aire_payroll_events_status_check"
+  end
+
+  create_table "aire_verified_history_rollout_receipts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "completed_at", null: false
+    t.datetime "created_at", null: false
+    t.integer "identity_count", null: false
+    t.string "manifest_sha256", limit: 64, null: false
+    t.integer "paid_source_entry_count", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_aire_verified_history_rollout_receipts_on_company_id"
+    t.index ["manifest_sha256"], name: "idx_aire_verified_rollout_receipts_manifest", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_aire_verified_rollout_receipts_source"
   end
 
   create_table "annual_retirement_limits", force: :cascade do |t|
@@ -3330,6 +3344,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_010400) do
   add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", column: ["aire_payroll_calendar_publication_id", "aire_payroll_calendar_period_id"], primary_key: ["id", "aire_payroll_calendar_period_id"], name: "fk_aire_payroll_events_publication_period"
   add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", on_delete: :restrict
   add_foreign_key "aire_payroll_events", "time_tracking_sources", on_delete: :restrict
+  add_foreign_key "aire_verified_history_rollout_receipts", "companies"
+  add_foreign_key "aire_verified_history_rollout_receipts", "time_tracking_sources"
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
