@@ -714,7 +714,7 @@ export function PayPeriods() {
       <div className="p-4 sm:p-6 lg:p-8">
         {trainingReplayWorkspace && (
           <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950">
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-4">
               <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" aria-hidden="true" />
               <div>
                 <p className="font-semibold">Complete the practice payrolls from oldest to newest</p>
@@ -833,8 +833,8 @@ export function PayPeriods() {
               onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"
             >
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </Select>
           </div>
         </div>

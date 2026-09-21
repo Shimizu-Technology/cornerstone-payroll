@@ -117,7 +117,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.queryByText('Checks & direct deposit')).toBeNull();
   });
 
-  it('routes sealed backups to a review-only workspace', async () => {
+  it.each(['work', 'checks'])('routes sealed backups from %s to a review-only workspace', async (tab) => {
     apiMocks.activeCompany = {
       id: 7,
       payroll_environment: 'migration_rehearsal',
@@ -126,7 +126,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     };
 
     render(
-      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <MemoryRouter initialEntries={[`/companies/7/pay-runs/12/${tab}`]}>
         <Routes>
           <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
         </Routes>

@@ -196,7 +196,7 @@ export function PayRunWorkspace(): ReactElement {
           <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
           {!readOnlyWorkspace && payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
           {isTrainingBaseline && <Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Locked training baseline</Badge>}
-          {readOnlyWorkspace && <Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Read-only snapshot</Badge>}
+          {readOnlyWorkspace && <Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Read-only snapshot</Badge>}
           <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
         </div>
       </section>
