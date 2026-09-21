@@ -37,6 +37,33 @@ RSpec.describe Company, type: :model do
     expect(rehearsal.errors.full_messages.join).to include("same organization")
   end
 
+  it "supports training and sealed backup workspaces without requiring a historical import" do
+    organization = create(:organization)
+    source = create(:company, organization: organization)
+    training = build(
+      :company,
+      organization: organization,
+      payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "training_replay",
+      migration_source_company: source,
+      migration_rehearsal_status: "pending"
+    )
+    backup = build(
+      :company,
+      organization: organization,
+      payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "backup_snapshot",
+      migration_source_company: source,
+      migration_rehearsal_status: "ready",
+      test_workspace_sealed_at: Time.current
+    )
+
+    expect(training).to be_valid
+    expect(training).to be_training_replay
+    expect(backup).to be_valid
+    expect(backup).to be_backup_snapshot
+  end
+
   it "allows draft practice periods before YTD activation but keeps calculation gated" do
     organization = create(:organization)
     source = create(:company, organization: organization, historical_payroll_enabled: true)

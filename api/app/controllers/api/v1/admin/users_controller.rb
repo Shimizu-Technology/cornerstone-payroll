@@ -255,15 +255,20 @@ module Api
 
           user.company_assignments.destroy_all
           normalized_company_ids.each do |company_id|
-            user.company_assignments.create!(company_id: company_id)
+            company = Company.find(company_id)
+            user.company_assignments.create!(
+              company: company,
+              workspace_access_level: company.test_workspace? ? "operator" : nil,
+              granted_by: current_user
+            )
           end
         end
 
         def current_assignment_ids_for(user)
           if user.association(:company_assignments).loaded?
-            user.company_assignments.map(&:company_id)
+            user.company_assignments.reject(&:expired?).map(&:company_id)
           else
-            user.company_assignments.pluck(:company_id)
+            user.company_assignments.active_access.pluck(:company_id)
           end
         end
 
@@ -372,15 +377,11 @@ module Api
             platform_owner: user.platform_owner?
           }
 
-          assigned = if user.association(:company_assignments).loaded?
-            user.company_assignments.map(&:company_id)
-          else
-            user.company_assignments.pluck(:company_id)
-          end
+          assigned = current_assignment_ids_for(user)
           data[:assigned_company_ids] = assigned if assigned.any?
 
           assigned_companies = if user.association(:company_assignments).loaded?
-            user.company_assignments.filter_map(&:company)
+            user.company_assignments.reject(&:expired?).filter_map(&:company)
           else
             Company.where(id: assigned)
           end
@@ -388,7 +389,9 @@ module Api
             data[:assigned_companies] = assigned_companies.map do |company|
               {
                 id: company.id,
-                name: company.name
+                name: company.name,
+                test_workspace: company.test_workspace?,
+                workspace_access_level: user.company_assignments.find { |assignment| assignment.company_id == company.id }&.workspace_access_level
               }
             end
           end

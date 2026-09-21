@@ -30,7 +30,6 @@ module MigrationRehearsal
         # must not delete files written by the job that completed first.
         cleanup_existing_uploads!
         maps = copy_company_setup!
-        copy_staff_assignments!
         target_batch = copy_historical_archive!(maps.fetch(:employees))
         verify_copy!(target_batch)
         company.update!(migration_rehearsal_status: "ready", migration_rehearsal_completed_at: Time.current)
@@ -126,14 +125,6 @@ module MigrationRehearsal
       end
 
       { employees: employee_map }
-    end
-
-    def copy_staff_assignments!
-      CompanyAssignment.where(company_id: source_company.id).find_each do |assignment|
-        next unless assignment.user.staff_member?
-
-        CompanyAssignment.find_or_create_by!(user_id: assignment.user_id, company: company)
-      end
     end
 
     def copy_historical_archive!(employee_map)

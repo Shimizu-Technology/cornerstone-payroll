@@ -29,19 +29,28 @@ module MigrationRehearsal
         organization: source_company.organization,
         active: true,
         payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal",
         migration_source_company: source_company,
         migration_source_batch: batch,
         migration_rehearsal_status: "pending",
         migration_rehearsal_created_by: actor,
         migration_rehearsal_created_at: Time.current,
         migration_rehearsal_error: nil,
+        test_workspace_manifest: {
+          version: 1,
+          purpose: "migration_rehearsal",
+          source_company_id: source_company.id,
+          source_historical_import_batch_id: batch.id,
+          copy_summary: preview.fetch(:copy_summary),
+          exclusions: preview.fetch(:warnings)
+        },
         auto_create_fit_check: false,
         payroll_intake_source_types: []
       ))
 
       Company.transaction do
         source_company.organization.lock!
-        if source_company.migration_rehearsals.active.exists?
+        if source_company.migration_rehearsals.active.where(test_workspace_archived_at: nil).exists?
           raise ArgumentError, "Archive the existing migration rehearsal before creating another"
         end
 

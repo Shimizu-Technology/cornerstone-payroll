@@ -38,14 +38,26 @@ RSpec.describe CompanyAssignment, type: :model do
     end
   end
 
-  describe "migration rehearsal access" do
-    it "allows payroll staff to be assigned to a rehearsal" do
+  describe "test workspace access" do
+    it "allows payroll staff to be assigned with an explicit access level" do
       organization = create(:organization)
       staff_company = create(:company, organization: organization)
       rehearsal = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
       accountant = create(:user, company: staff_company, organization: organization, role: "accountant")
 
-      expect(described_class.new(user: accountant, company: rehearsal)).to be_valid
+      expect(described_class.new(user: accountant, company: rehearsal, workspace_access_level: "operator")).to be_valid
+    end
+
+    it "requires an access level for a test workspace" do
+      organization = create(:organization)
+      staff_company = create(:company, organization: organization)
+      workspace = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
+      accountant = create(:user, company: staff_company, organization: organization, role: "accountant")
+
+      assignment = described_class.new(user: accountant, company: workspace)
+
+      expect(assignment).not_to be_valid
+      expect(assignment.errors[:workspace_access_level]).to include("is required for a test workspace")
     end
 
     it "rejects client portal access to a rehearsal" do
@@ -54,10 +66,21 @@ RSpec.describe CompanyAssignment, type: :model do
       rehearsal = build_stubbed(:company, organization: organization, payroll_environment: "migration_rehearsal")
       client = create(:user, company: client_company, organization: organization, role: "client")
 
-      assignment = described_class.new(user: client, company: rehearsal)
+      assignment = described_class.new(user: client, company: rehearsal, workspace_access_level: "operator")
 
       expect(assignment).not_to be_valid
-      expect(assignment.errors[:company]).to include("migration rehearsals are available only to payroll staff")
+      expect(assignment.errors[:company]).to include("test workspaces are available only to payroll staff")
+    end
+
+    it "does not allow workspace access levels on production clients" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      accountant = create(:user, company: company, organization: organization, role: "accountant")
+
+      assignment = described_class.new(user: accountant, company: company, workspace_access_level: "reviewer")
+
+      expect(assignment).not_to be_valid
+      expect(assignment.errors[:workspace_access_level]).to include("is only available for a test workspace")
     end
   end
 end

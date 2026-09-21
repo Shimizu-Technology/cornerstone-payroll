@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_21_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -397,29 +397,40 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
     t.boolean "require_distinct_check_print_confirmer", default: false, null: false
     t.boolean "simple_payroll_register_enabled", default: false, null: false
     t.string "state"
+    t.datetime "test_workspace_archived_at"
+    t.datetime "test_workspace_expires_at"
+    t.jsonb "test_workspace_manifest", default: {}, null: false
+    t.string "test_workspace_purpose"
+    t.datetime "test_workspace_sealed_at"
     t.datetime "updated_at", null: false
     t.string "zip"
     t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
     t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"
     t.index ["migration_source_batch_id"], name: "index_companies_on_migration_source_batch_id"
-    t.index ["migration_source_company_id", "active"], name: "idx_companies_active_migration_rehearsals", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true))"
+    t.index ["migration_source_company_id", "test_workspace_purpose"], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL))"
     t.index ["migration_source_company_id"], name: "index_companies_on_migration_source_company_id"
     t.index ["name"], name: "index_companies_on_name"
     t.index ["organization_id"], name: "index_companies_on_organization_id"
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
-    t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_source_batch_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL", name: "companies_migration_rehearsal_shape_check"
+    t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
+    t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying]::text[]))", name: "companies_test_workspace_purpose_check"
   end
 
   create_table "company_assignments", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
+    t.datetime "expires_at"
+    t.bigint "granted_by_id"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.string "workspace_access_level"
     t.index ["company_id"], name: "index_company_assignments_on_company_id"
+    t.index ["granted_by_id"], name: "index_company_assignments_on_granted_by_id"
     t.index ["user_id", "company_id"], name: "index_company_assignments_on_user_id_and_company_id", unique: true
     t.index ["user_id"], name: "index_company_assignments_on_user_id"
+    t.check_constraint "workspace_access_level IS NULL OR (workspace_access_level::text = ANY (ARRAY['operator'::character varying, 'reviewer'::character varying, 'workspace_admin'::character varying]::text[]))", name: "company_assignments_workspace_access_level_check"
   end
 
   create_table "company_pay_schedules", force: :cascade do |t|
@@ -3258,6 +3269,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_020000) do
   add_foreign_key "companies", "users", column: "migration_rehearsal_created_by_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
+  add_foreign_key "company_assignments", "users", column: "granted_by_id"
   add_foreign_key "company_pay_schedules", "companies"
   add_foreign_key "company_pay_schedules", "users", column: "confirmed_by_id"
   add_foreign_key "company_workweeks", "companies"

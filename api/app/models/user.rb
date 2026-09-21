@@ -114,9 +114,9 @@ class User < ApplicationRecord
         organization_company_ids
       else
         assigned_ids = if association(:company_assignments).loaded?
-          company_assignments.map(&:company_id)
+          company_assignments.reject(&:expired?).map(&:company_id)
         else
-          company_assignments.pluck(:company_id)
+          company_assignments.active_access.pluck(:company_id)
         end
         assigned_ids &= organization_company_ids
 
@@ -179,9 +179,9 @@ class User < ApplicationRecord
   end
 
   def migration_rehearsal_company_requires_staff_role
-    return if company.blank? || !company.migration_rehearsal? || staff_member?
+    return if company.blank? || !company.test_workspace? || staff_member?
 
-    errors.add(:company, "migration rehearsals are available only to payroll staff")
+    errors.add(:company, "test workspaces are available only to payroll staff")
   end
 
   def organization_company_ids

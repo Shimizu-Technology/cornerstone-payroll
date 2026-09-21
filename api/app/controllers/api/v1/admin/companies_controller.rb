@@ -17,7 +17,10 @@ module Api
         ).freeze
 
         skip_before_action :enforce_company_access!, only: [ :index ]
-        skip_before_action :enforce_migration_rehearsal_safety!, only: %i[
+        skip_before_action :enforce_test_workspace_access!, only: %i[
+          index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+        ]
+        skip_before_action :enforce_test_workspace_safety!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
         ]
 
@@ -124,7 +127,7 @@ module Api
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          unless current_user&.organization_admin? || staff_can_update_company?(company)
+          unless can_update_company?(company)
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
@@ -199,6 +202,13 @@ module Api
             historical_payroll_enabled: company.historical_payroll_enabled,
             client_payroll_approval_required: company.client_payroll_approval_required,
             payroll_environment: company.payroll_environment,
+            test_workspace: company.test_workspace?,
+            test_workspace_purpose: company.test_workspace_purpose,
+            test_workspace_purpose_label: company.test_workspace_purpose_label,
+            test_workspace_manifest: company.test_workspace_manifest,
+            test_workspace_expires_at: company.test_workspace_expires_at,
+            test_workspace_archived_at: company.test_workspace_archived_at,
+            test_workspace_sealed_at: company.test_workspace_sealed_at,
             migration_rehearsal_status: company.migration_rehearsal_status,
             migration_source_company_id: company.migration_source_company_id,
             migration_source_company_name: company.migration_source_company&.name,
@@ -231,11 +241,28 @@ module Api
             )
           end
 
+          can_update = can_update_company?(company)
           payload[:organization_id] = company.organization_id
-          payload[:can_update] = current_user&.organization_admin? || staff_can_update_company?(company)
-          payload[:editable_fields] = current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          payload[:can_update] = can_update
+          payload[:editable_fields] = if can_update
+            current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          else
+            []
+          end
 
           payload
+        end
+
+        def can_update_company?(company)
+          role_allows_update = current_user&.organization_admin? || staff_can_update_company?(company)
+          return false unless role_allows_update
+
+          TestWorkspaceAccessPolicy.allowed?(
+            user: current_user,
+            company: company,
+            request_method: "PATCH",
+            capability: :manage_client_configuration
+          )
         end
 
         def staff_client_access?

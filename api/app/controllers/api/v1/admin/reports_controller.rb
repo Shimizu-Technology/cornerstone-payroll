@@ -1371,9 +1371,9 @@ module Api
             meta: report_meta(company, :payroll_register),
             source: {
               system: "cornerstone",
-              label: company.migration_rehearsal? ? "Cornerstone test payroll" : "Cornerstone",
+              label: company.test_workspace? ? "Cornerstone test payroll" : "Cornerstone",
               locked: pay_period.committed?,
-              statement: company.migration_rehearsal? ?
+              statement: company.test_workspace? ?
                 "TEST ONLY — calculated rehearsal payroll, not committed or paid. Values may change if recalculated." :
                 "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
             },
@@ -2667,8 +2667,8 @@ module Api
             company_name: company&.name,
             generated_at: Time.current.iso8601,
             report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil),
-            provisional: company&.migration_rehearsal? || false,
-            payroll_status_note: company&.migration_rehearsal? ? "TEST ONLY — calculated rehearsal payroll, not committed or paid" : nil
+            provisional: company&.test_workspace? || false,
+            payroll_status_note: company&.test_workspace? ? "TEST ONLY — calculated test payroll, not committed or paid" : nil
           }
         end
 
