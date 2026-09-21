@@ -57,6 +57,7 @@ module TrainingReplay
       source_company.pay_periods
         .reportable_committed
         .regular_cycle
+        .where(pay_date: first.pay_date.beginning_of_year..)
         .where("pay_date < ? OR (pay_date = ? AND id < ?)", first.pay_date, first.pay_date, first.id)
     end
 

@@ -85,9 +85,11 @@ module TrainingReplay
     end
 
     def baseline_sources_before(first_practice)
+      tax_year_start = first_practice.pay_date.beginning_of_year
       source_company.pay_periods
         .reportable_committed
         .regular_cycle
+        .where(pay_date: tax_year_start..)
         .where("pay_date < ? OR (pay_date = ? AND id < ?)", first_practice.pay_date, first_practice.pay_date, first_practice.id)
         .period_chronological
         .to_a
