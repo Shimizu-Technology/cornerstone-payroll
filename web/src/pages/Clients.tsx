@@ -79,6 +79,12 @@ const testWorkspaceLabel = (company: CompanyListItem): string =>
 const isReadOnlyWorkspace = (company: CompanyListItem): boolean =>
   company.test_workspace_purpose === 'backup_snapshot' || Boolean(company.test_workspace_sealed_at);
 
+const testWorkspaceOpenLabel = (company: CompanyListItem): string => {
+  if (company.test_workspace_purpose === 'backup_snapshot') return 'Open backup';
+  if (company.test_workspace_sealed_at) return 'Open read-only';
+  return 'Open test';
+};
+
 interface SettingToggleProps {
   checked: boolean;
   label: string;
@@ -1115,10 +1121,10 @@ export function Clients() {
                         <MobileCardActions>
                           {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                             <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)}>
-                              {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-4 w-4" />
+                              {testWorkspaceOpenLabel(c)} <ArrowRight className="ml-1 h-4 w-4" />
                             </Button>
                           )}
-                          {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                          {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && !c.test_workspace_sealed_at && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
                             <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)}>
                               <ShieldCheck className="mr-1 h-4 w-4" />Promote rehearsal
                             </Button>
@@ -1228,10 +1234,10 @@ export function Clients() {
                           <div className="flex justify-end gap-2">
                             {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                               <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)} className="text-xs">
-                                {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                                {testWorkspaceOpenLabel(c)} <ArrowRight className="ml-1 h-3.5 w-3.5" />
                               </Button>
                             )}
-                            {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                            {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && !c.test_workspace_sealed_at && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
                               <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)} className="text-xs">
                                 <ShieldCheck className="mr-1 h-3.5 w-3.5" />Promote rehearsal
                               </Button>
