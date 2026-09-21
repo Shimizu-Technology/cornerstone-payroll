@@ -44,7 +44,11 @@ module Api
             "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
               .includes(:employee, payroll_item: :check_events)
               .order(:id)
-              .map { |allocation| manual_allocation_json(allocation) }
+              .map { |allocation| manual_allocation_json(allocation) },
+            "historical_classification_reviews" => @pay_period.time_tracking_classification_reconciliations
+              .includes(:employee)
+              .order(:id)
+              .map { |review| historical_classification_json(review) }
           )
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
@@ -314,9 +318,29 @@ module Api
             payroll_item_check_status: allocation.payroll_item.check_status,
             payment_method: allocation.payroll_item.effective_payment_delivery_method,
             remote_allocation_id: allocation.remote_allocation_id,
+            historical_classification_review_id: allocation.classification_reconciliation_id,
             last_sync_error: allocation.last_sync_error,
             last_synced_at: allocation.last_synced_at&.iso8601
           }.compact
+        end
+
+        def historical_classification_json(review)
+          {
+            id: review.id,
+            employee_id: review.employee_id,
+            employee_name: review.employee.full_name,
+            payroll_item_id: review.payroll_item_id,
+            source_entry_count: review.source_entries.length,
+            source_regular_hours: review.source_regular_hours.to_f,
+            source_overtime_hours: review.source_overtime_hours.to_f,
+            payroll_regular_hours: review.payroll_regular_hours.to_f,
+            payroll_overtime_hours: review.payroll_overtime_hours.to_f,
+            gross_wage_difference: review.gross_wage_difference.to_f,
+            check_number: review.check_number,
+            payment_effective_on: review.payment_effective_on.iso8601,
+            status: review.status,
+            note: review.note
+          }
         end
 
         def disable_http_caching
@@ -436,7 +460,7 @@ module Api
           @source.aire_payroll_calendar_periods
             .includes(:publications, :payroll_events, :pay_period)
             .joins(:pay_period)
-            .where(pay_periods: { cycle: "regular" })
+            .where(pay_periods: { cycle: "regular", run_purpose: "regular" })
             .where("pay_periods.start_date > ?", @pay_period.end_date)
             .order("pay_periods.start_date ASC, pay_periods.id ASC")
             .filter_map do |calendar_period|

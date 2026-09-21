@@ -242,7 +242,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const mismatchCount = rows.length - matchedCount;
   const attentionCount = Number(review?.summary.exclusion_count || 0)
     + Number(review?.issues.missing_category_count || 0)
-    + Number(review?.issues.negative_adjustment_count || 0);
+    + Number(review?.issues.negative_adjustment_count || 0)
+    + Number(review?.payment_attestations?.length || 0)
+    + Number(review?.historical_classification_reviews?.length || 0);
   const bulkCandidates = isCommitted ? (review?.employees || []).flatMap((employee) => {
     if (employee.cornerstone.status !== 'mapped' || !employee.source_user_uuid ||
         employee.adjustments.some((adjustment) => adjustment.regular_hours < 0 || adjustment.overtime_hours < 0)) return [];
@@ -269,6 +271,18 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     .filter((allocation) => allocation.status === 'committed')
     .reduce((sum, allocation) => sum + Number(allocation.regular_hours) + Number(allocation.overtime_hours), 0);
   const outstandingHours = unlinkedHours + linkedAwaitingEvidenceHours;
+  const offsetCorrectionIds = new Set((review?.employees || []).flatMap((employee) => {
+    const byEntry = new Map<string, typeof employee.adjustments>();
+    for (const entry of employee.adjustments) {
+      const grouped = byEntry.get(entry.source_time_entry_id) || [];
+      grouped.push(entry);
+      byEntry.set(entry.source_time_entry_id, grouped);
+    }
+    return [...byEntry.entries()].filter(([, entries]) =>
+      entries.every((entry) => entry.source_kind === 'correction') &&
+      sameHundredth(entries.reduce((sum, entry) => sum + entry.total_hours, 0), 0)
+    ).map(([entryId]) => `${employee.source_user_id}:${entryId}`);
+  }));
 
   return (
     <Card className="overflow-hidden border-primary-200">
@@ -316,7 +330,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE hours still owed</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(unlinkedHours)} hrs</p>
-                <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
+                <p className="mt-2 text-xs text-neutral-600">{review.summary.total_hours === 0 && (review.summary.regular_hours < 0 || review.summary.overtime_hours < 0)
+                  ? 'No additional total hours. Review the regular/OT reclassification before any wage adjustment.'
+                  : `${hours(review.summary.regular_hours)} regular · ${hours(review.summary.overtime_hours)} OT`}</p>
               </div>
               <div className={`rounded-xl border p-4 ${isCommitted ? (outstandingHours > 0 ? 'border-primary-200 bg-primary-50' : 'border-success-200 bg-success-50') : mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? (outstandingHours > 0 ? 'Payment not yet confirmed' : 'No payable AIRE hours awaiting payment') : 'Payroll match'}</p>
@@ -326,7 +342,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{attentionCount}</p>
-                <p className="mt-2 text-xs text-neutral-600">Review exclusions, categories, and negative corrections</p>
+                <p className="mt-2 text-xs text-neutral-600">Review held hours, categories, corrections, payment evidence, and historical pay differences</p>
               </div>
             </div>
 
@@ -341,17 +357,17 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                         {employee.cornerstone.status !== 'mapped' && <Badge variant="danger">Not mapped</Badge>}
                       </div>
                     </div>
-                    {isCommitted ? <Badge variant="warning">Reconcile</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update</Badge>}
+                    {isCommitted ? <Badge variant="warning">{employee.adjustments.every((entry) => offsetCorrectionIds.has(`${employee.source_user_id}:${entry.source_time_entry_id}`)) ? 'Correction review' : 'Reconcile'}</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update</Badge>}
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE says to pay</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? 'AIRE remaining / corrections' : 'AIRE says to pay'}</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
                       {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
                       {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
                     </div>
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Entered in Payroll</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{isCommitted ? 'Issued payroll hours' : 'Entered in Payroll'}</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(payrollRegular)} regular · {hours(payrollOvertime)} OT</p>
                       {!isCommitted && !matched && employee.cornerstone.status === 'mapped' && <p className="mt-2 text-xs text-warning-900">Change to {hours(employee.regular_hours)} regular and {hours(employee.overtime_hours)} OT below.</p>}
                     </div>
@@ -364,7 +380,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
-                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">AIRE says to pay</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
+                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">{isCommitted ? 'AIRE remaining / corrections' : 'AIRE says to pay'}</th><th className="px-4 py-4 font-semibold">{isCommitted ? 'Issued payroll hours' : 'Entered in Payroll'}</th><th className="px-6 py-4 font-semibold">Result</th></tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {rows.map(({ employee, payrollRegular, payrollOvertime, carryover, corrections, categories, matched }) => (
@@ -388,7 +404,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                         )}
                       </td>
                       <td className="px-6 py-4 align-top">
-                        {isCommitted ? <Badge variant="warning">Reconcile</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update needed</Badge>}
+                        {isCommitted ? <Badge variant="warning">{employee.adjustments.every((entry) => offsetCorrectionIds.has(`${employee.source_user_id}:${entry.source_time_entry_id}`)) ? 'Correction review' : 'Reconcile'}</Badge> : matched ? <Badge variant="success"><CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Matches</Badge> : <Badge variant="warning"><AlertTriangle className="mr-2 h-3.5 w-3.5" /> Update needed</Badge>}
                       </td>
                     </tr>
                   ))}
@@ -412,6 +428,44 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </div>
             )}
 
+            {Boolean(review.payment_attestations?.length) && (
+              <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">
+                <h4 className="font-semibold text-neutral-950">Payment reported; check details pending</h4>
+                <p className="mt-1 text-sm font-medium text-warning-950">{review.payment_attestations?.length} {review.payment_attestations?.length === 1 ? 'entry' : 'entries'} · {hours(review.payment_attestations?.reduce((total, attestation) => total + attestation.hours, 0) || 0)} hours held</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">These exact AIRE hours are held out of new payroll to prevent a duplicate payment. The owner reported they were paid, but Cornerstone has not yet matched the check, amount, and delivery date. They are not counted as verified paid hours.</p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {review.payment_attestations?.map((attestation) => (
+                    <div key={attestation.id} className="rounded-lg border border-warning-200 bg-white p-4 text-sm">
+                      <p className="font-semibold text-neutral-950">{attestation.cornerstone?.employee_name || attestation.display_name} · {hours(attestation.hours)} hrs</p>
+                      <p className="mt-2 text-xs text-neutral-700">Worked {formatDate(attestation.original_work_date)} · AIRE entry #{attestation.source_time_entry_id}</p>
+                      {attestation.source_changed && <p className="mt-2 text-xs font-semibold text-danger-800">The time entry changed after the owner statement. Review it before matching payment evidence.</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Boolean(review.historical_classification_reviews?.length) && (
+              <div className="border-t border-warning-200 bg-warning-50/50 px-6 py-6">
+                <h4 className="font-semibold text-neutral-950">Historical pay classification to review</h4>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">These AIRE entries match the total hours on issued checks and are recorded as paid. The regular/overtime split differs from the checks. This note does not create another payment; review any wage difference separately.</p>
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {review.historical_classification_reviews?.map((caseReview) => (
+                    <div key={caseReview.id} className="rounded-xl border border-warning-200 bg-white p-4 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-neutral-950">{caseReview.employee_name} · check #{caseReview.check_number}</p>
+                        <Badge variant={caseReview.status === 'complete' ? 'success' : 'warning'}>{caseReview.status === 'complete' ? 'Hours marked paid' : 'AIRE sync pending'}</Badge>
+                      </div>
+                      <p className="mt-2 text-xs text-neutral-600">{caseReview.source_entry_count} AIRE entries · check delivered {formatDate(caseReview.payment_effective_on)}</p>
+                      <p className="mt-2 text-xs text-neutral-700">AIRE: {hours(caseReview.source_regular_hours)} regular / {hours(caseReview.source_overtime_hours)} OT · Check: {hours(caseReview.payroll_regular_hours)} regular / {hours(caseReview.payroll_overtime_hours)} OT</p>
+                      <p className="mt-2 text-xs text-warning-950">Estimated gross difference: {caseReview.gross_wage_difference >= 0 ? '+' : ''}${caseReview.gross_wage_difference.toFixed(2)}. For review only; not automatically paid or deducted.</p>
+                      <p className="mt-3 rounded-lg bg-warning-50 px-3 py-2 text-xs leading-5 text-neutral-700">{caseReview.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="border-t border-neutral-200 px-6 py-6">
               <h4 className="font-semibold text-neutral-950">AIRE hours and payment history</h4>
               <p className="mt-1 text-sm text-neutral-600">Hours below remain owed until linked to a committed paycheck. Linked hours become paid only after the paper check is recorded as issued or the bank payment is confirmed.</p>
@@ -425,13 +479,13 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 </Button>)}
               </div>}
               <div className="mt-4 space-y-3">
-                {review.employees.flatMap((employee) => employee.adjustments.map((adjustment) => (
-                  <div key={`${employee.source_user_id}-${adjustment.source_time_entry_id}-${adjustment.source_kind}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                {review.employees.flatMap((employee) => employee.adjustments.map((adjustment, index) => (
+                  <div key={`${employee.source_user_id}-${adjustment.source_time_entry_id}-${adjustment.source_kind}-${index}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                     <div>
                       <p className="font-semibold text-neutral-950">{employee.cornerstone.employee_name || employee.display_name} · {hours(adjustment.regular_hours)} regular · {hours(adjustment.overtime_hours)} OT</p>
-                      <p className="mt-1 text-xs text-neutral-600">{formatDate(adjustment.original_work_date)} · {adjustment.source_kind === 'carryover' ? 'Carryover still owed' : adjustment.source_kind === 'correction' ? 'Correction still owed' : 'Current period still owed'}</p>
+                      <p className="mt-1 text-xs text-neutral-600">{formatDate(adjustment.original_work_date)} · {offsetCorrectionIds.has(`${employee.source_user_id}:${adjustment.source_time_entry_id}`) ? 'Offsetting correction; review the category or OT split, not new payable hours' : adjustment.source_kind === 'carryover' ? 'Carryover still owed' : adjustment.source_kind === 'correction' ? 'Correction still owed' : 'Current period still owed'}</p>
                     </div>
-                    {isCommitted && adjustment.regular_hours >= 0 && adjustment.overtime_hours >= 0 && (
+                    {isCommitted && !offsetCorrectionIds.has(`${employee.source_user_id}:${adjustment.source_time_entry_id}`) && adjustment.regular_hours >= 0 && adjustment.overtime_hours >= 0 && (
                       <Button type="button" size="sm" variant="outline" disabled={employee.cornerstone.status !== 'mapped' || !payrollItems.some((item) => item.employee_id === employee.cornerstone.employee_id && !item.voided)} onClick={() => openLink(employee, adjustment)}>Link to paycheck</Button>
                     )}
                   </div>

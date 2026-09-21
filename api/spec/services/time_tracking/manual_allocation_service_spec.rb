@@ -67,7 +67,8 @@ RSpec.describe TimeTracking::ManualAllocationService do
 
     expect(allocation.reload.status).to eq("issued")
     expect(client).to have_received(:issue_payroll_manual_allocation).with(
-      hash_including(allocation_id: "501", payment_reference: item.check_number)
+      hash_including(allocation_id: "501", payment_reference: item.check_number,
+                     payment_effective_on: PayrollBusinessClock.today.iso8601)
     )
   end
 
@@ -90,7 +91,8 @@ RSpec.describe TimeTracking::ManualAllocationService do
 
     expect(allocation.reload.status).to eq("issued")
     expect(client).to have_received(:issue_payroll_manual_allocation).with(
-      hash_including(payment_method: "direct_deposit", payment_reference: "BANK-TEST-123")
+      hash_including(payment_method: "direct_deposit", payment_reference: "BANK-TEST-123",
+                     payment_effective_on: PayrollBusinessClock.today.iso8601)
     )
   end
 

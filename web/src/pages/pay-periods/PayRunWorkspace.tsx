@@ -378,7 +378,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               <TableBody striped>
                 {items.map((item) => {
                   const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Mock ready' : 'Not ready' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
+                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Mock ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
                   return (
                     <TableRow key={item.id}>
                       <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>

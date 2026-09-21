@@ -17,6 +17,7 @@ import { checkNumberValidationError } from '@/components/checks/checkNumberDraft
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
+import { formatDate } from '@/lib/utils';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
@@ -587,7 +588,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
                       <p>
                         Last event: {eventLabel(latestEvent.event_type)} #{latestEvent.check_number || '—'}
-                        {latestEvent.user_name ? ` by ${latestEvent.user_name}` : ''}
+                        {latestEvent.event_type === 'delivered' ? ` · issued ${formatDate(latestEvent.effective_on)}` : ''}
+                        {latestEvent.user_name ? ` · recorded by ${latestEvent.user_name}` : ''}
                         {formatEventTime(latestEvent.created_at) ? ` · ${formatEventTime(latestEvent.created_at)}` : ''}
                       </p>
                       {shouldShowReason && <p className="mt-1 text-orange-700">Reason: {latestEvent.reason}</p>}
@@ -725,7 +727,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                           <div className="space-y-0.5 text-xs text-gray-500">
                             <div>
                               Last event: {eventLabel(latest.event_type)} #{latest.check_number || '—'}
-                              {latest.user_name ? ` by ${latest.user_name}` : ''}
+                              {latest.event_type === 'delivered' ? ` · issued ${formatDate(latest.effective_on)}` : ''}
+                              {latest.user_name ? ` · recorded by ${latest.user_name}` : ''}
                               {formatEventTime(latest.created_at) ? ` · ${formatEventTime(latest.created_at)}` : ''}
                             </div>
                             {shouldShowReason && (

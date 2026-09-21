@@ -160,7 +160,7 @@ module TimeTracking
     end
 
     def issue_payroll_manual_allocation(allocation_id:, command_id:, expected_version:,
-                                        payment_method:, payment_reference:, occurred_at:, reason:)
+                                        payment_method:, payment_reference:, payment_effective_on:, occurred_at:, reason:)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
         body: {
@@ -168,6 +168,7 @@ module TimeTracking
           expected_version: expected_version,
           payment_method: payment_method,
           payment_reference: payment_reference,
+          payment_effective_on: payment_effective_on,
           occurred_at: occurred_at,
           reason: reason
         }

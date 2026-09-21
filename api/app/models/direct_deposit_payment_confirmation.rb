@@ -57,7 +57,8 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
           occurred_at: created_at,
           payroll_item_id: payroll_item_id,
           payment_method: "direct_deposit",
-          payment_reference: bank_reference
+          payment_reference: bank_reference,
+          payment_effective_on: settled_on
         ).id
       end
   end

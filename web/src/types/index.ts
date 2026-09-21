@@ -250,7 +250,7 @@ export interface Employee {
   employer_roth_match_rate?: number;
   status: EmployeeStatus;
   portal_pending_approval?: boolean;
-  configuration_source?: 'quickbooks_history' | null;
+  configuration_source?: 'quickbooks_history' | 'aire_onboarding' | null;
   configuration_review_status?: 'complete' | 'needs_review';
   configuration_review_items?: Array<{ code: string; message: string; fields: string[]; requires_certification_evidence?: boolean }>;
   document_readiness?: {
@@ -675,6 +675,7 @@ export interface AirePayrollCockpitEmployee {
   approval_groups?: Array<{ key: string; label: string }>;
   time_categories?: Array<{ id: string; key?: string | null; name: string }>;
   cornerstone: AirePayrollCockpitMapping;
+  possible_payroll_matches?: Array<{ id: number; name: string; status: string }>;
 }
 
 export interface AirePayrollCockpitPeriod {
@@ -858,6 +859,19 @@ export interface AirePayrollManualReview {
     payment_reference?: string | null;
     cornerstone?: AirePayrollCockpitMapping;
   }>;
+  payment_attestations?: Array<{
+    id: string;
+    source_time_entry_id: string;
+    source_user_uuid: string;
+    display_name: string;
+    original_work_date: string;
+    hours: number;
+    status: 'pending_evidence';
+    attested_at: string;
+    source_changed: boolean;
+    evidence_needed: string;
+    cornerstone?: AirePayrollCockpitMapping;
+  }>;
   cornerstone_manual_allocations?: Array<{
     id: number;
     payroll_item_id: number;
@@ -871,8 +885,26 @@ export interface AirePayrollManualReview {
     payroll_item_check_status?: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
     payment_method?: 'paper_check' | 'direct_deposit';
     last_sync_error?: string | null;
+    historical_classification_review_id?: number;
+  }>;
+  historical_classification_reviews?: Array<{
+    id: number;
+    employee_id: number;
+    employee_name: string;
+    payroll_item_id: number;
+    source_entry_count: number;
+    source_regular_hours: number;
+    source_overtime_hours: number;
+    payroll_regular_hours: number;
+    payroll_overtime_hours: number;
+    gross_wage_difference: number;
+    check_number: string;
+    payment_effective_on: string;
+    status: 'pending' | 'complete';
+    note: string;
   }>;
   issues: {
+    payment_attestation_pending_count?: number;
     missing_category_count: number;
     negative_adjustment_count: number;
     pending_approval_count: number;

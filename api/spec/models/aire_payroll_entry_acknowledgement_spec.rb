@@ -45,7 +45,7 @@ RSpec.describe AirePayrollEntryAcknowledgement do
       user: actor, settled_on: PayrollBusinessClock.today, bank_reference: "BANK-TEST-202"
     )
 
-    expect(described_class.where(payroll_item: item).pluck(:source_time_entry_id, :status, :payment_method, :payment_reference))
-      .to eq([ [ "202", "payment_issued", "direct_deposit", "BANK-TEST-202" ] ])
+    expect(described_class.where(payroll_item: item).pluck(:source_time_entry_id, :status, :payment_method, :payment_reference, :payment_effective_on))
+      .to eq([ [ "202", "payment_issued", "direct_deposit", "BANK-TEST-202", PayrollBusinessClock.today ] ])
   end
 end

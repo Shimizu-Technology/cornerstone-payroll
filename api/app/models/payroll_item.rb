@@ -24,6 +24,7 @@ class PayrollItem < ApplicationRecord
   has_many :payroll_time_allocations, dependent: :destroy
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true

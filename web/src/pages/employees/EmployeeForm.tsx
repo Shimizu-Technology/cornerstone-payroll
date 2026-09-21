@@ -14,7 +14,7 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
@@ -248,7 +248,7 @@ export function EmployeeForm() {
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const airePayPeriodId = Number(searchParams.get('aire_pay_period_id'));
   const aireSourceUserId = searchParams.get('aire_staff_id') || '';
-  const hasAireOnboarding = !isEditing && !isClient && Number.isSafeInteger(airePayPeriodId) && airePayPeriodId > 0 && Boolean(aireSourceUserId);
+  const hasAireOnboarding = !isEditing && !isClient && Boolean(aireSourceUserId);
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -554,10 +554,10 @@ export function EmployeeForm() {
     let cancelled = false;
     setAireCandidate(null);
     setAireCandidateLoading(true);
-    void payPeriodsApi.airePayrollCockpit(airePayPeriodId, { employee_id: aireSourceUserId })
-      .then(({ aire_payroll_cockpit: cockpit }) => {
+    void employeesApi.aireCandidates({ employee_id: aireSourceUserId })
+      .then(({ employees }) => {
         if (cancelled) return;
-        const person = cockpit.employees.find((row) => row.id === aireSourceUserId);
+        const person = employees.find((row) => row.id === aireSourceUserId);
         if (!person || !person.payroll_integration_id || person.cornerstone.status !== 'unmapped') {
           setGeneralError('This AIRE person is already linked or is no longer available. Return to the AIRE team and refresh.');
           return;
@@ -570,7 +570,7 @@ export function EmployeeForm() {
       })
       .finally(() => { if (!cancelled) setAireCandidateLoading(false); });
     return () => { cancelled = true; };
-  }, [airePayPeriodId, aireSourceUserId, hasAireOnboarding]);
+  }, [aireSourceUserId, hasAireOnboarding]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -879,12 +879,12 @@ export function EmployeeForm() {
         }
       }
     }
-    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain) {
+    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain && !allowsUnverifiedBlank('ssn_encrypted')) {
       newErrors.ssn = ['Social Security Number is required'];
     } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
     }
-    if (usesSsn && (!isEditing || ssnChanged)) {
+    if (usesSsn && form.ssn?.trim() && (!isEditing || ssnChanged)) {
       if (!form.ssn_confirmation?.trim()) {
         newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
       } else if (canonicalSsn(form.ssn_confirmation) !== canonicalSsn(form.ssn)) {
@@ -1052,7 +1052,10 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create(
             { ...employeePayload, company_id: companyId },
-            hasAireOnboarding ? { pay_period_id: airePayPeriodId, source_user_id: aireSourceUserId } : undefined
+            hasAireOnboarding ? {
+              source_user_id: aireSourceUserId,
+              ...(Number.isSafeInteger(airePayPeriodId) && airePayPeriodId > 0 ? { pay_period_id: airePayPeriodId } : {}),
+            } : undefined
           );
           savedEmployeeId = response.data.id;
         }
@@ -1227,8 +1230,8 @@ export function EmployeeForm() {
             <div className="flex items-start gap-4">
               <AlertCircle className="mt-0 h-5 w-5 shrink-0 text-warning-700" />
               <div>
-                <p className="font-semibold">QuickBooks setup needs review</p>
-                <p className="mt-2 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Correct the fields here, then return to the employee workspace to document what was verified and mark each item reviewed.</p>
+                <p className="font-semibold">{loadedEmployee.configuration_source === 'aire_onboarding' ? 'AIRE payroll setup needs review' : 'QuickBooks setup needs review'}</p>
+                <p className="mt-2 text-sm leading-6 text-warning-800">These details were not safe to guess. Correct the fields here, then return to the employee workspace to document what was verified and mark each item reviewed.</p>
                 <ul className="mt-4 space-y-2 text-sm leading-6">
                   {(loadedEmployee.configuration_review_items || []).map((item) => (
                     <li key={item.code}>• {item.message}</li>
@@ -2255,7 +2258,7 @@ export function EmployeeForm() {
               </div>
 
               <div className="mb-4 grid gap-4 md:grid-cols-2">
-                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 (optional)
+                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 {loadedEmployee?.configuration_source === 'aire_onboarding' && loadedEmployee.configuration_review_status === 'needs_review' ? '(needed before activation)' : '(optional)'}
                   <Input type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
                 </label>
                 <label className="text-sm font-medium text-gray-700">Source document / reference (optional)

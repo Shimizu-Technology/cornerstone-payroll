@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_21_010400) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -82,6 +82,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
     t.string "event_id", null: false
     t.text "last_error"
     t.datetime "occurred_at", null: false
+    t.date "payment_effective_on"
     t.string "payment_method"
     t.string "payment_reference"
     t.bigint "payroll_item_id", null: false
@@ -1051,7 +1052,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
-    t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
+    t.check_constraint "configuration_source IS NULL OR (configuration_source::text = ANY (ARRAY['quickbooks_history'::character varying, 'aire_onboarding'::character varying]::text[]))", name: "employees_configuration_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying, 'direct_deposit'::character varying]::text[]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
@@ -2995,6 +2996,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
+  create_table "time_tracking_classification_reconciliations", force: :cascade do |t|
+    t.string "check_number", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "gross_wage_difference", precision: 12, scale: 2, null: false
+    t.text "note", null: false
+    t.bigint "pay_period_id", null: false
+    t.date "payment_effective_on", null: false
+    t.bigint "payroll_item_id", null: false
+    t.decimal "payroll_overtime_hours", precision: 8, scale: 2, null: false
+    t.decimal "payroll_regular_hours", precision: 8, scale: 2, null: false
+    t.jsonb "source_entries", default: [], null: false
+    t.decimal "source_overtime_hours", precision: 8, scale: 2, null: false
+    t.decimal "source_regular_hours", precision: 8, scale: 2, null: false
+    t.uuid "source_user_uuid", null: false
+    t.string "status", default: "pending", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "idx_on_company_id_879e10400d"
+    t.index ["created_by_id"], name: "idx_on_created_by_id_b38983023e"
+    t.index ["employee_id"], name: "idx_on_employee_id_37c38adfe5"
+    t.index ["pay_period_id"], name: "idx_on_pay_period_id_bc8b0e1c9d"
+    t.index ["payroll_item_id"], name: "idx_classification_reconciliations_item", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_classification_reconciliations_source"
+    t.check_constraint "(source_regular_hours + source_overtime_hours) = (payroll_regular_hours + payroll_overtime_hours)", name: "classification_reconciliation_total_hours"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'complete'::character varying]::text[])", name: "classification_reconciliation_status"
+  end
+
   create_table "time_tracking_delegations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3099,6 +3130,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
   end
 
   create_table "time_tracking_manual_allocations", force: :cascade do |t|
+    t.bigint "classification_reconciliation_id"
     t.bigint "company_id", null: false
     t.uuid "commit_command_id", null: false
     t.datetime "created_at", null: false
@@ -3122,6 +3154,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
     t.uuid "void_command_id", null: false
+    t.index ["classification_reconciliation_id"], name: "idx_manual_allocations_classification_reconciliation"
     t.index ["commit_command_id"], name: "index_time_tracking_manual_allocations_on_commit_command_id", unique: true
     t.index ["company_id"], name: "index_time_tracking_manual_allocations_on_company_id"
     t.index ["created_by_id"], name: "index_time_tracking_manual_allocations_on_created_by_id"
@@ -3623,6 +3656,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "time_tracking_classification_reconciliations", "companies"
+  add_foreign_key "time_tracking_classification_reconciliations", "employees"
+  add_foreign_key "time_tracking_classification_reconciliations", "pay_periods"
+  add_foreign_key "time_tracking_classification_reconciliations", "payroll_items"
+  add_foreign_key "time_tracking_classification_reconciliations", "time_tracking_sources"
+  add_foreign_key "time_tracking_classification_reconciliations", "users", column: "created_by_id"
   add_foreign_key "time_tracking_delegations", "companies", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", column: ["time_tracking_source_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_time_tracking_delegations_source_tenant", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", on_delete: :cascade
@@ -3644,6 +3683,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_20_073500) do
   add_foreign_key "time_tracking_manual_allocations", "employees"
   add_foreign_key "time_tracking_manual_allocations", "pay_periods"
   add_foreign_key "time_tracking_manual_allocations", "payroll_items"
+  add_foreign_key "time_tracking_manual_allocations", "time_tracking_classification_reconciliations", column: "classification_reconciliation_id"
   add_foreign_key "time_tracking_manual_allocations", "time_tracking_sources"
   add_foreign_key "time_tracking_manual_allocations", "users", column: "created_by_id"
   add_foreign_key "time_tracking_sources", "companies"
