@@ -387,6 +387,9 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(pending_employee.reload.status).to eq("active")
+      expect(response.parsed_body.dig("data", "ssn_last_four")).to eq("1234")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn_encrypted")
     end
   end
 
