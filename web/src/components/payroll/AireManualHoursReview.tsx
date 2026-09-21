@@ -243,7 +243,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const attentionCount = Number(review?.summary.exclusion_count || 0)
     + Number(review?.issues.missing_category_count || 0)
     + Number(review?.issues.negative_adjustment_count || 0)
-    + Number(review?.payment_attestations?.length || 0);
+    + Number(review?.payment_attestations?.length || 0)
+    + Number(review?.historical_classification_reviews?.length || 0);
   const bulkCandidates = isCommitted ? (review?.employees || []).flatMap((employee) => {
     if (employee.cornerstone.status !== 'mapped' || !employee.source_user_uuid ||
         employee.adjustments.some((adjustment) => adjustment.regular_hours < 0 || adjustment.overtime_hours < 0)) return [];
@@ -341,7 +342,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{attentionCount}</p>
-                <p className="mt-2 text-xs text-neutral-600">Review exclusions, categories, corrections, and payment evidence</p>
+                <p className="mt-2 text-xs text-neutral-600">Review held hours, categories, corrections, payment evidence, and historical pay differences</p>
               </div>
             </div>
 

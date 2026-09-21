@@ -378,6 +378,7 @@ describe('AireManualHoursReview', () => {
     expect(screen.getByText('Test Worker A · check #1062')).toBeTruthy();
     expect(screen.getByText('Hours marked paid')).toBeTruthy();
     expect(screen.getByText(/For review only; not automatically paid or deducted/)).toBeTruthy();
+    expect(within(screen.getByText('Needs attention').parentElement as HTMLElement).getByText('2')).toBeTruthy();
   });
 
   it('does not offer a new paycheck link for offsetting classification corrections', async () => {
