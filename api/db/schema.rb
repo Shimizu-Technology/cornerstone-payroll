@@ -1040,6 +1040,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
     t.index ["id", "company_id"], name: "idx_employees_document_readiness_tenant_key", unique: true
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
+    t.index ["test_workspace_source_employee_id"], name: "idx_employees_training_source", where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
@@ -2077,6 +2078,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
+    t.index ["test_workspace_source_pay_period_id"], name: "idx_pay_periods_training_source", where: "(test_workspace_source_pay_period_id IS NOT NULL)"
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"

@@ -11,6 +11,9 @@ RSpec.describe TrainingReplay::Cloner do
   let(:trainee) { create(:user, company: source_company, organization: organization, role: "accountant") }
   let!(:employee) { create(:employee, company: source_company, department: nil, first_name: "Ada", last_name: "Trainer") }
 
+  let!(:prior_tax_year_source) do
+    create_period(Date.new(2025, 12, 6), Date.new(2025, 12, 19), Date.new(2025, 12, 26), gross: 900, check_number: "500")
+  end
   let!(:baseline_source) do
     create_period(Date.new(2026, 8, 8), Date.new(2026, 8, 21), Date.new(2026, 8, 28), gross: 1_000, check_number: "501")
   end
@@ -85,6 +88,8 @@ RSpec.describe TrainingReplay::Cloner do
     practices = target.pay_periods.where(test_workspace_role: "practice").period_chronological.to_a
 
     expect(target.migration_rehearsal_status).to eq("ready")
+    expect(target.pay_periods.where(test_workspace_role: "baseline").count).to eq(1)
+    expect(target.pay_periods.where(test_workspace_source_pay_period: prior_tax_year_source)).to be_empty
     expect(copied_employee.test_workspace_source_employee).to eq(employee)
     copied_field = target.payroll_field_definitions.find_by!(name: "Ada phone allowance")
     expect(copied_field.owner_employee).to eq(copied_employee)
@@ -107,6 +112,12 @@ RSpec.describe TrainingReplay::Cloner do
     expect(baseline.update(notes: "changed")).to be(false)
     expect(baseline.errors.full_messages.join).to include("locked benchmark evidence")
     expect(baseline.payroll_items.sole.update(gross_pay: 5)).to be(false)
+  end
+
+  it "previews only same-tax-year baseline payroll" do
+    preview = TrainingReplay::Preview.new(source_company: source_company).call
+
+    expect(preview.dig(:copy_summary, :baseline_pay_periods)).to eq(1)
   end
 
   it "compares a practice run to its linked live benchmark using employee lineage" do
