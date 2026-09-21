@@ -138,15 +138,26 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
   end
 
   it "applies verified links and issued payment evidence idempotently" do
+    review.fetch("employees") << {
+      "source_user_uuid" => SecureRandom.uuid,
+      "adjustments" => [ {
+        "source_time_entry_id" => "outside-manifest", "source_time_entry_version" => 0,
+        "source_kind" => "current", "original_work_date" => "2026-08-15",
+        "regular_hours" => "2.00", "overtime_hours" => "0.00",
+        "category" => { "name" => "Maintenance" }
+      } ]
+    }
     rollout = described_class.new(manifest: manifest, actor: actor)
 
-    expect(rollout.apply!).to include(exact_entries: 1)
+    expect(rollout.apply!).to include(exact_entries: 1, new_source_entries_ignored: 1)
     expect(TimeTrackingEmployeeMapping.find_by!(source_user_uuid: uuid).employee_id).to eq(employee.id)
     expect(item.check_events.deliveries.count).to eq(1)
     expect(TimeTrackingManualAllocation.find_by!(source_time_entry_id: "41").status).to eq("issued")
     expect(AireVerifiedHistoryRolloutReceipt.find_by!(company: company).paid_source_entry_count).to eq(1)
-    expect { described_class.new(manifest: manifest, actor: actor).apply! }
+    replay_summary = nil
+    expect { replay_summary = described_class.new(manifest: manifest, actor: actor).apply! }
       .not_to change(TimeTrackingManualAllocation, :count)
+    expect(replay_summary).to include(new_source_entries_ignored: 1)
   end
 
   it "holds the release when AIRE changed an exact source entry" do

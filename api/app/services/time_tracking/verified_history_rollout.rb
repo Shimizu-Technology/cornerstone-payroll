@@ -4,6 +4,7 @@ require "digest"
 require "json"
 require "openssl"
 require "base64"
+require "set"
 
 module TimeTracking
   # Replays privately reviewed AIRE identities and historical payment evidence.
@@ -81,9 +82,7 @@ module TimeTracking
         exact_entries: entries.length,
         historical_classification_cases: classification_cases.length,
         finalized_batch_entries: finalized_batch_entries.length,
-        new_source_entries_ignored: @reviews.values.sum do |review|
-          Array(review["employees"]).sum { |employee| Array(employee["adjustments"]).length }
-        end - @live_entries.length
+        new_source_entries_ignored: ignored_source_entry_count
       }
     end
 
@@ -280,12 +279,44 @@ module TimeTracking
     end
 
     def live_entry(period, uuid, entry_id)
-      review = (@reviews[period.id] ||= @client.payroll_cockpit_manual_review(
-        start_date: period.start_date.iso8601, end_date: period.end_date.iso8601,
-        external_pay_period_id: period.id
-      ))
+      review = review_for(period)
       employee = Array(review["employees"]).find { |row| row["source_user_uuid"].to_s.downcase == uuid }
       Array(employee&.fetch("adjustments", [])).find { |row| row["source_time_entry_id"].to_s == entry_id.to_s }
+    end
+
+    def review_for(period)
+      @reviews[period.id] ||= @client.payroll_cockpit_manual_review(
+        start_date: period.start_date.iso8601, end_date: period.end_date.iso8601,
+        external_pay_period_id: period.id
+      )
+    end
+
+    def ignored_source_entry_count
+      covered = manifest_source_entry_keys
+      visible = checks.map { |row| row.fetch("pay_period_id").to_i }.uniq.each_with_object(Set.new) do |period_id, keys|
+        period = @company.pay_periods.find(period_id)
+        Array(review_for(period)["employees"]).each do |employee|
+          uuid = TimeTrackingEmployeeMapping.normalize_uuid(employee["source_user_uuid"])
+          Array(employee["adjustments"]).each do |adjustment|
+            keys << [ uuid, adjustment.fetch("source_time_entry_id").to_s ]
+          end
+        end
+      end
+      (visible - covered).length
+    end
+
+    def manifest_source_entry_keys
+      rows = entries + finalized_batch_entries + classification_cases.flat_map do |row|
+        row.fetch("source_entries").map do |entry|
+          entry.merge("source_user_uuid" => row.fetch("source_user_uuid"))
+        end
+      end
+      rows.each_with_object(Set.new) do |row, keys|
+        keys << [
+          TimeTrackingEmployeeMapping.normalize_uuid(row.fetch("source_user_uuid")),
+          row.fetch("source_time_entry_id").to_s
+        ]
+      end
     end
 
     def apply_identities!
