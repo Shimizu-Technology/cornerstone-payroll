@@ -2,6 +2,7 @@
 
 class PayrollItem < ApplicationRecord
   include PayrollAdjustable
+  include TrainingBaselineImmutable
   PAYROLL_ADJUSTMENTS_SOURCE_KEY = "payroll_adjustments_source"
   CUSTOM_EARNINGS_SOURCE_KEY = "custom_earnings_source"
   EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE = "employee_default"

@@ -18,11 +18,21 @@ class PayPeriod < ApplicationRecord
   CYCLES = %w[regular supplemental].freeze
   RUN_PURPOSES = %w[regular off_cycle_tips bonus commission correction final adjustment].freeze
   RUN_PURPOSE_SOURCES = %w[operator_selected system_correction production_migration legacy_system_default].freeze
+  TEST_WORKSPACE_ROLES = %w[baseline practice].freeze
 
   belongs_to :company
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
+  belongs_to :test_workspace_source_pay_period,
+             class_name: "PayPeriod",
+             optional: true,
+             inverse_of: :training_replay_copies
+  has_many :training_replay_copies,
+           class_name: "PayPeriod",
+           foreign_key: :test_workspace_source_pay_period_id,
+           inverse_of: :test_workspace_source_pay_period,
+           dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
@@ -96,6 +106,7 @@ class PayPeriod < ApplicationRecord
   validates :cycle, inclusion: { in: CYCLES }
   validates :run_purpose, inclusion: { in: RUN_PURPOSES }
   validates :run_purpose_source, inclusion: { in: RUN_PURPOSE_SOURCES }
+  validates :test_workspace_role, inclusion: { in: TEST_WORKSPACE_ROLES }, allow_nil: true
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
@@ -108,6 +119,7 @@ class PayPeriod < ApplicationRecord
   validate :parallel_run_cannot_be_committed
   validate :intake_stale_session_matches_period
   validate :test_workspace_cannot_be_committed
+  validate :training_replay_lineage_is_valid
   validate :published_aire_cutoff_dates_are_immutable,
            on: :update,
            if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
@@ -127,6 +139,8 @@ class PayPeriod < ApplicationRecord
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
+  before_update :prevent_training_baseline_mutation
+  before_destroy :prevent_training_baseline_mutation
 
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
@@ -188,8 +202,16 @@ class PayPeriod < ApplicationRecord
     company&.test_workspace? || false
   end
 
+  def training_baseline?
+    test_workspace_role == "baseline"
+  end
+
+  def training_practice?
+    test_workspace_role == "practice"
+  end
+
   def can_edit?
-    !committed? && !voided?
+    !committed? && !voided? && !training_baseline?
   end
 
   def intake_stale?
@@ -407,6 +429,25 @@ class PayPeriod < ApplicationRecord
   end
 
   private
+
+  def training_replay_lineage_is_valid
+    if test_workspace_role.blank? != test_workspace_source_pay_period.blank?
+      errors.add(:test_workspace_role, "and source pay period must be provided together")
+      return
+    end
+    return if test_workspace_role.blank?
+    return if company&.training_replay? &&
+      test_workspace_source_pay_period&.company_id == company.migration_source_company_id
+
+    errors.add(:test_workspace_source_pay_period, "must belong to the training workspace's live source client")
+  end
+
+  def prevent_training_baseline_mutation
+    return unless training_baseline?
+
+    errors.add(:base, "Training baseline payrolls are locked benchmark evidence")
+    throw :abort
+  end
 
   def force_test_workspace_to_parallel
     self.parallel_run = true if test_workspace?

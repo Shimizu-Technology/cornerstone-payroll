@@ -245,8 +245,8 @@ class PayrollHistoryQuery
     parallel_run = !imported && native_periods[row.fetch("id").to_i]&.parallel_run?
     status = row.fetch("status")
     correction_status = row["correction_status"]
-    editable = @audience == :staff && !imported && status != "committed" && correction_status != "voided"
     native_period = native_periods[row.fetch("id").to_i] unless imported
+    editable = @audience == :staff && !imported && native_period&.can_edit?
     client_review_ready = !native_period&.company&.client_payroll_approval_required? ||
       native_period.payroll_review_packages.find { |review_package| review_package.superseded_at.nil? }&.approved?
 
@@ -281,8 +281,8 @@ class PayrollHistoryQuery
         view: true,
         edit: editable,
         delete: editable,
-        enter_hours: @audience == :staff && !imported && status == "draft" && correction_status != "voided",
-        run: @audience == :staff && !imported && %w[draft calculated].include?(status) && correction_status != "voided",
+        enter_hours: editable && status == "draft",
+        run: editable && %w[draft calculated].include?(status),
         approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided" && client_review_ready,
         commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
       }

@@ -95,4 +95,23 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(document.body.textContent).not.toMatch(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/);
     expect(apiMocks.rehearsalPreviewPdf).toHaveBeenCalledWith(12);
   });
+
+  it('keeps a training baseline read-only and out of payroll processing', async () => {
+    apiMocks.getPayPeriod.mockResolvedValue({
+      pay_period: { ...payRun, status: 'approved', test_workspace_role: 'baseline', training_baseline_locked: true },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Locked training baseline')).toBeTruthy();
+    expect(screen.getByText('Locked baseline records')).toBeTruthy();
+    expect(screen.queryByText('Process payroll')).toBeNull();
+    expect(screen.queryByText('Checks & direct deposit')).toBeNull();
+  });
 });
