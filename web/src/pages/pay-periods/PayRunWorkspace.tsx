@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { HelpTip } from '@/components/ui/help-tip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import {
@@ -194,9 +195,9 @@ export function PayRunWorkspace(): ReactElement {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payRun.correction_status === 'voided' ? 'danger' : payRun.status === 'committed' ? 'success' : payRun.status === 'approved' ? 'info' : payRun.status === 'calculated' ? 'warning' : 'default'}>{payRun.correction_status === 'voided' ? 'Voided' : statusConfig?.label || payRun.status}</Badge>
           <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
-          {!readOnlyWorkspace && payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
-          {isTrainingBaseline && <Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Locked training baseline</Badge>}
-          {readOnlyWorkspace && <Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Read-only snapshot</Badge>}
+          {!readOnlyWorkspace && payRun.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge><HelpTip label="parallel comparison">This run is isolated from live payroll actions. It can be calculated and reviewed, but never committed, paid, printed, or filed.</HelpTip></span>}
+          {isTrainingBaseline && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Locked training baseline</Badge><HelpTip label="locked training baseline">This earlier payroll is view-only and preserves the year-to-date starting point for the practice exercises.</HelpTip></span>}
+          {readOnlyWorkspace && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Read-only snapshot</Badge><HelpTip label="read-only snapshot">This sealed backup is a recovery record. No payroll or employee data can be changed here.</HelpTip></span>}
           <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
         </div>
       </section>

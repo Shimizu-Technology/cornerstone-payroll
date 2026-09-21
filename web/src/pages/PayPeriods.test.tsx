@@ -106,6 +106,10 @@ describe('PayPeriods test workspaces', () => {
     render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
 
     expect(await screen.findByText('Complete the practice payrolls from oldest to newest')).toBeTruthy();
+    expect(screen.getByText('Complete Practice 1')).toBeTruthy();
+    expect(screen.getByText('Complete Practice 2')).toBeTruthy();
+    expect(screen.getByText(/Training payrolls are never committed/i)).toBeTruthy();
+    expect(screen.queryByText('Payroll Workflow')).toBeNull();
     await waitFor(() => expect(apiMocks.payrollHistoryList).toHaveBeenCalledWith(
       expect.objectContaining({ direction: 'asc', sort: 'pay_period' }),
       11,

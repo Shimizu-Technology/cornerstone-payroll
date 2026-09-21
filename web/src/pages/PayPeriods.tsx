@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { HelpTip } from '@/components/ui/help-tip';
+import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
@@ -98,9 +100,9 @@ function PayPeriodMobileCard({
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
           {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
-        {period.test_workspace_role === 'baseline' && <Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked baseline</Badge>}
-        {period.test_workspace_role === 'practice' && <Badge variant="info">Practice payroll</Badge>}
-        {!readOnly && period.parallel_run && <Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge>}
+        {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+        {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
+        {!readOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -713,16 +715,9 @@ export function PayPeriods() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {trainingReplayWorkspace && (
-          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950">
-            <div className="flex items-start gap-4">
-              <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" aria-hidden="true" />
-              <div>
-                <p className="font-semibold">Complete the practice payrolls from oldest to newest</p>
-                <p className="mt-1 text-sm leading-6 text-blue-900">
-                  Review the locked baseline first, then finish each practice payroll in date order. Recalculating an earlier payroll resets later practice results so year-to-date totals stay correct.
-                </p>
-              </div>
-            </div>
+          <div className="mb-4">
+            <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
+            <TrainingWorkflowGuide />
           </div>
         )}
         {goLiveGate?.comparison_only && (
@@ -914,8 +909,8 @@ export function PayPeriods() {
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
                             {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
                           </Badge>
-                          {period.test_workspace_role === 'baseline' && <Badge variant="warning">Locked baseline</Badge>}
-                          {period.test_workspace_role === 'practice' && <Badge variant="info">Practice payroll</Badge>}
+                          {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+                          {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
@@ -1006,7 +1001,7 @@ export function PayPeriods() {
                               </Button>}
                             </div>
                           )}
-                          {!readOnlyWorkspace && period.parallel_run && <Badge variant="info">Parallel · cannot commit</Badge>}
+                          {!readOnlyWorkspace && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
                           {!readOnlyWorkspace && period.capabilities.commit && (
                             <Button
                               size="sm"
@@ -1041,7 +1036,7 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        {!readOnlyWorkspace && <Card className="mt-8">
+        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-8">
           <div className="p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">

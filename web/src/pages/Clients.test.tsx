@@ -21,6 +21,7 @@ const apiMocks = vi.hoisted(() => ({
   trainingReplayPreview: vi.fn(),
   createTrainingReplay: vi.fn(),
   retryTrainingReplay: vi.fn(),
+  auth: { isAdmin: true, isAccountant: false, isManager: false },
 }));
 
 const refreshCompanies = vi.fn();
@@ -30,7 +31,7 @@ vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ refreshCompanies, switchCompany: vi.fn() }),
 }));
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: true, isAccountant: false, isManager: false }),
+  useAuth: () => apiMocks.auth,
 }));
 vi.mock('@/services/api', () => ({
   companiesApi: apiMocks,
@@ -87,8 +88,66 @@ afterEach(() => cleanup());
 describe('Clients migration promotion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
     apiMocks.list.mockResolvedValue({ companies: [target, rehearsal] });
     refreshCompanies.mockResolvedValue(undefined);
+  });
+
+  it('uses one guided entry point for test workspace creation', async () => {
+    const user = userEvent.setup();
+    apiMocks.trainingReplayPreview.mockResolvedValue({
+      training_replay: {
+        source_company: { id: target.id, name: target.name },
+        ready: true,
+        blockers: [],
+        warnings: [],
+        existing_replay: null,
+        practice_periods: [
+          { id: 61, start_date: '2026-08-24', end_date: '2026-09-06', pay_date: '2026-09-10', status: 'committed', employee_count: 57 },
+          { id: 62, start_date: '2026-09-07', end_date: '2026-09-20', pay_date: '2026-09-24', status: 'committed', employee_count: 57 },
+        ],
+        copy_summary: { employees: 114, active_employees: 57, baseline_pay_periods: 18, practice_pay_periods: 2 },
+        assignable_staff: [{ id: 4, name: 'Training Accountant', email: 'training@example.com', role: 'accountant' }],
+      },
+    });
+
+    render(<Clients />);
+
+    const createWorkspace = await screen.findByRole('button', { name: 'Create test workspace' });
+    expect(screen.queryByRole('button', { name: 'Migration test' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Training replay' })).toBeNull();
+
+    await user.click(createWorkspace);
+    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
+    await user.click(screen.getByRole('button', { name: /Practice completed payrolls/i }));
+
+    await waitFor(() => expect(apiMocks.trainingReplayPreview).toHaveBeenCalledWith(target.id));
+    expect(await screen.findByText('Access levels')).toBeTruthy();
+    expect(screen.getByText('Operator')).toBeTruthy();
+    expect(screen.getByText('Reviewer')).toBeTruthy();
+    expect(screen.getByText('Workspace admin')).toBeTruthy();
+  });
+
+  it('explains workspace types and statuses in the expandable guide', async () => {
+    const user = userEvent.setup();
+    render(<Clients />);
+
+    await user.click(await screen.findByText('Test workspace guide'));
+    expect(screen.getByText('Production client')).toBeTruthy();
+    expect(screen.getByText('Read-only backup')).toBeTruthy();
+    expect(screen.getByText('Preparing')).toBeTruthy();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+  });
+
+  it('keeps test-workspace creation and its admin guide out of accountant access', async () => {
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.list.mockResolvedValue({ companies: [target] });
+
+    render(<Clients />);
+
+    expect((await screen.findAllByRole('button', { name: 'Edit' })).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Create test workspace' })).toBeNull();
+    expect(screen.queryByText('Test workspace guide')).toBeNull();
   });
 
   it('guides an admin through the backup gate before live application', async () => {
