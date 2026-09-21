@@ -89,7 +89,7 @@ module Api
           end
 
           render json: {
-            data: user.company_assignments.includes(:company).map { |a| serialize_assignment(a) }
+            data: user.company_assignments.includes(:company, :granted_by).map { |a| serialize_assignment(a) }
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
@@ -105,7 +105,7 @@ module Api
         end
 
         def scoped_assignments
-          scope = CompanyAssignment.includes(:user, :company)
+          scope = CompanyAssignment.includes(:user, :company, :granted_by)
                                    .joins(:user)
                                    .where(users: { role: ASSIGNABLE_USER_ROLES })
                                    .where(company_id: assignable_company_ids)

@@ -19,6 +19,11 @@ import type { User, UserRole } from '@/types';
 import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
+import {
+  assignmentCompanyIdsForRole,
+  isTestWorkspaceCompany,
+  needsClientAssignment,
+} from '@/lib/user-company-access';
 
 const allRoleOptions: { value: UserRole; label: string; description: string }[] = [
   { value: 'super_admin', label: 'Super Admin', description: 'Platform-wide access across every organization and client' },
@@ -28,8 +33,6 @@ const allRoleOptions: { value: UserRole; label: string; description: string }[] 
   { value: 'client', label: 'Client Portal User', description: 'Can access the client portal for assigned clients, manage employee records, upload documents, and review reports' },
   { value: 'employee', label: 'Employee', description: 'View-only access (future: self-service portal)' },
 ];
-
-const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant' || role === 'client';
 
 export function Users() {
   const { user: currentUser } = useAuth();
@@ -154,7 +157,7 @@ export function Users() {
         email: newEmail.trim(),
         name: newName.trim() || newEmail.trim().split('@')[0],
         role: newRole,
-        company_ids: needsClientAssignment(newRole) ? newClientIds : [],
+        company_ids: assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies),
       };
       const response = await usersApi.create(payload);
       const createdUser = response.data;
@@ -217,7 +220,7 @@ export function Users() {
         role: editRole,
       };
 
-      payload.company_ids = needsClientAssignment(editRole) ? editClientIds : [];
+      payload.company_ids = assignmentCompanyIdsForRole(editRole, editClientIds, availableCompanies);
 
       await usersApi.update(editingId, payload);
       setEditingId(null);
@@ -274,6 +277,16 @@ export function Users() {
     );
   };
 
+  const handleNewRoleChange = (role: UserRole): void => {
+    setNewRole(role);
+    setNewClientIds(selectedIds => assignmentCompanyIdsForRole(role, selectedIds, availableCompanies));
+  };
+
+  const handleEditRoleChange = (role: UserRole): void => {
+    setEditRole(role);
+    setEditClientIds(selectedIds => assignmentCompanyIdsForRole(role, selectedIds, availableCompanies));
+  };
+
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
 
@@ -306,7 +319,7 @@ export function Users() {
     summaryLabel?: string
   ) => {
     const assignableCompanies = role === 'client'
-      ? availableCompanies.filter(company => !(company.test_workspace ?? company.payroll_environment === 'migration_rehearsal'))
+      ? availableCompanies.filter(company => !isTestWorkspaceCompany(company))
       : availableCompanies;
     if (companiesLoadError && availableCompanies.length === 0) {
       return (
@@ -333,11 +346,11 @@ export function Users() {
       <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {assignableCompanies.map(company => {
-            const testWorkspace = company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
+            const testWorkspace = isTestWorkspaceCompany(company);
             return (
               <label
                 key={company.id}
-                className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
+                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
                   selectedIds.includes(company.id)
                     ? 'border-primary-300 bg-primary-50'
                     : 'border-gray-200 bg-white hover:bg-gray-50'
@@ -430,7 +443,7 @@ export function Users() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)}>
+              <Select value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
                 {roleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
@@ -483,7 +496,7 @@ export function Users() {
                       {editingId === user.id ? (
                         <div className="space-y-3">
                           <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                          <Select value={editRole} onChange={(e) => setEditRole(e.target.value as UserRole)}>
+                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {roleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -587,7 +600,7 @@ export function Users() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Select value={editRole} onChange={(e) => setEditRole(e.target.value as UserRole)}>
+                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {roleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}

@@ -101,7 +101,7 @@ export function CompanySwitcher() {
             { label: 'Test workspaces', items: testWorkspaces },
           ].filter(group => group.items.length > 0).map(group => (
             <div key={group.label}>
-              <div className="sticky top-0 z-10 border-y border-neutral-100 bg-neutral-50/95 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500 first:border-t-0">
+              <div className="sticky top-0 z-10 border-y border-neutral-100 bg-neutral-50/95 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500 first:border-t-0">
                 {group.label}
               </div>
               {group.items.map(company => {
@@ -112,7 +112,7 @@ export function CompanySwitcher() {
                     key={company.id}
                     onClick={() => handleCompanySelect(company.id)}
                     disabled={workspaceUnavailable}
-                    className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-3 text-left transition-colors last:border-0 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:opacity-65 ${
+                    className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-4 text-left transition-colors last:border-0 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:opacity-65 ${
                       workspaceUnavailable ? '' : 'hover:bg-primary-50'
                     } ${company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''}`}
                   >
