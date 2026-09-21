@@ -180,9 +180,9 @@ describe('AireManualHoursReview', () => {
     apiMocks.manualReview.mockResolvedValue({
       ...review,
       payment_attestations: [{
-        id: '1', source_time_entry_id: '427', source_user_uuid: review.employees[0].source_user_uuid,
-        display_name: 'Jeremiah Brantley', original_work_date: '2026-05-11', hours: 8,
-        source_changed: false, cornerstone: { status: 'mapped', employee_id: 105, employee_name: 'Jeremiah Brantley' },
+        id: '1', source_time_entry_id: '7001', source_user_uuid: review.employees[0].source_user_uuid,
+        display_name: 'Casey Example', original_work_date: '2026-08-01', hours: 8,
+        source_changed: false, cornerstone: { status: 'mapped', employee_id: 42, employee_name: 'Casey Example' },
       }],
     });
     render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} />);
@@ -190,8 +190,8 @@ describe('AireManualHoursReview', () => {
     expect(await screen.findByText('Payment reported; check details pending')).toBeTruthy();
     expect(screen.getByText('1 entry · 8.00 hours held')).toBeTruthy();
     expect(screen.getByText(/not counted as verified paid hours/i)).toBeTruthy();
-    expect(screen.getByText('Jeremiah Brantley · 8.00 hrs')).toBeTruthy();
-    expect(screen.getByText(/AIRE entry #427/)).toBeTruthy();
+    expect(screen.getByText('Casey Example · 8.00 hrs')).toBeTruthy();
+    expect(screen.getByText(/AIRE entry #7001/)).toBeTruthy();
     const attentionCard = screen.getByText('Needs attention').parentElement;
     expect(within(attentionCard as HTMLElement).getByText('2')).toBeTruthy();
   });
