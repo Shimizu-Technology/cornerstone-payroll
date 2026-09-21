@@ -62,9 +62,15 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     item = payroll_item_for("Ana", "Taylor", nil, 100.25)
     generator = described_class.new(company: company, payroll_items: [ item ], rehearsal_preview: true)
     expect(generator).to receive(:draw_void_watermark).once.and_call_original
+    void_draws = []
+    allow_any_instance_of(Prawn::Document).to receive(:draw_text).and_wrap_original do |method, text, options|
+      void_draws << options if text == "VOID"
+      method.call(text, options)
+    end
 
     text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
+    expect(void_draws).to contain_exactly(hash_including(style: :bold))
     expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
   end
 

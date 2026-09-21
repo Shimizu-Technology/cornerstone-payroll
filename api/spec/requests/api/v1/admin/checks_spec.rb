@@ -188,6 +188,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     it "renders a VOID rehearsal check without allocating a number or recording a print" do
       original_number = company.reload.next_check_number
       original_item = draft_item.reload.attributes.slice("check_number", "check_status", "check_printed_at", "check_print_count")
+      void_draws = capture_void_draws
 
       expect {
         get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
@@ -197,6 +198,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.content_type).to include("application/pdf")
       expect(response.headers.fetch("Cache-Control")).to eq("private, no-store")
       expect(response.headers.fetch("Content-Disposition")).to include("void_rehearsal_checks")
+      expect(void_draws).to contain_exactly(*Array.new(3, hash_including(style: :bold)))
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
       expect(text).to include("Alice Reyes", "500.00")
       expect(text).not_to include("TEST ONLY", "NOT NEGOTIABLE", "VOID - TEST")
@@ -224,10 +226,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     it "includes every eligible employee as a separate standard-layout PDF page" do
       create(:payroll_item, pay_period: draft_period, employee: employee_b,
         gross_pay: 800, net_pay: 600, total_deductions: 200)
+      void_draws = capture_void_draws
 
       get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
 
       expect(response).to have_http_status(:ok)
+      expect(void_draws).to contain_exactly(*Array.new(6, hash_including(style: :bold)))
       pages = PDF::Reader.new(StringIO.new(response.body)).pages
       expect(pages.size).to eq(2)
       expect(pages.map(&:text).join("\n")).to include("Alice Reyes", "Bob Santos")
@@ -238,10 +242,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       company.update_columns(check_stock_type: "first_hawaiian_4up")
       create(:payroll_item, pay_period: draft_period, employee: employee_b,
         gross_pay: 800, net_pay: 600, total_deductions: 200)
+      void_draws = capture_void_draws
 
       get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
 
       expect(response).to have_http_status(:ok)
+      expect(void_draws).to contain_exactly(*Array.new(2, hash_including(style: :bold)))
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
       expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
       expect(text).to include("Alice Reyes", "Bob Santos")
@@ -1244,5 +1250,14 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       post "/api/v1/admin/pay_periods/#{approved_period.id}/commit"
       expect(company.reload.next_check_number).to eq(7002)
     end
+  end
+
+  def capture_void_draws
+    void_draws = []
+    allow_any_instance_of(Prawn::Document).to receive(:draw_text).and_wrap_original do |method, text, options|
+      void_draws << options if text == "VOID"
+      method.call(text, options)
+    end
+    void_draws
   end
 end
