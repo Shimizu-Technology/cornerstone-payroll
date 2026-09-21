@@ -464,6 +464,12 @@ module Api
 
         # GET /api/v1/admin/pay_periods/:id/comparison
         def comparison
+          if @pay_period.training_practice? && @pay_period.draft?
+            return render json: {
+              error: "Calculate this practice payroll before revealing its training benchmark"
+            }, status: :unprocessable_entity
+          end
+
           render json: PayPeriodComparisonBuilder.new(@pay_period).call
         end
 
@@ -1052,6 +1058,9 @@ module Api
             includes_recurring_items: pay_period.includes_recurring_items,
             run_purpose_source: pay_period.run_purpose_source,
             parallel_run: pay_period.parallel_run,
+            test_workspace_role: pay_period.test_workspace_role,
+            test_workspace_source_pay_period_id: pay_period.test_workspace_source_pay_period_id,
+            training_baseline_locked: pay_period.training_baseline?,
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,

@@ -203,7 +203,7 @@ class EmployeeLoan < ApplicationRecord
     requested = requested_amount.to_d.round(2)
     return requested if recurring_no_balance?
 
-    [ requested, current_balance ].min.round(2)
+    [ requested, training_replay_balance_before(pay_date) ].min.round(2)
   end
 
   def reverse_payroll_payment!(payment, actor:, reason:)
@@ -238,6 +238,19 @@ class EmployeeLoan < ApplicationRecord
   end
 
   private
+
+  def training_replay_balance_before(pay_date)
+    return current_balance unless company&.training_replay?
+
+    prior_practice_payments = PayrollItemDeduction
+      .joins(payroll_item: :pay_period)
+      .where(employee_loan_id: id)
+      .where(pay_periods: { company_id: company_id, test_workspace_role: "practice", status: %w[calculated approved] })
+      .where("pay_periods.pay_date < ?", pay_date)
+      .sum(:amount)
+
+    [ current_balance.to_d - prior_practice_payments.to_d, 0.to_d ].max
+  end
 
   def repayment_scope_is_valid
     errors.add(:company, "must match the employee's client") if employee && company_id != employee.company_id

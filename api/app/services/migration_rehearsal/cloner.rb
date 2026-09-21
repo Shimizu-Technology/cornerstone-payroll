@@ -61,70 +61,11 @@ module MigrationRehearsal
     end
 
     def copy_company_setup!
-      department_map = copy_collection(source_company.departments, Department, company: company)
-      deduction_type_map = copy_collection(source_company.deduction_types, DeductionType, company: company)
-      field_definition_map = copy_collection(source_company.payroll_field_definitions, PayrollFieldDefinition, company: company)
-
-      copy_collection(source_company.company_pay_schedules, CompanyPaySchedule, company: company)
-      copy_collection(source_company.company_workweeks, CompanyWorkweek, company: company)
-
-      employee_map = {}
-      source_company.employees.order(:id).each do |source|
-        employee_map[source.id] = copy_record!(
-          source,
-          company: company,
-          department: source.department_id && department_map.fetch(source.department_id),
-          previous_employee_id: nil,
-          portal_pending_approval: false
-        )
-      end
-      source_company.employees.where.not(previous_employee_id: nil).find_each do |source|
-        employee_map.fetch(source.id).update!(previous_employee: employee_map.fetch(source.previous_employee_id))
-      end
-      # Preserve the source review queue exactly. Ordinary employee saves may
-      # auto-resolve an imported item when its field is populated; cloning is
-      # an evidence copy, not a new Cornerstone review decision.
-      source_company.employees.order(:id).each do |source|
-        employee_map.fetch(source.id).update_columns(
-          configuration_source: source.configuration_source,
-          configuration_review_status: source.configuration_review_status,
-          configuration_review_items: source.configuration_review_items,
-          updated_at: Time.current
-        )
-      end
-
-      source_company.employees.order(:id).each do |source|
-        target = employee_map.fetch(source.id)
-        copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
-        copy_collection(source.employee_w4_elections, EmployeeW4Election, company: company, employee: target)
-        copy_collection(source.employee_work_profiles, EmployeeWorkProfile, company: company, employee: target)
-        copy_collection(source.employee_status_events, EmployeeStatusEvent, company: company, employee: target)
-        copy_collection(source.employee_tipped_occupations, EmployeeTippedOccupation, employee: target)
-        source.employee_deductions.each do |deduction|
-          copy_record!(deduction, employee: target, deduction_type: deduction_type_map.fetch(deduction.deduction_type_id))
-        end
-      end
-
-      loan_map = {}
-      source_company.employee_loans.order(:id).each do |loan|
-        loan_map[loan.id] = copy_record!(
-          loan,
-          company: company,
-          employee: employee_map.fetch(loan.employee_id),
-          deduction_type: loan.deduction_type_id && deduction_type_map.fetch(loan.deduction_type_id)
-        )
-      end
-
-      EmployeePayrollField.joins(:employee).where(employees: { company_id: source_company.id }).order(:id).each do |field|
-        copy_record!(
-          field,
-          employee: employee_map.fetch(field.employee_id),
-          payroll_field_definition: field_definition_map.fetch(field.payroll_field_definition_id),
-          employee_loan: field.employee_loan_id && loan_map.fetch(field.employee_loan_id)
-        )
-      end
-
-      { employees: employee_map }
+      TestWorkspace::SetupCloner.new(
+        source_company: source_company,
+        target_company: company,
+        actor: actor
+      ).call
     end
 
     def copy_historical_archive!(employee_map)
