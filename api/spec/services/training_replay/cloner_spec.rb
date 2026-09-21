@@ -62,6 +62,19 @@ RSpec.describe TrainingReplay::Cloner do
   end
 
   it "copies older payroll as locked baseline and seeds two input-only practice runs" do
+    personal_field = create(
+      :payroll_field_definition,
+      company: source_company,
+      owner_employee: employee,
+      name: "Ada phone allowance",
+      default_amount: 25
+    )
+    EmployeePayrollField.create!(
+      employee: employee,
+      payroll_field_definition: personal_field,
+      amount: 25,
+      start_date: Date.new(2026, 1, 1)
+    )
     target = build_target
 
     described_class.new(company: target, actor: actor).call
@@ -73,6 +86,9 @@ RSpec.describe TrainingReplay::Cloner do
 
     expect(target.migration_rehearsal_status).to eq("ready")
     expect(copied_employee.test_workspace_source_employee).to eq(employee)
+    copied_field = target.payroll_field_definitions.find_by!(name: "Ada phone allowance")
+    expect(copied_field.owner_employee).to eq(copied_employee)
+    expect(copied_employee.employee_payroll_fields.sole.payroll_field_definition).to eq(copied_field)
     expect(baseline).to have_attributes(
       status: "approved",
       test_workspace_source_pay_period_id: baseline_source.id,
@@ -98,13 +114,22 @@ RSpec.describe TrainingReplay::Cloner do
     described_class.new(company: target, actor: actor).call
     practice = target.pay_periods.find_by!(test_workspace_source_pay_period: first_practice_source)
     practice.payroll_items.sole.update!(gross_pay: 1_100, net_pay: 900)
+    added_employee = create(:employee, company: target, department: nil, first_name: "New", last_name: "Trainee")
+    create(:payroll_item, company: target, pay_period: practice, employee: added_employee, gross_pay: 100, net_pay: 80)
 
     result = PayPeriodComparisonBuilder.new(practice).call
 
     expect(result).to include(comparison_kind: "training_benchmark")
     expect(result.dig(:previous_pay_period, :id)).to eq(first_practice_source.id)
-    expect(result.dig(:summary, :gross_pay)).to include(current: 1_100.0, previous: 1_200.0, delta: -100.0)
-    expect(result.fetch(:employee_changes).first.fetch(:employee_id)).to eq(practice.payroll_items.sole.employee_id)
+    expect(result.dig(:summary, :gross_pay)).to include(current: 1_200.0, previous: 1_200.0, delta: 0.0)
+    copied_employee = target.employees.find_by!(test_workspace_source_employee: employee)
+    mapped_change = result.fetch(:employee_changes).find { |change| change.fetch(:employee_id) == copied_employee.id }
+    expect(mapped_change).to be_present
+    added_flag = result.fetch(:employee_changes)
+      .find { |change| change.fetch(:employee_id) == added_employee.id }
+      .fetch(:flags)
+      .find { |flag| flag.fetch(:key) == "new_employee" }
+    expect(added_flag.fetch(:message)).to include("training benchmark")
   end
 
   it "carries a calculated practice loan payment into the second practice run without committing" do
@@ -144,6 +169,36 @@ RSpec.describe TrainingReplay::Cloner do
 
     expect(copied_loan.scheduled_payment_for(pay_date: second_practice.pay_date, requested_amount: 100)).to eq(50.to_d)
     expect(copied_loan.reload.current_balance).to eq(150.to_d)
+  end
+
+  it "restores a recurring deduction that was stopped after the training cutoff" do
+    deduction_type = DeductionType.create!(
+      company: source_company,
+      name: "Recurring allotment",
+      category: "post_tax",
+      sub_category: "loan"
+    )
+    EmployeeLoan.create!(
+      company: source_company,
+      employee: employee,
+      deduction_type: deduction_type,
+      name: "Training allotment",
+      tracking_mode: "recurring_no_balance",
+      status: "stopped",
+      payment_amount: 25,
+      first_deduction_date: Date.new(2026, 8, 1),
+      stopped_at: Time.zone.parse("2026-09-20 12:00"),
+      stopped_by: actor
+    )
+    target = build_target
+
+    described_class.new(company: target, actor: actor).call
+
+    expect(target.employee_loans.sole).to have_attributes(
+      status: "active",
+      stopped_at: nil,
+      stopped_by_id: nil
+    )
   end
 
   private

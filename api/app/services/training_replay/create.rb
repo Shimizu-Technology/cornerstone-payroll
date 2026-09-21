@@ -22,7 +22,6 @@ module TrainingReplay
       preview_payload = preview.call
       raise ArgumentError, preview_payload.fetch(:blockers).join("; ") unless preview_payload.fetch(:ready)
 
-      staff_assignments = validated_assignments!
       company = build_company(preview_payload, preview.practice_periods)
 
       Company.transaction do
@@ -31,6 +30,7 @@ module TrainingReplay
           raise ArgumentError, "Archive the existing training replay before creating another"
         end
 
+        staff_assignments = validated_assignments!
         company.save!
         staff_assignments.each do |entry|
           CompanyAssignment.create!(
@@ -63,10 +63,13 @@ module TrainingReplay
     def validated_assignments!
       raise ArgumentError, "Assign at least one manager or accountant to the training workspace" if assignments.empty?
 
-      ids = assignments.filter_map { |entry| entry[:user_id] || entry["user_id"] }.map(&:to_i)
+      raw_ids = assignments.map { |entry| entry[:user_id] || entry["user_id"] }
+      raise ArgumentError, "Each assigned staff member requires a user_id" if raw_ids.any?(&:blank?)
+
+      ids = raw_ids.map(&:to_i)
       raise ArgumentError, "Each staff member can be assigned only once" unless ids.uniq.length == ids.length
 
-      users = source_company.organization.users.active.where(id: ids, role: %w[manager accountant]).index_by(&:id)
+      users = source_company.organization.users.active.where(id: ids, role: %w[manager accountant]).lock.index_by(&:id)
       raise ArgumentError, "Training access can only be assigned to active managers and accountants in this organization" unless users.length == ids.length
 
       assignments.map do |entry|

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useId, type ReactElement } from 'react';
+import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, GraduationCap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -148,6 +148,7 @@ export function Clients() {
   const [creatingTraining, setCreatingTraining] = useState(false);
   const [trainingConfirmed, setTrainingConfirmed] = useState(false);
   const [trainingError, setTrainingError] = useState<string | null>(null);
+  const trainingPreviewRequestIdRef = useRef(0);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
   const testWorkspaces = companies.filter(isTestWorkspace);
   const groupedCompanies = [
@@ -224,6 +225,7 @@ export function Clients() {
   };
 
   const handleOpenTraining = async (company: CompanyListItem) => {
+    const requestId = ++trainingPreviewRequestIdRef.current;
     handleCloseRehearsal();
     setTrainingSourceId(company.id);
     setTrainingPreview(null);
@@ -234,15 +236,18 @@ export function Clients() {
     setLoadingTraining(true);
     try {
       const response = await companiesApi.trainingReplayPreview(company.id);
-      setTrainingPreview(response.training_replay);
+      if (trainingPreviewRequestIdRef.current === requestId) setTrainingPreview(response.training_replay);
     } catch (err) {
-      setTrainingError(err instanceof Error ? err.message : 'Could not prepare the training preview');
+      if (trainingPreviewRequestIdRef.current === requestId) {
+        setTrainingError(err instanceof Error ? err.message : 'Could not prepare the training preview');
+      }
     } finally {
-      setLoadingTraining(false);
+      if (trainingPreviewRequestIdRef.current === requestId) setLoadingTraining(false);
     }
   };
 
   const handleCloseTraining = () => {
+    trainingPreviewRequestIdRef.current += 1;
     setTrainingSourceId(null);
     setTrainingPreview(null);
     setTrainingAssignments({});
@@ -482,10 +487,10 @@ export function Clients() {
         )}
 
         {trainingSourceId && (
-          <Card className="border-blue-200 p-4 sm:p-6">
+          <Card className="border-primary-200 p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-800">
                   <GraduationCap className="h-5 w-5" />
                 </div>
                 <div>
@@ -550,7 +555,7 @@ export function Clients() {
                           const access = trainingAssignments[staff.id];
                           return (
                             <div key={staff.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-                              <label className="flex cursor-pointer items-start gap-3">
+                              <label className="flex cursor-pointer items-start gap-2">
                                 <input
                                   type="checkbox"
                                   checked={Boolean(access)}
@@ -582,7 +587,7 @@ export function Clients() {
                       </div>
                     </div>
 
-                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+                    <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
                       <input type="checkbox" checked={trainingConfirmed} onChange={event => setTrainingConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
                       <span>I understand this workspace contains protected payroll and employee data and is limited to the selected payroll staff for 90 days.</span>
                     </label>
