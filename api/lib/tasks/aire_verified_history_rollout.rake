@@ -40,7 +40,7 @@ namespace :aire_rollout do
 
   desc "Fail closed if the verified AIRE history has not been reconciled"
   task ensure_complete: :environment do
-    expected_sha256 = ENV.fetch("AIRE_ROLLOUT_MANIFEST_SHA256")
+    expected_sha256 = ENV.fetch("AIRE_ROLLOUT_MANIFEST_SHA256").downcase
     company = Company.find_by(id: 2)
     if company
       raise "AIRE rollout company identity changed" unless company.name == "AIRE Services"
