@@ -269,31 +269,13 @@ module TimeTracking
 
     def client_for(allocation)
       @clients_by_source ||= {}
-      @clients_by_source[allocation.time_tracking_source_id] ||= begin
-        source_client = TimeTracking::Client.new(allocation.time_tracking_source)
-        linked = source_client.payroll_account_link(external_actor_id: actor.id)
-          .dig("account_link", "connected") == true
-        TimeTracking::Client.new(
-          allocation.time_tracking_source,
-          actor: (actor if linked),
-          delegation: allocation.time_tracking_source.delegation_for(actor)
-        )
-      rescue TimeTracking::Client::Error
-        TimeTracking::Client.new(
-          allocation.time_tracking_source,
-          delegation: allocation.time_tracking_source.delegation_for(actor)
-        )
-      end
+      @clients_by_source[allocation.time_tracking_source_id] ||= TimeTracking::Client.for_payroll_actor(
+        allocation.time_tracking_source, actor: actor
+      )
     end
 
     def client_for_source
-      @client_for_source ||= begin
-        linked = TimeTracking::Client.new(source).payroll_account_link(external_actor_id: actor.id)
-          .dig("account_link", "connected") == true
-        TimeTracking::Client.new(source, actor: (actor if linked), delegation: source.delegation_for(actor))
-      rescue TimeTracking::Client::Error
-        TimeTracking::Client.new(source, delegation: source.delegation_for(actor))
-      end
+      @client_for_source ||= TimeTracking::Client.for_payroll_actor(source, actor: actor)
     end
 
     def delivered_check_event(allocation)

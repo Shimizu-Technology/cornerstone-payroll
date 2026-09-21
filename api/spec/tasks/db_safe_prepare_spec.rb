@@ -10,6 +10,7 @@ RSpec.describe "database pre-deploy safety" do
   before do
     Rails.application.load_tasks unless Rake::Task.task_defined?("db:clear_advisory_locks")
     Rake::Task["db:clear_advisory_locks"].reenable
+    Rake::Task["aire_rollout:ensure_complete"].reenable
   end
 
   it "never terminates database sessions while preparing a deploy" do
@@ -25,6 +26,22 @@ RSpec.describe "database pre-deploy safety" do
 
     expect(entrypoint).to include('exec "${@}"')
     expect(entrypoint).not_to match(/db:(?:prepare|safe_prepare)|solid_queue:setup/)
+  end
+
+  it "normalizes the approved manifest checksum before checking its rollout receipt" do
+    company = instance_double(Company, name: "AIRE Services")
+    sources = double("time tracking sources")
+    source = instance_double(TimeTrackingSource)
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("AIRE_ROLLOUT_MANIFEST_SHA256").and_return("A" * 64)
+    allow(Company).to receive(:find_by).with(id: 2).and_return(company)
+    allow(company).to receive(:time_tracking_sources).and_return(sources)
+    allow(sources).to receive(:find_by).with(id: 1, source_type: "aire_services").and_return(source)
+    expect(AireVerifiedHistoryRolloutReceipt).to receive(:exists?).with(
+      company: company, time_tracking_source: source, manifest_sha256: "a" * 64
+    ).and_return(true)
+
+    expect { Rake::Task["aire_rollout:ensure_complete"].invoke }.not_to raise_error
   end
 
   it "runs Kamal schema preparation once without exposing direct URLs to runtime containers" do
@@ -89,6 +106,24 @@ RSpec.describe "database pre-deploy safety" do
     expect(rendered_argument.to_s).to include(secret_url)
     expect(rendered_argument.inspect).to include("MIGRATION_DATABASE_URL=[REDACTED]")
     expect(rendered_argument.inspect).not_to include(secret_url)
+  end
+
+  it "passes an approved encrypted AIRE rollout only to the one-off migration container" do
+    environment = {
+      "KAMAL_VERSION" => "release-sha",
+      "MIGRATION_DATABASE_URL" => "postgresql://migration-user:secret@example.test/payroll",
+      "AIRE_ROLLOUT_MANIFEST_KEY" => "a" * 64,
+      "AIRE_ROLLOUT_MANIFEST_SHA256" => "b" * 64,
+      "AIRE_ROLLOUT_PRODUCTION_APPROVED" => "yes",
+      "AIRE_ROLLOUT_RELEASE_ID" => "approved-release"
+    }
+    executor = KamalMigrationExecutor.new(environment: environment, cli: class_double(Kamal::Cli::Main))
+
+    expect(KamalMigrationExecutor.migration_environment).to include(
+      environment.slice("AIRE_ROLLOUT_MANIFEST_KEY", "AIRE_ROLLOUT_MANIFEST_SHA256",
+        "AIRE_ROLLOUT_PRODUCTION_APPROVED", "AIRE_ROLLOUT_RELEASE_ID")
+    )
+    expect(executor.command_arguments.join(" ")).not_to include(environment.fetch("AIRE_ROLLOUT_MANIFEST_KEY"))
   end
 end
 
@@ -177,7 +212,7 @@ RSpec.describe DatabasePredeploy do
 
     predeploy.run!
 
-    expect(calls.map { |call| call.drop(2) }).to eq([ %w[db:prepare], %w[solid_queue:setup] ])
+    expect(calls.map { |call| call.drop(2) }).to eq([ %w[db:prepare], %w[solid_queue:setup], %w[aire_rollout:ensure_complete] ])
     calls.each do |environment, command, *_task|
       expect(command).to eq("/app/api/bin/rails")
       expect(environment).to include(
@@ -189,6 +224,58 @@ RSpec.describe DatabasePredeploy do
         "PGOPTIONS" => include("lock_timeout=10s", "statement_timeout=15min")
       )
     end
+  end
+
+  it "runs the approved AIRE history rollout in the serialized predeploy phase" do
+    calls = []
+    predeploy = described_class.new(
+      env: {
+        "RAILS_ENV" => "production", "DATABASE_URL" => pooled_url,
+        "MIGRATION_DATABASE_URL" => direct_url,
+        "AIRE_ROLLOUT_MANIFEST_PATH" => "/run/secrets/aire-rollout.json",
+        "AIRE_ROLLOUT_MANIFEST_SHA256" => "a" * 64
+      },
+      app_root: "/app/api", command_runner: ->(*args) { calls << args }
+    )
+
+    predeploy.run!
+
+    expect(calls.map { |call| call.drop(2) }).to eq([
+      %w[db:prepare], %w[solid_queue:setup], %w[aire_rollout:apply], %w[aire_rollout:ensure_complete]
+    ])
+    expect(calls.last.first.fetch("DATABASE_URL")).to eq(direct_url)
+  end
+
+  it "applies the bundled encrypted manifest when its key is configured" do
+    calls = []
+    predeploy = described_class.new(
+      env: {
+        "RAILS_ENV" => "production", "DATABASE_URL" => pooled_url,
+        "MIGRATION_DATABASE_URL" => direct_url,
+        "AIRE_ROLLOUT_MANIFEST_KEY" => "a" * 64,
+        "AIRE_ROLLOUT_MANIFEST_SHA256" => "b" * 64
+      },
+      app_root: "/app/api", command_runner: ->(*args) { calls << args }
+    )
+
+    predeploy.run!
+
+    expect(calls.map { |call| call.last }).to include("aire_rollout:apply", "aire_rollout:ensure_complete")
+  end
+
+  it "does not run a partially configured AIRE rollout" do
+    calls = []
+    predeploy = described_class.new(
+      env: {
+        "RAILS_ENV" => "production", "DATABASE_URL" => pooled_url,
+        "MIGRATION_DATABASE_URL" => direct_url,
+        "AIRE_ROLLOUT_MANIFEST_PATH" => "/run/secrets/aire-rollout.json"
+      },
+      command_runner: ->(*args) { calls << args }
+    )
+
+    expect { predeploy.run! }.to raise_error(described_class::ConfigurationError, /SHA256 is required/)
+    expect(calls.map { |call| call.last }).not_to include("aire_rollout:apply")
   end
 
   it "requires an explicit migration connection for every production deployment" do
