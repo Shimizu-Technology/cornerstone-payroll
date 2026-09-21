@@ -85,6 +85,30 @@ RSpec.describe TimeTracking::HistoricalClassificationReconciliationService do
     expect(TimeTrackingManualAllocation.count).to eq(0)
   end
 
+  it "rejects a malformed employee row before creating a historical payment link" do
+    review["employees"] << nil
+
+    expect { service.call(payroll_item_id: item.id, source_user_uuid: uuid) }
+      .to raise_error(described_class::Error, /malformed manual review data/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
+  it "rejects a malformed adjustment row before creating a historical payment link" do
+    review["employees"][0]["adjustments"] << nil
+
+    expect { service.call(payroll_item_id: item.id, source_user_uuid: uuid) }
+      .to raise_error(described_class::Error, /malformed manual review entries/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
+  it "returns a domain error when a current adjustment has no valid work date" do
+    review["employees"][0]["adjustments"][0].delete("original_work_date")
+
+    expect { service.call(payroll_item_id: item.id, source_user_uuid: uuid) }
+      .to raise_error(described_class::Error, /invalid historical work date/)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   context "without a delivered check" do
     let(:record_delivery) { false }
 

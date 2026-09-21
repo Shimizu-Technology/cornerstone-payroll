@@ -178,7 +178,7 @@ module Api
               metadata: { source: "aire_onboarding" }
             )
           end
-          render json: { data: serialize_employee(@employee.reload, include_sensitive: true) }
+          render json: { data: serialize_employee(@employee.reload) }
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end

@@ -99,12 +99,22 @@ module TimeTracking
         end_date: pay_period.end_date.iso8601,
         external_pay_period_id: pay_period.id
       )
-      candidates = Array(review["employees"]).select do |row|
+      raise Error, "AIRE returned malformed manual review data" unless review.is_a?(Hash) && review["employees"].is_a?(Array) &&
+                                                                     review["employees"].all? { |row| row.is_a?(Hash) }
+
+      candidates = review["employees"].select do |row|
         TimeTrackingEmployeeMapping.normalize_uuid(row["source_user_uuid"]) == uuid
       end
       raise Error, "AIRE person is missing or duplicated in the manual hours review" unless candidates.one?
-      entries = Array(candidates.first["adjustments"]).select do |entry|
-        entry["source_kind"] == "current" && Date.iso8601(entry.fetch("original_work_date")).between?(pay_period.start_date, pay_period.end_date)
+      adjustments = candidates.first["adjustments"]
+      raise Error, "AIRE returned malformed manual review entries" unless adjustments.is_a?(Array) && adjustments.all? { |entry| entry.is_a?(Hash) }
+
+      entries = adjustments.select do |entry|
+        next false unless entry["source_kind"] == "current"
+
+        Date.iso8601(entry.fetch("original_work_date")).between?(pay_period.start_date, pay_period.end_date)
+      rescue Date::Error, KeyError, TypeError
+        raise Error, "AIRE returned an invalid historical work date"
       end
       raise Error, "No current-period AIRE source entries were found for this check" if entries.empty?
       snapshots = entries.map { |entry| source_entry_snapshot!(entry) }.sort_by { |entry| entry.fetch("source_time_entry_id").to_i }

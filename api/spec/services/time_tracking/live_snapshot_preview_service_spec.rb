@@ -26,7 +26,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) do
     create(:employee, company: company, department: create(:department, company: company),
-                      email: "pilot@example.com", pay_rate: 25)
+                      email: "pilot@example.com", pay_rate: BigDecimal("25.00"))
   end
   let(:response) do
     {
@@ -64,7 +64,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     allow(TimeTracking::Client).to receive(:for_payroll_actor) do |linked_source, actor:|
       TimeTracking::Client.new(linked_source)
     end
-    employee.employee_wage_rates.create!(label: "Regular", rate: 25, is_primary: true, active: true)
+    employee.employee_wage_rates.create!(label: "Regular", rate: BigDecimal("25.00"), is_primary: true, active: true)
     TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
                                         employee: employee, source_user_id: "17",
                                         source_user_uuid: uuid, source_display_name: employee.full_name)
@@ -89,7 +89,7 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
   end
 
   it "reuses the saved person mapping and pays new Solo hours through that person's Flight Hours wage" do
-    flight_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 30, active: true)
+    flight_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: BigDecimal("30.00"), active: true)
     solo = response.deep_dup
     solo["employees"][0]["adjustments"][0]["source_time_entry_id"] = "202"
     solo["employees"][0]["adjustments"][0]["source_category_id"] = "7"
@@ -124,6 +124,57 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
     expect(row.fetch("warnings")).to include(include("code" => "unmapped_wage_rate"))
   end
 
+  it "maps Ground Instruction only to its unique Ground Instruction Hours wage" do
+    ground_rate = employee.employee_wage_rates.create!(label: "Ground Instruction Hours", rate: BigDecimal("30.00"), active: true)
+    ground = response.deep_dup
+    ground["employees"][0]["adjustments"][0]["category"] =
+      { "id" => "9", "key" => "aire_ground", "name" => "Ground Instruction" }
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(ground)
+
+    row = described_class.new(pay_period: pay_period, source: source, actor: actor).call.processed_payload.fetch("rows").sole
+
+    expect(row.fetch("ready")).to be(true)
+    expect(row.fetch("categories").sole).to include(
+      "employee_wage_rate_id" => ground_rate.id,
+      "wage_rate_match_method" => "ground_instruction_hours", "payroll_rate_cents" => 3000
+    )
+  end
+
+  it "holds Ground Instruction when its required wage is missing, even if a similar label exists" do
+    employee.employee_wage_rates.create!(label: "Ground Instruction", rate: BigDecimal("30.00"), active: true)
+    ground = response.deep_dup
+    ground["employees"][0]["adjustments"][0]["category"] =
+      { "id" => "9", "key" => "aire_ground", "name" => "Ground Instruction" }
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(ground)
+
+    row = described_class.new(pay_period: pay_period, source: source, actor: actor).call.processed_payload.fetch("rows").sole
+
+    expect(row.fetch("ready")).to be(false)
+    expect(row.fetch("categories").sole.fetch("employee_wage_rate_id")).to be_nil
+    expect(row.fetch("warnings")).to include(include("code" => "unmapped_wage_rate"))
+  end
+
+  it "holds Ground Instruction when normalized target wages are ambiguous" do
+    employee.employee_wage_rates.create!(label: "Ground Instruction Hours", rate: BigDecimal("30.00"), active: true)
+    employee.employee_wage_rates.create!(label: "Ground-Instruction Hours", rate: BigDecimal("31.00"), active: true)
+    ground = response.deep_dup
+    ground["employees"][0]["adjustments"][0]["category"] =
+      { "id" => "9", "key" => "aire_ground", "name" => "Ground Instruction" }
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return(ground)
+
+    row = described_class.new(pay_period: pay_period, source: source, actor: actor).call.processed_payload.fetch("rows").sole
+
+    expect(row.fetch("ready")).to be(false)
+    expect(row.fetch("categories").sole.fetch("employee_wage_rate_id")).to be_nil
+    expect(row.fetch("warnings")).to include(include("code" => "unmapped_wage_rate"))
+  end
+
   it "reuses a sole Regular wage for a known AIRE maintenance category" do
     maintenance = response.deep_dup
     maintenance["employees"][0]["adjustments"][0]["category"] =
@@ -141,9 +192,9 @@ RSpec.describe TimeTracking::LiveSnapshotPreviewService do
   end
 
   it "uses the verified Maintenance wage for Aircraft Maintenance source time" do
-    employee.update!(pay_rate: 23)
+    employee.update!(pay_rate: BigDecimal("23.00"))
     maintenance_rate = employee.employee_wage_rates.sole
-    maintenance_rate.update!(label: "Maintenance", rate: 23)
+    maintenance_rate.update!(label: "Maintenance", rate: BigDecimal("23.00"))
     maintenance = response.deep_dup
     maintenance["employees"][0]["adjustments"][0]["category"] =
       { "id" => "3", "key" => "aire_maintenance", "name" => "Aircraft Maintenance" }

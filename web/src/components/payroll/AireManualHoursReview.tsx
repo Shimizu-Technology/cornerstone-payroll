@@ -459,6 +459,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       <p className="mt-2 text-xs text-neutral-600">{caseReview.source_entry_count} AIRE entries · check delivered {formatDate(caseReview.payment_effective_on)}</p>
                       <p className="mt-2 text-xs text-neutral-700">AIRE: {hours(caseReview.source_regular_hours)} regular / {hours(caseReview.source_overtime_hours)} OT · Check: {hours(caseReview.payroll_regular_hours)} regular / {hours(caseReview.payroll_overtime_hours)} OT</p>
                       <p className="mt-2 text-xs text-warning-950">Estimated gross difference: {caseReview.gross_wage_difference >= 0 ? '+' : ''}${caseReview.gross_wage_difference.toFixed(2)}. For review only; not automatically paid or deducted.</p>
+                      <p className="mt-3 rounded-lg bg-warning-50 px-3 py-2 text-xs leading-5 text-neutral-700">{caseReview.note}</p>
                     </div>
                   ))}
                 </div>

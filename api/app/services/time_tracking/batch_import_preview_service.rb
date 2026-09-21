@@ -252,6 +252,8 @@ module TimeTracking
       if normalize_match_key(category[:name]) == "ground instruction"
         ground_rates = rates.select { |rate| normalize_match_key(rate.label) == "ground instruction hours" }
         return [ ground_rates.first, "ground_instruction_hours" ] if ground_rates.one?
+
+        return [ nil, nil ]
       end
 
       if normalize_match_key(category[:name]) == "aircraft maintenance"
