@@ -58,6 +58,16 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     expect(text).to include("400.00")
   end
 
+  it "marks each rehearsal check only with the VOID watermark" do
+    item = payroll_item_for("Ana", "Taylor", nil, 100.25)
+    generator = described_class.new(company: company, payroll_items: [ item ], rehearsal_preview: true)
+    expect(generator).to receive(:draw_void_watermark).once.and_call_original
+
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+    expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
+  end
+
   it "honors a partially used starting slot" do
     items = 5.times.map { |index| payroll_item_for("Emp", "##{index + 1}", (2466 + index).to_s, 125 + index) }
 

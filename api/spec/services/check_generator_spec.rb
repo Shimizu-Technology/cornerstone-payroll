@@ -201,6 +201,16 @@ RSpec.describe CheckGenerator do
     end
   end
 
+  describe "#generate_rehearsal_preview" do
+    it "marks the check face and both stubs only as VOID" do
+      expect(generator).to receive(:draw_void_watermark).exactly(3).times.and_call_original
+
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
+    end
+  end
+
   describe "#alignment_test" do
     subject(:pdf) { generator.alignment_test }
 

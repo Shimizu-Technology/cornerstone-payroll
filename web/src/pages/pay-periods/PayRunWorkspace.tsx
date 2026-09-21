@@ -284,12 +284,12 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
       const result = await checksApi.rehearsalPreviewPdf(payRun.id);
       setMockPreview({
         blob: result.blob,
-        filename: result.filename || 'test_only_rehearsal_checks.pdf',
-        title: 'Preview mock checks',
-        note: 'TEST ONLY — NOT NEGOTIABLE. Review here, then print on plain paper or download a copy.',
+        filename: result.filename || 'void_rehearsal_checks.pdf',
+        title: 'Preview rehearsal checks',
+        note: 'Every check is marked VOID. This rehearsal copy cannot be used for payment. Review here, then print on plain paper or download a copy.',
       });
     } catch (error) {
-      setMockPreviewError(error instanceof Error ? error.message : 'Could not prepare the mock checks.');
+      setMockPreviewError(error instanceof Error ? error.message : 'Could not prepare the rehearsal checks.');
     } finally {
       setMockPreviewBusy(false);
     }
@@ -351,13 +351,13 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         <CardHeader className="flex-row items-start justify-between gap-4">
           <div>
             <CardTitle>Checks and direct deposit</CardTitle>
-            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview watermarked mock checks, then print on plain paper or download the PDF. These are test documents, not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
+            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview VOID-marked rehearsal checks, then print on plain paper or download the PDF. These documents are not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
             {printRefreshError && <p role="alert" className="mt-2 text-sm text-danger-700">{printRefreshError}</p>}
             {mockPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{mockPreviewError}</p>}
           </div>
           {canPreviewMockChecks && (
             <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
-              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview mock checks'}
+              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview rehearsal checks'}
             </Button>
           )}
           {!isRehearsal && payRun.status === 'committed' && (
@@ -368,7 +368,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         </CardHeader>
         {isRehearsal && (
           <div role="note" className="mx-4 mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:mx-6">
-            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check TEST ONLY - NOT NEGOTIABLE. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before previewing mock checks.'} Previewing, downloading, and printing do not assign check numbers or mark checks printed.
+            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check VOID. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before previewing rehearsal checks.'} Previewing, downloading, and printing do not assign check numbers or mark checks printed.
           </div>
         )}
         <CardContent className="p-0">
@@ -378,12 +378,12 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               <TableBody striped>
                 {items.map((item) => {
                   const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Mock ready' : 'Not ready' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
+                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
                   return (
                     <TableRow key={item.id}>
                       <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
                       <TableCell>{isDeposit ? 'Direct deposit' : 'Paper check'}</TableCell>
-                      <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Test preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
+                      <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Rehearsal preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
                       <TableCell><Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : item.check_printed_at ? 'success' : 'default'}>{status}</Badge></TableCell>
                       <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
                       <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>

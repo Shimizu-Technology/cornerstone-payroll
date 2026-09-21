@@ -185,7 +185,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       draft_item.update_columns(check_number: nil)
     end
 
-    it "renders a non-negotiable mock check without allocating a number or recording a print" do
+    it "renders a VOID rehearsal check without allocating a number or recording a print" do
       original_number = company.reload.next_check_number
       original_item = draft_item.reload.attributes.slice("check_number", "check_status", "check_printed_at", "check_print_count")
 
@@ -195,9 +195,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.content_type).to include("application/pdf")
-      expect(response.headers.fetch("Content-Disposition")).to include("test_only_rehearsal_checks")
+      expect(response.headers.fetch("Cache-Control")).to eq("private, no-store")
+      expect(response.headers.fetch("Content-Disposition")).to include("void_rehearsal_checks")
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
-      expect(text).to include("TEST ONLY - NOT NEGOTIABLE", "Alice Reyes", "500.00")
+      expect(text).to include("Alice Reyes", "500.00")
+      expect(text).not_to include("TEST ONLY", "NOT NEGOTIABLE", "VOID - TEST")
       expect(company.reload.next_check_number).to eq(original_number)
       expect(draft_item.reload.attributes.slice(*original_item.keys)).to eq(original_item)
       expect(draft_period.reload.status).to eq("calculated")
@@ -229,7 +231,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       pages = PDF::Reader.new(StringIO.new(response.body)).pages
       expect(pages.size).to eq(2)
       expect(pages.map(&:text).join("\n")).to include("Alice Reyes", "Bob Santos")
-      expect(pages.map(&:text).all? { |text| text.include?("TEST ONLY - NOT NEGOTIABLE") }).to be(true)
+      expect(pages.map(&:text).none? { |text| text.match?(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/) }).to be(true)
     end
 
     it "marks every occupied First Hawaiian slot as a rehearsal preview" do
@@ -241,7 +243,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
       expect(response).to have_http_status(:ok)
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
-      expect(text.scan("TEST ONLY - NOT NEGOTIABLE").size).to eq(2)
+      expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
       expect(text).to include("Alice Reyes", "Bob Santos")
     end
 
