@@ -187,9 +187,9 @@ describe('AireManualHoursReview', () => {
     });
     render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} />);
 
-    expect(await screen.findByText('Payment reported; check details pending')).toBeTruthy();
-    expect(screen.getByText('1 entry · 8.00 hours held')).toBeTruthy();
-    expect(screen.getByText(/not counted as verified paid hours/i)).toBeTruthy();
+    expect(await screen.findByText('Paid — owner attested; check details pending')).toBeTruthy();
+    expect(screen.getByText('1 entry · 8.00 hours protected from repayment')).toBeTruthy();
+    expect(screen.getByText(/recorded as paid from the owner statement/i)).toBeTruthy();
     expect(screen.getByText('Casey Example · 8.00 hrs')).toBeTruthy();
     expect(screen.getByText(/AIRE entry #7001/)).toBeTruthy();
     const attentionCard = screen.getByText('Needs attention').parentElement;
