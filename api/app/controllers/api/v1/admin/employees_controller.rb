@@ -7,7 +7,7 @@ module Api
         include Auditable
         audit_actions :terminate, :reactivate
         before_action :set_employee, only: [
-          :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification,
+          :show, :update, :destroy, :terminate, :reactivate, :activate_aire_onboarding, :transition_tax_classification,
           :resolve_configuration_review_item
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
@@ -148,6 +148,38 @@ module Api
           )
           render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
         rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # An AIRE-created worker is linked while inactive. Only reviewed,
+        # complete filing data may move the profile into the payable roster.
+        def activate_aire_onboarding
+          require_capability!(:manage_client_configuration)
+          return if performed?
+
+          Employee.transaction do
+            @employee.lock!
+            unless @employee.configuration_source == "aire_onboarding" && @employee.status == "inactive"
+              raise ArgumentError, "Only an inactive AIRE onboarding profile can be activated"
+            end
+            unless @employee.configuration_review_status == "complete" && @employee.configuration_review_items.empty?
+              raise ArgumentError, "Complete and document every AIRE setup review item first"
+            end
+
+            @employee.update!(status: "active")
+            AuditLog.record!(
+              user: current_user,
+              organization_id: @employee.company.organization_id,
+              company_id: @employee.company_id,
+              action: "employees#activate_aire_onboarding",
+              record_type: "employees",
+              record_id: @employee.id,
+              subject_name: @employee.full_name,
+              metadata: { source: "aire_onboarding" }
+            )
+          end
+          render json: { data: serialize_employee(@employee.reload, include_sensitive: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 

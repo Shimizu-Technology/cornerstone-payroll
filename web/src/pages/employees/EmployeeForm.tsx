@@ -14,7 +14,7 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
@@ -879,12 +879,12 @@ export function EmployeeForm() {
         }
       }
     }
-    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain) {
+    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain && !allowsUnverifiedBlank('ssn_encrypted')) {
       newErrors.ssn = ['Social Security Number is required'];
     } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
     }
-    if (usesSsn && (!isEditing || ssnChanged)) {
+    if (usesSsn && form.ssn?.trim() && (!isEditing || ssnChanged)) {
       if (!form.ssn_confirmation?.trim()) {
         newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
       } else if (canonicalSsn(form.ssn_confirmation) !== canonicalSsn(form.ssn)) {
@@ -1230,8 +1230,8 @@ export function EmployeeForm() {
             <div className="flex items-start gap-4">
               <AlertCircle className="mt-0 h-5 w-5 shrink-0 text-warning-700" />
               <div>
-                <p className="font-semibold">QuickBooks setup needs review</p>
-                <p className="mt-2 text-sm leading-6 text-warning-800">These items were not safe to guess during migration. Correct the fields here, then return to the employee workspace to document what was verified and mark each item reviewed.</p>
+                <p className="font-semibold">{loadedEmployee.configuration_source === 'aire_onboarding' ? 'AIRE payroll setup needs review' : 'QuickBooks setup needs review'}</p>
+                <p className="mt-2 text-sm leading-6 text-warning-800">These details were not safe to guess. Correct the fields here, then return to the employee workspace to document what was verified and mark each item reviewed.</p>
                 <ul className="mt-4 space-y-2 text-sm leading-6">
                   {(loadedEmployee.configuration_review_items || []).map((item) => (
                     <li key={item.code}>• {item.message}</li>
@@ -2258,7 +2258,7 @@ export function EmployeeForm() {
               </div>
 
               <div className="mb-4 grid gap-4 md:grid-cols-2">
-                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 (optional)
+                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 {loadedEmployee?.configuration_source === 'aire_onboarding' && loadedEmployee.configuration_review_status === 'needs_review' ? '(needed before activation)' : '(optional)'}
                   <Input type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
                 </label>
                 <label className="text-sm font-medium text-gray-700">Source document / reference (optional)

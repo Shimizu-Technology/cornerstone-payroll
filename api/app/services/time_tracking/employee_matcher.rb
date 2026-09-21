@@ -31,7 +31,9 @@ module TimeTracking
       else
         @mappings_by_source_id[source_user_id]
       end
-      return matched(existing.employee, "saved_mapping", 1.0) if existing&.employee&.active?
+      if existing
+        return matched(existing.employee, existing.employee.active? ? "saved_mapping" : "inactive_mapping", 1.0)
+      end
 
       email = source_employee["email"].to_s.downcase.strip
       if email.present?

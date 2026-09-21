@@ -6,7 +6,7 @@ class Employee < ApplicationRecord
 
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
   CONFIGURATION_REVIEW_STATUSES = %w[complete needs_review].freeze
-  CONFIGURATION_SOURCES = %w[quickbooks_history].freeze
+  CONFIGURATION_SOURCES = %w[quickbooks_history aire_onboarding].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
   PAYMENT_DELIVERY_METHODS = %w[paper_check direct_deposit].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
@@ -136,6 +136,7 @@ class Employee < ApplicationRecord
   validate :tax_classification_cannot_change_in_place, on: :update
   validate :previous_employee_transition_is_valid
   validate :portal_pending_employee_is_inactive
+  validate :aire_onboarding_needs_review_is_inactive
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -532,7 +533,7 @@ class Employee < ApplicationRecord
     if business_contractor?
       errors.add(:business_name, "can't be blank") if business_name.blank?
       errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank?
-    elsif ssn_encrypted.blank?
+    elsif ssn_encrypted.blank? && !configuration_review_allows_blank?(:ssn_encrypted)
       errors.add(:ssn, "can't be blank")
     end
   end
@@ -545,11 +546,12 @@ class Employee < ApplicationRecord
   end
 
   def configuration_review_allows_blank?(field)
-    return false unless configuration_source == "quickbooks_history" && configuration_review_status == "needs_review"
+    return false unless CONFIGURATION_SOURCES.include?(configuration_source) && configuration_review_status == "needs_review"
 
     Array(configuration_review_items).any? do |item|
       next false unless item.is_a?(Hash)
-      next false unless SOURCE_FIELD_CONFIGURATION_REVIEW_CODES.include?(item["code"])
+      next false unless SOURCE_FIELD_CONFIGURATION_REVIEW_CODES.include?(item["code"]) ||
+                        (configuration_source == "aire_onboarding" && item["code"] == "aire_filing_details_missing")
 
       Array(item["fields"]).include?(field.to_s)
     end
@@ -560,6 +562,13 @@ class Employee < ApplicationRecord
     return if status == "inactive"
 
     errors.add(:status, "must be inactive while client-submitted payroll details await approval")
+  end
+
+  def aire_onboarding_needs_review_is_inactive
+    return unless configuration_source == "aire_onboarding" && configuration_review_status == "needs_review"
+    return if status == "inactive"
+
+    errors.add(:status, "must remain inactive until AIRE payroll setup is reviewed")
   end
 
   def filing_ssn_format

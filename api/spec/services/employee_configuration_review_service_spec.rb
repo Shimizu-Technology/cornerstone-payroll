@@ -115,6 +115,32 @@ RSpec.describe EmployeeConfigurationReviewService do
     end.to raise_error(described_class::InvalidResolution, /Hire date/)
   end
 
+  it "requires AIRE filing details before an inactive onboarding profile can finish review" do
+    employee.update!(
+      status: "inactive", configuration_source: "aire_onboarding",
+      hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil,
+      ssn_encrypted: nil, w4_signed_on: nil,
+      configuration_review_items: [
+        { "code" => "aire_filing_details_missing", "message" => "Complete filing details", "fields" => %w[hire_date address_line1 city state zip ssn_encrypted w4_signed_on] }
+      ]
+    )
+    service = described_class.new(employee:, actor:)
+
+    expect do
+      service.resolve!(code: "aire_filing_details_missing", resolution_note: "Reviewed W-4", acknowledgement: described_class::ACKNOWLEDGEMENT)
+    end.to raise_error(described_class::InvalidResolution, /Hire date/)
+
+    employee.update!(
+      hire_date: Date.new(2026, 9, 1), address_line1: "123 Verified St",
+      city: "Hagatna", state: "GU", zip: "96910",
+      ssn_encrypted: "900-70-1234", w4_signed_on: Date.new(2026, 9, 1)
+    )
+    service.resolve!(code: "aire_filing_details_missing", resolution_note: "Reviewed signed W-4 and employee filing details", acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(employee.reload.configuration_review_status).to eq("complete")
+    expect(employee.status).to eq("inactive")
+  end
+
   it "denies an actor without payroll operations access" do
     client = create(:user, company:, organization: company.organization, role: "client")
 

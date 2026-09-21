@@ -387,8 +387,10 @@ export function EmployeeList() {
                 {shownAirePeople.map((person) => {
                   const match = person.possible_payroll_matches?.length === 1 ? person.possible_payroll_matches[0] : null;
                   const legacyEmployeeId = person.cornerstone.status === 'needs_verification' ? person.cornerstone.employee_id : undefined;
-                  const targetEmployeeId = legacyEmployeeId || match?.id;
-                  const canLink = canReviewAire && !!person.payroll_integration_id && !!targetEmployeeId;
+                  const targetEmployeeId = person.cornerstone.status === 'inactive'
+                    ? person.cornerstone.employee_id
+                    : legacyEmployeeId || match?.id;
+                  const canLink = canReviewAire && person.cornerstone.status !== 'inactive' && !!person.payroll_integration_id && !!targetEmployeeId;
                   const setupPath = newEmployeePath(companyId, { returnTo });
                   const onboardingPath = `${setupPath}${setupPath.includes('?') ? '&' : '?'}aire_staff_id=${encodeURIComponent(person.id)}`;
                   return (
