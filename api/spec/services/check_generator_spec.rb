@@ -236,6 +236,25 @@ RSpec.describe CheckGenerator do
   end
 
   describe "year-to-date totals" do
+    it "renders source-aware YTD earnings instead of repeating current amounts" do
+      payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
+      payroll_item.payroll_item_earnings.create!(
+        category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, call: [
+        PayrollEarningsYtdBreakdown::Row.new(
+          label: "Joint", source_label: "Joint", category: "regular",
+          hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
+        )
+      ])
+      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item).and_return(breakdown)
+
+      row = generator.send(:pay_rows).find { |candidate| candidate.first == "Joint" }
+
+      expect(row).to eq([ "Joint", "10.70", "11.00", "117.70", "1,032.90" ])
+      expect(PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n"))
+        .to include("1,032.90")
+    end
+
     it "limits payroll field YTD totals to the current calendar year" do
       field = PayrollFieldDefinition.create!(
         company: company,
