@@ -89,6 +89,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setOvertimeToLink(String(Math.max(0, adjustment.overtime_hours)));
     setLinkNote(DEFAULT_LINK_NOTE);
     setLinkError(null);
+    setLinkSuccess(null);
   };
 
   const saveLink = async () => {
@@ -105,6 +106,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     }
     setLinkBusy(true);
     setLinkError(null);
+    setLinkSuccess(null);
     try {
       await payPeriodsApi.linkManualAireHours(payPeriodId, {
         payroll_item_id: Number(selectedItemId),
@@ -128,6 +130,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const retryLink = async (allocationId: number) => {
     setLinkBusy(true);
     setLinkError(null);
+    setLinkSuccess(null);
     try {
       await payPeriodsApi.retryManualAireHours(payPeriodId, allocationId);
       await load();
@@ -141,6 +144,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const retryAllLinks = async (allocationIds: number[]) => {
     setLinkBusy(true);
     setLinkError(null);
+    setLinkSuccess(null);
     let synced = 0;
     let firstError: string | null = null;
     for (const allocationId of allocationIds) {

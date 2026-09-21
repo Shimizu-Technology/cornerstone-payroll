@@ -10,6 +10,7 @@ RSpec.describe "database pre-deploy safety" do
   before do
     Rails.application.load_tasks unless Rake::Task.task_defined?("db:clear_advisory_locks")
     Rake::Task["db:clear_advisory_locks"].reenable
+    Rake::Task["aire_rollout:ensure_complete"].reenable
   end
 
   it "never terminates database sessions while preparing a deploy" do
@@ -25,6 +26,22 @@ RSpec.describe "database pre-deploy safety" do
 
     expect(entrypoint).to include('exec "${@}"')
     expect(entrypoint).not_to match(/db:(?:prepare|safe_prepare)|solid_queue:setup/)
+  end
+
+  it "normalizes the approved manifest checksum before checking its rollout receipt" do
+    company = instance_double(Company, name: "AIRE Services")
+    sources = double("time tracking sources")
+    source = instance_double(TimeTrackingSource)
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("AIRE_ROLLOUT_MANIFEST_SHA256").and_return("A" * 64)
+    allow(Company).to receive(:find_by).with(id: 2).and_return(company)
+    allow(company).to receive(:time_tracking_sources).and_return(sources)
+    allow(sources).to receive(:find_by).with(id: 1, source_type: "aire_services").and_return(source)
+    expect(AireVerifiedHistoryRolloutReceipt).to receive(:exists?).with(
+      company: company, time_tracking_source: source, manifest_sha256: "a" * 64
+    ).and_return(true)
+
+    expect { Rake::Task["aire_rollout:ensure_complete"].invoke }.not_to raise_error
   end
 
   it "runs Kamal schema preparation once without exposing direct URLs to runtime containers" do

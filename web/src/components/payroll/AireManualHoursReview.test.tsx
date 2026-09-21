@@ -370,6 +370,9 @@ describe('AireManualHoursReview', () => {
     await waitFor(() => expect(apiMocks.link).toHaveBeenCalledTimes(4));
     expect(apiMocks.link).toHaveBeenNthCalledWith(3, 68, expect.objectContaining({ payroll_item_id: 201, source_time_entry_id: '50' }));
     expect((await screen.findByRole('status')).textContent).toContain('4 exact AIRE entries linked to 2 paychecks');
+
+    await user.click(screen.getAllByRole('button', { name: 'Link to paycheck' })[0]);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('offers a visible sync action when check delivery is recorded but AIRE has not confirmed payment', async () => {
