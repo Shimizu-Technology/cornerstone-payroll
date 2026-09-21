@@ -145,9 +145,16 @@ RSpec.describe MigrationRehearsal::Cloner do
 
     expect(@target).to have_attributes(
       payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "migration_rehearsal",
       migration_rehearsal_status: "pending",
       migration_source_company_id: source_company.id,
       ein: source_company.ein
+    )
+    expect(@target.test_workspace_manifest).to include(
+      "version" => 1,
+      "purpose" => "migration_rehearsal",
+      "source_company_id" => source_company.id,
+      "source_historical_import_batch_id" => batch.id
     )
     expect(organization.reload.companies.live_payroll.count).to eq(1)
   end
@@ -235,7 +242,7 @@ RSpec.describe MigrationRehearsal::Cloner do
     expect(copied_batch.historical_import_source_files.sole.storage_key).not_to eq(source_key)
     expect(storage.download(copied_batch.historical_import_source_files.sole.storage_key)).to eq(source_bytes)
     expect(batch.reload.historical_paychecks.sole.gross_pay).to eq(1_500.to_d)
-    expect(CompanyAssignment.exists?(user: actor, company: target)).to be(true)
+    expect(CompanyAssignment.exists?(user: actor, company: target)).to be(false)
     expect(CompanyAssignment.exists?(user: client_user, company: target)).to be(false)
   end
 

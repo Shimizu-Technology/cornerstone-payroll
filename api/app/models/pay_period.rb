@@ -107,7 +107,7 @@ class PayPeriod < ApplicationRecord
   validate :parallel_run_marker_cannot_be_cleared
   validate :parallel_run_cannot_be_committed
   validate :intake_stale_session_matches_period
-  validate :migration_rehearsal_cannot_be_committed
+  validate :test_workspace_cannot_be_committed
   validate :published_aire_cutoff_dates_are_immutable,
            on: :update,
            if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
@@ -126,18 +126,18 @@ class PayPeriod < ApplicationRecord
            }
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
-  before_validation :force_migration_rehearsal_to_parallel
+  before_validation :force_test_workspace_to_parallel
 
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
   scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
-  # A migration rehearsal cannot commit or pay anyone. Its calculated runs are
+  # A test workspace cannot commit or pay anyone. Its calculated runs are
   # provisional inputs for testing reports and cumulative tax math only.
   def self.reportable_for_company(company)
     base = where(company_id: company.id, correction_status: [ nil, "correction" ])
-    company.migration_rehearsal? ? base.where(status: %w[calculated approved]) : base.committed
+    company.test_workspace? ? base.where(status: %w[calculated approved]) : base.committed
   end
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
@@ -182,6 +182,10 @@ class PayPeriod < ApplicationRecord
 
   def migration_rehearsal?
     company&.migration_rehearsal? || false
+  end
+
+  def test_workspace?
+    company&.test_workspace? || false
   end
 
   def can_edit?
@@ -229,7 +233,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def invalidate_later_rehearsal_calculations!
-    return unless migration_rehearsal?
+    return unless test_workspace?
 
     company.pay_periods
       .where(status: %w[calculated approved])
@@ -404,14 +408,14 @@ class PayPeriod < ApplicationRecord
 
   private
 
-  def force_migration_rehearsal_to_parallel
-    self.parallel_run = true if migration_rehearsal?
+  def force_test_workspace_to_parallel
+    self.parallel_run = true if test_workspace?
   end
 
-  def migration_rehearsal_cannot_be_committed
-    return unless migration_rehearsal? && status == "committed"
+  def test_workspace_cannot_be_committed
+    return unless test_workspace? && status == "committed"
 
-    errors.add(:status, "cannot be committed in a migration rehearsal")
+    errors.add(:status, "cannot be committed in a test workspace")
   end
 
   def parallel_run_marker_cannot_be_cleared
@@ -461,7 +465,7 @@ class PayPeriod < ApplicationRecord
 
   def starts_after_historical_ytd_boundary
     return if company_id.blank?
-    return if migration_rehearsal? && validation_context != :payroll_calculation && draft?
+    return if test_workspace? && validation_context != :payroll_calculation && draft?
 
     batches = HistoricalImportBatch.where(
       company_id: company_id,
@@ -474,7 +478,7 @@ class PayPeriod < ApplicationRecord
 
     bridges = batches.filter_map(&:latest_applied_historical_ytd_bridge)
     unbridged_batch = batches.any? { |batch| batch.latest_applied_historical_ytd_bridge.nil? }
-    if migration_rehearsal? && validation_context == :payroll_calculation && unbridged_batch
+    if test_workspace? && validation_context == :payroll_calculation && unbridged_batch
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end

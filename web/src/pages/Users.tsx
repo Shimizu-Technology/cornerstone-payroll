@@ -292,7 +292,7 @@ export function Users() {
             key={company.id}
             className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600"
           >
-            {company.name}
+            {company.name}{company.test_workspace ? ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
           </span>
         ))}
       </div>
@@ -302,8 +302,12 @@ export function Users() {
   const renderClientAssignmentPicker = (
     selectedIds: number[],
     setSelectedIds: Dispatch<SetStateAction<number[]>>,
+    role: UserRole,
     summaryLabel?: string
   ) => {
+    const assignableCompanies = role === 'client'
+      ? availableCompanies.filter(company => !(company.test_workspace ?? company.payroll_environment === 'migration_rehearsal'))
+      : availableCompanies;
     if (companiesLoadError && availableCompanies.length === 0) {
       return (
         <div className="rounded-lg border border-danger-200 bg-danger-50 p-3">
@@ -321,34 +325,39 @@ export function Users() {
       return <p className="text-sm text-gray-500">Loading payroll clients...</p>;
     }
 
-    if (availableCompanies.length === 0) {
+    if (assignableCompanies.length === 0) {
       return <p className="text-sm text-gray-500">No payroll clients available.</p>;
     }
 
     return (
       <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {availableCompanies.map(company => (
-            <label
-              key={company.id}
-              className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
-                selectedIds.includes(company.id)
-                  ? 'border-primary-300 bg-primary-50'
-                  : 'border-gray-200 bg-white hover:bg-gray-50'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedIds.includes(company.id)}
-                onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
-                className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-              />
-              <div className="min-w-0">
-                <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                <p className="text-xs text-gray-500">{company.active_employees} employees</p>
-              </div>
-            </label>
-          ))}
+          {assignableCompanies.map(company => {
+            const testWorkspace = company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
+            return (
+              <label
+                key={company.id}
+                className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
+                  selectedIds.includes(company.id)
+                    ? 'border-primary-300 bg-primary-50'
+                    : 'border-gray-200 bg-white hover:bg-gray-50'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(company.id)}
+                  onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
+                  className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                />
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{company.name}</p>
+                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-gray-500'}`}>
+                    {testWorkspace ? `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
+                  </p>
+                </div>
+              </label>
+            );
+          })}
         </div>
         {summaryLabel && (
           <p className="text-xs text-gray-500 mt-2">{summaryLabel}</p>
@@ -437,6 +446,7 @@ export function Users() {
                 {renderClientAssignmentPicker(
                   newClientIds,
                   setNewClientIds,
+                  newRole,
                   newClientIds.length > 0 ? `${newClientIds.length} client${newClientIds.length !== 1 ? 's' : ''} selected` : undefined
                 )}
               </div>
@@ -478,7 +488,7 @@ export function Users() {
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
                           </Select>
-                          {needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds) : (
+                          {needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole) : (
                             <p className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-500">
                               This role does not use payroll client assignments. Saving will clear any existing client assignments.
                             </p>
@@ -671,7 +681,7 @@ export function Users() {
                                   </span>
                                 </div>
 
-                                {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
+                                {renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole)}
                               </>
                             ) : (
                               <p className="text-sm text-gray-500">

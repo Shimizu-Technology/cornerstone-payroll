@@ -5,12 +5,17 @@ import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 
+const isTestWorkspace = (company: { test_workspace?: boolean; payroll_environment: string }) =>
+  company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
+
 export function CompanySwitcher() {
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const productionCompanies = companies.filter(company => !isTestWorkspace(company));
+  const testWorkspaces = companies.filter(isTestWorkspace);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -50,8 +55,8 @@ export function CompanySwitcher() {
         <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
           {activeCompany?.name || 'Loading...'}
         </p>
-        {activeCompany?.payroll_environment === 'migration_rehearsal' && (
-          <p className="mt-0.5 text-xs font-semibold text-amber-700">Migration rehearsal</p>
+        {activeCompany && isTestWorkspace(activeCompany) && (
+          <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
         )}
       </div>
     );
@@ -74,8 +79,8 @@ export function CompanySwitcher() {
           <p className="truncate text-sm font-semibold text-neutral-900">
             {activeCompany?.name || 'Select Company'}
           </p>
-          {activeCompany?.payroll_environment === 'migration_rehearsal' && (
-            <p className="text-xs font-semibold text-amber-700">Migration rehearsal</p>
+          {activeCompany && isTestWorkspace(activeCompany) && (
+            <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
           )}
           <p className="text-xs text-neutral-500">
             {activeCompany?.active_employees || 0} employees
@@ -91,38 +96,47 @@ export function CompanySwitcher() {
 
       {isOpen && (
         <div className="absolute left-2 right-2 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
-          {companies.map(company => {
-            const rehearsalUnavailable = company.payroll_environment === 'migration_rehearsal'
-              && company.migration_rehearsal_status !== 'ready';
-            return (
-              <button
-                type="button"
-                key={company.id}
-                onClick={() => handleCompanySelect(company.id)}
-                disabled={rehearsalUnavailable}
-                className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-3 text-left transition-colors last:border-0 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:opacity-65 ${
-                  rehearsalUnavailable ? '' : 'hover:bg-primary-50'
-                } ${company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''}`}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className={`truncate text-sm ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
-                    {company.name}
-                  </p>
-                  {company.payroll_environment === 'migration_rehearsal' && (
-                    <p className="text-xs font-semibold text-amber-700">Migration rehearsal · {company.migration_rehearsal_status}</p>
-                  )}
-                  <p className="text-xs text-neutral-500">
-                    {company.active_employees} active employees &middot; {company.pay_frequency}
-                  </p>
-                </div>
-                {company.id === activeCompany?.id && (
-                  <svg className="ml-2 h-4 w-4 shrink-0 text-primary-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
+          {[
+            { label: 'Production clients', items: productionCompanies },
+            { label: 'Test workspaces', items: testWorkspaces },
+          ].filter(group => group.items.length > 0).map(group => (
+            <div key={group.label}>
+              <div className="sticky top-0 z-10 border-y border-neutral-100 bg-neutral-50/95 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500 first:border-t-0">
+                {group.label}
+              </div>
+              {group.items.map(company => {
+                const workspaceUnavailable = isTestWorkspace(company) && company.migration_rehearsal_status !== 'ready';
+                return (
+                  <button
+                    type="button"
+                    key={company.id}
+                    onClick={() => handleCompanySelect(company.id)}
+                    disabled={workspaceUnavailable}
+                    className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-3 text-left transition-colors last:border-0 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:opacity-65 ${
+                      workspaceUnavailable ? '' : 'hover:bg-primary-50'
+                    } ${company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate text-sm ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
+                        {company.name}
+                      </p>
+                      {isTestWorkspace(company) && (
+                        <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}</p>
+                      )}
+                      <p className="text-xs text-neutral-500">
+                        {company.active_employees} active employees &middot; {company.pay_frequency}
+                      </p>
+                    </div>
+                    {company.id === activeCompany?.id && (
+                      <svg className="ml-2 h-4 w-4 shrink-0 text-primary-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>

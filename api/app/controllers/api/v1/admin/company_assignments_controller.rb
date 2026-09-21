@@ -36,7 +36,14 @@ module Api
             return render json: { error: "Company not accessible" }, status: :forbidden
           end
 
-          assignment = CompanyAssignment.new(user: user, company_id: company_id)
+          company = Company.find(company_id)
+          assignment = CompanyAssignment.new(
+            user: user,
+            company: company,
+            workspace_access_level: company.test_workspace? ? assignment_params[:workspace_access_level].presence || "operator" : nil,
+            expires_at: company.test_workspace? ? assignment_params[:expires_at] : nil,
+            granted_by: current_user
+          )
 
           if assignment.save
             render json: { data: serialize_assignment(assignment) }, status: :created
@@ -72,7 +79,12 @@ module Api
           CompanyAssignment.transaction do
             user.company_assignments.destroy_all
             company_ids.each do |cid|
-              user.company_assignments.create!(company_id: cid)
+              company = Company.find(cid)
+              user.company_assignments.create!(
+                company: company,
+                workspace_access_level: company.test_workspace? ? "operator" : nil,
+                granted_by: current_user
+              )
             end
           end
 
@@ -115,7 +127,7 @@ module Api
         end
 
         def assignment_params
-          params.require(:company_assignment).permit(:user_id, :company_id)
+          params.require(:company_assignment).permit(:user_id, :company_id, :workspace_access_level, :expires_at)
         end
 
         def serialize_assignment(assignment)
@@ -126,6 +138,11 @@ module Api
             user_email: assignment.user.email,
             company_id: assignment.company_id,
             company_name: assignment.company.name,
+            test_workspace: assignment.company.test_workspace?,
+            workspace_access_level: assignment.workspace_access_level,
+            expires_at: assignment.expires_at,
+            granted_by_id: assignment.granted_by_id,
+            granted_by_name: assignment.granted_by&.name,
             created_at: assignment.created_at
           }
         end

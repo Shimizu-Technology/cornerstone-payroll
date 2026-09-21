@@ -30,7 +30,7 @@ module MigrationRehearsal
     attr_reader :source_company, :batch
 
     def active_rehearsal
-      @active_rehearsal ||= source_company.migration_rehearsals.active.order(created_at: :desc).first
+      @active_rehearsal ||= source_company.migration_rehearsals.active.where(test_workspace_archived_at: nil).order(created_at: :desc).first
     end
 
     def warnings

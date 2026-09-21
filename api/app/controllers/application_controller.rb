@@ -101,10 +101,10 @@ class ApplicationController < ActionController::API
   end
 
   def forbid_migration_rehearsal_official_action!
-    return unless current_company&.migration_rehearsal?
+    return unless current_company&.test_workspace?
 
     render json: {
-      error: "This action is unavailable in a migration rehearsal. Rehearsals cannot issue checks, move money, commit payroll, or produce filing-ready records."
+      error: "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
     }, status: :forbidden
   end
 

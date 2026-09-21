@@ -9,7 +9,7 @@ import { formatCurrency, payPeriodStatusConfig } from '@/lib/utils';
 import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
 import { useCompany } from '@/contexts/CompanyContext';
-import { importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
+import { employeesPath, importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 interface StatCardProps {
   title: string;
@@ -51,7 +51,9 @@ function StatCard({
 
 export function Dashboard(): ReactElement {
   const navigate = useNavigate();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
+    || Boolean(activeCompany?.test_workspace_sealed_at);
   const [loading, setLoading] = useState(true);
   const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,11 +141,11 @@ export function Dashboard(): ReactElement {
                 </p>
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
                   <Button onClick={() => navigate(currentPayPeriod ? payRunHref(currentPayPeriod.id, 'work') : payRunsHref)}>
-                    {currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
+                    {readOnlyWorkspace ? 'Browse pay periods' : currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                   <Button variant="secondary" onClick={() => navigate('/reports')}>Open reports</Button>
-                  <Button variant="ghost" onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
+                  {!readOnlyWorkspace && <Button variant="ghost" onClick={() => navigate(newEmployeeHref)}>Add employee</Button>}
                 </div>
               </div>
 
@@ -155,10 +157,14 @@ export function Dashboard(): ReactElement {
                   </div>
                   <div>
                     <p className="font-display text-lg font-bold text-neutral-950">
-                      {currentPayPeriod ? statusConfig?.label ?? 'Review pay period' : 'Set up the next pay period'}
+                      {readOnlyWorkspace
+                        ? 'Review preserved payroll records'
+                        : currentPayPeriod ? statusConfig?.label ?? 'Review pay period' : 'Set up the next pay period'}
                     </p>
                     <p className="mt-1 text-sm leading-6 text-neutral-500">
-                      {currentPayPeriod
+                      {readOnlyWorkspace
+                        ? 'Browse employees, prior payrolls, and reports without changing the backup.'
+                        : currentPayPeriod
                         ? `${currentPayPeriod.employee_count} employees, ${formatCurrency(currentPayPeriod.total_net)} net pay currently in view.`
                         : 'Create the period first, then add or import employee payroll items.'}
                     </p>
@@ -275,9 +281,13 @@ export function Dashboard(): ReactElement {
               <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 px-4 py-10 text-center">
                 <CalendarCheck2 className="mb-3 h-7 w-7 text-neutral-400" />
                 <p className="font-display text-lg font-bold text-neutral-900">No active pay period</p>
-                <p className="mt-1 max-w-md text-sm text-neutral-500">Create a pay period to start collecting hours, deductions, checks, and reports.</p>
+                <p className="mt-1 max-w-md text-sm text-neutral-500">
+                  {readOnlyWorkspace
+                    ? 'This backup does not contain an active pay period.'
+                    : 'Create a pay period to start collecting hours, deductions, checks, and reports.'}
+                </p>
                 <Button className="mt-5" onClick={() => navigate(payRunsHref)}>
-                  Create pay period
+                  {readOnlyWorkspace ? 'Browse pay periods' : 'Create pay period'}
                 </Button>
               </div>
             )}
@@ -317,8 +327,20 @@ export function Dashboard(): ReactElement {
 
         <div className="mt-8 grid gap-5 md:grid-cols-3">
           {[
-            { title: 'Add Employee', body: 'Register a worker before the next run.', icon: <UserPlus2 className="h-5 w-5" />, href: newEmployeeHref, tone: 'primary' },
-            { title: 'Run Payroll', body: 'Open pay periods and continue processing.', icon: <Wallet className="h-5 w-5" />, href: payRunsHref, tone: 'success' },
+            {
+              title: readOnlyWorkspace ? 'Browse Employees' : 'Add Employee',
+              body: readOnlyWorkspace ? 'Review the workers preserved in this backup.' : 'Register a worker before the next run.',
+              icon: <UserPlus2 className="h-5 w-5" />,
+              href: readOnlyWorkspace && activeCompanyId ? employeesPath(activeCompanyId) : newEmployeeHref,
+              tone: 'primary',
+            },
+            {
+              title: readOnlyWorkspace ? 'Browse Pay Periods' : 'Run Payroll',
+              body: readOnlyWorkspace ? 'Review preserved payroll without changing it.' : 'Open pay periods and continue processing.',
+              icon: <Wallet className="h-5 w-5" />,
+              href: payRunsHref,
+              tone: 'success',
+            },
             { title: 'Guam Reports', body: 'Export registers, tax summaries, and compliance packets.', icon: <Landmark className="h-5 w-5" />, href: '/reports', tone: 'accent' },
           ].map((action) => (
             <Card key={action.title} className="group cursor-pointer overflow-hidden hover:-translate-y-1 hover:border-primary-200" onClick={() => navigate(action.href)}>
