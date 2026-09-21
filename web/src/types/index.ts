@@ -38,6 +38,8 @@ export type UserRole = 'super_admin' | 'org_admin' | 'admin' | 'manager' | 'empl
 export interface AssignedCompanySummary {
   id: number;
   name: string;
+  test_workspace?: boolean;
+  workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin' | null;
 }
 
 export interface User {

@@ -25,6 +25,7 @@ class PayrollReminderService
 
     def process_company(config)
       company = config.company
+      return if company.test_workspace?
       return if config.recipients.blank?
 
       today = Date.current

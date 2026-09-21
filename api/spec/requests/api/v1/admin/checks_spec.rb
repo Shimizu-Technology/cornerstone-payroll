@@ -177,6 +177,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       source_batch = create(:historical_import_batch, company: source_company, status: "locked")
       company.update_columns(
         payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal",
         migration_source_company_id: source_company.id,
         migration_source_batch_id: source_batch.id,
         migration_rehearsal_status: "ready"
@@ -217,7 +218,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
 
       company.update_columns(payroll_environment: "live", migration_source_company_id: nil,
-        migration_source_batch_id: nil, migration_rehearsal_status: nil)
+        migration_source_batch_id: nil, migration_rehearsal_status: nil, test_workspace_purpose: nil)
       draft_period.update_columns(status: "calculated")
       get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
       expect(response).to have_http_status(:unprocessable_entity)

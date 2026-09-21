@@ -65,6 +65,31 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
   end
 
   describe "PATCH /api/v1/admin/companies/:id" do
+    it "keeps sealed backup workspaces read-only even when a production client is active" do
+      backup = create(
+        :company,
+        organization: organization,
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "backup_snapshot",
+        test_workspace_sealed_at: Time.current,
+        migration_source_company: client_company,
+        migration_rehearsal_status: "ready",
+        name: "Client A — Backup"
+      )
+
+      patch "/api/v1/admin/companies/#{backup.id}", params: {
+        company: { name: "Changed backup" }
+      }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(backup.reload.name).to eq("Client A — Backup")
+
+      get "/api/v1/admin/companies/#{backup.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("company", "can_update")).to be(false)
+      expect(response.parsed_body.dig("company", "editable_fields")).to eq([])
+    end
+
     it "lets organization admins configure the simple payroll register" do
       patch "/api/v1/admin/companies/#{client_company.id}", params: {
         company: {

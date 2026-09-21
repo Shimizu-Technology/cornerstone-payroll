@@ -128,7 +128,9 @@ export function PayPeriods() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
+    || Boolean(activeCompany?.test_workspace_sealed_at);
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId
@@ -690,9 +692,11 @@ export function PayPeriods() {
         title="Pay Periods"
         description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
         actions={
-          <Button onClick={openCreateModal}>
-            {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
-          </Button>
+          readOnlyWorkspace ? undefined : (
+            <Button onClick={openCreateModal}>
+              {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
+            </Button>
+          )
         }
       />
 
@@ -817,7 +821,11 @@ export function PayPeriods() {
             <div className="p-8 text-center text-gray-500">Loading...</div>
           ) : visiblePayPeriods.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              {searchTerm ? 'No pay periods match the current filters.' : 'No pay periods found. Create your first pay period to get started.'}
+              {searchTerm
+                ? 'No pay periods match the current filters.'
+                : readOnlyWorkspace
+                  ? 'No pay periods were preserved in this backup.'
+                  : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
             <>
@@ -1005,7 +1013,7 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        <Card className="mt-8">
+        {!readOnlyWorkspace && <Card className="mt-8">
           <div className="p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
@@ -1050,7 +1058,7 @@ export function PayPeriods() {
               </div>
             </div>
           </div>
-        </Card>
+        </Card>}
       </div>
 
       {/* Create Pay Period Modal */}
