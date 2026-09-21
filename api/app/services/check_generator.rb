@@ -394,76 +394,14 @@ class CheckGenerator
   # Data row builders
   # -----------------------------------------------------------------------
   def pay_rows
-    rows = []
-    is_c = employee.contractor?
-    earnings = payroll_item.payroll_item_earnings.to_a
-
-    if is_c
-      if employee.contractor_hourly?
-        hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
-        if hourly_earnings.any?
-          hourly_earnings.each do |earning|
-            rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
-          end
-        else
-          rp = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
-          rows << [label_or("Contract Labor"), fh(payroll_item.hours_worked), fn(payroll_item.pay_rate), fn(rp), fn(ytd[:gross])]
-          if payroll_item.overtime_hours.to_f > 0
-            ot_r = payroll_item.pay_rate.to_f * 1.5
-            ot_p = payroll_item.overtime_hours.to_f * ot_r
-            rows << ["Contract OT", fh(payroll_item.overtime_hours), fn(ot_r), fn(ot_p), fn(ot_p)]
-          end
-        end
-      else
-        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
-        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - ce_total), fn(ytd[:gross])]
-      end
-    elsif payroll_item.hourly?
-      hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
-      if hourly_earnings.any?
-        hourly_earnings.each do |earning|
-          rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
-        end
-      else
-        dept = employee.department&.name || "Regular"
-        reg = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
-        rows << [dept, fh(payroll_item.hours_worked), fn(payroll_item.pay_rate), fn(reg), fn(ytd[:gross])]
-        if payroll_item.overtime_hours.to_f > 0
-          otr = payroll_item.pay_rate.to_f * 1.5
-          rows << ["Overtime Pay", "-", fn(otr), fn(payroll_item.overtime_hours.to_f * otr), fn(payroll_item.overtime_hours.to_f * otr)]
-        end
-        if payroll_item.holiday_hours.to_f > 0
-          rows << ["Holiday", fh(payroll_item.holiday_hours), fn(payroll_item.pay_rate), fn(payroll_item.holiday_hours.to_f * payroll_item.pay_rate.to_f), "-"]
-        end
-        if payroll_item.pto_hours.to_f > 0
-          rows << ["PTO", fh(payroll_item.pto_hours), fn(payroll_item.pay_rate), fn(payroll_item.pto_hours.to_f * payroll_item.pay_rate.to_f), "-"]
-        end
-      end
-    else
-      sal_label = "Salary"
-      sal_label = "Salary - #{employee.first_name&.first} #{employee.last_name}" if employee.first_name.present?
-      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
-      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total
-      rows << [sal_label, "-", "-", fn(sal_cur), fn(ytd[:gross])]
-    end
-
-    rows << ["Bonus", "-", "-", fn(payroll_item.bonus), fn(payroll_item.bonus)] if payroll_item.bonus.to_f > 0
-    rows << ["Paycheck Tips", "-", "-", fn(payroll_item.reported_tips), fn(payroll_item.reported_tips)] if payroll_item.reported_tips.to_f > 0
-
-    Array(payroll_item.custom_earnings).each do |ce|
-      amt = ce["amount"].to_f
-      rows << [stub_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
-    end
-
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless adjustment["treatment"] == "taxable_addition"
-
-      amt = adjustment["amount"].to_f
-      rows << [stub_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
-    end
-
-    payroll_field_entries_for("taxable_addition").each do |entry|
-      rows << [stub_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+    rows = PayrollEarningsYtdBreakdown.new(payroll_item).call.map do |earning|
+      [
+        stub_label(earning.label),
+        earning.hours.present? ? fh(earning.hours) : "-",
+        earning.rate.present? ? fn(earning.rate) : "-",
+        fn(earning.current),
+        fn(earning.ytd)
+      ]
     end
 
     rows << [
