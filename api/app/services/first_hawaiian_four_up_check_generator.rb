@@ -157,7 +157,6 @@ class FirstHawaiianFourUpCheckGenerator
 
   def draw_entry(pdf, entry, slot_bottom)
     draw_void_watermark(pdf, slot_bottom) if entry.voided || rehearsal_preview
-    draw_rehearsal_label(pdf, slot_bottom) if rehearsal_preview
 
     draw_text_field(pdf, :check_face, :date, slot_bottom, format_date(entry.date), align: :right)
     draw_text_field(pdf, :check_face, :payee, slot_bottom, entry.payee)
@@ -309,15 +308,6 @@ class FirstHawaiianFourUpCheckGenerator
             pdf.draw_text "VOID", at: [ cx - 78, cy - 20 ], style: :bold
           end
         end
-      end
-    end
-  end
-
-  def draw_rehearsal_label(pdf, slot_bottom)
-    pdf.save_graphics_state do
-      pdf.fill_color "B91C1C"
-      pdf.font_size(9) do
-        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 194, slot_bottom + SLOT_HEIGHT - 13 ], style: :bold
       end
     end
   end

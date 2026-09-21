@@ -78,12 +78,12 @@ module Api
           }
         end
 
-        # Read-only, non-negotiable proof for calculated or approved migration
+        # Read-only, VOID-marked proof for calculated or approved migration
         # rehearsals. This deliberately does not allocate check numbers, record
         # a print event, or make a rehearsal eligible for payment/commit.
         def rehearsal_preview_pdf
           unless @pay_period.company.migration_rehearsal? && %w[calculated approved].include?(@pay_period.status)
-            return render json: { error: "Mock checks are only available for calculated or approved migration rehearsals" }, status: :unprocessable_entity
+            return render json: { error: "Rehearsal checks are only available for calculated or approved migration rehearsals" }, status: :unprocessable_entity
           end
 
           items = @pay_period.payroll_items
@@ -108,7 +108,7 @@ module Api
           response.headers["Cache-Control"] = "private, no-store"
           pay_date_token = @pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           send_data pdf_data, type: "application/pdf", disposition: "attachment",
-            filename: "test_only_rehearsal_checks_#{pay_date_token}.pdf"
+            filename: "void_rehearsal_checks_#{pay_date_token}.pdf"
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
