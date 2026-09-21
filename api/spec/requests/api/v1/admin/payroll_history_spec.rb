@@ -204,6 +204,7 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
 
     expect(response).to have_http_status(:ok), response.body
     record = response.parsed_body.fetch("data").find { |entry| entry.fetch("id") == baseline.id }
+    expect(record.fetch("test_workspace_role")).to eq("baseline")
     expect(record.fetch("capabilities")).to include(
       "view" => true,
       "edit" => false,
@@ -213,6 +214,24 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
       "approve" => false,
       "commit" => false
     )
+  end
+
+  it "shows the operator when an organization administrator commits payroll for another client" do
+    home_company = create(:company, organization: company.organization)
+    organization_admin = create(
+      :user,
+      company: home_company,
+      organization: company.organization,
+      role: "admin",
+      name: "Organization Payroll Admin"
+    )
+    period = create(:pay_period, :committed, company: company, committed_by_id: organization_admin.id)
+
+    get "/api/v1/admin/payroll_history"
+
+    expect(response).to have_http_status(:ok), response.body
+    record = response.parsed_body.fetch("data").find { |entry| entry.fetch("id") == period.id }
+    expect(record.fetch("processed_by_name")).to eq("Organization Payroll Admin")
   end
 
   it "shows a paginated imported detail without exposing private source metadata" do

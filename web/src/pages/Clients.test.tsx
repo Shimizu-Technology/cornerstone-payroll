@@ -140,4 +140,22 @@ describe('Clients migration promotion', () => {
     await waitFor(() => expect(apiMocks.applyMigrationPromotion).toHaveBeenCalledWith(7, 'APPLY REHEARSAL TO LIVE CLIENT'));
     expect(await screen.findByText(/now has the verified rehearsal setup and both migrated payrolls/i)).toBeTruthy();
   });
+
+  it('presents a sealed rehearsal as read-only and does not offer promotion again', async () => {
+    apiMocks.list.mockResolvedValue({
+      companies: [
+        target,
+        {
+          ...rehearsal,
+          test_workspace_sealed_at: '2026-09-22T07:30:00Z',
+          test_workspace_manifest: {},
+        },
+      ],
+    });
+
+    render(<Clients />);
+
+    expect((await screen.findAllByRole('button', { name: /open read-only/i })).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /promote rehearsal/i })).toBeNull();
+  });
 });
