@@ -204,8 +204,7 @@ class CheckGenerator
   # CHECK FACE  – keep the top third clean like QuickBooks
   # -----------------------------------------------------------------------
   def draw_check_face(pdf, sect_bot, voided, rehearsal_preview: false)
-    draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
-    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
+    draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
     date_cfg = layout_field(:check_face, :date)
     payee_cfg = layout_field(:check_face, :payee)
     payee_address_cfg = layout_field(:check_face, :payee_address)
@@ -246,7 +245,6 @@ class CheckGenerator
         pdf.text resolve_memo_text
       end
     end
-
   end
 
   # -----------------------------------------------------------------------
@@ -351,8 +349,7 @@ class CheckGenerator
       stub_cfg: stub_cfg
     )
 
-    draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
-    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
+    draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
   end
 
   # -----------------------------------------------------------------------
@@ -758,26 +755,9 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # Non-negotiable rehearsal and void watermarks
+  # Void watermark
   # -----------------------------------------------------------------------
-  def draw_rehearsal_watermark(pdf, sect_bot)
-    center = [ PAGE_WIDTH / 2, sect_bot + SECTION_HEIGHT / 2 ]
-    pdf.save_graphics_state do
-      pdf.fill_color "B91C1C"
-      pdf.font_size(10) do
-        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 205, sect_bot + SECTION_HEIGHT - 13 ], style: :bold
-      end
-      pdf.transparent(0.28) do
-        pdf.font_size(55) do
-          pdf.rotate(20, origin: center) do
-            pdf.draw_text "VOID - TEST", at: [ 118, sect_bot + 100 ], style: :bold
-          end
-        end
-      end
-    end
-  end
-
-  def draw_void_watermark(pdf, sect_bot, sect_top)
+  def draw_void_watermark(pdf, sect_bot)
     cx = PAGE_WIDTH / 2
     cy = sect_bot + SECTION_HEIGHT / 2
     pdf.save_graphics_state do

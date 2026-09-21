@@ -201,6 +201,18 @@ RSpec.describe CheckGenerator do
     end
   end
 
+  describe "#generate_rehearsal_preview" do
+    it "marks the check face and both stubs only as VOID" do
+      expect(generator).to receive(:draw_void_watermark).exactly(3).times.and_call_original
+      void_draws = capture_void_draws
+
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(void_draws).to contain_exactly(*Array.new(3, hash_including(style: :bold)))
+      expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
+    end
+  end
+
   describe "#alignment_test" do
     subject(:pdf) { generator.alignment_test }
 
@@ -407,5 +419,14 @@ RSpec.describe CheckGenerator do
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_box_h)).to eq(48.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(-18.0)
     end
+  end
+
+  def capture_void_draws
+    void_draws = []
+    allow_any_instance_of(Prawn::Document).to receive(:draw_text).and_wrap_original do |method, text, options|
+      void_draws << options if text == "VOID"
+      method.call(text, options)
+    end
+    void_draws
   end
 end
