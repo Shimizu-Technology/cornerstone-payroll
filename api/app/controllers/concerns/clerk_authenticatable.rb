@@ -86,7 +86,7 @@ module ClerkAuthenticatable
   end
 
   def fetch_jwks
-    Rails.cache.fetch("clerk_jwks", expires_in: 1.hour) do
+    RequestPathCache.store.fetch("clerk_jwks", expires_in: 1.hour, skip_nil: true) do
       uri = URI("#{clerk_api_base}/.well-known/jwks.json")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
