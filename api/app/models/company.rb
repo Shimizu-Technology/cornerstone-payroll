@@ -33,6 +33,7 @@ class Company < ApplicationRecord
            dependent: :restrict_with_error
 
   has_many :departments, dependent: :destroy
+  has_many :company_assignments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy
   has_many :time_tracking_delegations, dependent: :destroy

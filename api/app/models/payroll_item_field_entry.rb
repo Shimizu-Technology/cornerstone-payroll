@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollItemFieldEntry < ApplicationRecord
+  include TrainingBaselineImmutable
   SOURCES = %w[employee_default manual import system].freeze
   REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 

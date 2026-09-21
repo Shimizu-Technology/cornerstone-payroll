@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useCallback, useId, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
-import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, GraduationCap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { companiesApi, ApiError } from '@/services/api';
-import type { CompanyListItem, CompanyFormData, MigrationRehearsalPreview } from '@/services/api';
+import type { CompanyListItem, CompanyFormData, MigrationRehearsalPreview, TrainingReplayPreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -60,6 +60,10 @@ function formatBytes(value = 0): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatShortDate(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 const isTestWorkspace = (company: CompanyListItem): boolean =>
@@ -114,6 +118,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
 export function Clients() {
   const navigate = useNavigate();
   const rehearsalNameId = useId();
+  const trainingNameId = useId();
   const { refreshCompanies, switchCompany } = useCompany();
   const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
@@ -135,6 +140,14 @@ export function Clients() {
   const [rehearsalConfirmed, setRehearsalConfirmed] = useState(false);
   const [rehearsalError, setRehearsalError] = useState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
+  const [trainingSourceId, setTrainingSourceId] = useState<number | null>(null);
+  const [trainingPreview, setTrainingPreview] = useState<TrainingReplayPreview | null>(null);
+  const [trainingName, setTrainingName] = useState('');
+  const [trainingAssignments, setTrainingAssignments] = useState<Record<number, 'operator' | 'reviewer' | 'workspace_admin'>>({});
+  const [loadingTraining, setLoadingTraining] = useState(false);
+  const [creatingTraining, setCreatingTraining] = useState(false);
+  const [trainingConfirmed, setTrainingConfirmed] = useState(false);
+  const [trainingError, setTrainingError] = useState<string | null>(null);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
   const testWorkspaces = companies.filter(isTestWorkspace);
   const groupedCompanies = [
@@ -166,6 +179,7 @@ export function Clients() {
   }, [companies, load]);
 
   const handleOpenRehearsal = async (company: CompanyListItem) => {
+    handleCloseTraining();
     setRehearsalSourceId(company.id);
     setRehearsalPreview(null);
     setRehearsalName(`${company.name} Migration Test`);
@@ -209,15 +223,69 @@ export function Clients() {
     }
   };
 
-  const handleRetryRehearsal = async (companyId: number) => {
-    setRetryingRehearsalId(companyId);
-    setError(null);
+  const handleOpenTraining = async (company: CompanyListItem) => {
+    handleCloseRehearsal();
+    setTrainingSourceId(company.id);
+    setTrainingPreview(null);
+    setTrainingName(`${company.name} Training Replay`);
+    setTrainingAssignments({});
+    setTrainingConfirmed(false);
+    setTrainingError(null);
+    setLoadingTraining(true);
     try {
-      await companiesApi.retryMigrationRehearsal(companyId);
+      const response = await companiesApi.trainingReplayPreview(company.id);
+      setTrainingPreview(response.training_replay);
+    } catch (err) {
+      setTrainingError(err instanceof Error ? err.message : 'Could not prepare the training preview');
+    } finally {
+      setLoadingTraining(false);
+    }
+  };
+
+  const handleCloseTraining = () => {
+    setTrainingSourceId(null);
+    setTrainingPreview(null);
+    setTrainingAssignments({});
+    setTrainingConfirmed(false);
+    setTrainingError(null);
+  };
+
+  const handleCreateTraining = async () => {
+    if (!trainingSourceId || !trainingPreview?.ready || !trainingConfirmed) return;
+    setCreatingTraining(true);
+    setTrainingError(null);
+    try {
+      await companiesApi.createTrainingReplay(trainingSourceId, {
+        name: trainingName.trim(),
+        acknowledgement: 'CREATE TRAINING REPLAY',
+        assignments: Object.entries(trainingAssignments).map(([userId, workspaceAccessLevel]) => ({
+          user_id: Number(userId),
+          workspace_access_level: workspaceAccessLevel,
+        })),
+      });
+      handleCloseTraining();
       await load();
       await refreshCompanies();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not retry the migration rehearsal');
+      setTrainingError(err instanceof Error ? err.message : 'Could not create the training replay');
+    } finally {
+      setCreatingTraining(false);
+    }
+  };
+
+  const handleRetryWorkspace = async (company: CompanyListItem) => {
+    setRetryingRehearsalId(company.id);
+    setError(null);
+    try {
+      if (company.test_workspace_purpose === 'training_replay') {
+        await companiesApi.retryTrainingReplay(company.id);
+      } else {
+        await companiesApi.retryMigrationRehearsal(company.id);
+      }
+      await load();
+      await refreshCompanies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not retry the test workspace copy');
     } finally {
       setRetryingRehearsalId(null);
     }
@@ -408,6 +476,129 @@ export function Clients() {
               <Button variant="outline" onClick={handleCloseRehearsal}>Cancel</Button>
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
                 <FlaskConical className="mr-2 h-4 w-4" />{creatingRehearsal ? 'Creating verified copy…' : 'Create migration test'}
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {trainingSourceId && (
+          <Card className="border-blue-200 p-4 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
+                  <GraduationCap className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-neutral-950">Create a payroll training replay</h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+                    Give a staff member two real payroll periods to process safely. Cornerstone copies the setup and earlier year-to-date history, then loads only the inputs from the latest two committed payrolls.
+                  </p>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={handleCloseTraining} aria-label="Close training replay setup">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {loadingTraining ? (
+              <p className="mt-6 text-sm text-neutral-500">Checking the latest payrolls…</p>
+            ) : trainingPreview && (
+              <div className="mt-6 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.active_employees} active · {trainingPreview.copy_summary.employees} total</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Locked YTD baseline</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.baseline_pay_periods} earlier pay periods</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Practice work</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.practice_pay_periods} payroll periods</p></div>
+                </div>
+
+                <div className="rounded-xl border border-neutral-200 p-4">
+                  <p className="text-sm font-semibold text-neutral-900">Payrolls the trainee will reproduce</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    {trainingPreview.practice_periods.map((period, index) => (
+                      <div key={period.id} className="rounded-lg bg-neutral-50 p-4 text-sm">
+                        <p className="font-semibold text-neutral-900">Practice {index + 1}</p>
+                        <p className="mt-2 text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
+                        <p className="mt-2 text-xs text-neutral-500">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees · <span className="capitalize">{period.status}</span></p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {trainingPreview.blockers.length > 0 && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                    <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Not ready to copy</div>
+                    <ul className="mt-2 list-disc space-y-2 pl-6">{trainingPreview.blockers.map(item => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                )}
+
+                {trainingPreview.ready && (
+                  <>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                      <div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Safe by design</div>
+                      <p className="mt-2 leading-6">The live client remains untouched. Expected results stay in the live benchmark and appear only in comparison after the trainee calculates. Commit, payment, check issuance, filing, reminders, and client communications remain blocked.</p>
+                    </div>
+
+                    <div className="max-w-xl">
+                      <label htmlFor={trainingNameId} className="mb-2 block text-sm font-medium text-neutral-700">Training workspace name</label>
+                      <Input id={trainingNameId} value={trainingName} onChange={event => setTrainingName(event.target.value)} />
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-900">Who should have access?</p>
+                      <p className="mt-2 text-sm text-neutral-600">Admins already have full access. Select the managers and accountants who should train or review.</p>
+                      <div className="mt-4 divide-y divide-neutral-200 rounded-xl border border-neutral-200">
+                        {trainingPreview.assignable_staff.map(staff => {
+                          const access = trainingAssignments[staff.id];
+                          return (
+                            <div key={staff.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+                              <label className="flex cursor-pointer items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(access)}
+                                  onChange={event => setTrainingAssignments(current => {
+                                    const next = { ...current };
+                                    if (event.target.checked) next[staff.id] = 'operator';
+                                    else delete next[staff.id];
+                                    return next;
+                                  })}
+                                  className="mt-0.5 h-4 w-4 rounded border-neutral-300"
+                                />
+                                <span><span className="block text-sm font-medium text-neutral-900">{staff.name}</span><span className="mt-1 block text-xs text-neutral-500">{staff.email} · {staff.role}</span></span>
+                              </label>
+                              {access && (
+                                <Select
+                                  aria-label={`Access level for ${staff.name}`}
+                                  value={access}
+                                  onChange={event => setTrainingAssignments(current => ({ ...current, [staff.id]: event.target.value as 'operator' | 'reviewer' | 'workspace_admin' }))}
+                                  className="sm:w-48"
+                                >
+                                  <option value="operator">Operator — process</option>
+                                  <option value="reviewer">Reviewer — review</option>
+                                  <option value="workspace_admin">Workspace admin</option>
+                                </Select>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+                      <input type="checkbox" checked={trainingConfirmed} onChange={event => setTrainingConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
+                      <span>I understand this workspace contains protected payroll and employee data and is limited to the selected payroll staff for 90 days.</span>
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+
+            {trainingError && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{trainingError}</div>}
+            <div className="mt-6 flex justify-end gap-4 border-t border-neutral-200 pt-4">
+              <Button variant="outline" onClick={handleCloseTraining}>Cancel</Button>
+              <Button
+                onClick={handleCreateTraining}
+                disabled={!trainingPreview?.ready || !trainingConfirmed || !trainingName.trim() || Object.keys(trainingAssignments).length === 0 || creatingTraining}
+              >
+                <GraduationCap className="mr-2 h-4 w-4" />{creatingTraining ? 'Creating training copy…' : 'Create training replay'}
               </Button>
             </div>
           </Card>
@@ -703,8 +894,13 @@ export function Clients() {
                               <FlaskConical className="mr-1 h-4 w-4" />Migration test
                             </Button>
                           )}
+                          {canManageClients && c.payroll_environment === 'live' && (
+                            <Button size="sm" variant="outline" onClick={() => handleOpenTraining(c)}>
+                              <GraduationCap className="mr-1 h-4 w-4" />Training replay
+                            </Button>
+                          )}
                           {canManageClients && c.migration_rehearsal_status === 'failed' && (
-                            <Button size="sm" variant="outline" onClick={() => handleRetryRehearsal(c.id)} disabled={retryingRehearsalId === c.id}>
+                            <Button size="sm" variant="outline" onClick={() => handleRetryWorkspace(c)} disabled={retryingRehearsalId === c.id}>
                               {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
                             </Button>
                           )}
@@ -790,8 +986,13 @@ export function Clients() {
                                 <FlaskConical className="mr-1 h-3.5 w-3.5" />Migration test
                               </Button>
                             )}
+                            {canManageClients && c.payroll_environment === 'live' && (
+                              <Button size="sm" variant="outline" onClick={() => handleOpenTraining(c)} className="text-xs">
+                                <GraduationCap className="mr-1 h-3.5 w-3.5" />Training replay
+                              </Button>
+                            )}
                             {canManageClients && c.migration_rehearsal_status === 'failed' && (
-                              <Button size="sm" variant="outline" onClick={() => handleRetryRehearsal(c.id)} disabled={retryingRehearsalId === c.id} className="text-xs">
+                              <Button size="sm" variant="outline" onClick={() => handleRetryWorkspace(c)} disabled={retryingRehearsalId === c.id} className="text-xs">
                                 {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
                               </Button>
                             )}

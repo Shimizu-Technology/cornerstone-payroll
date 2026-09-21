@@ -111,6 +111,9 @@ Rails.application.routes.draw do
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal
             post :retry_migration_rehearsal
+            get :training_replay_preview
+            post :training_replay, action: :create_training_replay
+            post :retry_training_replay
           end
         end
         resources :organizations, only: [ :index, :show, :create, :update ] do
