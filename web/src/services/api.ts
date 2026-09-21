@@ -417,6 +417,8 @@ export const employeesApi = {
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/reactivate`, { reactivation }),
+  activateAireOnboarding: (id: number) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/activate_aire_onboarding`, {}),
   workProfiles: (id: number) =>
     api.get<{ data: import('@/types').EmployeeWorkProfile[] }>(`/admin/employees/${id}/work_profiles`),
   createWorkProfile: (id: number, work_profile: import('@/types').EmployeeWorkProfileInput) =>

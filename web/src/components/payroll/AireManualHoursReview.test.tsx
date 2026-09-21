@@ -361,6 +361,40 @@ describe('AireManualHoursReview', () => {
     expect(within(card as HTMLElement).getByText(/0.00 unlinked · 6.10 linked, awaiting payment evidence/)).toBeTruthy();
   });
 
+  it('explains a historical regular/overtime difference without suggesting a second payment', async () => {
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      historical_classification_reviews: [{
+        id: 4, employee_id: 7, employee_name: 'Test Worker A', payroll_item_id: 200,
+        source_entry_count: 5, source_regular_hours: 27.2, source_overtime_hours: 1,
+        payroll_regular_hours: 28.2, payroll_overtime_hours: 0,
+        gross_wage_difference: 5, check_number: '1062', payment_effective_on: '2026-09-15',
+        status: 'complete', note: 'Historical classification difference',
+      }],
+    });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText('Historical pay classification to review')).toBeTruthy();
+    expect(screen.getByText('Test Worker A · check #1062')).toBeTruthy();
+    expect(screen.getByText('Hours marked paid')).toBeTruthy();
+    expect(screen.getByText(/For review only; not automatically paid or deducted/)).toBeTruthy();
+  });
+
+  it('does not offer a new paycheck link for offsetting classification corrections', async () => {
+    apiMocks.manualReview.mockResolvedValue({
+      ...review,
+      employees: [{ ...review.employees[0], regular_hours: -0.1, overtime_hours: 0.1, total_hours: 0,
+        adjustments: [{ ...review.employees[0].adjustments[0], source_kind: 'correction', total_hours: 0, regular_hours: -0.1, overtime_hours: 0.1 }] }],
+      exclusions: [],
+      summary: { ...review.summary, total_hours: 0, regular_hours: -0.1, overtime_hours: 0.1, correction_count: 1, exclusion_count: 0 },
+    });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+
+    expect(await screen.findByText(/No additional total hours. Review the regular\/OT reclassification/)).toBeTruthy();
+    expect(screen.getByText(/Offsetting correction; review the category or OT split/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Link to paycheck' })).toBeNull();
+  });
+
   it('retries multiple failed AIRE links from one review action', async () => {
     const user = userEvent.setup();
     apiMocks.retry.mockResolvedValue({ manual_allocation: { last_sync_error: null } });

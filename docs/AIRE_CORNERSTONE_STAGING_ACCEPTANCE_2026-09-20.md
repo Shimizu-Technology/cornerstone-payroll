@@ -28,6 +28,12 @@ production until Leon has tested the local UI and explicitly approves promotion.
    awaiting payment until actual delivery/settlement evidence exists. A failed
    AIRE sync remains visible and retryable. Historical issued allocations with
    no recorded payment date must say that the date is unknown; do not infer it.
+   For older delivered checks whose total hours match AIRE but whose regular/OT
+   split differs, use the guarded historical-classification path. It records
+   each exact AIRE entry as paid against the issued check and leaves a visible
+   wage-difference review note. It never creates another payment. Do not use it
+   when total hours differ, a check is missing, or the wage category cannot be
+   verified.
 5. After the AIRE cutoff, compare its verified final batch with the selected
    payroll's links and later payments of exact source entries. The final batch
    contains **residual hours at cutoff**: AIRE already subtracts active manual
@@ -79,6 +85,23 @@ regular pay dates differ from the earlier next-day assumption. It also shows
 older numeric-only employee links and historical paid hours that need explicit
 entry-level attribution. No names, credentials, or payroll amounts from that
 snapshot belong in this repository.
+
+The local rehearsal has linked exact historical AIRE entries to issued payroll
+checks. This is not a production migration: the source has continued changing
+since the snapshot. Before any production write, refresh both systems read-only,
+verify the employee identities and exact entries again, and run a private,
+fail-closed rollout manifest. Keep that manifest outside Git. Hold every
+unmatched entry for review; do not mark a whole employee or period paid merely
+because a check exists.
+
+The local historical-classification review is for equal-total, split-different
+hours only. Its saved note is a review queue, not authorization to issue an
+overtime correction. Entries with unequal totals, no matching check or payroll
+item, or an ambiguous wage category remain held and must not be imported as
+new pay merely because the older AIRE period still shows residual time. The
+private local reconciliation ledger lists the exact holds; it must not be
+committed to this repository. Snapshot-specific identity/rate backfills are
+also private local rehearsal inputs, not repository migrations.
 
 Before a production rollout, the payroll owners must attest the actual check
 delivery dates for historical adjustments and confirm any bank settlement

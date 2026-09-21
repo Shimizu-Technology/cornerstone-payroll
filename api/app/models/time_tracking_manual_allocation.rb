@@ -9,6 +9,8 @@ class TimeTrackingManualAllocation < ApplicationRecord
   belongs_to :payroll_item
   belongs_to :employee
   belongs_to :created_by, class_name: "User"
+  belongs_to :classification_reconciliation, class_name: "TimeTrackingClassificationReconciliation", optional: true,
+             inverse_of: :time_tracking_manual_allocations
 
   validates :source_user_uuid, :source_time_entry_id, :source_time_entry_version,
             :original_work_date, :reconciliation_note, :commit_command_id,
@@ -17,6 +19,7 @@ class TimeTrackingManualAllocation < ApplicationRecord
   validates :regular_hours, :overtime_hours, numericality: { greater_than_or_equal_to: 0 }
   validate :hours_are_positive
   validate :ownership_reconciles
+  validate :classification_reconciliation_ownership
 
   before_validation :assign_command_ids, on: :create
 
@@ -47,5 +50,17 @@ class TimeTrackingManualAllocation < ApplicationRecord
       employee.company_id == company_id
 
     errors.add(:base, "AIRE manual allocation must belong to the same company, period, and employee")
+  end
+
+  def classification_reconciliation_ownership
+    return unless classification_reconciliation
+    return if classification_reconciliation.company_id == company_id &&
+              classification_reconciliation.time_tracking_source_id == time_tracking_source_id &&
+              classification_reconciliation.pay_period_id == pay_period_id &&
+              classification_reconciliation.payroll_item_id == payroll_item_id &&
+              classification_reconciliation.employee_id == employee_id &&
+              classification_reconciliation.source_user_uuid == source_user_uuid
+
+    errors.add(:base, "Historical classification exception must belong to the same employee and check")
   end
 end

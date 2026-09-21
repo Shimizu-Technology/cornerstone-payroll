@@ -151,6 +151,17 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       source_user_id: "91",
       source_user_uuid: employee_uuid
     )
+    payroll_item = create(:payroll_item, :with_check, company: company, pay_period: unpublished,
+                                                      employee: employee, hours_worked: 2, overtime_hours: 0)
+    historical_review = TimeTrackingClassificationReconciliation.create!(
+      company: company, time_tracking_source: source, pay_period: unpublished,
+      payroll_item: payroll_item, employee: employee, created_by: admin,
+      source_user_uuid: employee_uuid, source_entries: [ { source_time_entry_id: "41" } ],
+      source_regular_hours: 1, source_overtime_hours: 1,
+      payroll_regular_hours: 2, payroll_overtime_hours: 0,
+      gross_wage_difference: 5, check_number: payroll_item.check_number,
+      payment_effective_on: Date.new(2026, 9, 15), note: "Issued historical check needs wage review"
+    )
     allow(client).to receive(:payroll_cockpit_manual_review).and_return(
       "start_date" => "2026-08-16",
       "end_date" => "2026-08-31",
@@ -201,6 +212,11 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     )
     expect(response.parsed_body.dig("exclusions", 0, "cornerstone", "employee_id")).to eq(employee.id)
     expect(response.parsed_body.dig("payment_attestations", 0, "cornerstone", "employee_id")).to eq(employee.id)
+    expect(response.parsed_body.dig("historical_classification_reviews", 0)).to include(
+      "id" => historical_review.id, "employee_name" => employee.full_name,
+      "source_overtime_hours" => 1.0, "payroll_overtime_hours" => 0.0,
+      "gross_wage_difference" => 5.0
+    )
   end
 
   it "matches a live AIRE permanent identity to one existing Cornerstone employee" do

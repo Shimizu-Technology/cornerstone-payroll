@@ -566,6 +566,31 @@ module TimeTracking
     end
 
     def wage_rate_for_category(category, active_rates, override_by_category_key)
+      # Solo is an AIRE source label, not a separate payroll earning type.
+      # Keep the approved Flight Hours rule even when an apply-time override
+      # was supplied; a missing/ambiguous Flight Hours rate blocks import.
+      if normalize_match_key(category_name(category)) == "solo"
+        flight_rates = active_rates.select { |rate| normalize_match_key(rate.label) == "flight hours" }
+        return flight_rates.first if flight_rates.one?
+
+        return nil
+      end
+
+      if normalize_match_key(category_name(category)) == "ground instruction"
+        ground_rates = active_rates.select { |rate| normalize_match_key(rate.label) == "ground instruction hours" }
+        return ground_rates.first if ground_rates.one?
+      end
+
+      if normalize_match_key(category_name(category)) == "aircraft maintenance"
+        maintenance_rates = active_rates.select { |rate| normalize_match_key(rate.label) == "maintenance" }
+        return maintenance_rates.first if maintenance_rates.one?
+      end
+
+      if active_rates.one? && normalize_match_key(active_rates.first.label) == "regular" &&
+         normalize_match_key(category_name(category)).in?(%w[other] + [ "admin duties", "aircraft maintenance" ])
+        return active_rates.first
+      end
+
       override_rate_id = category_override_keys(category).filter_map { |key| override_by_category_key[key] }.first
       return active_rates.find { |rate| rate.id == override_rate_id } if override_rate_id.present?
 

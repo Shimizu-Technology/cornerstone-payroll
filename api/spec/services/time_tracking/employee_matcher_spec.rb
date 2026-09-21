@@ -65,6 +65,25 @@ RSpec.describe TimeTracking::EmployeeMatcher do
       expect(match).to include(employee_id: employee.id, match_method: "saved_mapping", match_score: 1.0)
     end
 
+    it "keeps a terminated person's permanent mapping instead of suggesting an active namesake" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      terminated = create(:employee, company: company, status: "terminated", email: "former@example.com")
+      namesake = create(:employee, company: company, email: "new@example.com")
+      uuid = SecureRandom.uuid
+      TimeTrackingEmployeeMapping.create!(
+        company: company, time_tracking_source: source, employee: terminated,
+        source_user_id: "former-id", source_user_uuid: uuid
+      )
+
+      match = described_class.new(company: company, source: source).match(
+        "source_user_id" => "former-id", "source_user_uuid" => uuid,
+        "email" => namesake.email, "display_name" => namesake.full_name
+      )
+
+      expect(match).to include(employee_id: terminated.id, match_method: "inactive_mapping")
+    end
+
     it "blocks a numeric source ID and permanent UUID that resolve to different mappings" do
       company = create(:company)
       source = create(:time_tracking_source, company: company, source_type: "aire_services")

@@ -7,11 +7,11 @@ class EmployeeConfigurationReviewService
 
   ACKNOWLEDGEMENT = "MARK SETUP ITEM REVIEWED"
   SOURCE_REQUIRED_CODES = %w[
-    verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing
+    verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing aire_filing_details_missing
   ].freeze
   CERTIFICATION_CODES = EmployeeConfigurationReviewResolution::CERTIFICATION_ITEM_CODES
   REVIEWABLE_EMPLOYEE_FIELDS = %w[
-    hire_date address_line1 city state zip allowances w4_form_version
+    hire_date address_line1 city state zip ssn_encrypted w4_signed_on allowances w4_form_version
     employment_type salary_type pay_rate
   ].freeze
 
@@ -112,7 +112,7 @@ class EmployeeConfigurationReviewService
   end
 
   def authorize!
-    allowed = employee.configuration_source == "quickbooks_history" && actor&.payroll_access_allowed? &&
+    allowed = Employee::CONFIGURATION_SOURCES.include?(employee.configuration_source) && actor&.payroll_access_allowed? &&
       actor.can_access_company?(employee.company_id) && StaffRolePolicy.allowed?(actor, :payroll_operations)
     raise NotAuthorized, "Cornerstone payroll access is required" unless allowed
   end

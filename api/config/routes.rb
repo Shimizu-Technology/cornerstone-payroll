@@ -201,6 +201,7 @@ Rails.application.routes.draw do
           member do
             post :terminate
             post :reactivate
+            post :activate_aire_onboarding
             post :transition_tax_classification
             post :resolve_configuration_review_item
           end
