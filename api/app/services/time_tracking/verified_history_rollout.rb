@@ -216,7 +216,9 @@ module TimeTracking
     end
 
     def validate_entries!
-      by_uuid = identities.index_by { |row| row.fetch("source_user_uuid").downcase }
+      by_uuid = identities.index_by do |row|
+        TimeTrackingEmployeeMapping.normalize_uuid(row.fetch("source_user_uuid"))
+      end
       all_entries = entries + classification_cases.flat_map do |row|
         row.fetch("source_entries").map { |entry| entry.merge("payroll_item_id" => row.fetch("payroll_item_id"), "source_user_uuid" => row.fetch("source_user_uuid")) }
       end

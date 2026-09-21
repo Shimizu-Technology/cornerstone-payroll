@@ -107,6 +107,36 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     end
   end
 
+  it "rejects a private manifest with the wrong checksum or unsafe permissions" do
+    Tempfile.create("aire-rollout") do |file|
+      file.write(JSON.generate(manifest))
+      file.flush
+      File.chmod(0o600, file.path)
+      expect { described_class.load_file!(path: file.path, expected_sha256: "0" * 64) }
+        .to raise_error(described_class::Error, /checksum differs/)
+      File.chmod(0o644, file.path)
+      expect { described_class.load_file!(path: file.path, expected_sha256: Digest::SHA256.file(file.path).hexdigest) }
+        .to raise_error(described_class::Error, /private file/)
+    end
+  end
+
+  it "rejects a different actor and entries that bypass delivered-check evidence" do
+    wrong_actor = manifest.deep_dup
+    wrong_actor["actor_id"] = actor.id + 1
+    expect { described_class.new(manifest: wrong_actor, actor: actor).preview! }
+      .to raise_error(described_class::Error, /actor differs/)
+
+    missing_check = manifest.deep_dup
+    missing_check["delivered_checks"] = []
+    expect { described_class.new(manifest: missing_check, actor: actor).preview! }
+      .to raise_error(described_class::Error, /no verified delivered check/)
+
+    duplicate_path = manifest.deep_dup
+    duplicate_path["finalized_batch_entries"] = [ duplicate_path.fetch("issued_entries").first ]
+    expect { described_class.new(manifest: duplicate_path, actor: actor).preview! }
+      .to raise_error(described_class::Error, /belongs to two paths/)
+  end
+
   it "applies verified links and issued payment evidence idempotently" do
     rollout = described_class.new(manifest: manifest, actor: actor)
 

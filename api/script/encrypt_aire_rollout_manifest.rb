@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "base64"
+require "digest"
 require "json"
 require "openssl"
 
@@ -28,3 +29,5 @@ envelope = {
   ciphertext: Base64.strict_encode64(ciphertext)
 }
 File.write(destination, JSON.generate(envelope) + "\n")
+warn "Wrote #{destination}"
+warn "AIRE_ROLLOUT_MANIFEST_SHA256=#{Digest::SHA256.hexdigest(bytes)}"
