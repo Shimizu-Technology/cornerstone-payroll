@@ -3327,6 +3327,13 @@ export interface CompanyListItem {
   historical_payroll_enabled: boolean;
   client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
+  test_workspace?: boolean;
+  test_workspace_purpose?: 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
+  test_workspace_purpose_label?: string;
+  test_workspace_manifest?: Record<string, unknown>;
+  test_workspace_expires_at?: string | null;
+  test_workspace_archived_at?: string | null;
+  test_workspace_sealed_at?: string | null;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;
@@ -3665,13 +3672,18 @@ export interface CompanyAssignment {
   user_email: string;
   company_id: number;
   company_name: string;
+  test_workspace: boolean;
+  workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin' | null;
+  expires_at?: string | null;
+  granted_by_id?: number | null;
+  granted_by_name?: string | null;
   created_at: string;
 }
 
 export const companyAssignmentsApi = {
   list: (userId?: number) =>
     api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
-  create: (data: { user_id: number; company_id: number }) =>
+  create: (data: { user_id: number; company_id: number; workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin'; expires_at?: string }) =>
     api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
   remove: (id: number) =>
     api.delete(`/admin/company_assignments/${id}`),

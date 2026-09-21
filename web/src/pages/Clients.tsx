@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useId, type ReactElement } from 'react';
+import { Fragment, useState, useEffect, useCallback, useId, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -61,6 +61,15 @@ function formatBytes(value = 0): string {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const isTestWorkspace = (company: CompanyListItem): boolean =>
+  company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
+
+const testWorkspaceLabel = (company: CompanyListItem): string =>
+  company.test_workspace_purpose_label || 'Test workspace';
+
+const isReadOnlyWorkspace = (company: CompanyListItem): boolean =>
+  company.test_workspace_purpose === 'backup_snapshot' || Boolean(company.test_workspace_sealed_at);
 
 interface SettingToggleProps {
   checked: boolean;
@@ -126,6 +135,14 @@ export function Clients() {
   const [rehearsalConfirmed, setRehearsalConfirmed] = useState(false);
   const [rehearsalError, setRehearsalError] = useState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
+  const productionCompanies = companies.filter(company => !isTestWorkspace(company));
+  const testWorkspaces = companies.filter(isTestWorkspace);
+  const groupedCompanies = [
+    { label: 'Production clients', companies: productionCompanies },
+    { label: 'Test workspaces', companies: testWorkspaces },
+  ].filter(group => group.companies.length > 0);
+  const orderedCompanies = groupedCompanies.flatMap(group => group.companies);
+  const groupStartLabels = new Map(groupedCompanies.map(group => [group.companies[0].id, group.label]));
 
   const load = useCallback(async (quiet = false) => {
     try {
@@ -622,8 +639,14 @@ export function Clients() {
                 <MobileRecordCard className="text-center text-sm text-neutral-500">
                   {canManageClients ? 'No clients found. Add a new client to get started.' : 'No assigned clients found.'}
                 </MobileRecordCard>
-              ) : companies.map((c) => (
-                <MobileRecordCard key={c.id}>
+              ) : orderedCompanies.map((c) => (
+                <Fragment key={c.id}>
+                  {groupStartLabels.has(c.id) && (
+                    <h2 className="px-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                      {groupStartLabels.get(c.id)}
+                    </h2>
+                  )}
+                  <MobileRecordCard>
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
                       <Building2 className="h-5 w-5" />
@@ -632,8 +655,8 @@ export function Clients() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-neutral-950">{c.name}</p>
-                          {c.payroll_environment === 'migration_rehearsal' && (
-                            <p className="mt-0.5 text-xs font-semibold text-amber-700">Migration rehearsal · {c.migration_rehearsal_status}</p>
+                          {isTestWorkspace(c) && (
+                            <p className="mt-0.5 text-xs font-semibold text-amber-700">{testWorkspaceLabel(c)} · {c.migration_rehearsal_status}</p>
                           )}
                         </div>
                         <Badge variant={c.migration_rehearsal_status === 'pending' ? 'info' : c.migration_rehearsal_status === 'failed' ? 'danger' : c.active !== false ? 'success' : 'default'}>
@@ -641,7 +664,9 @@ export function Clients() {
                             ? 'Preparing'
                             : c.migration_rehearsal_status === 'failed'
                               ? 'Needs attention'
-                              : c.payroll_environment === 'migration_rehearsal'
+                              : isReadOnlyWorkspace(c)
+                                ? 'Read only'
+                                : isTestWorkspace(c)
                                 ? 'Ready to test'
                                 : c.active !== false ? 'Active' : 'Inactive'}
                         </Badge>
@@ -652,21 +677,23 @@ export function Clients() {
                       </div>
                       {canEditAssignedClients && (
                         <MobileCardActions>
-                          {c.payroll_environment === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && (
+                          {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                             <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)}>
-                              Open test <ArrowRight className="ml-1 h-4 w-4" />
+                              {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-4 w-4" />
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEdit(c.id)}
-                            disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
-                          >
-                            <Pencil className="mr-1 h-4 w-4" />
-                            {loadingEditId === c.id ? 'Loading...' : 'Edit'}
-                          </Button>
-                          {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                          {!isReadOnlyWorkspace(c) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEdit(c.id)}
+                              disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
+                            >
+                              <Pencil className="mr-1 h-4 w-4" />
+                              {loadingEditId === c.id ? 'Loading...' : 'Edit'}
+                            </Button>
+                          )}
+                          {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
                             </Button>
@@ -685,7 +712,8 @@ export function Clients() {
                       )}
                     </div>
                   </div>
-                </MobileRecordCard>
+                  </MobileRecordCard>
+                </Fragment>
               ))}
             </div>
             <Card className="hidden sm:block">
@@ -708,15 +736,23 @@ export function Clients() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  companies.map((c) => (
-                    <TableRow key={c.id}>
+                  orderedCompanies.map((c) => (
+                    <Fragment key={c.id}>
+                    {groupStartLabels.has(c.id) && (
+                      <TableRow className="bg-neutral-50/80 hover:bg-neutral-50/80">
+                        <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                          {groupStartLabels.get(c.id)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {c.payroll_environment === 'migration_rehearsal' ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-gray-400" />}
+                          {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-gray-400" />}
                           <div>
                             <span className="font-medium text-gray-900">{c.name}</span>
-                            {c.payroll_environment === 'migration_rehearsal' && (
-                              <p className="text-xs font-medium text-amber-700">Migration rehearsal · source: {c.migration_source_company_name || 'linked client'}</p>
+                            {isTestWorkspace(c) && (
+                              <p className="text-xs font-medium text-amber-700">{testWorkspaceLabel(c)} · source: {c.migration_source_company_name || 'linked client'}</p>
                             )}
                             {c.migration_rehearsal_status === 'failed' && c.migration_rehearsal_error && (
                               <p className="mt-1 max-w-md text-xs text-red-700">{c.migration_rehearsal_error}</p>
@@ -736,7 +772,7 @@ export function Clients() {
                         ) : c.migration_rehearsal_status === 'failed' ? (
                           <Badge variant="danger">Needs attention</Badge>
                         ) : c.active !== false ? (
-                          <Badge variant="success">{c.payroll_environment === 'migration_rehearsal' ? 'Ready to test' : 'Active'}</Badge>
+                          <Badge variant="success">{isReadOnlyWorkspace(c) ? 'Read only' : isTestWorkspace(c) ? 'Ready to test' : 'Active'}</Badge>
                         ) : (
                           <Badge variant="default">Inactive</Badge>
                         )}
@@ -744,9 +780,9 @@ export function Clients() {
                       {canEditAssignedClients && (
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {c.payroll_environment === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && (
+                            {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                               <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)} className="text-xs">
-                                Open test <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                                {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-3.5 w-3.5" />
                               </Button>
                             )}
                             {canManageClients && c.payroll_environment === 'live' && (
@@ -759,23 +795,25 @@ export function Clients() {
                                 {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
                               </Button>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleEdit(c.id)}
-                              className="text-xs"
-                              disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
-                            >
-                              {loadingEditId === c.id ? (
-                                <>
-                                  <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
-                                  Loading...
-                                </>
-                              ) : (
-                                <><Pencil className="w-3 h-3 mr-1" /> Edit</>
-                              )}
-                            </Button>
-                            {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                            {!isReadOnlyWorkspace(c) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(c.id)}
+                                className="text-xs"
+                                disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
+                              >
+                                {loadingEditId === c.id ? (
+                                  <>
+                                    <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                    Loading...
+                                  </>
+                                ) : (
+                                  <><Pencil className="w-3 h-3 mr-1" /> Edit</>
+                                )}
+                              </Button>
+                            )}
+                            {canManageClients && !isTestWorkspace(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                                 Time tracking
                               </Button>
@@ -784,6 +822,7 @@ export function Clients() {
                         </TableCell>
                       )}
                     </TableRow>
+                    </Fragment>
                   ))
                 )}
               </TableBody>

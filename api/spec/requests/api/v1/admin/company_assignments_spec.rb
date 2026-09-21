@@ -150,5 +150,31 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to eq("Company must belong to the user's organization")
     end
+
+    it "grants operator access when staff are assigned to a test workspace" do
+      workspace = create(
+        :company,
+        organization: organization,
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "training_replay",
+        migration_source_company: client_company,
+        migration_rehearsal_status: "ready"
+      )
+
+      put "/api/v1/admin/company_assignments/bulk_update",
+        params: { user_id: managed_user.id, company_ids: [ workspace.id ] }
+
+      expect(response).to have_http_status(:ok)
+      assignment = managed_user.company_assignments.reload.sole
+      expect(assignment).to have_attributes(
+        company_id: workspace.id,
+        workspace_access_level: "operator",
+        granted_by_id: admin_user.id
+      )
+      expect(response.parsed_body.dig("data", 0)).to include(
+        "test_workspace" => true,
+        "workspace_access_level" => "operator"
+      )
+    end
   end
 end

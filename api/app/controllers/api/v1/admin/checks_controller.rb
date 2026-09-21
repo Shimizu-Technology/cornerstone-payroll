@@ -82,8 +82,8 @@ module Api
         # rehearsals. This deliberately does not allocate check numbers, record
         # a print event, or make a rehearsal eligible for payment/commit.
         def rehearsal_preview_pdf
-          unless @pay_period.company.migration_rehearsal? && %w[calculated approved].include?(@pay_period.status)
-            return render json: { error: "Rehearsal checks are only available for calculated or approved migration rehearsals" }, status: :unprocessable_entity
+          unless @pay_period.company.test_workspace? && %w[calculated approved].include?(@pay_period.status)
+            return render json: { error: "VOID check previews are only available for calculated or approved test payrolls" }, status: :unprocessable_entity
           end
 
           items = @pay_period.payroll_items

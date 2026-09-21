@@ -223,7 +223,9 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(payload.fetch("assigned_companies")).to eq([
         {
           "id" => other_company.id,
-          "name" => other_company.name
+          "name" => other_company.name,
+          "test_workspace" => false,
+          "workspace_access_level" => nil
         }
       ])
       audit = AuditLog.find_by!(action: "users#updated", record_id: managed_user.id)

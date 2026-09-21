@@ -83,7 +83,7 @@ RSpec.describe User, type: :model do
       user = build(:user, company: rehearsal, organization: organization, role: "client")
 
       expect(user).not_to be_valid
-      expect(user.errors[:company]).to include("migration rehearsals are available only to payroll staff")
+      expect(user.errors[:company]).to include("test workspaces are available only to payroll staff")
     end
   end
 
