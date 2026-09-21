@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2037,6 +2037,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
     t.text "notes"
     t.boolean "parallel_run", default: false, null: false
     t.date "pay_date", null: false
+    t.bigint "promotion_source_pay_period_id"
     t.string "run_purpose", default: "regular", null: false
     t.string "run_purpose_source", default: "legacy_system_default", null: false
     t.bigint "source_pay_period_id"
@@ -2060,6 +2061,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
     t.index ["committed_by_id"], name: "index_pay_periods_on_committed_by_id"
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
     t.index ["company_id", "parallel_run", "pay_date"], name: "idx_pay_periods_parallel_runs"
+    t.index ["company_id", "promotion_source_pay_period_id"], name: "idx_pay_periods_promotion_source_unique", unique: true, where: "(promotion_source_pay_period_id IS NOT NULL)"
     t.index ["company_id", "run_purpose"], name: "idx_pay_periods_company_purpose"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
@@ -2073,6 +2075,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
     t.index ["cycle"], name: "index_pay_periods_on_cycle"
     t.index ["id", "company_id"], name: "idx_pay_periods_aire_calendar_tenant_key", unique: true
     t.index ["intake_stale_session_id"], name: "idx_pay_periods_intake_stale_session"
+    t.index ["promotion_source_pay_period_id"], name: "idx_pay_periods_promotion_source", where: "(promotion_source_pay_period_id IS NOT NULL)"
     t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
@@ -3467,6 +3470,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_010000) do
   add_foreign_key "pay_periods", "company_pay_schedules"
   add_foreign_key "pay_periods", "company_workweeks"
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
+  add_foreign_key "pay_periods", "pay_periods", column: "promotion_source_pay_period_id", on_delete: :restrict
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "test_workspace_source_pay_period_id", on_delete: :restrict

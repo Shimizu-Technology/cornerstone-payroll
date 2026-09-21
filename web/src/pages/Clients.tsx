@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
-import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, GraduationCap } from 'lucide-react';
+import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, GraduationCap, RefreshCw } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { companiesApi, ApiError } from '@/services/api';
-import type { CompanyListItem, CompanyFormData, MigrationRehearsalPreview, TrainingReplayPreview } from '@/services/api';
+import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, TrainingReplayPreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -64,6 +64,10 @@ function formatBytes(value = 0): string {
 
 function formatShortDate(value: string): string {
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatMoney(value: number | string): string {
+  return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
 const isTestWorkspace = (company: CompanyListItem): boolean =>
@@ -149,6 +153,14 @@ export function Clients() {
   const [trainingConfirmed, setTrainingConfirmed] = useState(false);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const trainingPreviewRequestIdRef = useRef(0);
+  const [promotionRehearsalId, setPromotionRehearsalId] = useState<number | null>(null);
+  const [promotionPreview, setPromotionPreview] = useState<MigrationPromotionPreview | null>(null);
+  const [loadingPromotion, setLoadingPromotion] = useState(false);
+  const [promotionAction, setPromotionAction] = useState<'backup' | 'apply' | null>(null);
+  const [promotionConfirmed, setPromotionConfirmed] = useState(false);
+  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionNotice, setPromotionNotice] = useState<string | null>(null);
+  const promotionPreviewRequestIdRef = useRef(0);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
   const testWorkspaces = companies.filter(isTestWorkspace);
   const groupedCompanies = [
@@ -179,8 +191,37 @@ export function Clients() {
     return () => window.clearTimeout(timer);
   }, [companies, load]);
 
+  const refreshPromotionPreview = useCallback(async (rehearsalId: number, quiet = false) => {
+    const requestId = ++promotionPreviewRequestIdRef.current;
+    if (!quiet) setLoadingPromotion(true);
+    setPromotionError(null);
+    try {
+      const response = await companiesApi.migrationPromotionPreview(rehearsalId);
+      if (promotionPreviewRequestIdRef.current === requestId) {
+        setPromotionPreview(response.migration_promotion);
+        setPromotionConfirmed(false);
+      }
+    } catch (err) {
+      if (promotionPreviewRequestIdRef.current === requestId) {
+        setPromotionError(err instanceof Error ? err.message : 'Could not check the rehearsal promotion');
+      }
+    } finally {
+      if (!quiet && promotionPreviewRequestIdRef.current === requestId) setLoadingPromotion(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!promotionRehearsalId || promotionPreview?.backup?.status !== 'pending') return;
+    const timer = window.setTimeout(() => {
+      void refreshPromotionPreview(promotionRehearsalId, true);
+      void load(true);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [load, promotionPreview, promotionRehearsalId, refreshPromotionPreview]);
+
   const handleOpenRehearsal = async (company: CompanyListItem) => {
     handleCloseTraining();
+    handleClosePromotion();
     setRehearsalSourceId(company.id);
     setRehearsalPreview(null);
     setRehearsalName(`${company.name} Migration Test`);
@@ -227,6 +268,7 @@ export function Clients() {
   const handleOpenTraining = async (company: CompanyListItem) => {
     const requestId = ++trainingPreviewRequestIdRef.current;
     handleCloseRehearsal();
+    handleClosePromotion();
     setTrainingSourceId(company.id);
     setTrainingPreview(null);
     setTrainingName(`${company.name} Training Replay`);
@@ -275,6 +317,58 @@ export function Clients() {
       setTrainingError(err instanceof Error ? err.message : 'Could not create the training replay');
     } finally {
       setCreatingTraining(false);
+    }
+  };
+
+  const handleOpenPromotion = (company: CompanyListItem) => {
+    handleCloseRehearsal();
+    handleCloseTraining();
+    setPromotionRehearsalId(company.id);
+    setPromotionPreview(null);
+    setPromotionConfirmed(false);
+    setPromotionError(null);
+    setPromotionNotice(null);
+    void refreshPromotionPreview(company.id);
+  };
+
+  const handleClosePromotion = () => {
+    promotionPreviewRequestIdRef.current += 1;
+    setPromotionRehearsalId(null);
+    setPromotionPreview(null);
+    setPromotionConfirmed(false);
+    setPromotionError(null);
+    setPromotionAction(null);
+  };
+
+  const handleCreatePromotionBackup = async () => {
+    if (!promotionRehearsalId || !promotionPreview?.ready_to_back_up || !promotionConfirmed) return;
+    setPromotionAction('backup');
+    setPromotionError(null);
+    try {
+      await companiesApi.createMigrationPromotionBackup(promotionRehearsalId, 'CREATE READ-ONLY BACKUP');
+      await Promise.all([load(true), refreshCompanies()]);
+      await refreshPromotionPreview(promotionRehearsalId, true);
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not create the clean-client backup');
+    } finally {
+      setPromotionAction(null);
+    }
+  };
+
+  const handleApplyPromotion = async () => {
+    if (!promotionRehearsalId || !promotionPreview?.ready_to_apply || !promotionConfirmed) return;
+    setPromotionAction('apply');
+    setPromotionError(null);
+    try {
+      const response = await companiesApi.applyMigrationPromotion(promotionRehearsalId, 'APPLY REHEARSAL TO LIVE CLIENT');
+      const targetName = response.company.name;
+      handleClosePromotion();
+      setPromotionNotice(`${targetName} now has the verified rehearsal setup and both migrated payrolls.`);
+      await Promise.all([load(), refreshCompanies()]);
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not apply the rehearsal to the clean client');
+    } finally {
+      setPromotionAction(null);
     }
   };
 
@@ -404,6 +498,12 @@ export function Clients() {
             {error}
           </div>
         )}
+        {promotionNotice && (
+          <div role="status" className="flex items-start justify-between gap-4 rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
+            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
+            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button>
+          </div>
+        )}
 
         {/* Add new button */}
         {canManageClients && !showForm && (
@@ -459,7 +559,7 @@ export function Clients() {
 
                 {rehearsalPreview.ready && (
                   <>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <div className="rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
                       <div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Built-in safety</div>
                       <p className="mt-1 leading-6">The original remains untouched. Practice runs are always parallel-only and cannot be committed. Check, payment, and official filing actions are blocked.</p>
                     </div>
@@ -537,7 +637,7 @@ export function Clients() {
 
                 {trainingPreview.ready && (
                   <>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <div className="rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
                       <div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Safe by design</div>
                       <p className="mt-2 leading-6">The live client remains untouched. Expected results stay in the live benchmark and appear only in comparison after the trainee calculates. Commit, payment, check issuance, filing, reminders, and client communications remain blocked.</p>
                     </div>
@@ -605,6 +705,146 @@ export function Clients() {
               >
                 <GraduationCap className="mr-2 h-4 w-4" />{creatingTraining ? 'Creating training copy…' : 'Create training replay'}
               </Button>
+            </div>
+          </Card>
+        )}
+
+        {promotionRehearsalId && (
+          <Card className="overflow-hidden border-primary-200">
+            <div className="border-b border-primary-100 bg-primary-50/70 p-4 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-800">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Verified migration handoff</p>
+                    <h3 className="mt-1 text-lg font-semibold tracking-tight text-neutral-950">Move rehearsal results to the clean client</h3>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+                      Cornerstone verifies the employee match and both payrolls, takes a sealed backup, then applies everything in one transaction. Nothing is sent, printed, filed, or synced externally.
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleClosePromotion} aria-label="Close migration handoff">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-6">
+              {loadingPromotion ? (
+                <div role="status" className="flex items-center gap-3 py-8 text-sm text-neutral-600">
+                  <RefreshCw className="h-4 w-4 animate-spin" />Verifying the rehearsal, clean client, and backup…
+                </div>
+              ) : promotionPreview && (
+                <div className="space-y-6">
+                  <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Rehearsal source</p>
+                      <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.rehearsal.name}</p>
+                      <p className="mt-1 text-sm text-neutral-600">
+                        {promotionPreview.rehearsal.employee_count} employees · {promotionPreview.source_periods.length} reviewed {promotionPreview.source_periods.length === 1 ? 'payroll' : 'payrolls'}
+                      </p>
+                    </div>
+                    <ArrowRight className="mx-auto hidden h-5 w-5 text-neutral-400 lg:block" />
+                    <div className="rounded-xl border border-primary-200 bg-primary-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-primary-800">Clean client destination</p>
+                      <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.target_company?.name || 'Missing clean client'}</p>
+                      <p className="mt-1 text-sm text-neutral-600">{promotionPreview.target_company?.employee_count ?? 0} employee records</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="text-xs text-neutral-500">Employees matched</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
+                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="text-xs text-neutral-500">New employees to add</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
+                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="text-xs text-neutral-500">Empty drafts replaced</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">Payrolls that will be recorded</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {promotionPreview.source_periods.map((period, index) => (
+                        <div key={period.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-neutral-900">Payroll {index + 1}</p>
+                            <Badge variant="default"><span className="capitalize">{period.status}</span></Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
+                          <p className="mt-1 text-xs text-neutral-500">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
+                          <div className="mt-3 flex gap-6 border-t border-neutral-200 pt-3 text-sm"><span><span className="text-neutral-500">Gross </span><strong>{formatMoney(period.gross_pay)}</strong></span><span><span className="text-neutral-500">Net </span><strong>{formatMoney(period.net_pay)}</strong></span></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className={`rounded-xl border p-4 ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'border-success-100 bg-success-50' : 'border-neutral-200 bg-neutral-50'}`}>
+                      <div className="flex items-start gap-3">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'bg-success-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}>1</div>
+                        <div>
+                          <p className="font-semibold text-neutral-950">Seal a clean-client backup</p>
+                          {promotionPreview.backup ? (
+                            <p className="mt-1 text-sm leading-6 text-neutral-600">
+                              {promotionPreview.backup.status === 'pending'
+                                ? 'The backup is being copied and verified now. This page will refresh automatically.'
+                                : promotionPreview.backup.status === 'failed'
+                                  ? 'The last backup did not finish. Create a replacement before applying.'
+                                  : promotionPreview.backup.current
+                                    ? `${promotionPreview.backup.name} is verified and read only.`
+                                    : 'The clean client changed after this backup. Create a fresh replacement.'}
+                            </p>
+                          ) : <p className="mt-1 text-sm leading-6 text-neutral-600">Required before the clean client can change. The backup keeps its current setup, archive, and empty draft.</p>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`rounded-xl border p-4 ${promotionPreview.ready_to_apply ? 'border-primary-200 bg-primary-50' : 'border-neutral-200 bg-neutral-50'}`}>
+                      <div className="flex items-start gap-3">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.ready_to_apply ? 'bg-primary-700 text-white' : 'bg-neutral-200 text-neutral-700'}`}>2</div>
+                        <div>
+                          <p className="font-semibold text-neutral-950">Apply setup and both payrolls</p>
+                          <p className="mt-1 text-sm leading-6 text-neutral-600">Replaces only the verified setup and matching empty draft, records both payrolls, rebuilds YTD totals, and seals the rehearsal.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {promotionPreview.blockers.length > 0 && !promotionPreview.ready_to_back_up && (
+                    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                      <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Action required</div>
+                      <ul className="mt-2 list-disc space-y-1 pl-6">{promotionPreview.blockers.map(item => <li key={item}>{item}</li>)}</ul>
+                    </div>
+                  )}
+
+                  {(promotionPreview.ready_to_back_up || promotionPreview.ready_to_apply) && (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-300 p-4 text-sm text-neutral-700">
+                      <input type="checkbox" checked={promotionConfirmed} onChange={event => setPromotionConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
+                      <span>{promotionPreview.ready_to_apply
+                        ? `I reviewed the employee match, both payroll totals, and the verified backup. Apply this rehearsal to ${promotionPreview.target_company?.name}.`
+                        : `Create a sealed, read-only backup of ${promotionPreview.target_company?.name} before any migration data is applied.`}</span>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {promotionError && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{promotionError}</div>}
+              <div className="mt-6 flex flex-col-reverse gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:justify-between">
+                <Button variant="outline" onClick={handleClosePromotion}>Cancel</Button>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button variant="outline" onClick={() => void refreshPromotionPreview(promotionRehearsalId)} disabled={loadingPromotion || Boolean(promotionAction)}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loadingPromotion ? 'animate-spin' : ''}`} />Refresh verification
+                  </Button>
+                  {promotionPreview?.ready_to_back_up && (
+                    <Button onClick={handleCreatePromotionBackup} disabled={!promotionConfirmed || Boolean(promotionAction)}>
+                      <ShieldCheck className="mr-2 h-4 w-4" />{promotionAction === 'backup' ? 'Creating backup…' : promotionPreview.backup ? 'Replace backup' : 'Create read-only backup'}
+                    </Button>
+                  )}
+                  {promotionPreview?.ready_to_apply && (
+                    <Button onClick={handleApplyPromotion} disabled={!promotionConfirmed || Boolean(promotionAction)}>
+                      <ArrowRight className="mr-2 h-4 w-4" />{promotionAction === 'apply' ? 'Applying verified migration…' : 'Apply to clean client'}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           </Card>
         )}
@@ -878,6 +1118,11 @@ export function Clients() {
                               {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-4 w-4" />
                             </Button>
                           )}
+                          {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                            <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)}>
+                              <ShieldCheck className="mr-1 h-4 w-4" />Promote rehearsal
+                            </Button>
+                          )}
                           {!isReadOnlyWorkspace(c) && (
                             <Button
                               size="sm"
@@ -984,6 +1229,11 @@ export function Clients() {
                             {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                               <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)} className="text-xs">
                                 {isReadOnlyWorkspace(c) ? 'Open backup' : 'Open test'} <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                              <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)} className="text-xs">
+                                <ShieldCheck className="mr-1 h-3.5 w-3.5" />Promote rehearsal
                               </Button>
                             )}
                             {canManageClients && c.payroll_environment === 'live' && (

@@ -28,10 +28,19 @@ class PayPeriod < ApplicationRecord
              class_name: "PayPeriod",
              optional: true,
              inverse_of: :training_replay_copies
+  belongs_to :promotion_source_pay_period,
+             class_name: "PayPeriod",
+             optional: true,
+             inverse_of: :promoted_live_copies
   has_many :training_replay_copies,
            class_name: "PayPeriod",
            foreign_key: :test_workspace_source_pay_period_id,
            inverse_of: :test_workspace_source_pay_period,
+           dependent: :restrict_with_error
+  has_many :promoted_live_copies,
+           class_name: "PayPeriod",
+           foreign_key: :promotion_source_pay_period_id,
+           inverse_of: :promotion_source_pay_period,
            dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
@@ -120,6 +129,7 @@ class PayPeriod < ApplicationRecord
   validate :intake_stale_session_matches_period
   validate :test_workspace_cannot_be_committed
   validate :training_replay_lineage_is_valid
+  validate :promotion_source_is_valid
   validate :published_aire_cutoff_dates_are_immutable,
            on: :update,
            if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
@@ -440,6 +450,15 @@ class PayPeriod < ApplicationRecord
       test_workspace_source_pay_period&.company_id == company.migration_source_company_id
 
     errors.add(:test_workspace_source_pay_period, "must belong to the training workspace's live source client")
+  end
+
+  def promotion_source_is_valid
+    return if promotion_source_pay_period.blank?
+
+    source_company = promotion_source_pay_period.company
+    valid = company&.live_payroll? && source_company&.migration_rehearsal? &&
+      source_company.migration_source_company_id == company_id
+    errors.add(:promotion_source_pay_period, "must belong to this live client's migration rehearsal") unless valid
   end
 
   def prevent_training_baseline_mutation

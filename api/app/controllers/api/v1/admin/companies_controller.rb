@@ -20,10 +20,12 @@ module Api
         skip_before_action :enforce_test_workspace_access!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
           training_replay_preview create_training_replay retry_training_replay
+          migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
         skip_before_action :enforce_test_workspace_safety!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
           training_replay_preview create_training_replay retry_training_replay
+          migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
 
         # GET /api/v1/admin/companies
@@ -108,8 +110,7 @@ module Api
           ).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
         end
 
         # POST /api/v1/admin/companies/:id/retry_migration_rehearsal
@@ -118,8 +119,7 @@ module Api
           company = MigrationRehearsal::Retry.new(company: company, actor: current_user).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
         end
 
         # GET /api/v1/admin/companies/:id/training_replay_preview
@@ -140,8 +140,7 @@ module Api
           ).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
         end
 
         # POST /api/v1/admin/companies/:id/retry_training_replay
@@ -150,8 +149,44 @@ module Api
           company = TrainingReplay::Retry.new(company: company, actor: current_user).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
+        end
+
+        # GET /api/v1/admin/companies/:id/migration_promotion_preview
+        def migration_promotion_preview
+          rehearsal = accessible_company!
+          render json: { migration_promotion: MigrationPromotion::Preview.new(rehearsal: rehearsal).call }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/migration_promotion_backup
+        def create_migration_promotion_backup
+          rehearsal = accessible_company!
+          backup = MigrationPromotion::CreateBackup.new(
+            rehearsal: rehearsal,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement]
+          ).call
+          render json: { company: company_payload(backup, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/migration_promotion
+        def apply_migration_promotion
+          rehearsal = accessible_company!
+          periods = MigrationPromotion::Apply.new(
+            rehearsal: rehearsal,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement]
+          ).call
+          render json: {
+            company: company_payload(rehearsal.migration_source_company.reload, detailed: true),
+            promoted_pay_period_ids: periods.map(&:id)
+          }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
         end
 
         # PATCH/PUT /api/v1/admin/companies/:id
@@ -324,6 +359,11 @@ module Api
           raise ActiveRecord::RecordNotFound unless current_user&.can_access_company?(company.id)
 
           company
+        end
+
+        def render_service_errors(error)
+          messages = error.respond_to?(:record) && error.record ? error.record.errors.full_messages : [ error.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
         end
 
         def selected_locked_batch(company)

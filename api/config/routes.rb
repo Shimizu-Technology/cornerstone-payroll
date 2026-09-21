@@ -114,6 +114,9 @@ Rails.application.routes.draw do
             get :training_replay_preview
             post :training_replay, action: :create_training_replay
             post :retry_training_replay
+            get :migration_promotion_preview
+            post :migration_promotion_backup, action: :create_migration_promotion_backup
+            post :migration_promotion, action: :apply_migration_promotion
           end
         end
         resources :organizations, only: [ :index, :show, :create, :update ] do
