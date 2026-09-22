@@ -45,6 +45,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [run, setRun] = useState<CheckPrintRun | null>(null);
   const [runs, setRuns] = useState<CheckPrintRun[]>([]);
   const [printerProfiles, setPrinterProfiles] = useState<PrinterProfile[]>([]);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [artifactVerified, setArtifactVerified] = useState(false);
@@ -93,6 +94,18 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       setLoading(false);
     }
   }, [payPeriodId]);
+
+  const loadPrinterProfiles = useCallback(async () => {
+    setProfileLoadError(null);
+    try {
+      const response = await printerProfilesApi.list();
+      setPrinterProfiles(response.printer_profiles);
+      return true;
+    } catch (err) {
+      setProfileLoadError(err instanceof Error ? err.message : 'Could not load printer profiles.');
+      return false;
+    }
+  }, []);
 
   useEffect(() => () => {
     previewRequestRef.current += 1;
@@ -233,16 +246,17 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     let cancelled = false;
     setRun(null);
     setRuns([]);
+    setPrinterProfiles([]);
+    setProfileLoadError(null);
     setArtifactVerified(false);
     setPreviewExpanded(false);
     revokePreview();
 
     void (async () => {
-      const [queueLoaded, profileResponse] = await Promise.all([
+      const [queueLoaded] = await Promise.all([
         loadQueue(),
-        printerProfilesApi.list().catch(() => null),
+        loadPrinterProfiles(),
       ]);
-      if (profileResponse && !cancelled) setPrinterProfiles(profileResponse.printer_profiles);
       if (!queueLoaded || cancelled) return;
       try {
         const response = await checksApi.printRuns(payPeriodId);
@@ -258,7 +272,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       cancelled = true;
       previewRequestRef.current += 1;
     };
-  }, [loadQueue, open, openSavedRun, payPeriodId, revokePreview]);
+  }, [loadPrinterProfiles, loadQueue, open, openSavedRun, payPeriodId, revokePreview]);
 
   const generate = async () => {
     const printerProfile = queue?.meta.printer_profile;
@@ -465,6 +479,20 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                   <p className="mt-2 text-xs leading-5 text-slate-500">
                     Your choice applies only to you and follows you across clients using this stock.
                   </p>
+                  {profileLoadError && (
+                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+                      <p>{profileLoadError}</p>
+                      <Button
+                        className="mt-2"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void loadPrinterProfiles()}
+                        disabled={Boolean(action)}
+                      >
+                        Retry printer profiles
+                      </Button>
+                    </div>
+                  )}
                   {!queue?.meta.printer_profile && (
                     <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
                       Select a calibrated profile before generating the official package.

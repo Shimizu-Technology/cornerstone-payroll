@@ -562,7 +562,10 @@ module Api
 
           Company.transaction do
             if calibration_attributes.present? && selected_profile.present?
-              if expected_profile_version.present? && selected_profile.lock_version != expected_profile_version.to_i
+              if expected_profile_version.blank?
+                raise ArgumentError, "Reload the selected printer profile before saving calibration"
+              end
+              if selected_profile.lock_version != expected_profile_version.to_i
                 raise ActiveRecord::StaleObjectError.new(selected_profile, "update")
               end
               selected_profile.update!(calibration_attributes.merge(updated_by: current_user))

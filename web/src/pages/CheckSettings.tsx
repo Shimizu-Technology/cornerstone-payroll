@@ -17,6 +17,7 @@ import { CheckLayoutEditor } from '@/components/checks/CheckLayoutEditor';
 import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile, PrinterProfileSelection } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
+import { selectedPrinterProfileLockVersion } from './checkSettingsPrinterProfile';
 
 type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
 
@@ -371,10 +372,12 @@ export function CheckSettingsPage() {
         check_memo_template: memoTemplate.trim() || null,
         auto_create_fit_check: autoCreateFitCheck,
         require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
-        printer_profile_lock_version: activeProfile?.lock_version
-          ?? (settings?.active_printer_profile_id === activePrinterProfileId
-            ? settings.active_printer_profile_lock_version
-            : null),
+        printer_profile_lock_version: selectedPrinterProfileLockVersion(
+          settings?.active_printer_profile_id,
+          settings?.active_printer_profile_lock_version,
+          activePrinterProfileId,
+          activeProfile?.lock_version
+        ),
         check_layout_config: parsedLayoutOverrides,
       });
       applySettingsToForm(data.check_settings);

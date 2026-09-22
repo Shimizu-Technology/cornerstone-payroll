@@ -1004,6 +1004,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
           check_offset_y: "0.000",
           check_stock_type: "bottom_check",
           check_layout_config: {},
+          printer_profile_lock_version: profile.lock_version,
           bank_name: "Bank of Guam",
           auto_create_fit_check: true
         }
@@ -1034,7 +1035,8 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         params: {
           check_offset_x: "0.125",
           check_offset_y: "-0.050",
-          check_layout_config: { check_face: { date: { x: 481.0 } } }
+          check_layout_config: { check_face: { date: { x: 481.0 } } },
+          printer_profile_lock_version: profile.lock_version
         }
 
       expect(response).to have_http_status(:ok)
@@ -1043,6 +1045,25 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(profile.check_layout_config.dig("check_face", "date", "x")).to eq(481.0)
       expect(company.reload.check_offset_x.to_d).to eq(0.to_d)
       expect(response.parsed_body.dig("check_settings", "check_offset_x").to_d).to eq(0.125.to_d)
+    end
+
+    it "requires the reviewed profile version before saving shared calibration" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Versioned Printer",
+        check_stock_type: company.check_stock_type,
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      UserPrinterProfileSelection.create!(user: admin_user, organization: company.organization,
+        check_stock_type: company.check_stock_type, printer_profile: profile)
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: { check_offset_x: "0.125", check_offset_y: "0.000", check_layout_config: {} }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").join).to include("Reload the selected printer profile")
+      expect(profile.reload.check_offset_x.to_d).to eq(0.to_d)
     end
 
     it "rejects calibration saved against an outdated shared profile" do
