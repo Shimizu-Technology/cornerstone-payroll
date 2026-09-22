@@ -4,7 +4,6 @@ require "rails_helper"
 require "csv"
 require "pdf/reader"
 require "roo"
-require "zip"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
   include ActiveSupport::Testing::TimeHelpers
