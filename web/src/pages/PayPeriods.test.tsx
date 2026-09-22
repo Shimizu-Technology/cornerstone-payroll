@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 
@@ -99,13 +99,26 @@ describe('PayPeriods test workspaces', () => {
   it('guides training replays oldest-first without offering extra pay periods', async () => {
     apiMocks.activeCompany = { id: 11, test_workspace_purpose: 'training_replay' };
     apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([
-      { ...editablePeriod, id: 10, key: 'native:10', status: 'approved', test_workspace_role: 'baseline' },
+      {
+        ...editablePeriod,
+        id: 10,
+        key: 'native:10',
+        start_date: '2026-08-10',
+        end_date: '2026-08-23',
+        pay_date: '2026-08-27',
+        status: 'approved',
+        test_workspace_role: 'baseline',
+      },
       editablePeriod,
     ]));
 
     render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
 
     expect(await screen.findByText('Complete the practice payrolls from oldest to newest')).toBeTruthy();
+    expect(screen.getByText('Complete Practice 1')).toBeTruthy();
+    expect(screen.getByText('Complete Practice 2')).toBeTruthy();
+    expect(screen.getByText(/Training payrolls are never committed/i)).toBeTruthy();
+    expect(screen.queryByText('Payroll Workflow')).toBeNull();
     await waitFor(() => expect(apiMocks.payrollHistoryList).toHaveBeenCalledWith(
       expect.objectContaining({ direction: 'asc', sort: 'pay_period' }),
       11,
@@ -113,6 +126,23 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
     expect(screen.getAllByText('Locked baseline')).toHaveLength(2);
     expect(screen.getAllByText('Practice payroll')).toHaveLength(2);
+    const baselineRow = screen.getByRole('row', { name: /Aug 10 - 23, 2026/ });
+    const practiceRow = screen.getByRole('row', { name: /Aug 24 - Sep 6, 2026/ });
+    const baselineCard = screen.getByRole('group', { name: 'Pay period Aug 10 - 23, 2026' });
+    const practiceCard = screen.getByRole('group', { name: 'Pay period Aug 24 - Sep 6, 2026' });
+
+    for (const container of [baselineRow, baselineCard]) {
+      expect(within(container).getByRole('button', { name: 'View' })).toBeTruthy();
+      expect(within(container).queryByRole('button', { name: 'Edit' })).toBeNull();
+      expect(within(container).queryByRole('button', { name: 'Delete' })).toBeNull();
+      expect(within(container).queryByRole('button', { name: /enter hours/i })).toBeNull();
+    }
+    for (const container of [practiceRow, practiceCard]) {
+      expect(within(container).getByRole('button', { name: 'Edit' })).toBeTruthy();
+      expect(within(container).getByRole('button', { name: 'Delete' })).toBeTruthy();
+      expect(within(container).getByRole('button', { name: /enter hours/i })).toBeTruthy();
+    }
+    expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   });
 
   it('suppresses every mutation action in both read-only row layouts', async () => {

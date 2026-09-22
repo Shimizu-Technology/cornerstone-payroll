@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { HelpTip } from '@/components/ui/help-tip';
+import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
@@ -46,6 +48,7 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
 interface PayPeriodMobileCardProps {
   period: PayrollHistoryRecord;
   readOnly: boolean;
+  commitBlocked: boolean;
   actionInFlight: string | null;
   onView: () => void;
   onEdit: () => void;
@@ -59,6 +62,7 @@ interface PayPeriodMobileCardProps {
 function PayPeriodMobileCard({
   period,
   readOnly,
+  commitBlocked,
   actionInFlight,
   onView,
   onEdit,
@@ -71,7 +75,8 @@ function PayPeriodMobileCard({
   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
 
   return (
-    <MobileRecordCard>
+    <div role="group" aria-label={`Pay period ${formatDateRange(period.start_date, period.end_date)}`}>
+      <MobileRecordCard>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
@@ -98,9 +103,9 @@ function PayPeriodMobileCard({
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
           {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
-        {period.test_workspace_role === 'baseline' && <Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked baseline</Badge>}
-        {period.test_workspace_role === 'practice' && <Badge variant="info">Practice payroll</Badge>}
-        {!readOnly && period.parallel_run && <Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge>}
+        {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+        {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
+        {!readOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -122,10 +127,11 @@ function PayPeriodMobileCard({
             {period.capabilities.approve && <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>}
           </>
         )}
-        {!readOnly && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+        {!readOnly && !commitBlocked && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
         {readOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
       </MobileCardActions>
-    </MobileRecordCard>
+      </MobileRecordCard>
+    </div>
   );
 }
 
@@ -713,16 +719,9 @@ export function PayPeriods() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {trainingReplayWorkspace && (
-          <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950">
-            <div className="flex items-start gap-4">
-              <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" aria-hidden="true" />
-              <div>
-                <p className="font-semibold">Complete the practice payrolls from oldest to newest</p>
-                <p className="mt-1 text-sm leading-6 text-blue-900">
-                  Review the locked baseline first, then finish each practice payroll in date order. Recalculating an earlier payroll resets later practice results so year-to-date totals stay correct.
-                </p>
-              </div>
-            </div>
+          <div className="mb-4">
+            <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
+            <TrainingWorkflowGuide />
           </div>
         )}
         {goLiveGate?.comparison_only && (
@@ -858,7 +857,8 @@ export function PayPeriods() {
                   <PayPeriodMobileCard
                     key={period.key}
                     period={period}
-                    readOnly={readOnlyWorkspace}
+                    readOnly={readOnlyWorkspace || period.test_workspace_role === 'baseline'}
+                    commitBlocked={trainingReplayWorkspace || Boolean(period.parallel_run)}
                     actionInFlight={actionInFlight}
                     onView={() => navigate(recordDestination(period, 'overview'))}
                     onEnterHours={() => navigate(recordDestination(period, 'work'))}
@@ -889,6 +889,8 @@ export function PayPeriods() {
                 {visiblePayPeriods.map((period, index) => {
                   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
                   const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                  const periodReadOnly = readOnlyWorkspace || period.test_workspace_role === 'baseline';
+                  const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
@@ -914,8 +916,8 @@ export function PayPeriods() {
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
                             {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
                           </Badge>
-                          {period.test_workspace_role === 'baseline' && <Badge variant="warning">Locked baseline</Badge>}
-                          {period.test_workspace_role === 'practice' && <Badge variant="info">Practice payroll</Badge>}
+                          {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+                          {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
@@ -974,11 +976,11 @@ export function PayPeriods() {
                             >
                               View
                             </button>
-                            {!readOnlyWorkspace && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!readOnlyWorkspace && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
-                          {!readOnlyWorkspace && period.capabilities.enter_hours && (
+                          {!periodReadOnly && period.capabilities.enter_hours && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -987,7 +989,7 @@ export function PayPeriods() {
                               Enter Hours
                             </Button>
                           )}
-                          {!readOnlyWorkspace && period.capabilities.run && period.status === 'calculated' && (
+                          {!periodReadOnly && period.capabilities.run && period.status === 'calculated' && (
                             <div className="flex items-center gap-1.5">
                               <Button
                                 variant="outline"
@@ -1006,8 +1008,8 @@ export function PayPeriods() {
                               </Button>}
                             </div>
                           )}
-                          {!readOnlyWorkspace && period.parallel_run && <Badge variant="info">Parallel · cannot commit</Badge>}
-                          {!readOnlyWorkspace && period.capabilities.commit && (
+                          {!periodReadOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
+                          {!periodReadOnly && !commitBlocked && period.capabilities.commit && (
                             <Button
                               size="sm"
                               variant="primary"
@@ -1017,7 +1019,7 @@ export function PayPeriods() {
                               Commit
                             </Button>
                           )}
-                          {readOnlyWorkspace && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
+                          {periodReadOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1041,7 +1043,7 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        {!readOnlyWorkspace && <Card className="mt-8">
+        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-8">
           <div className="p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">

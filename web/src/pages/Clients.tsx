@@ -12,6 +12,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { HelpTip } from '@/components/ui/help-tip';
+import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { companiesApi, ApiError } from '@/services/api';
 import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, TrainingReplayPreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -142,6 +144,8 @@ export function Clients() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
+  const [workspaceBuilderOpen, setWorkspaceBuilderOpen] = useState(false);
+  const [workspaceBuilderSourceId, setWorkspaceBuilderSourceId] = useState<number | null>(null);
   const [rehearsalSourceId, setRehearsalSourceId] = useState<number | null>(null);
   const [rehearsalPreview, setRehearsalPreview] = useState<MigrationRehearsalPreview | null>(null);
   const [rehearsalName, setRehearsalName] = useState('');
@@ -226,6 +230,7 @@ export function Clients() {
   }, [load, promotionPreview, promotionRehearsalId, refreshPromotionPreview]);
 
   const handleOpenRehearsal = async (company: CompanyListItem) => {
+    setWorkspaceBuilderOpen(false);
     handleCloseTraining();
     handleClosePromotion();
     setRehearsalSourceId(company.id);
@@ -272,6 +277,7 @@ export function Clients() {
   };
 
   const handleOpenTraining = async (company: CompanyListItem) => {
+    setWorkspaceBuilderOpen(false);
     const requestId = ++trainingPreviewRequestIdRef.current;
     handleCloseRehearsal();
     handleClosePromotion();
@@ -327,6 +333,7 @@ export function Clients() {
   };
 
   const handleOpenPromotion = (company: CompanyListItem) => {
+    handleCloseWorkspaceBuilder();
     handleCloseRehearsal();
     handleCloseTraining();
     setPromotionRehearsalId(company.id);
@@ -402,13 +409,37 @@ export function Clients() {
   };
 
   const handleAddNew = () => {
+    setWorkspaceBuilderOpen(false);
+    handleCloseRehearsal();
+    handleCloseTraining();
+    handleClosePromotion();
     setEditingId(null);
     setForm({ ...emptyForm });
     setFormError(null);
     setShowForm(true);
   };
 
+  const handleOpenWorkspaceBuilder = () => {
+    setShowForm(false);
+    handleCloseRehearsal();
+    handleCloseTraining();
+    handleClosePromotion();
+    setWorkspaceBuilderSourceId(productionCompanies.length === 1 ? productionCompanies[0].id : null);
+    setWorkspaceBuilderOpen(true);
+  };
+
+  const handleCloseWorkspaceBuilder = () => {
+    setWorkspaceBuilderOpen(false);
+    setWorkspaceBuilderSourceId(null);
+  };
+
+  const workspaceBuilderSource = productionCompanies.find(company => company.id === workspaceBuilderSourceId);
+
   const handleEdit = async (id: number) => {
+    handleCloseWorkspaceBuilder();
+    handleCloseRehearsal();
+    handleCloseTraining();
+    handleClosePromotion();
     setLoadingEditId(id);
     try {
       const data = await companiesApi.get(id);
@@ -511,14 +542,86 @@ export function Clients() {
           </div>
         )}
 
-        {/* Add new button */}
+        {/* Primary actions */}
         {canManageClients && !showForm && (
-          <div className="flex justify-end">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen} disabled={productionCompanies.length === 0}>
+                <FlaskConical className="mr-2 h-4 w-4" />
+                Create test workspace
+              </Button>
+              {productionCompanies.length === 0 && <p className="text-xs text-neutral-500">Add a production client before creating a test workspace.</p>}
+            </div>
             <Button onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-2" />
               Add New Client
             </Button>
           </div>
+        )}
+
+        {workspaceBuilderOpen && (
+          <Card className="overflow-hidden border-primary-200">
+            <div className="border-b border-primary-100 bg-primary-50/70 p-4 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Guided setup</p>
+                  <h2 className="mt-2 text-lg font-semibold tracking-tight text-neutral-950">Create a test workspace</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">Choose the live client first, then choose what the workspace is for. The live client remains unchanged.</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleCloseWorkspaceBuilder} aria-label="Close test workspace setup">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-700 text-xs font-bold text-white">1</span>
+                  <label htmlFor="test-workspace-source" className="text-sm font-semibold text-neutral-900">Choose a production client</label>
+                </div>
+                <Select
+                  id="test-workspace-source"
+                  className="mt-4"
+                  value={workspaceBuilderSourceId ?? ''}
+                  onChange={event => setWorkspaceBuilderSourceId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  <option value="">Select a production client</option>
+                  {productionCompanies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
+                </Select>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">Only production clients appear here. Existing test workspaces and backups cannot be copied again.</p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${workspaceBuilderSource ? 'bg-primary-700 text-white' : 'bg-neutral-200 text-neutral-500'}`}>2</span>
+                  <p className="text-sm font-semibold text-neutral-900">Choose the goal</p>
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    disabled={!workspaceBuilderSource}
+                    onClick={() => workspaceBuilderSource && void handleOpenTraining(workspaceBuilderSource)}
+                    className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <GraduationCap aria-hidden="true" className="h-5 w-5 text-primary-700" />
+                    <span className="mt-4 block font-semibold text-neutral-950">Practice completed payrolls</span>
+                    <span className="mt-2 block text-xs font-semibold uppercase tracking-wide text-primary-700">Training replay</span>
+                    <span className="mt-2 block text-sm leading-5 text-neutral-600">A trainee safely reproduces the latest two real payrolls and compares results.</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!workspaceBuilderSource}
+                    onClick={() => workspaceBuilderSource && void handleOpenRehearsal(workspaceBuilderSource)}
+                    className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-warning-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <FlaskConical aria-hidden="true" className="h-5 w-5 text-warning-700" />
+                    <span className="mt-4 block font-semibold text-neutral-950">Rehearse a migration</span>
+                    <span className="mt-2 block text-xs font-semibold uppercase tracking-wide text-warning-700">Migration test</span>
+                    <span className="mt-2 block text-sm leading-5 text-neutral-600">Review imported employee and payroll data in a protected working copy.</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Card>
         )}
 
         {rehearsalSourceId && (
@@ -617,8 +720,14 @@ export function Clients() {
               <div className="mt-6 space-y-4">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.active_employees} active · {trainingPreview.copy_summary.employees} total</p></div>
-                  <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Locked YTD baseline</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.baseline_pay_periods} earlier pay periods</p></div>
-                  <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Practice work</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.practice_pay_periods} payroll periods</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-4">
+                    <p className="flex items-center gap-2 text-xs text-neutral-500">Locked YTD baseline <HelpTip label="locked YTD baseline">Earlier committed payrolls are copied only to preserve accurate year-to-date totals. Trainees can view them but cannot edit them.</HelpTip></p>
+                    <p className="mt-2 font-semibold">{trainingPreview.copy_summary.baseline_pay_periods} earlier pay periods</p>
+                  </div>
+                  <div className="rounded-xl bg-neutral-50 p-4">
+                    <p className="flex items-center gap-2 text-xs text-neutral-500">Practice payrolls <HelpTip label="practice payrolls">The latest two committed payrolls are recreated with their original inputs but without their calculated results. The trainee processes them oldest first.</HelpTip></p>
+                    <p className="mt-2 font-semibold">{trainingPreview.copy_summary.practice_pay_periods} payroll periods</p>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-neutral-200 p-4">
@@ -656,6 +765,7 @@ export function Clients() {
                     <div>
                       <p className="text-sm font-semibold text-neutral-900">Who should have access?</p>
                       <p className="mt-2 text-sm text-neutral-600">Admins already have full access. Select the managers and accountants who should train or review.</p>
+                      <div className="mt-4"><WorkspaceRoleGuide /></div>
                       <div className="mt-4 divide-y divide-neutral-200 rounded-xl border border-neutral-200">
                         {trainingPreview.assignable_staff.map(staff => {
                           const access = trainingAssignments[staff.id];
@@ -761,9 +871,9 @@ export function Clients() {
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="text-xs text-neutral-500">Employees matched</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
-                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="text-xs text-neutral-500">New employees to add</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
-                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="text-xs text-neutral-500">Empty drafts replaced</p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
+                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
+                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
+                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
                   </div>
 
                   <div>
@@ -788,7 +898,7 @@ export function Clients() {
                       <div className="flex items-start gap-3">
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'bg-success-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}>1</div>
                         <div>
-                          <p className="font-semibold text-neutral-950">Seal a clean-client backup</p>
+                          <p className="flex items-center gap-2 font-semibold text-neutral-950">Seal a clean-client backup <HelpTip label="current backup">A backup is current only while the clean client remains unchanged after the backup was created. Any later change requires a fresh backup.</HelpTip></p>
                           {promotionPreview.backup ? (
                             <p className="mt-1 text-sm leading-6 text-neutral-600">
                               {promotionPreview.backup.status === 'pending'
@@ -1071,6 +1181,8 @@ export function Clients() {
           </Card>
         )}
 
+        {canManageClients && <TestWorkspaceGuide />}
+
         {/* Clients list */}
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-500">Loading clients…</div>
@@ -1143,16 +1255,6 @@ export function Clients() {
                           {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
-                            </Button>
-                          )}
-                          {canManageClients && c.payroll_environment === 'live' && (
-                            <Button size="sm" variant="outline" onClick={() => handleOpenRehearsal(c)}>
-                              <FlaskConical className="mr-1 h-4 w-4" />Migration test
-                            </Button>
-                          )}
-                          {canManageClients && c.payroll_environment === 'live' && (
-                            <Button size="sm" variant="outline" onClick={() => handleOpenTraining(c)}>
-                              <GraduationCap className="mr-1 h-4 w-4" />Training replay
                             </Button>
                           )}
                           {canManageClients && c.migration_rehearsal_status === 'failed' && (
@@ -1240,16 +1342,6 @@ export function Clients() {
                             {canManageClients && c.test_workspace_purpose === 'migration_rehearsal' && !c.test_workspace_sealed_at && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
                               <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)} className="text-xs">
                                 <ShieldCheck className="mr-1 h-3.5 w-3.5" />Promote rehearsal
-                              </Button>
-                            )}
-                            {canManageClients && c.payroll_environment === 'live' && (
-                              <Button size="sm" variant="outline" onClick={() => handleOpenRehearsal(c)} className="text-xs">
-                                <FlaskConical className="mr-1 h-3.5 w-3.5" />Migration test
-                              </Button>
-                            )}
-                            {canManageClients && c.payroll_environment === 'live' && (
-                              <Button size="sm" variant="outline" onClick={() => handleOpenTraining(c)} className="text-xs">
-                                <GraduationCap className="mr-1 h-3.5 w-3.5" />Training replay
                               </Button>
                             )}
                             {canManageClients && c.migration_rehearsal_status === 'failed' && (
