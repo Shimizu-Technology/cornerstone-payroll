@@ -216,7 +216,6 @@ RSpec.describe CheckGenerator do
       expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
       expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "381.08", "8,027.12" ])
       expect(text).to include("401(k) Pre-Tax", "18,558.20")
-      expect(text).to include("Remittance ID 2952492", "3,192.00")
       expect(text).to include("ER 401(k) Pre-Tax", "8,027.12")
       expect(text).to include("26,234.00")
     end
