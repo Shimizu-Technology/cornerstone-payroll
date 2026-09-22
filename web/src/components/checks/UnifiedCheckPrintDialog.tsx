@@ -11,7 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { checksApi } from '@/services/api';
+import { checksApi, printerProfilesApi } from '@/services/api';
+import type { PrinterProfile } from '@/services/api';
 import type { CheckPrintQueueItem, CheckPrintQueueResponse, CheckPrintRun } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
@@ -43,6 +44,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [startingSlot, setStartingSlot] = useState(1);
   const [run, setRun] = useState<CheckPrintRun | null>(null);
   const [runs, setRuns] = useState<CheckPrintRun[]>([]);
+  const [printerProfiles, setPrinterProfiles] = useState<PrinterProfile[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [artifactVerified, setArtifactVerified] = useState(false);
@@ -54,6 +56,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const compactPreviewRef = useRef<HTMLIFrameElement>(null);
   const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
   const previewRequestRef = useRef(0);
+
+  const compatibleProfiles = useMemo(
+    () => printerProfiles.filter((profile) => profile.check_stock_type === queue?.meta.check_stock_type),
+    [printerProfiles, queue?.meta.check_stock_type]
+  );
 
   const revokePreview = useCallback(() => {
     setPreviewUrl((url) => {
@@ -231,7 +238,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     revokePreview();
 
     void (async () => {
-      const queueLoaded = await loadQueue();
+      const [queueLoaded, profileResponse] = await Promise.all([
+        loadQueue(),
+        printerProfilesApi.list().catch(() => null),
+      ]);
+      if (profileResponse && !cancelled) setPrinterProfiles(profileResponse.printer_profiles);
       if (!queueLoaded || cancelled) return;
       try {
         const response = await checksApi.printRuns(payPeriodId);
@@ -250,7 +261,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }, [loadQueue, open, openSavedRun, payPeriodId, revokePreview]);
 
   const generate = async () => {
-    if (selectedItems.length === 0) return;
+    const printerProfile = queue?.meta.printer_profile;
+    if (selectedItems.length === 0 || !printerProfile) return;
     setAction('Generating an exact print package…');
     setError(null);
     try {
@@ -258,12 +270,28 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         payrollItemIds: selectedItems.filter((item) => item.source_type === 'payroll_item').map((item) => item.source_id),
         nonEmployeeCheckIds: selectedItems.filter((item) => item.source_type === 'non_employee_check').map((item) => item.source_id),
         startingSlot,
+        printerProfileId: printerProfile.id,
+        printerProfileLockVersion: printerProfile.lock_version,
       });
       setRun(response.check_print_run);
       setRuns((current) => [response.check_print_run, ...current]);
       await loadPreview(response.check_print_run);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate the print package.');
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const selectPrinterProfile = async (profileId: number) => {
+    if (!queue || run) return;
+    setAction('Selecting your printer profile…');
+    setError(null);
+    try {
+      await printerProfilesApi.selectForMe(queue.meta.check_stock_type, profileId);
+      await loadQueue({ preserveSelection: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not select the printer profile.');
     } finally {
       setAction(null);
     }
@@ -411,6 +439,40 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
           </section>
 
           <aside className="min-h-0 overflow-y-auto bg-slate-50 p-5">
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Printer profile</div>
+              {run ? (
+                <div className="mt-2">
+                  <p className="font-semibold text-slate-950">{run.printer_profile_name || 'Legacy company calibration'}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    This package keeps the exact calibration{run.printer_profile_lock_version !== null ? ` from profile version ${run.printer_profile_lock_version}` : ''} used when it was generated.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <select
+                    aria-label="Printer profile"
+                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                    value={queue?.meta.printer_profile?.id ?? ''}
+                    onChange={(event) => void selectPrinterProfile(Number(event.target.value))}
+                    disabled={!queue || Boolean(action)}
+                  >
+                    <option value="" disabled>Select a calibrated printer…</option>
+                    {compatibleProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>{profile.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Your choice applies only to you and follows you across clients using this stock.
+                  </p>
+                  {!queue?.meta.printer_profile && (
+                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                      Select a calibrated profile before generating the official package.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Package summary</div>
               <div className="mt-4 grid grid-cols-2 gap-3">
@@ -453,6 +515,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     <Button className="mt-3" size="sm" variant="outline" onClick={() => void loadPreview(run)} disabled={Boolean(action)}>Retry preview</Button>
                   </div>
                 )}
+                <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950">
+                  <span className="font-semibold">Printer setup:</span> Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink.
+                </div>
                 <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={(): void => void download()} disabled={Boolean(action)}>Download</Button></div>
                 {run.confirmation_issue && (
                   <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">
@@ -501,7 +566,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
         <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
           <Button variant="outline" onClick={requestClose}>Close</Button>
-          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action) || savingNumbers || hasUnsavedNumbers}>Generate print package</Button>}
+          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || !queue?.meta.printer_profile || Boolean(action) || savingNumbers || hasUnsavedNumbers}>Generate print package</Button>}
           {run && <Button variant="outline" onClick={startNewPackage} disabled={Boolean(action)} className="gap-2"><Plus className="h-4 w-4" />New package</Button>}
           {run && run.status !== 'confirmed' && run.confirmation_state !== 'stale' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified || !run.can_current_user_confirm}>Confirm printed correctly</Button>}
           </DialogFooter>

@@ -8,6 +8,7 @@ class CheckPrintRun < ApplicationRecord
   belongs_to :pay_period
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :confirmed_by, class_name: "User", optional: true
+  belongs_to :printer_profile, optional: true
 
   validates :status, inclusion: { in: STATUSES }
   validates :check_stock_type, :storage_key, :filename, :sha256, presence: true
@@ -18,6 +19,7 @@ class CheckPrintRun < ApplicationRecord
   validate :manifest_matches_selected_count
   validate :manifest_entries_have_source_references
   validate :pay_period_belongs_to_company
+  validate :calibration_snapshot_is_an_object
 
   before_update :prevent_artifact_mutation
   before_destroy :prevent_destroy
@@ -47,6 +49,12 @@ class CheckPrintRun < ApplicationRecord
     return if pay_period.blank? || company_id.blank? || pay_period.company_id == company_id
 
     errors.add(:pay_period, "must belong to the same company")
+  end
+
+  def calibration_snapshot_is_an_object
+    return if calibration_snapshot.is_a?(Hash)
+
+    errors.add(:calibration_snapshot, "must be a JSON object")
   end
 
   def prevent_artifact_mutation

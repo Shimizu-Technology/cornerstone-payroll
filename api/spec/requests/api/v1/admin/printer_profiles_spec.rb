@@ -23,6 +23,9 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
     allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user).and_return(admin_user)
     allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user_id).and_return(admin_user.id)
     allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::PrinterProfileSelectionsController).to receive(:current_user).and_return(admin_user)
+    allow_any_instance_of(Api::V1::Admin::PrinterProfileSelectionsController).to receive(:current_user_id).and_return(admin_user.id)
+    allow_any_instance_of(Api::V1::Admin::PrinterProfileSelectionsController).to receive(:current_company_id).and_return(company.id)
   end
 
   describe "GET /api/v1/admin/printer_profiles" do
@@ -69,15 +72,16 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
 
       expect(response).to have_http_status(:created)
       expect(response.parsed_body.dig("printer_profile", "organization_id")).to eq(organization.id)
+      expect(response.parsed_body.dig("printer_profile", "created_by_id")).to eq(admin_user.id)
     end
   end
 
   describe "POST /api/v1/admin/printer_profiles/:id/apply" do
-    it "applies an organization profile to the active company" do
+    it "selects an organization profile for only the current operator" do
       profile = PrinterProfile.create!(
         organization: organization,
         name: "Shared Printer",
-        check_stock_type: "bottom_check",
+        check_stock_type: "top_check",
         check_offset_x: 0.125,
         check_offset_y: -0.025,
         check_layout_config: { "check_face" => { "memo" => { "x" => 50 } } }
@@ -86,11 +90,11 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       post "/api/v1/admin/printer_profiles/#{profile.id}/apply"
 
       expect(response).to have_http_status(:ok)
-      expect(company.reload.check_stock_type).to eq("bottom_check")
-      expect(company.check_offset_x.to_d).to eq(0.125.to_d)
-      expect(company.check_offset_y.to_d).to eq(-0.025.to_d)
-      expect(company.check_layout_config).to eq("check_face" => { "memo" => { "x" => 50 } })
-      expect(company.active_printer_profile_id).to eq(profile.id)
+      expect(company.reload.check_stock_type).to eq("top_check")
+      expect(company.check_offset_x.to_d).to eq(0.to_d)
+      expect(company.active_printer_profile_id).to be_nil
+      selection = admin_user.user_printer_profile_selections.find_by(check_stock_type: "top_check")
+      expect(selection&.printer_profile_id).to eq(profile.id)
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to eq(profile.id)
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_name")).to eq("Shared Printer")
     end
@@ -110,7 +114,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(company.reload.check_stock_type).to eq("top_check")
     end
 
-    it "uses the organization for the switched company context" do
+    it "uses the organization for the switched company context without mutating that company" do
       allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_company_id).and_return(other_company.id)
       profile = PrinterProfile.create!(
         organization: organization,
@@ -123,13 +127,13 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       post "/api/v1/admin/printer_profiles/#{profile.id}/apply"
 
       expect(response).to have_http_status(:ok)
-      expect(other_company.reload.check_stock_type).to eq("bottom_check")
-      expect(other_company.active_printer_profile_id).to eq(profile.id)
+      expect(other_company.reload.active_printer_profile_id).to be_nil
+      expect(admin_user.user_printer_profile_selections.find_by(check_stock_type: "bottom_check")&.printer_profile_id).to eq(profile.id)
     end
   end
 
   describe "POST /api/v1/admin/printer_profiles/:id/apply_to_all_companies" do
-    it "applies an organization printer profile to every company in the organization" do
+    it "rejects the retired company-wide printer assignment" do
       foreign_company = create(:company, organization: foreign_organization, check_stock_type: "top_check")
       profile = PrinterProfile.create!(
         organization: organization,
@@ -142,15 +146,11 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
 
       post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
 
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.fetch("applied_count")).to eq(2)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("personal")
       [ company, other_company ].each do |client|
         client.reload
-        expect(client.check_stock_type).to eq("bottom_check")
-        expect(client.check_offset_x.to_d).to eq(0.125.to_d)
-        expect(client.check_offset_y.to_d).to eq(-0.025.to_d)
-        expect(client.check_layout_config).to eq("check_face" => { "memo" => { "x" => 50 } })
-        expect(client.active_printer_profile_id).to eq(profile.id)
+        expect(client.active_printer_profile_id).to be_nil
       end
       expect(foreign_company.reload.check_stock_type).to eq("top_check")
     end
@@ -184,7 +184,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
   end
 
   describe "POST /api/v1/admin/printer_profiles/clear_active" do
-    it "clears the active printer profile without changing the current calibration" do
+    it "clears only the current operator selection without changing company calibration" do
       profile = PrinterProfile.create!(
         organization: organization,
         name: "Shared Printer",
@@ -192,17 +192,14 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
         check_offset_x: 0.125,
         check_offset_y: -0.025
       )
-      company.update!(
-        active_printer_profile: profile,
-        check_stock_type: "bottom_check",
-        check_offset_x: 0.125,
-        check_offset_y: -0.025
-      )
+      company.update!(check_stock_type: "bottom_check", check_offset_x: 0.125, check_offset_y: -0.025)
+      UserPrinterProfileSelection.create!(user: admin_user, organization: organization,
+        check_stock_type: "bottom_check", printer_profile: profile)
 
       post "/api/v1/admin/printer_profiles/clear_active"
 
       expect(response).to have_http_status(:ok)
-      expect(company.reload.active_printer_profile_id).to be_nil
+      expect(admin_user.user_printer_profile_selections.find_by(check_stock_type: "bottom_check")).to be_nil
       expect(company.check_stock_type).to eq("bottom_check")
       expect(company.check_offset_x.to_d).to eq(0.125.to_d)
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to be_nil
@@ -211,7 +208,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
   end
 
   describe "DELETE /api/v1/admin/printer_profiles/:id" do
-    it "deletes an active profile and clears company active references" do
+    it "archives a profile and clears personal selections" do
       profile = PrinterProfile.create!(
         organization: organization,
         name: "Shared Printer",
@@ -219,14 +216,41 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
         check_offset_x: 0,
         check_offset_y: 0
       )
-      company.update!(active_printer_profile: profile)
+      UserPrinterProfileSelection.create!(user: admin_user, organization: organization,
+        check_stock_type: "bottom_check", printer_profile: profile)
 
-      expect {
-        delete "/api/v1/admin/printer_profiles/#{profile.id}"
-      }.to change { PrinterProfile.exists?(profile.id) }.from(true).to(false)
+      delete "/api/v1/admin/printer_profiles/#{profile.id}"
 
       expect(response).to have_http_status(:no_content)
+      expect(profile.reload.archived_at).to be_present
+      expect(admin_user.user_printer_profile_selections.find_by(printer_profile_id: profile.id)).to be_nil
+      expect(organization.printer_profiles.active).not_to include(profile)
+    end
+  end
+
+  describe "personal printer profile selections" do
+    let!(:profile) do
+      PrinterProfile.create!(organization: organization, name: "Office Printer",
+        check_stock_type: "top_check", check_offset_x: 0.1, check_offset_y: -0.05)
+    end
+
+    it "lets a payroll operator select a shared profile without changing another operator" do
+      colleague = create(:user, company: company, organization: organization, role: "accountant")
+
+      put "/api/v1/admin/printer_profile_selections/top_check", params: { printer_profile_id: profile.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("selection", "printer_profile_id")).to eq(profile.id)
+      expect(admin_user.user_printer_profile_selections.find_by(check_stock_type: "top_check")&.printer_profile_id).to eq(profile.id)
+      expect(colleague.user_printer_profile_selections).to be_empty
       expect(company.reload.active_printer_profile_id).to be_nil
+    end
+
+    it "rejects a profile calibrated for a different stock" do
+      put "/api/v1/admin/printer_profile_selections/bottom_check", params: { printer_profile_id: profile.id }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error").downcase).to include("top check")
     end
   end
 
