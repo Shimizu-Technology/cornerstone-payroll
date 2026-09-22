@@ -40,7 +40,7 @@ test('check settings previews draft test checks and alignment PDFs before option
       } } });
     }
     if (path.endsWith('/check_layout')) return route.fulfill({ json: { check_layout: null } });
-    if (path.endsWith('/printer_profiles')) return route.fulfill({ json: { printer_profiles: [], active_printer_profile_id: null } });
+    if (path.endsWith('/printer_profiles')) return route.fulfill({ json: { printer_profiles: [], selections: [], active_printer_profile_id: null } });
     if (path.endsWith('/test_check_pdf') || path.endsWith('/alignment_test_pdf')) {
       requested.push(path);
       if (path.endsWith('/test_check_pdf')) draftRequest = route.request().postDataJSON() as Record<string, unknown>;

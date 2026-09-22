@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -225,6 +225,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
 
   create_table "check_print_runs", force: :cascade do |t|
     t.bigint "byte_size", null: false
+    t.jsonb "calibration_snapshot", default: {}, null: false
     t.string "check_stock_type", null: false
     t.bigint "company_id", null: false
     t.datetime "confirmed_at"
@@ -235,6 +236,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
     t.datetime "generated_at", null: false
     t.jsonb "manifest", default: [], null: false
     t.bigint "pay_period_id", null: false
+    t.bigint "printer_profile_id"
     t.integer "selected_count", null: false
     t.string "sha256", null: false
     t.integer "starting_slot", default: 1, null: false
@@ -246,6 +248,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
     t.index ["created_by_id"], name: "index_check_print_runs_on_created_by_id"
     t.index ["pay_period_id", "generated_at"], name: "idx_check_print_runs_period_generated"
     t.index ["pay_period_id"], name: "index_check_print_runs_on_pay_period_id"
+    t.index ["printer_profile_id"], name: "index_check_print_runs_on_printer_profile_id"
     t.index ["storage_key"], name: "index_check_print_runs_on_storage_key", unique: true
     t.check_constraint "byte_size > 0", name: "check_print_runs_byte_size_check"
     t.check_constraint "selected_count > 0", name: "check_print_runs_selected_count_check"
@@ -2740,20 +2743,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
   end
 
   create_table "printer_profiles", force: :cascade do |t|
+    t.datetime "archived_at"
     t.jsonb "check_layout_config", default: {}, null: false
     t.decimal "check_offset_x", precision: 5, scale: 3, default: "0.0", null: false
     t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
     t.string "check_stock_type", default: "top_check", null: false
     t.datetime "created_at", null: false
+    t.bigint "created_by_id"
     t.text "description"
     t.boolean "is_default", default: false, null: false
+    t.integer "lock_version", default: 0, null: false
     t.string "name", null: false
     t.text "notes"
     t.bigint "organization_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true
+    t.bigint "updated_by_id"
+    t.index ["created_by_id"], name: "index_printer_profiles_on_created_by_id"
+    t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true, where: "(archived_at IS NULL)"
     t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
     t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
+    t.index ["updated_by_id"], name: "index_printer_profiles_on_updated_by_id"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -3197,6 +3206,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
     t.index ["token"], name: "index_user_invitations_on_token", unique: true
   end
 
+  create_table "user_printer_profile_selections", force: :cascade do |t|
+    t.string "check_stock_type", null: false
+    t.datetime "created_at", null: false
+    t.bigint "organization_id", null: false
+    t.bigint "printer_profile_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["organization_id", "user_id", "check_stock_type"], name: "idx_user_printer_selections_on_org_user_stock", unique: true
+    t.index ["organization_id"], name: "index_user_printer_profile_selections_on_organization_id"
+    t.index ["printer_profile_id"], name: "index_user_printer_profile_selections_on_printer_profile_id"
+    t.index ["user_id"], name: "index_user_printer_profile_selections_on_user_id"
+    t.check_constraint "check_stock_type::text = ANY (ARRAY['bottom_check'::character varying, 'top_check'::character varying, 'first_hawaiian_4up'::character varying]::text[])", name: "user_printer_selections_stock_type_check"
+  end
+
   create_table "user_sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false
@@ -3283,6 +3306,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
   add_foreign_key "check_events", "users", on_delete: :restrict
   add_foreign_key "check_print_runs", "companies"
   add_foreign_key "check_print_runs", "pay_periods"
+  add_foreign_key "check_print_runs", "printer_profiles", on_delete: :nullify
   add_foreign_key "check_print_runs", "users", column: "confirmed_by_id"
   add_foreign_key "check_print_runs", "users", column: "created_by_id"
   add_foreign_key "check_reconciliation_events", "companies", on_delete: :restrict
@@ -3582,6 +3606,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
   add_foreign_key "printer_profiles", "organizations"
+  add_foreign_key "printer_profiles", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "printer_profiles", "users", column: "updated_by_id", on_delete: :nullify
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "quarterly_compliance_packets", "companies"
   add_foreign_key "quarterly_compliance_packets", "users", column: "assigned_to_id"
@@ -3630,6 +3656,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
   add_foreign_key "transmittals", "users", column: "updated_by_id"
   add_foreign_key "user_invitations", "companies"
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
+  add_foreign_key "user_printer_profile_selections", "organizations", on_delete: :cascade
+  add_foreign_key "user_printer_profile_selections", "printer_profiles", on_delete: :cascade
+  add_foreign_key "user_printer_profile_selections", "users", on_delete: :cascade
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "organizations"

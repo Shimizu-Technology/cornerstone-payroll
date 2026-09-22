@@ -87,11 +87,11 @@ class CheckGenerator
     }
   end
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, company: nil)
     @payroll_item = payroll_item
     @employee     = payroll_item.employee
     @pay_period   = payroll_item.pay_period
-    @company      = pay_period.company
+    @company      = company || pay_period.company
   end
 
   def generate
@@ -750,9 +750,10 @@ class CheckGenerator
       end
       pdf.bounding_box([0, PAGE_HEIGHT - 4], width: PAGE_WIDTH) do
         pdf.font_size(7) do
-          pdf.text "ALIGNMENT TEST – Print on plain paper.", align: :center, color: "CC0000"
+          pdf.text "ALIGNMENT TEST – Print on plain paper at Actual Size / 100% (never Fit or Shrink).", align: :center, color: "CC0000"
         end
       end
+      draw_one_inch_scale_reference(pdf)
     end.render
   end
 
@@ -861,5 +862,19 @@ class CheckGenerator
     end
     pdf.fill_color "000000"
     pdf.stroke_color "000000"
+  end
+
+  def draw_one_inch_scale_reference(pdf)
+    x = 20
+    y = 14
+    pdf.save_graphics_state do
+      pdf.stroke_color "CC0000"
+      pdf.fill_color "CC0000"
+      pdf.line_width 0.8
+      pdf.stroke_line [ x, y ], [ x + 72, y ]
+      pdf.stroke_line [ x, y - 4 ], [ x, y + 4 ]
+      pdf.stroke_line [ x + 72, y - 4 ], [ x + 72, y + 4 ]
+      pdf.font_size(6) { pdf.draw_text "This line must measure exactly 1 inch", at: [ x + 78, y - 2 ] }
+    end
   end
 end

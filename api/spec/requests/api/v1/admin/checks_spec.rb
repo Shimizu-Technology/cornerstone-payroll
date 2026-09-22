@@ -815,7 +815,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         check_offset_x: 0,
         check_offset_y: 0
       )
-      company.update!(active_printer_profile: profile)
+      UserPrinterProfileSelection.create!(
+        user: admin_user,
+        organization: company.organization,
+        check_stock_type: company.check_stock_type,
+        printer_profile: profile
+      )
 
       get "/api/v1/admin/companies/check_settings"
 
@@ -986,12 +991,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         check_offset_y: 0,
         check_layout_config: {}
       )
-      company.update!(
-        active_printer_profile: profile,
+      UserPrinterProfileSelection.create!(
+        user: admin_user,
+        organization: company.organization,
         check_stock_type: profile.check_stock_type,
-        check_offset_x: profile.check_offset_x,
-        check_offset_y: profile.check_offset_y,
-        check_layout_config: profile.check_layout_config
+        printer_profile: profile
       )
 
       patch "/api/v1/admin/companies/check_settings",
@@ -1005,8 +1009,66 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         }
 
       expect(response).to have_http_status(:ok)
-      expect(company.reload.active_printer_profile_id).to eq(profile.id)
+      expect(company.reload.active_printer_profile_id).to be_nil
+      expect(profile.reload.check_offset_x.to_d).to eq(0.to_d)
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to eq(profile.id)
+    end
+
+    it "saves calibration to the current operator profile instead of the client" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Payroll Room Printer",
+        check_stock_type: company.check_stock_type,
+        check_offset_x: 0,
+        check_offset_y: 0,
+        check_layout_config: {}
+      )
+      UserPrinterProfileSelection.create!(
+        user: admin_user,
+        organization: company.organization,
+        check_stock_type: company.check_stock_type,
+        printer_profile: profile
+      )
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: "0.125",
+          check_offset_y: "-0.050",
+          check_layout_config: { check_face: { date: { x: 481.0 } } }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(profile.reload.check_offset_x.to_d).to eq(0.125.to_d)
+      expect(profile.check_offset_y.to_d).to eq(-0.05.to_d)
+      expect(profile.check_layout_config.dig("check_face", "date", "x")).to eq(481.0)
+      expect(company.reload.check_offset_x.to_d).to eq(0.to_d)
+      expect(response.parsed_body.dig("check_settings", "check_offset_x").to_d).to eq(0.125.to_d)
+    end
+
+    it "rejects calibration saved against an outdated shared profile" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Shared Printer",
+        check_stock_type: company.check_stock_type,
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      UserPrinterProfileSelection.create!(user: admin_user, organization: company.organization,
+        check_stock_type: company.check_stock_type, printer_profile: profile)
+      reviewed_version = profile.lock_version
+      profile.update!(check_offset_x: 0.25)
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: "0.125",
+          check_offset_y: "0.000",
+          check_layout_config: {},
+          printer_profile_lock_version: reviewed_version
+        }
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body.fetch("error")).to include("changed while you were editing")
+      expect(profile.reload.check_offset_x.to_d).to eq(0.25.to_d)
     end
 
     it "returns validation errors instead of 500s for malformed offset values" do

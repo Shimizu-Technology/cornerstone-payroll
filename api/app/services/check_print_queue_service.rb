@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 class CheckPrintQueueService
-  def initialize(pay_period:)
+  def initialize(pay_period:, actor: nil)
     @pay_period = pay_period
+    @actor = actor
   end
 
   def call
@@ -29,14 +30,31 @@ class CheckPrintQueueService
         printed: items.count { |item| item.fetch(:eligible) && item.fetch(:status) == "printed" },
         voided: items.count { |item| item.fetch(:status) == "voided" },
         check_stock_type: pay_period.company.check_stock_type,
-        slot_count: pay_period.company.first_hawaiian_4up_checks? ? FirstHawaiianFourUpCheckGenerator::SLOT_COUNT : 1
+        slot_count: pay_period.company.first_hawaiian_4up_checks? ? FirstHawaiianFourUpCheckGenerator::SLOT_COUNT : 1,
+        printer_profile: selected_profile_payload
       }
     }
   end
 
   private
 
-  attr_reader :pay_period
+  attr_reader :pay_period, :actor
+
+  def selected_profile_payload
+    return unless actor
+
+    settings = CheckRenderSettings.resolve(company: pay_period.company, actor: actor)
+    profile = settings.printer_profile
+    return unless profile
+
+    {
+      id: profile.id,
+      name: profile.name,
+      check_stock_type: profile.check_stock_type,
+      lock_version: profile.lock_version,
+      updated_at: profile.updated_at
+    }
+  end
 
   def queue_item_for_payroll_item(item)
     eligible = !item.voided? && item.net_pay.to_d.positive?

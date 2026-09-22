@@ -3157,11 +3157,19 @@ export const checksApi = {
 
   createPrintRun: (
     payPeriodId: number,
-    data: { payrollItemIds: number[]; nonEmployeeCheckIds: number[]; startingSlot: number }
+    data: {
+      payrollItemIds: number[];
+      nonEmployeeCheckIds: number[];
+      startingSlot: number;
+      printerProfileId: number;
+      printerProfileLockVersion: number;
+    }
   ) => api.post<{ check_print_run: CheckPrintRun }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`, {
     payroll_item_ids: data.payrollItemIds,
     non_employee_check_ids: data.nonEmployeeCheckIds,
     starting_slot: data.startingSlot,
+    printer_profile_id: data.printerProfileId,
+    printer_profile_lock_version: data.printerProfileLockVersion,
   }),
 
   printRunPdf: (runId: number, disposition: 'inline' | 'attachment' = 'inline') =>
@@ -3253,15 +3261,19 @@ export const checksApi = {
       `/admin/companies/check_layout${checkStockType ? `?check_stock_type=${encodeURIComponent(checkStockType)}` : ''}`
     ),
 
-  updateSettings: (settings: Partial<CheckSettings>) =>
+  updateSettings: (settings: Partial<CheckSettings> & { printer_profile_lock_version?: number | null }) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/check_settings', settings),
 
   updateNextCheckNumber: (next_check_number: number) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/next_check_number', { next_check_number }),
 
   // Download alignment test PDF through authenticated API client
-  alignmentTestPdf: () =>
-    api.getBlob('/admin/companies/alignment_test_pdf'),
+  alignmentTestPdf: (checkSettings: {
+    check_stock_type: CheckStockType;
+    check_offset_x: number;
+    check_offset_y: number;
+    check_layout_config: Record<string, unknown>;
+  }) => api.postBlob('/admin/companies/alignment_test_pdf', { check_settings: checkSettings }),
   testCheckPdf: (data: {
     sample_type: 'payroll' | 'fit' | 'grt' | 'vendor';
     check_settings: {
@@ -3308,13 +3320,32 @@ export interface PrinterProfile {
   check_offset_y: number;
   check_layout_config: Record<string, unknown>;
   is_default: boolean;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  updated_by_id: number | null;
+  updated_by_name: string | null;
+  selection_count: number;
+  selected_for_current_user: boolean;
+  lock_version: number;
   created_at: string;
+  updated_at: string;
+}
+
+export interface PrinterProfileSelection {
+  id: number;
+  check_stock_type: PrinterProfile['check_stock_type'];
+  printer_profile_id: number;
+  printer_profile_name: string;
   updated_at: string;
 }
 
 export const printerProfilesApi = {
   list: () =>
-    api.get<{ printer_profiles: PrinterProfile[]; active_printer_profile_id: number | null }>('/admin/printer_profiles'),
+    api.get<{
+      printer_profiles: PrinterProfile[];
+      selections: PrinterProfileSelection[];
+      active_printer_profile_id: number | null;
+    }>('/admin/printer_profiles'),
   get: (id: number) =>
     api.get<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`),
   create: (data: Partial<PrinterProfile>) =>
@@ -3329,6 +3360,12 @@ export const printerProfilesApi = {
     api.post<{ printer_profile: PrinterProfile; applied_count: number; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply_to_all_companies`),
   clearActive: () =>
     api.post<{ check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>('/admin/printer_profiles/clear_active'),
+  selectForMe: (checkStockType: PrinterProfile['check_stock_type'], printerProfileId: number) =>
+    api.put<{ selection: PrinterProfileSelection }>(`/admin/printer_profile_selections/${checkStockType}`, {
+      printer_profile_id: printerProfileId,
+    }),
+  clearSelection: (checkStockType: PrinterProfile['check_stock_type']) =>
+    api.delete<void>(`/admin/printer_profile_selections/${checkStockType}`),
 };
 
 // ============================================================
