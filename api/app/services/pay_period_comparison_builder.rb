@@ -1,6 +1,25 @@
 # frozen_string_literal: true
 
 class PayPeriodComparisonBuilder
+  SnapshotItem = Struct.new(
+    :employee_id,
+    :employee_full_name,
+    :employment_type,
+    :gross_pay,
+    :net_pay,
+    :withholding_tax,
+    :social_security_tax,
+    :medicare_tax,
+    :total_deductions,
+    :reported_tips,
+    :tips_paid_out,
+    :loan_deduction,
+    :loan_payment,
+    :hours_worked,
+    :salary_override,
+    :employee,
+    keyword_init: true
+  )
   MONEY_FIELDS = {
     gross_pay: :gross_pay,
     net_pay: :net_pay,
@@ -33,14 +52,17 @@ class PayPeriodComparisonBuilder
       previous_pay_period: @previous_period ? period_payload(@previous_period) : nil,
       summary: summary_payload(current_items, previous_items),
       employee_changes: employee_changes,
-      review_flags: review_flags_payload(employee_changes)
+      review_flags: review_flags_payload(employee_changes),
+      benchmark: benchmark_payload
     }
   end
 
   private
 
   def previous_period
-    return @pay_period.test_workspace_source_pay_period if training_benchmark?
+    if training_benchmark?
+      return @pay_period.training_replay_benchmark || @pay_period.test_workspace_source_pay_period
+    end
 
     PayPeriod
       .reportable_committed
@@ -53,6 +75,18 @@ class PayPeriodComparisonBuilder
   end
 
   def period_payload(period)
+    if period.is_a?(TrainingReplayBenchmark)
+      snapshot = period.period_snapshot
+      return {
+        id: snapshot.fetch("id"),
+        start_date: snapshot.fetch("start_date"),
+        end_date: snapshot.fetch("end_date"),
+        pay_date: snapshot.fetch("pay_date"),
+        status: snapshot.fetch("status"),
+        period_description: snapshot.fetch("period_description")
+      }
+    end
+
     {
       id: period.id,
       start_date: period.start_date,
@@ -64,6 +98,28 @@ class PayPeriodComparisonBuilder
   end
 
   def comparison_items(period)
+    if period.is_a?(TrainingReplayBenchmark)
+      return period.item_snapshots.map do |item|
+        SnapshotItem.new(
+          employee_id: item.fetch("source_employee_id"),
+          employee_full_name: item.fetch("employee_name"),
+          employment_type: item["employment_type"],
+          gross_pay: item["gross_pay"],
+          net_pay: item["net_pay"],
+          withholding_tax: item["withholding_tax"],
+          social_security_tax: item["social_security_tax"],
+          medicare_tax: item["medicare_tax"],
+          total_deductions: item["total_deductions"],
+          reported_tips: item["reported_tips"],
+          tips_paid_out: item["tips_paid_out"],
+          loan_deduction: item["loan_deduction"],
+          loan_payment: item["loan_payment"],
+          hours_worked: item["hours_worked"],
+          salary_override: item["salary_override"]
+        )
+      end
+    end
+
     period.payroll_items
       .not_voided
       .includes(employee: :department)
@@ -227,6 +283,21 @@ class PayPeriodComparisonBuilder
 
   def training_benchmark?
     @pay_period.training_practice? && @pay_period.test_workspace_source_pay_period.present?
+  end
+
+  def benchmark_payload
+    return nil unless training_benchmark?
+
+    snapshot = @pay_period.training_replay_benchmark
+    return { mode: "live_legacy", immutable: false } unless snapshot
+
+    {
+      mode: "immutable_snapshot",
+      immutable: true,
+      captured_at: snapshot.captured_at,
+      source_status: snapshot.source_status,
+      sha256: snapshot.sha256
+    }
   end
 
   def comparison_employee_id(item, current:)

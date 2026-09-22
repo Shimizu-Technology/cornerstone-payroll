@@ -720,7 +720,7 @@ export function Clients() {
                 <div>
                   <h3 className="font-semibold text-neutral-950">Create a payroll training replay</h3>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-                    Give a staff member two real payroll periods to process safely. Cornerstone copies the setup and earlier year-to-date history, then loads only the inputs from the latest two committed payrolls.
+                    Give a staff member two real payroll periods to process safely. Cornerstone copies the setup and earlier year-to-date history, then loads only the inputs from the latest two calculated, approved, or committed payrolls.
                   </p>
                 </div>
               </div>
@@ -740,7 +740,7 @@ export function Clients() {
                     <p className="mt-2 font-semibold">{trainingPreview.copy_summary.baseline_pay_periods} earlier pay periods</p>
                   </div>
                   <div className="rounded-xl bg-neutral-50 p-4">
-                    <p className="flex items-center gap-2 text-xs text-neutral-500">Practice payrolls <HelpTip label="practice payrolls">The latest two committed payrolls are recreated with their original inputs but without their calculated results. The trainee processes them oldest first.</HelpTip></p>
+                    <p className="flex items-center gap-2 text-xs text-neutral-500">Practice payrolls <HelpTip label="practice payrolls">The latest two completed calculations are recreated with their original inputs but without their calculated results. The trainee processes them oldest first.</HelpTip></p>
                     <p className="mt-2 font-semibold">{trainingPreview.copy_summary.practice_pay_periods} payroll periods</p>
                   </div>
                 </div>
@@ -769,7 +769,7 @@ export function Clients() {
                   <>
                     <div className="rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
                       <div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Safe by design</div>
-                      <p className="mt-2 leading-6">The live client remains untouched. Expected results stay in the live benchmark and appear only in comparison after the trainee calculates. Commit, payment, check issuance, filing, reminders, and client communications remain blocked.</p>
+                      <p className="mt-2 leading-6">The live client remains untouched. Expected results are frozen now as an immutable benchmark and appear only after the trainee calculates. Later changes to the live payroll cannot change the benchmark. Commit, payment, check issuance, filing, reminders, and client communications remain blocked.</p>
                     </div>
 
                     <div className="max-w-xl">

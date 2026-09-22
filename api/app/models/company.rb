@@ -53,6 +53,7 @@ class Company < ApplicationRecord
   has_many :user_invitations, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
+  has_many :training_replay_benchmarks, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :general_transmittals, dependent: :destroy
   has_many :general_transmittal_artifacts, dependent: :restrict_with_error

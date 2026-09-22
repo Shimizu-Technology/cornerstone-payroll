@@ -16,6 +16,7 @@ class CheckPrintRun < ApplicationRecord
   validates :selected_count, numericality: { only_integer: true, greater_than: 0 }
   validates :byte_size, numericality: { only_integer: true, greater_than: 0 }
   validate :manifest_matches_selected_count
+  validate :manifest_entries_have_source_references
   validate :pay_period_belongs_to_company
 
   before_update :prevent_artifact_mutation
@@ -31,6 +32,15 @@ class CheckPrintRun < ApplicationRecord
     return if manifest.is_a?(Array) && manifest.size == selected_count.to_i
 
     errors.add(:manifest, "must contain one entry per selected check")
+  end
+
+  def manifest_entries_have_source_references
+    return unless manifest.is_a?(Array)
+    return if manifest.all? do |entry|
+      entry.is_a?(Hash) && entry["source_type"].present? && entry["source_id"].present?
+    end
+
+    errors.add(:manifest, "entries must identify their source type and record")
   end
 
   def pay_period_belongs_to_company

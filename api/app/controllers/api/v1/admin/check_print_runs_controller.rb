@@ -6,13 +6,27 @@ module Api
   module V1
     module Admin
       class CheckPrintRunsController < BaseController
-        before_action :set_pay_period, only: [ :queue, :create ]
+        before_action :set_pay_period, only: [ :queue, :index, :create ]
         before_action :set_run, only: [ :pdf, :confirm ]
 
         def queue
           render json: CheckPrintQueueService.new(pay_period: @pay_period).call
         rescue ArgumentError => e
           render json: { error: e.message }, status: :conflict
+        end
+
+        def index
+          runs = @pay_period.check_print_runs
+            .includes(:company, :created_by, :confirmed_by, :pay_period)
+            .order(generated_at: :desc, id: :desc)
+            .limit(50)
+          confirmation_states = CheckPrintRunHistoryVerifier.new(runs: runs).call
+
+          render json: {
+            check_print_runs: runs.map do |run|
+              run_payload(run, confirmation_state: confirmation_states.fetch(run.id))
+            end
+          }
         end
 
         def create
@@ -93,7 +107,8 @@ module Api
           @run = CheckPrintRun.where(company_id: current_company_id).find(params[:id])
         end
 
-        def run_payload(run)
+        def run_payload(run, confirmation_state: nil)
+          confirmation_state, confirmation_issue = confirmation_state || confirmation_state_for(run)
           {
             id: run.id,
             pay_period_id: run.pay_period_id,
@@ -112,8 +127,19 @@ module Api
             confirmed_by_id: run.confirmed_by_id,
             confirmed_by_name: run.confirmed_by&.name,
             requires_distinct_confirmer: run.company.require_distinct_check_print_confirmer?,
-            can_current_user_confirm: !run.company.require_distinct_check_print_confirmer? || run.created_by_id != current_user.id
+            can_current_user_confirm: !run.company.require_distinct_check_print_confirmer? || run.created_by_id != current_user.id,
+            confirmation_state: confirmation_state,
+            confirmation_issue: confirmation_issue
           }
+        end
+
+        def confirmation_state_for(run)
+          return [ "confirmed", nil ] if run.confirmed?
+
+          CheckPrintRunSelectionVerifier.new(run: run).call
+          [ "ready", nil ]
+        rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
+          [ "stale", e.message ]
         end
       end
     end
