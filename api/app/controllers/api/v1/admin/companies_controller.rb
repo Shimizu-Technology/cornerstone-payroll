@@ -363,7 +363,12 @@ module Api
         end
 
         def payment_disposition_params
-          params.require(:payment_dispositions).each_pair.to_h do |period_id, disposition|
+          dispositions = params.require(:payment_dispositions)
+          unless dispositions.is_a?(ActionController::Parameters)
+            raise ArgumentError, "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+          end
+
+          dispositions.each_pair.to_h do |period_id, disposition|
             [ period_id.to_s, disposition.to_s ]
           end
         end

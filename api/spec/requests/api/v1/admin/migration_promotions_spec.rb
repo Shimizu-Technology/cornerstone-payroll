@@ -109,6 +109,20 @@ RSpec.describe "Api::V1::Admin::MigrationPromotions", type: :request do
     expect(response.parsed_body.fetch("errors")).to eq([ "The clean client changed after the backup" ])
   end
 
+  it "rejects a non-object payment disposition payload without invoking promotion" do
+    expect(MigrationPromotion::Apply).not_to receive(:new)
+
+    post "/api/v1/admin/companies/#{rehearsal.id}/migration_promotion", params: {
+      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+      payment_dispositions: [ "record_only" ]
+    }, as: :json
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to eq([
+      "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+    ])
+  end
+
   %w[accountant manager].each do |role|
     it "does not allow a #{role} to preview or apply a live-client promotion" do
       staff_user = create(:user, company: target_company, organization: organization, role: role)
