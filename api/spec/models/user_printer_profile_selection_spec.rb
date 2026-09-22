@@ -33,4 +33,21 @@ RSpec.describe UserPrinterProfileSelection, type: :model do
     expect(selection.errors[:printer_profile]).to include("must belong to the selected organization")
     expect(selection.errors[:printer_profile]).to include("must match the selected check stock")
   end
+
+  it "enforces organization and stock compatibility when validations are bypassed" do
+    other_organization = create(:organization)
+    foreign_profile = PrinterProfile.create!(organization: other_organization, name: "Foreign Printer",
+      check_stock_type: "bottom_check", check_offset_x: 0, check_offset_y: 0)
+
+    expect {
+      described_class.insert_all!([ {
+        user_id: user.id,
+        organization_id: organization.id,
+        printer_profile_id: foreign_profile.id,
+        check_stock_type: "top_check",
+        created_at: Time.current,
+        updated_at: Time.current
+      } ])
+    }.to raise_error(ActiveRecord::InvalidForeignKey)
+  end
 end

@@ -298,9 +298,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
         -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
         -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
         -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" },
-        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply" },
-        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" },
-        -> { post "/api/v1/admin/printer_profiles/clear_active" }
+        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" }
       ]
 
       requests.each do |request|
@@ -314,6 +312,20 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(profile.reload.attributes.slice(*original_profile.keys)).to eq(original_profile)
       expect(company.reload.attributes.slice(*original_company.keys)).to eq(original_company)
       expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
+
+    it "allows the compatibility endpoints to manage only the accountant's selection" do
+      company.update!(check_stock_type: "bottom_check")
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply"
+
+      expect(response).to have_http_status(:ok)
+      expect(accountant.user_printer_profile_selections.find_by(check_stock_type: "bottom_check")&.printer_profile_id).to eq(profile.id)
+
+      post "/api/v1/admin/printer_profiles/clear_active"
+
+      expect(response).to have_http_status(:ok)
+      expect(accountant.user_printer_profile_selections.find_by(check_stock_type: "bottom_check")).to be_nil
     end
   end
 end

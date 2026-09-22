@@ -10,22 +10,27 @@ module Api
             return render json: { error: "Unsupported check stock type" }, status: :unprocessable_entity
           end
 
-          profile = current_company.organization.printer_profiles.active.find_by(id: params[:printer_profile_id])
-          return render json: { error: "Printer profile not found" }, status: :not_found unless profile
-          if profile.check_stock_type != stock_type
-            return render json: {
-              error: "#{profile.name} is calibrated for #{profile.check_stock_type.humanize}, not #{stock_type.humanize}"
-            }, status: :unprocessable_entity
+          selection = PrinterProfile.transaction do
+            profile = current_company.organization.printer_profiles.active.lock.find(params[:printer_profile_id])
+            if profile.check_stock_type != stock_type
+              raise CheckRenderSettings::IncompatibleProfileError,
+                "#{profile.name} is calibrated for #{profile.check_stock_type.humanize}, not #{stock_type.humanize}"
+            end
+
+            current_user.user_printer_profile_selections.find_or_initialize_by(
+              organization_id: current_company.organization_id,
+              check_stock_type: stock_type
+            ).tap do |record|
+              record.printer_profile = profile
+              record.save!
+            end
           end
 
-          selection = current_user.user_printer_profile_selections.find_or_initialize_by(
-            organization_id: current_company.organization_id,
-            check_stock_type: stock_type
-          )
-          selection.printer_profile = profile
-          selection.save!
-
           render json: { selection: selection_json(selection) }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Printer profile not found" }, status: :not_found
+        rescue CheckRenderSettings::IncompatibleProfileError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         end

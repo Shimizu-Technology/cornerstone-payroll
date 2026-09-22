@@ -52,7 +52,7 @@ module Api
         end
 
         def destroy
-          PrinterProfile.transaction do
+          @profile.with_lock do
             @profile.user_printer_profile_selections.delete_all
             @profile.update!(archived_at: Time.current, is_default: false, updated_by: current_user)
           end
@@ -70,6 +70,8 @@ module Api
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Printer profile not found" }, status: :not_found
         end
 
         # The old organization-wide mutation is deliberately unavailable.
@@ -124,15 +126,19 @@ module Api
         end
 
         def select_profile!(profile)
-          current_user.user_printer_profile_selections
-            .find_or_initialize_by(
-              organization_id: current_organization.id,
-              check_stock_type: profile.check_stock_type
-            ).tap do |selection|
-              selection.printer_profile = profile
-              selection.save!
-              @selections_by_stock = nil
-            end
+          profile.with_lock do
+            raise ActiveRecord::RecordNotFound if profile.archived?
+
+            current_user.user_printer_profile_selections
+              .find_or_initialize_by(
+                organization_id: current_organization.id,
+                check_stock_type: profile.check_stock_type
+              ).tap do |selection|
+                selection.printer_profile = profile
+                selection.save!
+                @selections_by_stock = nil
+              end
+          end
         end
 
         def check_settings_json
