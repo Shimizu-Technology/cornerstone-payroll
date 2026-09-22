@@ -165,6 +165,37 @@ describe('Clients migration promotion', () => {
     })));
   });
 
+  it('offers every supported recent-payroll exclusion count', async () => {
+    const user = userEvent.setup();
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
+    await screen.findByText('Setup + committed payroll history');
+    await user.click(screen.getByRole('radio', { name: /Leave out the latest payrolls/i }));
+
+    const selector = screen.getByLabelText('Recent payrolls to leave out');
+    expect(within(selector).getByRole('option', { name: '1 payroll' })).toBeTruthy();
+    expect(within(selector).getByRole('option', { name: '12 payrolls' })).toBeTruthy();
+  });
+
+  it('disables creation while a changed copy option is being previewed', async () => {
+    const user = userEvent.setup();
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
+    await screen.findByText('Setup + committed payroll history');
+    await user.click(screen.getByRole('checkbox', { name: /I understand this copy contains protected/i }));
+    expect((screen.getAllByRole('button', { name: 'Create test workspace' }).at(-1) as HTMLButtonElement).disabled).toBe(false);
+
+    apiMocks.testWorkspacePreview.mockImplementationOnce(() => new Promise(() => undefined));
+    await user.click(screen.getByRole('radio', { name: /Leave out the latest payrolls/i }));
+
+    expect(await screen.findByText('Checking what will be copied…')).toBeTruthy();
+    expect((screen.getAllByRole('button', { name: 'Create test workspace' }).at(-1) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('routes the guided migration choice into the rehearsal preview', async () => {
     const user = userEvent.setup();
     apiMocks.migrationRehearsalPreview.mockResolvedValue({

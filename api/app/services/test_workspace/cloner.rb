@@ -3,6 +3,7 @@
 module TestWorkspace
   class Cloner
     PAYROLL_ITEM_CLEAR_COLUMNS = TrainingReplay::Cloner::PAYROLL_ITEM_CLEAR_COLUMNS
+    FAILURE_MESSAGE = "The test copy did not finish. No production data changed. Retry the isolated copy."
 
     def initialize(company:, actor:)
       @company = company
@@ -174,7 +175,7 @@ module TestWorkspace
 
       company.update_columns(
         migration_rehearsal_status: "failed",
-        migration_rehearsal_error: "The test copy did not finish. No production data changed. Retry the isolated copy.",
+        migration_rehearsal_error: FAILURE_MESSAGE,
         updated_at: Time.current
       )
     rescue StandardError => e

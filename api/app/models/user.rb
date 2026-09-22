@@ -114,8 +114,18 @@ class User < ApplicationRecord
         organization_company_ids
       else
         assigned_ids = if association(:company_assignments).loaded?
-          company_assignments.reject(&:expired?).filter_map do |assignment|
-            assignment.company_id unless assignment.company&.test_workspace_archived_at?
+          active_assignments = company_assignments.reject(&:expired?)
+          active_assignment_company_ids = active_assignments.map(&:company_id)
+
+          if active_assignments.all? { |assignment| assignment.association(:company).loaded? }
+            active_assignments.filter_map do |assignment|
+              assignment.company_id unless assignment.company&.test_workspace_archived_at?
+            end
+          else
+            archived_company_ids = Company.where(id: active_assignment_company_ids)
+              .where.not(test_workspace_archived_at: nil)
+              .pluck(:id)
+            active_assignment_company_ids - archived_company_ids
           end
         else
           company_assignments.active_access

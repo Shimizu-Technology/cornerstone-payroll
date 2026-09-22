@@ -92,6 +92,17 @@ RSpec.describe "General test workspaces" do
     expect(workspace.employees.count).to eq(employee_count)
   end
 
+  it "rolls an archive back when its audit record cannot be written" do
+    workspace = create_workspace(copy_mode: "setup_only")
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
+
+    expect {
+      TestWorkspace::Lifecycle.new(company: workspace, actor: actor).archive!
+    }.to raise_error(ActiveRecord::RecordInvalid)
+
+    expect(workspace.reload).to have_attributes(active: true, test_workspace_archived_at: nil)
+  end
+
   it "makes an expired workspace read-only even for an administrator" do
     workspace = create_workspace(copy_mode: "setup_only")
     workspace.update_column(:test_workspace_expires_at, 1.minute.ago)
