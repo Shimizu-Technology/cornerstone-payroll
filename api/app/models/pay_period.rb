@@ -19,6 +19,7 @@ class PayPeriod < ApplicationRecord
   RUN_PURPOSES = %w[regular off_cycle_tips bonus commission correction final adjustment].freeze
   RUN_PURPOSE_SOURCES = %w[operator_selected system_correction production_migration legacy_system_default].freeze
   TEST_WORKSPACE_ROLES = %w[baseline practice].freeze
+  PROMOTION_PAYMENT_DISPOSITIONS = %w[record_only process_in_cornerstone].freeze
 
   belongs_to :company
   belongs_to :company_pay_schedule, optional: true
@@ -32,6 +33,9 @@ class PayPeriod < ApplicationRecord
              class_name: "PayPeriod",
              optional: true,
              inverse_of: :promoted_live_copies
+  belongs_to :promoted_payment_prepared_by,
+             class_name: "User",
+             optional: true
   has_many :training_replay_copies,
            class_name: "PayPeriod",
            foreign_key: :test_workspace_source_pay_period_id,
@@ -116,6 +120,9 @@ class PayPeriod < ApplicationRecord
   validates :run_purpose, inclusion: { in: RUN_PURPOSES }
   validates :run_purpose_source, inclusion: { in: RUN_PURPOSE_SOURCES }
   validates :test_workspace_role, inclusion: { in: TEST_WORKSPACE_ROLES }, allow_nil: true
+  validates :promotion_payment_disposition,
+            inclusion: { in: PROMOTION_PAYMENT_DISPOSITIONS },
+            allow_nil: true
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
@@ -130,6 +137,8 @@ class PayPeriod < ApplicationRecord
   validate :test_workspace_cannot_be_committed
   validate :training_replay_lineage_is_valid
   validate :promotion_source_is_valid
+  validate :promotion_payment_disposition_matches_lineage
+  validate :promoted_payment_preparation_is_complete
   validate :published_aire_cutoff_dates_are_immutable,
            on: :update,
            if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
@@ -459,6 +468,21 @@ class PayPeriod < ApplicationRecord
     valid = company&.live_payroll? && source_company&.migration_rehearsal? &&
       source_company.migration_source_company_id == company_id
     errors.add(:promotion_source_pay_period, "must belong to this live client's migration rehearsal") unless valid
+  end
+
+  def promotion_payment_disposition_matches_lineage
+    if promotion_source_pay_period.blank? != promotion_payment_disposition.blank?
+      errors.add(:promotion_payment_disposition, "must be recorded for promoted payrolls only")
+    end
+  end
+
+  def promoted_payment_preparation_is_complete
+    if promoted_payment_prepared_at.blank? != promoted_payment_prepared_by.blank?
+      errors.add(:promoted_payment_prepared_at, "and preparer must be recorded together")
+    end
+    return if promoted_payment_prepared_at.blank? || promotion_payment_disposition == "process_in_cornerstone"
+
+    errors.add(:promoted_payment_prepared_at, "requires an unpaid Cornerstone payment disposition")
   end
 
   def prevent_training_baseline_mutation

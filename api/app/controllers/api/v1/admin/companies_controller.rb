@@ -179,13 +179,14 @@ module Api
           periods = MigrationPromotion::Apply.new(
             rehearsal: rehearsal,
             actor: current_user,
-            acknowledgement: params[:acknowledgement]
+            acknowledgement: params[:acknowledgement],
+            payment_dispositions: payment_disposition_params
           ).call
           render json: {
             company: company_payload(rehearsal.migration_source_company.reload, detailed: true),
             promoted_pay_period_ids: periods.map(&:id)
           }
-        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+        rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
           render_service_errors(e)
         end
 
@@ -359,6 +360,17 @@ module Api
           raise ActiveRecord::RecordNotFound unless current_user&.can_access_company?(company.id)
 
           company
+        end
+
+        def payment_disposition_params
+          dispositions = params.require(:payment_dispositions)
+          unless dispositions.is_a?(ActionController::Parameters)
+            raise ArgumentError, "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+          end
+
+          dispositions.each_pair.to_h do |period_id, disposition|
+            [ period_id.to_s, disposition.to_s ]
+          end
         end
 
         def render_service_errors(error)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2037,6 +2037,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
     t.text "notes"
     t.boolean "parallel_run", default: false, null: false
     t.date "pay_date", null: false
+    t.datetime "promoted_payment_prepared_at"
+    t.bigint "promoted_payment_prepared_by_id"
+    t.string "promotion_payment_disposition"
     t.bigint "promotion_source_pay_period_id"
     t.string "run_purpose", default: "regular", null: false
     t.string "run_purpose_source", default: "legacy_system_default", null: false
@@ -2075,6 +2078,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
     t.index ["cycle"], name: "index_pay_periods_on_cycle"
     t.index ["id", "company_id"], name: "idx_pay_periods_aire_calendar_tenant_key", unique: true
     t.index ["intake_stale_session_id"], name: "idx_pay_periods_intake_stale_session"
+    t.index ["promoted_payment_prepared_by_id"], name: "index_pay_periods_on_promoted_payment_prepared_by_id"
     t.index ["promotion_source_pay_period_id"], name: "idx_pay_periods_promotion_source", where: "(promotion_source_pay_period_id IS NOT NULL)"
     t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
@@ -2084,9 +2088,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
     t.index ["test_workspace_source_pay_period_id"], name: "idx_pay_periods_training_source", where: "(test_workspace_source_pay_period_id IS NOT NULL)"
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
+    t.check_constraint "(promoted_payment_prepared_at IS NULL) = (promoted_payment_prepared_by_id IS NULL)", name: "pay_periods_promoted_payment_preparer_complete"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
     t.check_constraint "intake_stale_at IS NULL AND intake_stale_reason IS NULL AND intake_stale_session_id IS NULL OR intake_stale_at IS NOT NULL AND NULLIF(btrim(intake_stale_reason), ''::text) IS NOT NULL AND intake_stale_session_id IS NOT NULL", name: "pay_periods_intake_stale_complete"
     t.check_constraint "parallel_run = false OR status::text <> 'committed'::text", name: "pay_periods_parallel_runs_not_committed"
+    t.check_constraint "promoted_payment_prepared_at IS NULL OR promotion_payment_disposition::text = 'process_in_cornerstone'::text", name: "pay_periods_promoted_payment_prepared_disposition"
+    t.check_constraint "promotion_source_pay_period_id IS NULL AND promotion_payment_disposition IS NULL OR promotion_source_pay_period_id IS NOT NULL AND (promotion_payment_disposition::text = ANY (ARRAY['record_only'::character varying::text, 'process_in_cornerstone'::character varying::text]))", name: "pay_periods_promotion_payment_disposition_complete"
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
     t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
@@ -3475,6 +3482,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_020000) do
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "test_workspace_source_pay_period_id", on_delete: :restrict
   add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
+  add_foreign_key "pay_periods", "users", column: "promoted_payment_prepared_by_id"
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_field_definitions", "employees", column: "owner_employee_id"

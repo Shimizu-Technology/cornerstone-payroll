@@ -197,7 +197,11 @@ RSpec.describe MigrationPromotion::Apply do
     described_class.new(
       rehearsal: rehearsal,
       actor: actor,
-      acknowledgement: described_class::ACKNOWLEDGEMENT
+      acknowledgement: described_class::ACKNOWLEDGEMENT,
+      payment_dispositions: {
+        first_source_period.id => "record_only",
+        second_source_period.id => "record_only"
+      }
     ).call
   end
 
@@ -207,6 +211,7 @@ RSpec.describe MigrationPromotion::Apply do
     promoted = target_company.pay_periods.committed.period_chronological.to_a
     expect(replaceable_draft.class.exists?(replaceable_draft.id)).to be(false)
     expect(promoted.map(&:promotion_source_pay_period_id)).to eq([ first_source_period.id, second_source_period.id ])
+    expect(promoted.map(&:promotion_payment_disposition)).to eq(%w[record_only record_only])
     expect(promoted).to all(have_attributes(run_purpose_source: "production_migration", parallel_run: false))
     expect(promoted).to all(have_attributes(tax_sync_status: nil, tax_sync_idempotency_key: nil))
     expect(promoted.first.payroll_items.sole.payment_delivery_method).to eq("direct_deposit")
@@ -241,6 +246,48 @@ RSpec.describe MigrationPromotion::Apply do
     expect(AuditLog.where(action: "migration_promotion#completed", company: target_company)).to exist
   end
 
+  it "keeps unpaid payrolls in the normal live review workflow without applying financial effects" do
+    promoted = described_class.new(
+      rehearsal: rehearsal,
+      actor: actor,
+      acknowledgement: described_class::ACKNOWLEDGEMENT,
+      payment_dispositions: {
+        first_source_period.id => "record_only",
+        second_source_period.id => "process_in_cornerstone"
+      }
+    ).call
+
+    historical, unpaid = promoted
+    expect(historical).to have_attributes(status: "committed", promotion_payment_disposition: "record_only")
+    expect(unpaid).to have_attributes(
+      status: "calculated",
+      promotion_payment_disposition: "process_in_cornerstone",
+      approved_at: nil,
+      committed_at: nil
+    )
+    expect(historical.payroll_liability_postings.count).to eq(1)
+    expect(unpaid.payroll_liability_postings).to be_empty
+    expect(EmployeeYtdTotal.find_by!(employee: target_employee, year: 2026)).to have_attributes(
+      gross_pay: 1_300.to_d,
+      net_pay: 1_040.to_d
+    )
+    expect(CompanyYtdTotal.find_by!(company: target_company, year: 2026)).to have_attributes(
+      gross_pay: 1_400.to_d,
+      net_pay: 1_120.to_d
+    )
+  end
+
+  it "requires one explicit payment disposition for every payroll" do
+    expect {
+      described_class.new(
+        rehearsal: rehearsal,
+        actor: actor,
+        acknowledgement: described_class::ACKNOWLEDGEMENT,
+        payment_dispositions: { first_source_period.id => "record_only" }
+      ).call
+    }.to raise_error(ArgumentError, /Choose whether each rehearsal payroll/)
+  end
+
   it "rolls back target changes and leaves the verified backup intact when setup synchronization fails" do
     allow(MigrationPromotion::SetupSynchronizer).to receive(:new).and_raise("copy failed")
 
@@ -261,7 +308,11 @@ RSpec.describe MigrationPromotion::Apply do
       described_class.new(
         rehearsal: rehearsal,
         actor: accountant,
-        acknowledgement: described_class::ACKNOWLEDGEMENT
+        acknowledgement: described_class::ACKNOWLEDGEMENT,
+        payment_dispositions: {
+          first_source_period.id => "record_only",
+          second_source_period.id => "record_only"
+        }
       ).call
     }.to raise_error(ArgumentError, /organization administrator/)
   end

@@ -277,10 +277,20 @@ describe('Clients migration promotion', () => {
     render(<Clients />);
     await user.click((await screen.findAllByRole('button', { name: /promote rehearsal/i }))[0]);
     await screen.findByText(/is verified and read only/i);
+    expect(screen.getByText(/Choose a payment status for every payroll/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: /apply to clean client/i }) as HTMLButtonElement).disabled).toBe(true);
+    const recordOnlyChoices = screen.getAllByRole('radio', { name: /Already paid elsewhere/i });
+    const processChoices = screen.getAllByRole('radio', { name: /Unpaid — process in Cornerstone/i });
+    await user.click(recordOnlyChoices[0]);
+    await user.click(processChoices[1]);
     await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /apply to clean client/i }));
 
-    await waitFor(() => expect(apiMocks.applyMigrationPromotion).toHaveBeenCalledWith(7, 'APPLY REHEARSAL TO LIVE CLIENT'));
+    await waitFor(() => expect(apiMocks.applyMigrationPromotion).toHaveBeenCalledWith(
+      7,
+      'APPLY REHEARSAL TO LIVE CLIENT',
+      { 70: 'record_only', 71: 'process_in_cornerstone' },
+    ));
     expect(await screen.findByText(/now has the verified rehearsal setup and both migrated payrolls/i)).toBeTruthy();
   });
 

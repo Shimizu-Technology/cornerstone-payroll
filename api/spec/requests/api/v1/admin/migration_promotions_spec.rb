@@ -73,11 +73,19 @@ RSpec.describe "Api::V1::Admin::MigrationPromotions", type: :request do
     expect(MigrationPromotion::Apply).to receive(:new).with(
       rehearsal: rehearsal,
       actor: admin,
-      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT
+      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+      payment_dispositions: {
+        periods.first.id.to_s => "record_only",
+        periods.second.id.to_s => "process_in_cornerstone"
+      }
     ).and_return(promotion)
 
     post "/api/v1/admin/companies/#{rehearsal.id}/migration_promotion", params: {
-      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT
+      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+      payment_dispositions: {
+        periods.first.id => "record_only",
+        periods.second.id => "process_in_cornerstone"
+      }
     }
 
     expect(response).to have_http_status(:ok)
@@ -93,11 +101,26 @@ RSpec.describe "Api::V1::Admin::MigrationPromotions", type: :request do
     allow(MigrationPromotion::Apply).to receive(:new).and_return(promotion)
 
     post "/api/v1/admin/companies/#{rehearsal.id}/migration_promotion", params: {
-      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT
+      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+      payment_dispositions: { 1 => "record_only", 2 => "record_only" }
     }
 
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("errors")).to eq([ "The clean client changed after the backup" ])
+  end
+
+  it "rejects a non-object payment disposition payload without invoking promotion" do
+    expect(MigrationPromotion::Apply).not_to receive(:new)
+
+    post "/api/v1/admin/companies/#{rehearsal.id}/migration_promotion", params: {
+      acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+      payment_dispositions: [ "record_only" ]
+    }, as: :json
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to eq([
+      "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+    ])
   end
 
   %w[accountant manager].each do |role|
@@ -119,7 +142,8 @@ RSpec.describe "Api::V1::Admin::MigrationPromotions", type: :request do
       expect(response).to have_http_status(:forbidden)
 
       post "/api/v1/admin/companies/#{rehearsal.id}/migration_promotion", params: {
-        acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT
+        acknowledgement: MigrationPromotion::Apply::ACKNOWLEDGEMENT,
+        payment_dispositions: { 1 => "record_only", 2 => "record_only" }
       }
       expect(response).to have_http_status(:forbidden)
     end
