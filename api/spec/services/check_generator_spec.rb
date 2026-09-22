@@ -187,6 +187,39 @@ RSpec.describe CheckGenerator do
       expect(text).to include("15.00")
       expect(text).to include("25.00")
     end
+
+    it "renders migrated deduction and employer contribution YTD balances on the check stubs" do
+      apply_historical_balance(
+        source_breakdown: {
+          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
+          "after_tax_deduction_breakdown" => {
+            "Health Insurance" => "2457.00",
+            "Case No. 2952492" => "3024.00"
+          },
+          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "7646.04" }
+        },
+        tips_paid_out: 1_900.80
+      )
+      create_statement_field_entry(
+        label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
+      create_statement_field_entry(
+        label: "Remittance ID 2952492", amount: 168, treatment: "post_tax_deduction", category: "child_support")
+      payroll_item.update!(retirement_payment: 927.91, employer_retirement_match: 381.08)
+
+      deduction_rows = generator.send(:deduction_rows)
+      other_pay_rows = generator.send(:other_pay_rows)
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(deduction_rows).to include([ "401(k) Pre-Tax", "927.91", "18,558.20" ])
+      expect(deduction_rows).to include([ "Health Insurance", "126.00", "2,583.00" ])
+      expect(deduction_rows).to include([ "Remittance ID 2952492", "168.00", "3,192.00" ])
+      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
+      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "381.08", "8,027.12" ])
+      expect(text).to include("401(k) Pre-Tax", "18,558.20")
+      expect(text).to include("Remittance ID 2952492", "3,192.00")
+      expect(text).to include("ER 401(k) Pre-Tax", "8,027.12")
+      expect(text).to include("26,234.00")
+    end
   end
 
   describe "#generate_voided" do
@@ -447,5 +480,55 @@ RSpec.describe CheckGenerator do
       method.call(text, options)
     end
     void_draws
+  end
+
+  def apply_historical_balance(source_breakdown:, tips_paid_out: 0)
+    batch = create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current)
+    bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: batch, status: "applied")
+    bridge = HistoricalYtdBridge.create!(
+      company: company,
+      historical_import_batch: batch,
+      historical_client_bootstrap: bootstrap,
+      status: "applied",
+      plan_digest: SecureRandom.hex(16),
+      applied_at: Time.current,
+      applied_by: create(:user, company: company),
+      apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
+      preview_summary: {
+        "through_period_end" => Date.new(2026, 2, 28).iso8601,
+        "through_pay_date" => Date.new(2026, 3, 10).iso8601
+      }
+    )
+    HistoricalEmployeeYtdBalance.create!(
+      historical_ytd_bridge: bridge,
+      company: company,
+      employee: employee,
+      tax_year: 2026,
+      through_period_end: Date.new(2026, 2, 28),
+      through_pay_date: Date.new(2026, 3, 10),
+      source_breakdown: source_breakdown,
+      tips_paid_out: tips_paid_out
+    )
+  end
+
+  def create_statement_field_entry(label:, amount:, treatment:, category:)
+    definition = create(
+      :payroll_field_definition,
+      company: company,
+      name: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category
+    )
+    create(
+      :payroll_item_field_entry,
+      payroll_item: payroll_item,
+      payroll_field_definition: definition,
+      label: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category,
+      amount: amount
+    )
   end
 end

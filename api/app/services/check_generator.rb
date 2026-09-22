@@ -170,11 +170,7 @@ class CheckGenerator
   end
 
   def cur_deds
-    payroll_item.retirement_payment.to_f + payroll_item.roth_retirement_payment.to_f +
-      visible_legacy_insurance_payment + visible_legacy_loan_payment +
-      payroll_item.tips_paid_out.to_f + payroll_item.custom_deductions_total.to_f +
-      payroll_item.pre_tax_payroll_adjustments_total.to_f + payroll_item.post_tax_payroll_adjustments_total.to_f +
-      payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").sum { |entry| entry.amount.to_f }
+    statement_deduction_rows.sum(0.to_d) { |row| row.current.to_d }
   end
 
   # -----------------------------------------------------------------------
@@ -444,49 +440,17 @@ class CheckGenerator
   end
 
   def other_pay_rows
-    rows = []
-    if payroll_item.retirement_payment.to_f > 0 && employee.respond_to?(:retirement_rate) && employee.retirement_rate.to_f > 0
-      rows << ["401(k) Pre-Tax", fn(payroll_item.retirement_payment), fn(ytd[:retire])]
+    statement_ytd_breakdown.other_pay.map do |row|
+      [ stub_label(row.label), fn(row.current), fn(row.ytd) ]
+    end + statement_ytd_breakdown.employer_contributions.map do |row|
+      [ stub_label("ER #{row.label}"), fn(row.current), fn(row.ytd) ]
     end
-    rows << ["Non-Taxable", fn(payroll_item.non_taxable_pay), "-"] if payroll_item.non_taxable_pay.to_f > 0
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless adjustment["treatment"] == "non_taxable_addition"
-
-      rows << [stub_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
-    end
-    payroll_field_entries_for("non_taxable_addition").each do |entry|
-      rows << [stub_label(entry.label), fn(entry.amount), "-"] if entry.amount.to_f.positive?
-    end
-    payroll_field_entries_for("employer_contribution").each do |entry|
-      rows << [stub_label("ER #{entry.label}"), fn(entry.amount), "-"] if entry.amount.to_f.positive?
-    end
-    rows
   end
 
   def deduction_rows
     return [] if employee.contractor?
-    rows = []
-    rows << ["401(k) Pre-Tax", fn(payroll_item.retirement_payment), fn(ytd[:retire])] if payroll_item.retirement_payment.to_f > 0
-    rows << ["Roth 401(k)", fn(payroll_item.roth_retirement_payment), fn(ytd[:roth])] if payroll_item.roth_retirement_payment.to_f > 0
-    rows << ["Health Insurance", fn(visible_legacy_insurance_payment), fn(ytd[:ins])] if visible_legacy_insurance_payment.positive?
-    rows << ["Loan", fn(visible_legacy_loan_payment), fn(visible_legacy_loan_ytd)] if visible_legacy_loan_payment.positive?
-    rows << ["Tips Paid Out", fn(payroll_item.tips_paid_out), fn(ytd[:tips_paid_out])] if payroll_item.tips_paid_out.to_f > 0
-    Array(payroll_item.custom_deductions).each do |deduction|
-      amount = deduction["amount"].to_f
-      next unless amount.positive?
-
-      label = deduction["label"].presence || "Other Deduction"
-      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
-    end
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
-
-      amount = adjustment["amount"].to_f
-      label = adjustment["label"].presence || "Payroll Adjustment"
-      rows << [stub_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
-    end
-    payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
-      rows << [stub_label(entry.label), fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+    rows = statement_deduction_rows.map do |row|
+      [ stub_label(row.label), fn(row.current), fn(row.ytd) ]
     end
 
     if rows.any?
@@ -517,8 +481,17 @@ class CheckGenerator
   end
 
   def ytd_visible_deds
-    ytd[:retire] + ytd[:roth] + visible_legacy_insurance_ytd + visible_legacy_loan_ytd +
-      ytd[:tips_paid_out] + ytd[:custom_deds] + ytd_payroll_field_deductions_total
+    statement_deduction_rows.sum(0.to_d) { |row| row.ytd.to_d }
+  end
+
+  def statement_deduction_rows
+    return [] if employee.contractor?
+
+    statement_ytd_breakdown.deductions
+  end
+
+  def statement_ytd_breakdown
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
   end
 
   def visible_legacy_insurance_ytd

@@ -71,9 +71,10 @@ RSpec.describe PayrollRetirementTotals do
     expect(text).not_to include("Extra 401(k)")
     expect(text).to include("Separate pension")
     expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(0)
-    # Insurance is a legacy aggregate on real calculated rows; this saved fixture
-    # deliberately omits that aggregate so only 401(k) and the other plan are here.
-    expect(generator.send(:ytd_total_deductions).round(2)).to eq(1135.00)
+    # The displayed total is derived from the displayed rows, so the saved
+    # itemized Health row remains visible and contributes once even though this
+    # fixture deliberately omits the legacy insurance aggregate snapshot.
+    expect(generator.send(:ytd_total_deductions).round(2)).to eq(1190.00)
   end
 
   it "preserves signed built-in correction amounts" do
