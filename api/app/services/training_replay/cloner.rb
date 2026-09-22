@@ -75,10 +75,10 @@ module TrainingReplay
 
     def resolve_practice_sources!
       ids = Array(company.test_workspace_manifest["practice_source_pay_period_ids"]).map(&:to_i)
-      periods = source_company.pay_periods.where(id: ids).index_by(&:id)
+      periods = source_company.pay_periods.lock.where(id: ids).index_by(&:id)
       resolved = ids.filter_map { |id| periods[id] }
       valid = ids.length == Preview::PRACTICE_PERIOD_COUNT && resolved.length == ids.length &&
-        resolved.all? { |period| period.committed? && period.regular_cycle? && !period.voided? }
+        resolved.all? { |period| period.status.in?(TrainingReplayBenchmark::SOURCE_STATUSES) && period.regular_cycle? && !period.voided? }
       raise ArgumentError, "The source payroll benchmarks changed before the training copy completed" unless valid
 
       resolved.sort_by { |period| [ period.start_date, period.end_date, period.pay_date, period.id ] }
@@ -131,6 +131,7 @@ module TrainingReplay
       source.pay_period_excluded_employees.order(:id).each do |excluded|
         copy_record!(excluded, pay_period: target, employee: maps.fetch(:employees).fetch(excluded.employee_id))
       end
+      BenchmarkSnapshot.capture!(company: company, pay_period: target, source_pay_period: source, actor: actor)
       target
     end
 
@@ -200,7 +201,8 @@ module TrainingReplay
         baseline_periods: [ baseline_sources.count, company.pay_periods.where(test_workspace_role: "baseline").count ],
         practice_periods: [ practice_sources.count, company.pay_periods.where(test_workspace_role: "practice").count ],
         baseline_items: [ baseline_sources.sum { |period| period.payroll_items.not_voided.count }, company.pay_periods.where(test_workspace_role: "baseline").joins(:payroll_items).count ],
-        practice_items: [ practice_sources.sum { |period| period.payroll_items.not_voided.count }, company.pay_periods.where(test_workspace_role: "practice").joins(:payroll_items).count ]
+        practice_items: [ practice_sources.sum { |period| period.payroll_items.not_voided.count }, company.pay_periods.where(test_workspace_role: "practice").joins(:payroll_items).count ],
+        benchmark_snapshots: [ practice_sources.count, company.training_replay_benchmarks.count ]
       }
       mismatches = checks.select { |_key, values| values.first != values.last }
       raise "Training replay record-count verification failed: #{mismatches.keys.join(', ')}" if mismatches.any?

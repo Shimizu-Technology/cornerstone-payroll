@@ -1231,6 +1231,13 @@ export interface PayPeriodComparisonResponse {
     review_count: number;
     message: string;
   };
+  benchmark: {
+    mode: 'immutable_snapshot' | 'live_legacy';
+    immutable: boolean;
+    captured_at?: string;
+    source_status?: 'calculated' | 'approved' | 'committed';
+    sha256?: string;
+  } | null;
 }
 
 // ----------------
@@ -1737,6 +1744,8 @@ export interface CheckPrintRun {
   confirmed_by_name: string | null;
   requires_distinct_confirmer: boolean;
   can_current_user_confirm: boolean;
+  confirmation_state: 'ready' | 'confirmed' | 'stale';
+  confirmation_issue: string | null;
 }
 
 export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';

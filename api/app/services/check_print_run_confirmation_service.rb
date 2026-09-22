@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CheckPrintRunConfirmationService
-  class StaleSelectionError < StandardError; end
+  StaleSelectionError = CheckPrintRunSelectionVerifier::StaleSelectionError
 
   def initialize(run:, actor:, ip_address: nil)
     @run = run
@@ -25,8 +25,7 @@ class CheckPrintRunConfirmationService
         raise ArgumentError, "A different authorized payroll operator must confirm this print package"
       end
 
-      payroll_items, non_employee_checks = load_current_records(locked_run)
-      verify_manifest!(locked_run, payroll_items, non_employee_checks)
+      payroll_items, non_employee_checks = CheckPrintRunSelectionVerifier.new(run: locked_run, lock: true).call
 
       payroll_items.values.each { |item| item.mark_printed!(user: actor, ip_address: ip_address) }
       non_employee_checks.values.each(&:mark_printed!)
@@ -50,62 +49,6 @@ class CheckPrintRunConfirmationService
   private
 
   attr_reader :run, :actor, :ip_address
-
-  def load_current_records(locked_run)
-    employee_ids = locked_run.manifest.filter_map do |entry|
-      entry.fetch("source_id") if entry.fetch("source_type") == "payroll_item"
-    end
-    non_employee_ids = locked_run.manifest.filter_map do |entry|
-      entry.fetch("source_id") if entry.fetch("source_type") == "non_employee_check"
-    end
-
-    payroll_items = PayrollItem
-      .where(id: employee_ids, pay_period_id: locked_run.pay_period_id, company_id: locked_run.company_id)
-      .includes(:employee)
-      .lock
-      .index_by(&:id)
-    non_employee_checks = NonEmployeeCheck
-      .where(id: non_employee_ids, pay_period_id: locked_run.pay_period_id, company_id: locked_run.company_id)
-      .lock
-      .index_by(&:id)
-
-    [ payroll_items, non_employee_checks ]
-  end
-
-  def verify_manifest!(locked_run, payroll_items, non_employee_checks)
-    locked_run.manifest.each do |entry|
-      record = if entry.fetch("source_type") == "payroll_item"
-        payroll_items[entry.fetch("source_id")]
-      else
-        non_employee_checks[entry.fetch("source_id")]
-      end
-      raise_stale!(entry, "was removed") unless record
-      raise_stale!(entry, "was voided") if record.voided?
-      raise_stale!(entry, "has a different check number") unless record.check_number.to_s == entry.fetch("check_number")
-      raise_stale!(entry, "has a different amount") unless current_amount(record) == entry.fetch("amount").to_d
-      raise_stale!(entry, "changed after this package was generated") unless record.updated_at.iso8601(6) == entry.fetch("source_updated_at")
-      raise_stale!(entry, "has new print activity") unless current_print_count(record) == entry.fetch("print_count").to_i
-      raise_stale!(entry, "has new print activity") unless current_printed_at(record) == entry["printed_at"]
-    end
-  end
-
-  def current_amount(record)
-    record.is_a?(PayrollItem) ? record.net_pay.to_d : record.amount.to_d
-  end
-
-  def current_print_count(record)
-    record.is_a?(PayrollItem) ? record.check_print_count.to_i : record.print_count.to_i
-  end
-
-  def current_printed_at(record)
-    value = record.is_a?(PayrollItem) ? record.check_printed_at : record.printed_at
-    value&.iso8601(6)
-  end
-
-  def raise_stale!(entry, reason)
-    raise StaleSelectionError,
-          "Check ##{entry.fetch('check_number')} #{reason}. Refresh the print queue and generate a new package."
-  end
 
   def record_confirmation_audit!(locked_run, employee_count, non_employee_count)
     AuditLog.record!(

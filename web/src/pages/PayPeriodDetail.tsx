@@ -1887,7 +1887,7 @@ export function PayPeriodDetail({
                     {comparisonError
                       ? 'Comparison failed to load. Retry before approving this payroll.'
                       : comparison?.previous_pay_period
-                        ? `${comparison.comparison_kind === 'training_benchmark' ? 'Expected result from' : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
+                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
                         : comparisonLoading ? 'Loading comparison…' : 'No comparison target found for this payroll.'}
                   </p>
                 </div>

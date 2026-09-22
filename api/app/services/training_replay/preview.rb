@@ -12,10 +12,7 @@ module TrainingReplay
       blockers = []
       blockers << "Choose a live client as the training source" unless source_company.live_payroll?
       blockers << "Archive the existing training replay before creating another" if active_replay
-      blockers << "At least two completed regular payrolls are required" if candidate_periods.length < PRACTICE_PERIOD_COUNT
-      if candidate_periods.length == PRACTICE_PERIOD_COUNT && candidate_periods.any? { |period| !period.committed? }
-        blockers << "Commit both latest payrolls before creating their immutable training benchmarks"
-      end
+      blockers << "At least two calculated, approved, or committed regular payrolls are required" if candidate_periods.length < PRACTICE_PERIOD_COUNT
       blockers << "Add an active manager or accountant before creating a training replay" if assignable_staff.empty?
 
       {
@@ -31,7 +28,7 @@ module TrainingReplay
     end
 
     def practice_periods
-      return [] if planned_practice_periods.empty? || !planned_practice_periods.all?(&:committed?)
+      return [] if planned_practice_periods.empty?
 
       planned_practice_periods
     end
@@ -93,6 +90,7 @@ module TrainingReplay
       [
         "This copies protected employee and payroll data inside the same Cornerstone organization.",
         "The two practice runs contain source inputs, but no source calculation results, check numbers, payment state, filings, messages, documents, or external connections.",
+        "Expected results are frozen when the workspace is created, even when a source payroll is calculated or approved rather than committed.",
         "Older committed payroll is retained as locked baseline evidence so practice calculations use the correct year-to-date context.",
         "Every training payroll is isolated from live payroll and cannot be committed, paid, filed, printed, or communicated to clients."
       ]

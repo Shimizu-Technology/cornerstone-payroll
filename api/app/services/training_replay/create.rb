@@ -96,10 +96,11 @@ module TrainingReplay
         test_workspace_expires_at: 90.days.from_now,
         active_printer_profile: nil,
         test_workspace_manifest: {
-          version: 1,
+          version: 2,
           purpose: "training_replay",
           source_company_id: source_company.id,
           practice_source_pay_period_ids: practice_periods.map(&:id),
+          benchmark_mode: "immutable_snapshot",
           copy_summary: preview_payload.fetch(:copy_summary),
           exclusions: preview_payload.fetch(:warnings)
         },

@@ -42,6 +42,157 @@ RSpec.describe "Check print runs", type: :request do
     )
   end
 
+  it "lists saved packages for the current pay period without exposing another client" do
+    print_run.update!(
+      status: "confirmed",
+      confirmed_at: Time.current,
+      confirmed_by: admin_user
+    )
+    other_company = create(:company)
+    other_period = create(:pay_period, :committed, company: other_company)
+    CheckPrintRun.create!(
+      company: other_company,
+      pay_period: other_period,
+      status: "confirmed",
+      check_stock_type: other_company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ { "source_type" => "payroll_item", "source_id" => 999 } ],
+      storage_key: "check-print-runs/other-package.pdf",
+      filename: "other-package.pdf",
+      sha256: "b" * 64,
+      byte_size: 100,
+      generated_at: Time.current,
+      confirmed_at: Time.current
+    )
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("check_print_runs").sole).to include(
+      "id" => print_run.id,
+      "confirmation_state" => "confirmed",
+      "confirmation_issue" => nil
+    )
+  end
+
+  it "forbids client-portal users from listing saved packages" do
+    client_user = create(:user, company: company, organization: company.organization, role: "client")
+    allow_any_instance_of(Api::V1::Admin::CheckPrintRunsController)
+      .to receive(:current_user).and_return(client_user)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body).to eq("error" => "Staff access required")
+  end
+
+  it "bulk-loads referenced records once per model while verifying package history" do
+    employee = create(:employee, company: company)
+    item = create(
+      :payroll_item,
+      company: company,
+      pay_period: pay_period,
+      employee: employee,
+      net_pay: 500,
+      check_number: "4101",
+      check_print_count: 0,
+      check_printed_at: nil
+    )
+    manifest = [ {
+      "key" => "payroll_item:#{item.id}",
+      "source_type" => "payroll_item",
+      "source_id" => item.id,
+      "check_number" => item.check_number,
+      "payee" => employee.full_name,
+      "amount" => "500.00",
+      "source_updated_at" => item.updated_at.iso8601(6),
+      "printed_at" => nil,
+      "print_count" => 0
+    } ]
+    2.times do |index|
+      CheckPrintRun.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: admin_user,
+        status: "generated",
+        check_stock_type: company.check_stock_type,
+        starting_slot: 1,
+        selected_count: 1,
+        manifest: manifest,
+        storage_key: "check-print-runs/history-package-#{index}.pdf",
+        filename: "history-package-#{index}.pdf",
+        sha256: (index + 1).to_s * 64,
+        byte_size: 100,
+        generated_at: Time.current
+      )
+    end
+    allow(PayrollItem).to receive(:where).and_call_original
+    allow(NonEmployeeCheck).to receive(:where).and_call_original
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    expect(response).to have_http_status(:ok)
+    expect(PayrollItem).to have_received(:where).once
+    expect(NonEmployeeCheck).to have_received(:where).once
+  end
+
+  it "marks legacy packages with missing source references stale" do
+    print_run.update_column(:manifest, [ { "source_id" => 123 } ])
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    payload = response.parsed_body.fetch("check_print_runs").sole
+    expect(payload).to include("confirmation_state" => "stale")
+    expect(payload.fetch("confirmation_issue")).to include("invalid check reference")
+  end
+
+  it "marks an unconfirmed saved package stale when its check data changed" do
+    employee = create(:employee, company: company)
+    item = create(
+      :payroll_item,
+      company: company,
+      pay_period: pay_period,
+      employee: employee,
+      net_pay: 500,
+      check_number: "4101",
+      check_print_count: 0,
+      check_printed_at: nil
+    )
+    run = CheckPrintRun.create!(
+      company: company,
+      pay_period: pay_period,
+      created_by: admin_user,
+      status: "generated",
+      check_stock_type: company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ {
+        "key" => "payroll_item:#{item.id}",
+        "source_type" => "payroll_item",
+        "source_id" => item.id,
+        "check_number" => item.check_number,
+        "payee" => employee.full_name,
+        "amount" => "500.00",
+        "source_updated_at" => item.updated_at.iso8601(6),
+        "printed_at" => nil,
+        "print_count" => 0
+      } ],
+      storage_key: "check-print-runs/stale-package.pdf",
+      filename: "stale-package.pdf",
+      sha256: "c" * 64,
+      byte_size: 100,
+      generated_at: Time.current
+    )
+    item.update_columns(net_pay: 501, updated_at: Time.current)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
+    expect(payload).to include("confirmation_state" => "stale")
+    expect(payload.fetch("confirmation_issue")).to include("different amount")
+  end
+
   it "returns a structured retryable response when package generation has an infrastructure failure" do
     service = instance_double(CheckPrintRunGenerationService)
     allow(CheckPrintRunGenerationService).to receive(:new).and_return(service)

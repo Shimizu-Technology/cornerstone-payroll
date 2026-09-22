@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3135,6 +3135,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_130000) do
     t.index ["pay_period_id"], name: "index_timecards_on_pay_period_id"
   end
 
+  create_table "training_replay_benchmarks", force: :cascade do |t|
+    t.datetime "captured_at", null: false
+    t.bigint "captured_by_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "pay_period_id", null: false
+    t.string "sha256", null: false
+    t.jsonb "snapshot", default: {}, null: false
+    t.bigint "source_company_id", null: false
+    t.bigint "source_pay_period_id", null: false
+    t.string "source_status", null: false
+    t.datetime "updated_at", null: false
+    t.index ["captured_by_id"], name: "index_training_replay_benchmarks_on_captured_by_id"
+    t.index ["company_id", "source_pay_period_id"], name: "idx_training_benchmarks_company_source", unique: true
+    t.index ["company_id"], name: "index_training_replay_benchmarks_on_company_id"
+    t.index ["pay_period_id"], name: "index_training_replay_benchmarks_on_pay_period_id", unique: true
+    t.index ["source_company_id"], name: "index_training_replay_benchmarks_on_source_company_id"
+    t.index ["source_pay_period_id"], name: "index_training_replay_benchmarks_on_source_pay_period_id"
+    t.check_constraint "source_status::text = ANY (ARRAY['calculated'::character varying, 'approved'::character varying, 'committed'::character varying]::text[])", name: "training_replay_benchmarks_source_status_check"
+  end
+
   create_table "transmittals", force: :cascade do |t|
     t.string "check_number_first"
     t.string "check_number_last"
@@ -3598,6 +3619,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_130000) do
   add_foreign_key "timecards", "employees", column: "applied_employee_id"
   add_foreign_key "timecards", "pay_periods"
   add_foreign_key "timecards", "payroll_items", column: "applied_payroll_item_id"
+  add_foreign_key "training_replay_benchmarks", "companies", column: "source_company_id", on_delete: :restrict
+  add_foreign_key "training_replay_benchmarks", "companies", on_delete: :restrict
+  add_foreign_key "training_replay_benchmarks", "pay_periods", column: "source_pay_period_id", on_delete: :restrict
+  add_foreign_key "training_replay_benchmarks", "pay_periods", on_delete: :restrict
+  add_foreign_key "training_replay_benchmarks", "users", column: "captured_by_id", on_delete: :nullify
   add_foreign_key "transmittals", "companies"
   add_foreign_key "transmittals", "pay_periods"
   add_foreign_key "transmittals", "users", column: "created_by_id"
