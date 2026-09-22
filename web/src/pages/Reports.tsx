@@ -22,6 +22,7 @@ import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/repo
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
+import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -68,6 +69,22 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+/** Loads every payroll run that can be rendered as a final or rehearsal register. */
+async function fetchRegisterEligiblePayRuns(companyId: number): Promise<PayrollHistoryRecord[]> {
+  const runs: PayrollHistoryRecord[] = [];
+  let page = 1;
+  let totalPages = 1;
+  while (page <= totalPages) {
+    const response = await payrollHistoryApi.list({
+      page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true,
+    }, companyId);
+    runs.push(...response.data);
+    totalPages = response.meta.total_pages;
+    page += 1;
+  }
+  return runs;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -129,6 +146,7 @@ export function PayrollRegisterPanel() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingHistoryPackage, setExportingHistoryPackage] = useState<'xlsx' | 'pdf' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<PayrollRegisterReport['report'] | null>(null);
 
@@ -147,15 +165,7 @@ export function PayrollRegisterPanel() {
     let cancelled = false;
     const loadPeriods = async () => {
       try {
-        const periods: PayrollHistoryRecord[] = [];
-        let page = 1;
-        let totalPages = 1;
-        while (page <= totalPages) {
-          const res = await payrollHistoryApi.list({ page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true }, activeCompanyId);
-          periods.push(...res.data);
-          totalPages = res.meta.total_pages;
-          page += 1;
-        }
+        const periods = await fetchRegisterEligiblePayRuns(activeCompanyId);
         if (cancelled) return;
         setPayPeriods(periods);
         setSelectedPayRunKey(periods[0]?.key || '');
@@ -169,7 +179,7 @@ export function PayrollRegisterPanel() {
     return () => { cancelled = true; };
   }, [activeCompanyId]);
 
-  const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
+  const busy = loading || exportingCsv || exportingPdf || exportingXlsx || exportingHistoryPackage !== null;
   const downloadFormats: ReportDownloadFormat[] = [
     {
       key: 'xlsx',
@@ -194,6 +204,24 @@ export function PayrollRegisterPanel() {
       kind: 'data',
       loading: exportingCsv,
       onSelect: downloadCsv,
+    },
+  ];
+  const historyPackageFormats: ReportDownloadFormat[] = [
+    {
+      key: 'xlsx',
+      label: 'Excel history package',
+      description: 'One workbook per payroll run, plus CSV and JSON manifests.',
+      kind: 'spreadsheet',
+      loading: exportingHistoryPackage === 'xlsx',
+      onSelect: () => downloadHistoryPackage('xlsx'),
+    },
+    {
+      key: 'pdf',
+      label: 'PDF history package',
+      description: 'One printable register per payroll run, plus CSV and JSON manifests.',
+      kind: 'pdf',
+      loading: exportingHistoryPackage === 'pdf',
+      onSelect: () => downloadHistoryPackage('pdf'),
     },
   ];
 
@@ -255,6 +283,26 @@ export function PayrollRegisterPanel() {
     }
   }
 
+  async function downloadHistoryPackage(format: 'xlsx' | 'pdf') {
+    setExportingHistoryPackage(format);
+    setError(null);
+    try {
+      const { blob, filename } = await buildPayrollHistoryPackage({
+        runs: payPeriods,
+        format,
+        fetchReport: (runKey) => reportsApi.payrollRegister(runKey),
+        fetchFile: (runKey) => format === 'pdf'
+          ? reportsApi.payrollRegisterPdf(runKey)
+          : reportsApi.payrollRegisterXlsx(runKey),
+      });
+      triggerDownload(blob, filename);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingHistoryPackage(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -299,6 +347,21 @@ export function PayrollRegisterPanel() {
             <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
               <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPayRunKey} />
             </div>
+          </div>
+          <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-primary-200 bg-primary-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-neutral-950">Complete payroll history</p>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">
+                Download every reportable payroll run in one ZIP. Each package includes a reconciliation manifest and keeps W-2 employees and 1099 contractors separate.
+              </p>
+            </div>
+            <ReportDownloadMenu
+              formats={historyPackageFormats}
+              disabled={busy || loadingPeriods || payPeriods.length === 0}
+              buttonLabel="Download all history"
+              ariaLabel="Download complete payroll history"
+              className="shrink-0"
+            />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -1299,11 +1362,16 @@ function EmployeePayHistoryPanel() {
 
 export function YtdSummaryPanel() {
   const previewPdf = usePdfPreview();
+  const { activeCompanyId } = useCompany();
   const currentYear = new Date().getFullYear();
   const localIsoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
-  const [periodMode, setPeriodMode] = useState<'ytd' | 'rolling_year' | 'year' | 'quarter' | 'month' | 'custom'>('ytd');
+  const [periodMode, setPeriodMode] = useState<'ytd' | 'rolling_year' | 'year' | 'quarter' | 'month' | 'custom' | 'pay_run'>('ytd');
+  const [payRuns, setPayRuns] = useState<PayrollHistoryRecord[]>([]);
+  const [selectedPayRunKey, setSelectedPayRunKey] = useState('');
+  const [loadingPayRuns, setLoadingPayRuns] = useState(false);
+  const [loadedPayRunCompanyId, setLoadedPayRunCompanyId] = useState<number | null>(null);
   const [quarter, setQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
@@ -1323,6 +1391,32 @@ export function YtdSummaryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
   const reportRequestSequence = useRef(0);
+  const selectedPayRun = payRuns.find((payRun) => payRun.key === selectedPayRunKey);
+
+  useEffect(() => {
+    if (periodMode !== 'pay_run' || !activeCompanyId || loadedPayRunCompanyId === activeCompanyId) return;
+
+    let cancelled = false;
+    setLoadingPayRuns(true);
+    setPayRuns([]);
+    setSelectedPayRunKey('');
+    void (async () => {
+      try {
+        const runs = await fetchRegisterEligiblePayRuns(activeCompanyId);
+        if (cancelled) return;
+        setPayRuns(runs);
+        setSelectedPayRunKey(runs[0]?.key || '');
+      } catch {
+        if (!cancelled) setError('Failed to load payroll runs');
+      } finally {
+        if (!cancelled) {
+          setLoadingPayRuns(false);
+          setLoadedPayRunCompanyId(activeCompanyId);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeCompanyId, loadedPayRunCompanyId, periodMode]);
 
   function calendarRange(mode: 'quarter' | 'month'): { start_date: string; end_date: string } {
     const startMonth = mode === 'quarter' ? ((quarter - 1) * 3) + 1 : month;
@@ -1336,6 +1430,9 @@ export function YtdSummaryPanel() {
   }
 
   function selectedPeriodParams(): PayrollReportPeriodParams {
+    if (periodMode === 'pay_run' && selectedPayRun) {
+      return { start_date: selectedPayRun.pay_date, end_date: selectedPayRun.pay_date, pay_run_key: selectedPayRun.key };
+    }
     if (periodMode === 'ytd') return { start_date: `${currentYear}-01-01`, end_date: localIsoDate(new Date()) };
     if (periodMode === 'rolling_year') {
       const end = new Date();
@@ -1393,6 +1490,7 @@ export function YtdSummaryPanel() {
   }
 
   async function loadReport(overrides: Partial<YtdSummaryParams> = {}) {
+    if (periodMode === 'pay_run' && !selectedPayRun) return;
     const requestSequence = ++reportRequestSequence.current;
     setLoading(true);
     setError(null);
@@ -1451,27 +1549,51 @@ export function YtdSummaryPanel() {
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Payroll detail and reconciliation sheets.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'Payroll data (.csv)', description: 'Flat employee totals for analysis.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
+  const noPayrollActivity = report != null && Number(report.company_totals?.payroll_count ?? 0) === 0;
+  const reportLabel = periodMode === 'pay_run' && selectedPayRun
+    ? `${selectedPayRun.start_date} – ${selectedPayRun.end_date} (paid ${selectedPayRun.pay_date})`
+    : report?.period.label;
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Payroll Summary by Period</CardTitle>
+          <CardTitle className="text-lg">Payroll Summary by Pay Date</CardTitle>
           <CardDescription>
-            Payroll totals and field-level reconciliation for any pay-date period.
+            Payroll totals and field-level reconciliation based on when payroll was paid. Use Payroll Register when you need a specific work period.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as typeof periodMode); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
               <option value="ytd">Year to date</option>
+              <option value="pay_run">Single payroll run</option>
               <option value="rolling_year">Past 12 months</option>
               <option value="year">Full calendar year</option>
               <option value="quarter">Quarter</option>
               <option value="month">Month</option>
               <option value="custom">Custom pay dates</option>
             </select>
-            {periodMode === 'custom' ? <>
+            {periodMode === 'pay_run' ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <label htmlFor="ytd-pay-run" className="text-sm font-medium text-gray-700">Payroll run</label>
+                {loadingPayRuns ? <span className="text-sm text-gray-500">Loading payroll runs…</span> : (
+                  <select
+                    id="ytd-pay-run"
+                    value={selectedPayRunKey}
+                    onChange={(event) => { setSelectedPayRunKey(event.target.value); setReport(null); setError(null); }}
+                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                  >
+                    {payRuns.length === 0 && <option value="">No reportable payroll runs</option>}
+                    {payRuns.map((payRun) => (
+                      <option key={payRun.key} value={payRun.key}>
+                        {payRun.start_date} – {payRun.end_date} · paid {payRun.pay_date} · {payRun.source.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ) : periodMode === 'custom' ? <>
               <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
               <span className="text-sm text-gray-500">to</span>
               <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
@@ -1556,11 +1678,14 @@ export function YtdSummaryPanel() {
               />
               Include active employees with $0 pay
             </label>
-            <Button onClick={() => loadReport()} disabled={loading}>
+            <Button onClick={() => loadReport()} disabled={loading || loadingPayRuns || (periodMode === 'pay_run' && !selectedPayRun)}>
               {loading ? 'Loading…' : 'View Report'}
             </Button>
-            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv} />
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv || (periodMode === 'pay_run' && !selectedPayRun)} />
           </div>
+          <p className="mt-4 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm leading-6 text-primary-950" role="note">
+            <span className="font-semibold">Date basis: pay date.</span> A work period such as April 1–15 appears on the date it was paid, such as April 30. Choose Single payroll run to avoid translating those dates yourself.
+          </p>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
       </Card>
@@ -1574,7 +1699,7 @@ export function YtdSummaryPanel() {
           )}
           <Card>
             <CardHeader>
-              <CardTitle>Payroll Summary — {report.period.label}</CardTitle>
+              <CardTitle>Payroll Summary by Pay Date — {reportLabel}</CardTitle>
               <CardDescription>
                 Pay-date basis &bull; {report.employees.length} employee{report.employees.length !== 1 ? 's' : ''}
                 {report.company_totals?.payroll_count != null && (
@@ -1586,7 +1711,30 @@ export function YtdSummaryPanel() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {noPayrollActivity ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-6" role="status">
+                  <h3 className="font-semibold text-amber-950">No payroll was paid in this date range</h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-900">
+                    This report uses pay dates, not work-period dates. Choose Single payroll run above, select the actual pay date, or open Payroll Register to find the work period you need.
+                  </p>
+                  <Link to="/reports?report=payroll-register" className="mt-4 inline-flex min-h-11 items-center rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-950 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
+                    Open Payroll Register
+                  </Link>
+                </div>
+              ) : <>
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
+              {(report.included_payroll_runs?.length ?? 0) > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" aria-label="Included payroll runs">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Included payroll runs</p>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                    {report.included_payroll_runs?.map((payRun) => (
+                      <li key={payRun.key}>
+                        {payRun.work_period_start} – {payRun.work_period_end} · paid {payRun.pay_date} · {payRun.source}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {report.historical_deductions?.source_bucket_totals.length ? (
                 <p className="text-sm text-amber-900" role="note">{report.historical_deductions.classification_note}</p>
               ) : null}
@@ -1638,10 +1786,11 @@ export function YtdSummaryPanel() {
                   </details>
                 </div>
               )}
+              </>}
             </CardContent>
           </Card>
 
-          <Card>
+          {!noPayrollActivity && <Card>
             <CardHeader>
               <CardTitle className="text-base">Employee Detail</CardTitle>
               <CardDescription>Category and source columns are views of the same saved paychecks, not extra amounts to add.</CardDescription>
@@ -1746,7 +1895,7 @@ export function YtdSummaryPanel() {
                 </tbody>
               </table>
             </CardContent>
-          </Card>
+          </Card>}
         </>
       )}
     </div>
@@ -3565,7 +3714,7 @@ const reports: ReportDefinition[] = [
   },
   {
     id: 'ytd-summary',
-    title: 'Payroll Summary by Period',
+    title: 'Payroll Summary by Pay Date',
     description: 'Wage, tax, deduction, and payroll-field totals for any pay-date range.',
     category: 'payroll',
     basis: 'Pay-date range',
