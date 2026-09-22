@@ -5,13 +5,15 @@ require "digest"
 
 class CheckPrintRunGenerationService
   def initialize(pay_period:, actor:, payroll_item_ids:, non_employee_check_ids:, starting_slot:, ip_address: nil,
-                 storage: R2StorageService.new)
+                 printer_profile_id:, printer_profile_lock_version:, storage: R2StorageService.new)
     @pay_period = pay_period
     @actor = actor
     @payroll_item_ids = normalize_ids(payroll_item_ids)
     @non_employee_check_ids = normalize_ids(non_employee_check_ids)
     @starting_slot = Integer(starting_slot || 1)
     @ip_address = ip_address
+    @printer_profile_id = printer_profile_id
+    @printer_profile_lock_version = printer_profile_lock_version
     @storage = storage
   rescue ArgumentError, TypeError
     raise ArgumentError, "Starting slot must be a number from 1 through 4"
@@ -26,6 +28,15 @@ class CheckPrintRunGenerationService
       locked_period = PayPeriod.lock.find(pay_period.id)
       raise ArgumentError, "Checks are only available for committed pay periods" unless locked_period.committed?
 
+      render_settings = CheckRenderSettings.resolve(
+        company: locked_period.company,
+        actor: actor,
+        printer_profile_id: printer_profile_id,
+        printer_profile_lock_version: printer_profile_lock_version,
+        require_profile: true,
+        lock_profile: true
+      )
+      render_company = render_settings.apply_to(locked_period.company)
       payroll_items = load_payroll_items(locked_period)
       non_employee_checks = load_non_employee_checks(locked_period)
       validate_scoped_selection!(payroll_items, non_employee_checks)
@@ -36,7 +47,7 @@ class CheckPrintRunGenerationService
 
       # Keep rendering and storage inside this lock boundary intentionally. The immutable manifest must describe the
       # exact rows used by the PDF; releasing the locks before upload would allow a correction to make them diverge.
-      pdf_bytes = render_pdf(payroll_items, non_employee_checks, manifest)
+      pdf_bytes = render_pdf(payroll_items, non_employee_checks, manifest, render_company)
       artifact_id = SecureRandom.uuid
       key = storage_key(artifact_id)
       filename = print_run_filename(artifact_id)
@@ -46,11 +57,13 @@ class CheckPrintRunGenerationService
         company: pay_period.company,
         pay_period: pay_period,
         created_by: actor,
+        printer_profile: render_settings.printer_profile,
         status: "generated",
-        check_stock_type: pay_period.company.check_stock_type,
-        starting_slot: effective_starting_slot,
+        check_stock_type: render_settings.check_stock_type,
+        starting_slot: effective_starting_slot(render_settings.check_stock_type),
         selected_count: manifest.size,
         manifest: manifest,
+        calibration_snapshot: render_settings.snapshot,
         storage_key: key,
         filename: filename,
         sha256: Digest::SHA256.hexdigest(pdf_bytes),
@@ -69,7 +82,8 @@ class CheckPrintRunGenerationService
 
   private
 
-  attr_reader :pay_period, :actor, :payroll_item_ids, :non_employee_check_ids, :starting_slot, :ip_address, :storage
+  attr_reader :pay_period, :actor, :payroll_item_ids, :non_employee_check_ids, :starting_slot, :ip_address,
+    :printer_profile_id, :printer_profile_lock_version, :storage
 
   def normalize_ids(values)
     Array(values).filter_map do |value|
@@ -84,6 +98,9 @@ class CheckPrintRunGenerationService
     raise ArgumentError, "Checks are only available for committed pay periods" unless pay_period.committed?
     raise ArgumentError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
     raise ArgumentError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)
+    if printer_profile_id.blank? || printer_profile_lock_version.blank?
+      raise ArgumentError, "Choose a printer profile and refresh its calibration before generating checks"
+    end
   end
 
   def load_payroll_items(locked_period)
@@ -157,13 +174,13 @@ class CheckPrintRunGenerationService
     }
   end
 
-  def render_pdf(payroll_items, non_employee_checks, manifest)
-    if pay_period.company.first_hawaiian_4up_checks?
+  def render_pdf(payroll_items, non_employee_checks, manifest, render_company)
+    if render_company.first_hawaiian_4up_checks?
       return FirstHawaiianFourUpCheckGenerator.new(
-        company: pay_period.company,
+        company: render_company,
         payroll_items: payroll_items,
         non_employee_checks: non_employee_checks,
-        starting_slot: effective_starting_slot
+        starting_slot: effective_starting_slot(render_company.check_stock_type)
       ).generate
     end
 
@@ -171,9 +188,9 @@ class CheckPrintRunGenerationService
     non_employee_by_id = non_employee_checks.index_by(&:id)
     pdfs = manifest.map do |entry|
       if entry.fetch("source_type") == "payroll_item"
-        CheckGenerator.new(employee_by_id.fetch(entry.fetch("source_id"))).generate
+        CheckGenerator.new(employee_by_id.fetch(entry.fetch("source_id")), company: render_company).generate
       else
-        NonEmployeeCheckGenerator.new(non_employee_by_id.fetch(entry.fetch("source_id"))).generate
+        NonEmployeeCheckGenerator.new(non_employee_by_id.fetch(entry.fetch("source_id")), company: render_company).generate
       end
     end
     combine_pdfs(pdfs)
@@ -189,8 +206,8 @@ class CheckPrintRunGenerationService
     raise ArgumentError, "Failed to merge check PDFs: #{e.message}"
   end
 
-  def effective_starting_slot
-    pay_period.company.first_hawaiian_4up_checks? ? starting_slot : 1
+  def effective_starting_slot(stock_type)
+    stock_type == "first_hawaiian_4up" ? starting_slot : 1
   end
 
   def check_number_sort_key(check_number, fallback)
@@ -223,6 +240,10 @@ class CheckPrintRunGenerationService
         non_employee_check_count: non_employee_checks.size,
         check_numbers: run.manifest.map { |entry| entry.fetch("check_number") },
         starting_slot: run.starting_slot,
+        printer_profile_id: run.printer_profile_id,
+        printer_profile_name: run.calibration_snapshot["printer_profile_name"],
+        printer_profile_lock_version: run.calibration_snapshot["printer_profile_lock_version"],
+        calibration_digest: run.calibration_snapshot["calibration_digest"],
         sha256: run.sha256,
         ip_address: ip_address
       }.compact,

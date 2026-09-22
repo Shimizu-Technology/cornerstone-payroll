@@ -13,9 +13,17 @@ const apiMocks = vi.hoisted(() => ({
   createPrintRun: vi.fn(),
   updateCheckNumbers: vi.fn(),
   confirmPrintRun: vi.fn(),
+  listPrinterProfiles: vi.fn(),
+  selectPrinterProfile: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({ checksApi: apiMocks }));
+vi.mock('@/services/api', () => ({
+  checksApi: apiMocks,
+  printerProfilesApi: {
+    list: apiMocks.listPrinterProfiles,
+    selectForMe: apiMocks.selectPrinterProfile,
+  },
+}));
 
 const queue: CheckPrintQueueResponse = {
   items: [{
@@ -33,7 +41,16 @@ const queue: CheckPrintQueueResponse = {
     eligible: true,
     disabled_reason: null,
   }],
-  meta: { total: 1, eligible: 1, unprinted: 0, printed: 1, voided: 0, check_stock_type: 'bottom_check', slot_count: 1 },
+  meta: {
+    total: 1,
+    eligible: 1,
+    unprinted: 0,
+    printed: 1,
+    voided: 0,
+    check_stock_type: 'bottom_check',
+    slot_count: 1,
+    printer_profile: { id: 8, name: 'Payroll Room Printer', check_stock_type: 'bottom_check', lock_version: 3, updated_at: '2026-09-22T00:00:00Z' },
+  },
 };
 
 const savedRun: CheckPrintRun = {
@@ -41,6 +58,10 @@ const savedRun: CheckPrintRun = {
   pay_period_id: 9,
   status: 'confirmed',
   check_stock_type: 'bottom_check',
+  printer_profile_id: 8,
+  printer_profile_name: 'Payroll Room Printer',
+  printer_profile_lock_version: 3,
+  calibration_digest: 'b'.repeat(64),
   starting_slot: 1,
   selected_count: 1,
   manifest: [{ key: 'payroll_item:7', source_type: 'payroll_item', source_id: 7, check_number: '4101', payee: 'Ada Trainer', amount: '800.00' }],
@@ -88,6 +109,8 @@ describe('UnifiedCheckPrintDialog', () => {
     apiMocks.printRuns.mockReset().mockResolvedValue({ check_print_runs: [savedRun] });
     apiMocks.printRunPdf.mockReset().mockResolvedValue({ blob: new Blob(['%PDF-1.4']), filename: 'checks.pdf' });
     apiMocks.createPrintRun.mockReset();
+    apiMocks.listPrinterProfiles.mockReset().mockResolvedValue({ printer_profiles: [], selections: [], active_printer_profile_id: 8 });
+    apiMocks.selectPrinterProfile.mockReset();
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:checks');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   });
@@ -139,5 +162,28 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(URL.createObjectURL).toHaveBeenCalledWith(newerBlob);
     expect(screen.getByText('Generated package #43')).toBeTruthy();
     expect(screen.getByTitle('Check package preview').getAttribute('src')).toBe('https://example.test/newer-checks.pdf');
+  });
+
+  it('pins the selected printer profile version when generating a package', async () => {
+    const user = userEvent.setup();
+    apiMocks.printQueue.mockResolvedValue({
+      ...queue,
+      items: [{ ...queue.items[0], status: 'unprinted', printed_at: null, print_count: 0 }],
+      meta: { ...queue.meta, unprinted: 1, printed: 0 },
+    });
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [] });
+    apiMocks.createPrintRun.mockResolvedValue({
+      check_print_run: { ...savedRun, status: 'generated', confirmed_at: null, confirmation_state: 'ready' },
+    });
+
+    render(<UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={vi.fn()} onConfirmed={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Generate print package' }));
+
+    expect(apiMocks.createPrintRun).toHaveBeenCalledWith(9, expect.objectContaining({
+      printerProfileId: 8,
+      printerProfileLockVersion: 3,
+      payrollItemIds: [7],
+    }));
   });
 });

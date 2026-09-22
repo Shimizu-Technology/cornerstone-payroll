@@ -10,7 +10,7 @@ module Api
         before_action :set_run, only: [ :pdf, :confirm ]
 
         def queue
-          render json: CheckPrintQueueService.new(pay_period: @pay_period).call
+          render json: CheckPrintQueueService.new(pay_period: @pay_period, actor: current_user).call
         rescue ArgumentError => e
           render json: { error: e.message }, status: :conflict
         end
@@ -36,6 +36,8 @@ module Api
             payroll_item_ids: params[:payroll_item_ids],
             non_employee_check_ids: params[:non_employee_check_ids],
             starting_slot: params[:starting_slot],
+            printer_profile_id: params[:printer_profile_id],
+            printer_profile_lock_version: params[:printer_profile_lock_version],
             ip_address: request.remote_ip
           ).call
 
@@ -114,6 +116,10 @@ module Api
             pay_period_id: run.pay_period_id,
             status: run.status,
             check_stock_type: run.check_stock_type,
+            printer_profile_id: run.printer_profile_id,
+            printer_profile_name: run.calibration_snapshot["printer_profile_name"],
+            printer_profile_lock_version: run.calibration_snapshot["printer_profile_lock_version"],
+            calibration_digest: run.calibration_snapshot["calibration_digest"],
             starting_slot: run.starting_slot,
             selected_count: run.selected_count,
             manifest: run.manifest,
