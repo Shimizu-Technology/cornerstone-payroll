@@ -437,6 +437,9 @@ export function Clients() {
 
   const handleEdit = async (id: number) => {
     handleCloseWorkspaceBuilder();
+    handleCloseRehearsal();
+    handleCloseTraining();
+    handleClosePromotion();
     setLoadingEditId(id);
     try {
       const data = await companiesApi.get(id);

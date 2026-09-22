@@ -21,7 +21,11 @@ export function HelpTip({ label, children, className }: HelpTipProps): ReactElem
     if (!open) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setPinned(false);
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setPinned(false);
+        setHovered(false);
+        setFocused(false);
+      }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

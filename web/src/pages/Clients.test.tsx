@@ -195,6 +195,32 @@ describe('Clients migration promotion', () => {
     expect(screen.queryByRole('heading', { name: 'Create a test workspace' })).toBeNull();
   });
 
+  it('closes an open workspace preview before editing a client', async () => {
+    const user = userEvent.setup();
+    apiMocks.get.mockResolvedValue({ company: target });
+    apiMocks.migrationRehearsalPreview.mockResolvedValue({
+      migration_rehearsal: {
+        source_company: { id: target.id, name: target.name },
+        historical_import_batch_id: 12,
+        ready: true,
+        blockers: [],
+        warnings: [],
+        existing_rehearsal: null,
+        copy_summary: { employees: 114, imported_pay_periods: 2 },
+      },
+    });
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
+    await user.click(screen.getByRole('button', { name: /Rehearse a migration/i }));
+    expect(await screen.findByRole('heading', { name: 'Create a migration rehearsal' })).toBeTruthy();
+
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    expect(await screen.findByRole('heading', { name: 'Edit Client' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create a migration rehearsal' })).toBeNull();
+  });
+
   it('guides an admin through the backup gate before live application', async () => {
     const user = userEvent.setup();
     apiMocks.migrationPromotionPreview.mockResolvedValue({

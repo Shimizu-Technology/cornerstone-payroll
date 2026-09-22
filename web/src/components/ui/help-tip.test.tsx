@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -34,6 +34,17 @@ describe('HelpTip', () => {
     expect(screen.getByRole('tooltip')).toBeTruthy();
 
     await user.click(trigger);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('closes a pinned tooltip on an outside pointer press', async () => {
+    const user = userEvent.setup();
+    render(<HelpTip label="practice payroll">A safe training copy.</HelpTip>);
+
+    await user.click(screen.getByRole('button', { name: 'About practice payroll' }));
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
