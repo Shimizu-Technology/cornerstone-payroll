@@ -111,9 +111,9 @@ RSpec.describe PayrollStatementYtdBreakdown do
       through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "earnings_breakdown" => {
-          "Allotment - Douglas" => "7713.28",
-          "Rent" => "2400.00",
-          "Auto Loan Reimbursement" => "1936.00"
+          "Reimb" => "7713.28",
+          "Rent - Charlie" => "2400.00",
+          "Auto Loan Reimbursem" => "1936.00"
         }
       }
     )
@@ -128,6 +128,59 @@ RSpec.describe PayrollStatementYtdBreakdown do
     expect(rows.fetch("Allotment - Douglas")).to have_attributes(current: 482.08.to_d, ytd: 8_195.36.to_d)
     expect(rows.fetch("Rent Reimbursement")).to have_attributes(current: 150.to_d, ytd: 2_550.to_d)
     expect(rows.fetch("Auto Loan Reimbursement")).to have_attributes(current: 121.to_d, ytd: 2_057.to_d)
+  end
+
+  it "prefers an explicit current reimbursement over the legacy allotment rename" do
+    apply_historical_ytd_balance(
+      company: company,
+      employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
+      source_breakdown: { "earnings_breakdown" => { "Reimb" => "400.00" } }
+    )
+    field_entry(item: payroll_item, label: "Allotment", amount: 100,
+      treatment: "non_taxable_addition", category: "allotment")
+    field_entry(item: payroll_item, label: "Reimbursement", amount: 50,
+      treatment: "non_taxable_addition", category: "reimbursement")
+
+    rows = described_class.new(payroll_item).other_pay.index_by(&:label)
+
+    expect(rows.fetch("Allotment")).to have_attributes(current: 100.to_d, ytd: 100.to_d)
+    expect(rows.fetch("Reimbursement")).to have_attributes(current: 50.to_d, ytd: 450.to_d)
+  end
+
+  it "keeps an unmatched generic reimbursement separate instead of guessing an allotment rename" do
+    apply_historical_ytd_balance(
+      company: company,
+      employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
+      source_breakdown: { "earnings_breakdown" => { "Reimb" => "375.00" } }
+    )
+    field_entry(item: payroll_item, label: "Allotment", amount: 100,
+      treatment: "non_taxable_addition", category: "allotment")
+
+    rows = described_class.new(payroll_item).other_pay.index_by(&:label)
+
+    expect(rows.fetch("Allotment")).to have_attributes(current: 100.to_d, ytd: 100.to_d)
+    expect(rows.fetch("Reimb")).to have_attributes(current: 0.to_d, ytd: 375.to_d)
+  end
+
+  it "keeps a negative historical reimbursement separate from a current allotment" do
+    apply_historical_ytd_balance(
+      company: company,
+      employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
+      source_breakdown: { "earnings_breakdown" => { "Reimb" => "-400.00" } }
+    )
+    field_entry(item: payroll_item, label: "Allotment", amount: 100,
+      treatment: "non_taxable_addition", category: "allotment")
+
+    rows = described_class.new(payroll_item).other_pay.index_by(&:label)
+
+    expect(rows.fetch("Allotment")).to have_attributes(current: 100.to_d, ytd: 100.to_d)
+    expect(rows.fetch("Reimb")).to have_attributes(current: 0.to_d, ytd: -400.to_d)
   end
 
   it "keeps distinct loans separate instead of guessing between ambiguous matches" do
