@@ -3,6 +3,7 @@
 module MigrationPromotion
   class Apply
     ACKNOWLEDGEMENT = "APPLY REHEARSAL TO LIVE CLIENT"
+    PAYMENT_DISPOSITIONS = PayPeriod::PROMOTION_PAYMENT_DISPOSITIONS.freeze
     PAYROLL_ITEM_CLEAR_COLUMNS = {
       "check_number" => nil,
       "check_date" => nil,
@@ -18,11 +19,12 @@ module MigrationPromotion
       "correction_reason" => nil
     }.freeze
 
-    def initialize(rehearsal:, actor:, acknowledgement:)
+    def initialize(rehearsal:, actor:, acknowledgement:, payment_dispositions:)
       @rehearsal = rehearsal
       @target_company = rehearsal.migration_source_company
       @actor = actor
       @acknowledgement = acknowledgement
+      @payment_dispositions = payment_dispositions.to_h.stringify_keys
     end
 
     def call
@@ -36,6 +38,7 @@ module MigrationPromotion
         preview = Preview.new(rehearsal: rehearsal)
         payload = preview.call
         raise ArgumentError, payload.fetch(:blockers).join("; ") unless payload.fetch(:ready_to_apply)
+        validate_payment_dispositions!(preview.source_periods)
 
         backup = preview.promotion_backup
         mapping = preview.employee_mapping
@@ -46,8 +49,10 @@ module MigrationPromotion
           actor: actor,
           mapping: mapping
         ).call
-        promoted_periods = preview.source_periods.map { |source| copy_period!(source, maps) }
-        apply_financial_effects!(promoted_periods)
+        promoted_periods = preview.source_periods.map do |source|
+          copy_period!(source, maps, payment_disposition: payment_disposition_for(source))
+        end
+        apply_financial_effects!(promoted_periods.select(&:committed?))
         verify!(preview.source_periods, promoted_periods)
 
         completed_at = Time.current
@@ -59,6 +64,7 @@ module MigrationPromotion
             "promoted_target_company_id" => target_company.id,
             "promoted_source_pay_period_ids" => preview.source_periods.map(&:id),
             "promoted_pay_period_ids" => promoted_periods.map(&:id),
+            "promoted_payment_dispositions" => payment_disposition_manifest(promoted_periods),
             "promoted_at" => completed_at.iso8601
           )
         )
@@ -71,7 +77,7 @@ module MigrationPromotion
 
     private
 
-    attr_reader :rehearsal, :target_company, :actor, :acknowledgement
+    attr_reader :rehearsal, :target_company, :actor, :acknowledgement, :payment_dispositions
 
     def authorize!
       allowed = actor&.organization_admin? && actor.can_access_company?(rehearsal.id) &&
@@ -85,30 +91,53 @@ module MigrationPromotion
       target_company.reload
     end
 
-    def copy_period!(source, maps)
+    def validate_payment_dispositions!(source_periods)
+      expected_ids = source_periods.map { |period| period.id.to_s }.sort
+      submitted_ids = payment_dispositions.keys.sort
+      unless submitted_ids == expected_ids
+        raise ArgumentError, "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+      end
+
+      invalid = payment_dispositions.values - PAYMENT_DISPOSITIONS
+      return if invalid.empty?
+
+      raise ArgumentError, "Payment disposition is invalid"
+    end
+
+    def payment_disposition_for(source)
+      payment_dispositions.fetch(source.id.to_s)
+    end
+
+    def copy_period!(source, maps, payment_disposition:)
       attributes = source.attributes.except(
         "id", "created_at", "updated_at", "company_id", "company_pay_schedule_id", "company_workweek_id",
         "corrects_pay_period_id", "source_pay_period_id", "superseded_by_id", "intake_stale_session_id",
         "test_workspace_source_pay_period_id", "test_workspace_role", "promotion_source_pay_period_id"
       )
+      record_only = payment_disposition == "record_only"
       target = PayPeriod.create!(attributes.merge(
         company: target_company,
         company_pay_schedule: source.company_pay_schedule_id && maps.fetch(:pay_schedules).fetch(source.company_pay_schedule_id),
         company_workweek: source.company_workweek_id && maps.fetch(:workweeks).fetch(source.company_workweek_id),
-        status: "committed",
+        status: record_only ? "committed" : "calculated",
         parallel_run: false,
         run_purpose_source: "production_migration",
         cycle: "regular",
         promotion_source_pay_period: source,
+        promotion_payment_disposition: payment_disposition,
         created_by_id: actor.id,
-        committed_by_id: actor.id,
-        committed_at: Time.current,
+        calculated_by_id: actor.id,
+        calculated_at: source.calculated_at || Time.current,
+        approved_by_id: nil,
+        approved_at: nil,
+        committed_by_id: record_only ? actor.id : nil,
+        committed_at: record_only ? Time.current : nil,
         correction_status: nil,
         corrects_pay_period_id: nil,
         source_pay_period_id: nil,
         superseded_by_id: nil,
-        # These periods already occurred in the legacy system. Keep them out of
-        # the live tax-sync queue while preserving their payroll/YTD records.
+        # Promotion itself never starts tax sync. Record-only payrolls remain
+        # historical; unpaid payrolls enter the normal live approval workflow.
         tax_sync_status: nil,
         tax_sync_attempts: 0,
         tax_sync_last_error: nil,
@@ -196,6 +225,10 @@ module MigrationPromotion
       source.class.create!(attributes.merge(overrides.stringify_keys))
     end
 
+    def payment_disposition_manifest(periods)
+      periods.to_h { |period| [ period.id.to_s, period.promotion_payment_disposition ] }
+    end
+
     def audit_completed!(backup, sources, targets)
       AuditLog.record!(
         user: actor,
@@ -210,6 +243,7 @@ module MigrationPromotion
           backup_company_id: backup.id,
           source_pay_period_ids: sources.map(&:id),
           promoted_pay_period_ids: targets.map(&:id),
+          promoted_payment_dispositions: payment_disposition_manifest(targets),
           employee_count: target_company.employees.count,
           promoted_gross_pay: targets.sum { |period| period.payroll_items.sum(:gross_pay).to_d },
           promoted_net_pay: targets.sum { |period| period.payroll_items.sum(:net_pay).to_d }
