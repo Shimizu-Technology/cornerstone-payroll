@@ -160,6 +160,49 @@ RSpec.describe CheckGenerator do
       expect(text).not_to include("[TABLE]")
     end
 
+    it "keeps details and summary below crowded statement tables" do
+      crowded_rows = [
+        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Rent Reimbursement", "150.00", "3,000.00" ],
+        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Loan (Nena Joe)", "0.00", "350.00" ],
+        [ "Loan - Douglas Phill", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+      ]
+      crowded_deduction_rows = [
+        [ "401(k) Pre-Tax", "387.81", "8,177.03" ],
+        [ "Loan", "0.00", "350.00" ],
+        [ "Loan - Madela Severin", "0.00", "2,500.00" ],
+        [ "Health Insurance", "126.00", "2,583.00" ],
+        [ "Remittance ID 2952492", "168.00", "3,192.00" ],
+        [ "Tips Paid Out", "0.00", "1,900.80" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "681.81", font_style: :bold }, { content: "18,702.83", font_style: :bold } ]
+      ]
+      allow(generator).to receive(:other_pay_rows).and_return(crowded_rows)
+      allow(generator).to receive(:deduction_rows).and_return(crowded_deduction_rows)
+
+      page = PDF::Reader.new(StringIO.new(generator.generate)).pages.first
+      stub_bottoms = CheckGenerator.page_layout_metadata(company)
+        .values_at(:stub1_section_bottom, :stub2_section_bottom)
+      stub_bottoms.each do |stub_bottom|
+        stub_runs = page.runs.select { |run| run.y.between?(stub_bottom, stub_bottom + CheckGenerator::SECTION_HEIGHT) }
+        other_pay_bottom = stub_runs.filter_map do |run|
+          run.y if crowded_rows.flatten.include?(run.text)
+        end.min
+        pay_period_top = stub_runs.find { |run| run.text == "Pay Period" }.y
+        deduction_bottom = stub_runs.filter_map do |run|
+          run.y if crowded_deduction_rows.filter_map { |row| row.first if row.first.is_a?(String) }.include?(run.text)
+        end.min
+        summary_top = stub_runs.find { |run| run.text == "SUMMARY" }.y
+
+        expect(pay_period_top).to be < other_pay_bottom - 2.0
+        expect(summary_top).to be < deduction_bottom - 2.0
+      end
+      expect(page.text).to include(
+        "ER 401(k) Pre-Tax", "8,177.03", "Remittance ID 2952492", "18,702.83", "Pay Period", "MEMO:"
+      )
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,
