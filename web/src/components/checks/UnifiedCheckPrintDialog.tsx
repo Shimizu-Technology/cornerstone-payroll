@@ -78,8 +78,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         if (options.selectKey && eligibleKeys.has(options.selectKey)) next.add(options.selectKey);
         return next;
       });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the check queue.');
+      return false;
     } finally {
       setLoading(false);
     }
@@ -229,7 +231,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     revokePreview();
 
     void (async () => {
-      await loadQueue();
+      const queueLoaded = await loadQueue();
+      if (!queueLoaded || cancelled) return;
       try {
         const response = await checksApi.printRuns(payPeriodId);
         if (cancelled) return;
