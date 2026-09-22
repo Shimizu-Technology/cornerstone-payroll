@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_210000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2759,6 +2759,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_210000) do
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
     t.index ["created_by_id"], name: "index_printer_profiles_on_created_by_id"
+    t.index ["id", "organization_id", "check_stock_type"], name: "idx_printer_profiles_identity_scope", unique: true
     t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true, where: "(archived_at IS NULL)"
     t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
     t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
@@ -3658,6 +3659,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_210000) do
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_printer_profile_selections", "organizations", on_delete: :cascade
   add_foreign_key "user_printer_profile_selections", "printer_profiles", on_delete: :cascade
+  add_foreign_key "user_printer_profile_selections", "printer_profiles", column: ["printer_profile_id", "organization_id", "check_stock_type"], primary_key: ["id", "organization_id", "check_stock_type"], name: "fk_user_printer_selections_profile_scope", on_delete: :cascade
   add_foreign_key "user_printer_profile_selections", "users", on_delete: :cascade
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
