@@ -65,6 +65,29 @@ RSpec.describe User, type: :model do
       expect(user.accessible_company_ids).to eq([ assigned_company.id ])
     end
 
+    it "filters archived workspaces when assignments are loaded without their companies" do
+      organization = create(:organization)
+      home_company = create(:company, organization: organization)
+      assigned_company = create(:company, organization: organization)
+      archived_workspace = create(
+        :company,
+        organization: organization,
+        active: false,
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox",
+        migration_source_company: home_company,
+        migration_rehearsal_status: "ready",
+        test_workspace_archived_at: Time.current
+      )
+      user = create(:user, company: home_company, organization: organization, role: "accountant")
+      CompanyAssignment.create!(user: user, company: assigned_company)
+      CompanyAssignment.create!(user: user, company: archived_workspace, workspace_access_level: "operator")
+      user.reload.company_assignments.load
+
+      expect(user.company_assignments).to all(satisfy { |assignment| !assignment.association(:company).loaded? })
+      expect(user.accessible_company_ids).to eq([ assigned_company.id ])
+    end
+
     it "rejects users whose home company belongs to another organization" do
       company = create(:company)
       other_org = create(:organization)

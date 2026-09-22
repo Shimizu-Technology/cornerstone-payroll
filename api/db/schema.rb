@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -408,14 +408,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
     t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"
     t.index ["migration_source_batch_id"], name: "index_companies_on_migration_source_batch_id"
-    t.index ["migration_source_company_id", "test_workspace_purpose"], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL))"
+    t.index ["migration_source_company_id", "test_workspace_purpose"], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL) AND ((test_workspace_purpose)::text = ANY ((ARRAY['migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying])::text[])))"
     t.index ["migration_source_company_id"], name: "index_companies_on_migration_source_company_id"
     t.index ["name"], name: "index_companies_on_name"
     t.index ["organization_id"], name: "index_companies_on_organization_id"
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
-    t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying]::text[]))", name: "companies_test_workspace_purpose_check"
+    t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying, 'migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying]::text[]))", name: "companies_test_workspace_purpose_check"
   end
 
   create_table "company_assignments", force: :cascade do |t|

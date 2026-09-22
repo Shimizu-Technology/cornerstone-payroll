@@ -111,7 +111,7 @@ RSpec.describe TrainingReplay::Cloner do
     expect(target.training_replay_benchmarks.order(:source_pay_period_id).pluck(:source_status)).to eq(%w[committed committed])
 
     expect(baseline.update(notes: "changed")).to be(false)
-    expect(baseline.errors.full_messages.join).to include("locked benchmark evidence")
+    expect(baseline.errors.full_messages.join).to include("locked reference evidence")
     expect(baseline.payroll_items.sole.update(gross_pay: 5)).to be(false)
   end
 
