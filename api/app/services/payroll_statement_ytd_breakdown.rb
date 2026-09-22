@@ -212,9 +212,10 @@ class PayrollStatementYtdBreakdown
   end
 
   def repeated_recurring_amount?(historical_amount, current_amount)
-    historical = historical_amount.to_d.abs
-    current = current_amount.to_d.abs
-    current.positive? && historical >= current && (historical % current).zero?
+    historical = historical_amount.to_d
+    current = current_amount.to_d
+    historical.positive? && current.positive? &&
+      historical >= current && (historical % current).zero?
   end
 
   def append_ytd_only_target!(targets, component)

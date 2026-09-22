@@ -166,6 +166,23 @@ RSpec.describe PayrollStatementYtdBreakdown do
     expect(rows.fetch("Reimb")).to have_attributes(current: 0.to_d, ytd: 375.to_d)
   end
 
+  it "keeps a negative historical reimbursement separate from a current allotment" do
+    apply_historical_ytd_balance(
+      company: company,
+      employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
+      source_breakdown: { "earnings_breakdown" => { "Reimb" => "-400.00" } }
+    )
+    field_entry(item: payroll_item, label: "Allotment", amount: 100,
+      treatment: "non_taxable_addition", category: "allotment")
+
+    rows = described_class.new(payroll_item).other_pay.index_by(&:label)
+
+    expect(rows.fetch("Allotment")).to have_attributes(current: 100.to_d, ytd: 100.to_d)
+    expect(rows.fetch("Reimb")).to have_attributes(current: 0.to_d, ytd: -400.to_d)
+  end
+
   it "keeps distinct loans separate instead of guessing between ambiguous matches" do
     apply_historical_ytd_balance(
       company: company,
