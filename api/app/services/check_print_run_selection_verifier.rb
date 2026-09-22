@@ -3,36 +3,59 @@
 class CheckPrintRunSelectionVerifier
   class StaleSelectionError < StandardError; end
 
-  def initialize(run:, lock: false)
+  def initialize(run:, lock: false, current_records: nil)
     @run = run
     @lock = lock
+    @current_records = current_records
   end
 
   def call
     raise StaleSelectionError, "This pay period is no longer committed" unless run.pay_period.committed?
+    validate_manifest_references!
 
-    payroll_items, non_employee_checks = load_current_records
+    payroll_items, non_employee_checks = current_records || load_current_records
     verify_manifest!(payroll_items, non_employee_checks)
     [ payroll_items, non_employee_checks ]
   end
 
-  private
+  def self.load_current_records(runs:, lock: false)
+    manifests = runs.flat_map(&:manifest)
+    payroll_item_ids = source_ids(manifests, "payroll_item")
+    non_employee_check_ids = source_ids(manifests, "non_employee_check")
+    company_ids = runs.map(&:company_id).uniq
+    pay_period_ids = runs.map(&:pay_period_id).uniq
 
-  attr_reader :run, :lock
-
-  def load_current_records
-    employee_ids = run.manifest.filter_map do |entry|
-      entry.fetch("source_id") if entry.fetch("source_type") == "payroll_item"
-    end
-    non_employee_ids = run.manifest.filter_map do |entry|
-      entry.fetch("source_id") if entry.fetch("source_type") == "non_employee_check"
-    end
-
-    payroll_scope = PayrollItem.where(id: employee_ids, pay_period_id: run.pay_period_id, company_id: run.company_id).includes(:employee)
-    non_employee_scope = NonEmployeeCheck.where(id: non_employee_ids, pay_period_id: run.pay_period_id, company_id: run.company_id)
+    payroll_scope = PayrollItem.where(id: payroll_item_ids, pay_period_id: pay_period_ids, company_id: company_ids).includes(:employee)
+    non_employee_scope = NonEmployeeCheck.where(id: non_employee_check_ids, pay_period_id: pay_period_ids, company_id: company_ids)
     payroll_scope = payroll_scope.lock if lock
     non_employee_scope = non_employee_scope.lock if lock
     [ payroll_scope.index_by(&:id), non_employee_scope.index_by(&:id) ]
+  end
+
+  def self.source_ids(manifests, source_type)
+    manifests.filter_map do |entry|
+      entry["source_id"] if entry.is_a?(Hash) && entry["source_type"] == source_type
+    end
+  end
+
+  private_class_method :source_ids
+
+  private
+
+  attr_reader :run, :lock, :current_records
+
+  def load_current_records
+    self.class.load_current_records(runs: [ run ], lock: lock)
+  end
+
+  def validate_manifest_references!
+    valid = run.manifest.is_a?(Array) && run.manifest.all? do |entry|
+      entry.is_a?(Hash) && entry["source_type"].present? && entry["source_id"].present?
+    end
+    return if valid
+
+    raise StaleSelectionError,
+          "This saved package has an invalid check reference. Generate a new package from the current check queue."
   end
 
   def verify_manifest!(payroll_items, non_employee_checks)

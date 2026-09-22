@@ -53,6 +53,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [savingNumbers, setSavingNumbers] = useState(false);
   const compactPreviewRef = useRef<HTMLIFrameElement>(null);
   const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
+  const previewRequestRef = useRef(0);
 
   const revokePreview = useCallback(() => {
     setPreviewUrl((url) => {
@@ -84,7 +85,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     }
   }, [payPeriodId]);
 
-  useEffect(() => () => revokePreview(), [revokePreview]);
+  useEffect(() => () => {
+    previewRequestRef.current += 1;
+    revokePreview();
+  }, [revokePreview]);
 
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
@@ -176,20 +180,23 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const loadPreview = useCallback(async (printRun: CheckPrintRun) => {
+    const requestToken = ++previewRequestRef.current;
     setAction('Loading and verifying the generated PDF…');
     setError(null);
     setArtifactVerified(false);
+    revokePreview();
     try {
       const pdf = await checksApi.printRunPdf(printRun.id);
-      revokePreview();
+      if (requestToken !== previewRequestRef.current) return;
       setPreviewUrl(URL.createObjectURL(pdf.blob));
       setArtifactVerified(true);
     } catch (err) {
+      if (requestToken !== previewRequestRef.current) return;
       setError(err instanceof Error
         ? `The package was generated, but its preview could not be loaded: ${err.message}`
         : 'The package was generated, but its preview could not be loaded. Retry before confirming it as printed.');
     } finally {
-      setAction(null);
+      if (requestToken === previewRequestRef.current) setAction(null);
     }
   }, [revokePreview]);
 
@@ -202,6 +209,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }, [loadPreview]);
 
   const startNewPackage = useCallback(() => {
+    previewRequestRef.current += 1;
     setRun(null);
     setArtifactVerified(false);
     setPreviewExpanded(false);
@@ -232,7 +240,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      previewRequestRef.current += 1;
+    };
   }, [loadQueue, open, openSavedRun, payPeriodId, revokePreview]);
 
   const generate = async () => {
@@ -468,11 +479,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                       type="button"
                       onClick={() => void openSavedRun(savedRun)}
                       disabled={Boolean(action)}
-                      className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}
+                      className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-slate-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}
                     >
                       <span>
                         <span className="block text-sm font-semibold text-slate-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span>
-                        <span className="mt-0.5 block text-xs text-slate-500">{new Date(savedRun.generated_at).toLocaleString()}</span>
+                        <span className="mt-2 block text-xs text-slate-500">{new Date(savedRun.generated_at).toLocaleString()}</span>
                       </span>
                       <Badge variant={savedRun.confirmation_state === 'confirmed' ? 'success' : savedRun.confirmation_state === 'stale' ? 'danger' : 'warning'}>
                         {savedRun.confirmation_state === 'confirmed' ? 'Confirmed' : savedRun.confirmation_state === 'stale' ? 'Changed' : 'Ready'}

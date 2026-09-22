@@ -20,8 +20,13 @@ module Api
             .includes(:company, :created_by, :confirmed_by, :pay_period)
             .order(generated_at: :desc, id: :desc)
             .limit(50)
+          confirmation_states = CheckPrintRunHistoryVerifier.new(runs: runs).call
 
-          render json: { check_print_runs: runs.map { |run| run_payload(run) } }
+          render json: {
+            check_print_runs: runs.map do |run|
+              run_payload(run, confirmation_state: confirmation_states.fetch(run.id))
+            end
+          }
         end
 
         def create
@@ -102,8 +107,8 @@ module Api
           @run = CheckPrintRun.where(company_id: current_company_id).find(params[:id])
         end
 
-        def run_payload(run)
-          confirmation_state, confirmation_issue = confirmation_state_for(run)
+        def run_payload(run, confirmation_state: nil)
+          confirmation_state, confirmation_issue = confirmation_state || confirmation_state_for(run)
           {
             id: run.id,
             pay_period_id: run.pay_period_id,

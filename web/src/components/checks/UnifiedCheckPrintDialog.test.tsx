@@ -59,8 +59,31 @@ const savedRun: CheckPrintRun = {
   confirmation_issue: null,
 };
 
+const newerSavedRun: CheckPrintRun = {
+  ...savedRun,
+  id: 43,
+  pay_period_id: 10,
+  filename: 'newer-checks.pdf',
+  generated_at: '2026-09-22T02:00:00Z',
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => { resolve = resolver; });
+  return { promise, resolve };
+}
+
 describe('UnifiedCheckPrintDialog', () => {
   beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+      },
+    });
     apiMocks.printQueue.mockReset().mockResolvedValue(queue);
     apiMocks.printRuns.mockReset().mockResolvedValue({ check_print_runs: [savedRun] });
     apiMocks.printRunPdf.mockReset().mockResolvedValue({ blob: new Blob(['%PDF-1.4']), filename: 'checks.pdf' });
@@ -87,5 +110,34 @@ describe('UnifiedCheckPrintDialog', () => {
 
     await user.click(screen.getByRole('button', { name: 'New package' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Generate print package' })).toBeTruthy());
+  });
+
+  it('ignores an older PDF response after the active pay period changes', async () => {
+    const olderPdf = deferred<{ blob: Blob; filename: string }>();
+    const newerPdf = deferred<{ blob: Blob; filename: string }>();
+    apiMocks.printRuns.mockImplementation((payPeriodId: number) => Promise.resolve({
+      check_print_runs: [payPeriodId === 9 ? savedRun : newerSavedRun],
+    }));
+    apiMocks.printRunPdf.mockImplementation((runId: number) => runId === savedRun.id ? olderPdf.promise : newerPdf.promise);
+    vi.mocked(URL.createObjectURL).mockReturnValue('https://example.test/newer-checks.pdf');
+
+    const { rerender } = render(
+      <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={vi.fn()} onConfirmed={vi.fn()} />
+    );
+    await waitFor(() => expect(apiMocks.printRunPdf).toHaveBeenCalledWith(savedRun.id));
+
+    rerender(<UnifiedCheckPrintDialog open payPeriodId={10} onOpenChange={vi.fn()} onConfirmed={vi.fn()} />);
+    await waitFor(() => expect(apiMocks.printRunPdf).toHaveBeenCalledWith(newerSavedRun.id));
+
+    const newerBlob = new Blob(['newer PDF']);
+    newerPdf.resolve({ blob: newerBlob, filename: newerSavedRun.filename });
+    expect(await screen.findByText('Generated package #43')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTitle('Check package preview').getAttribute('src')).toBe('https://example.test/newer-checks.pdf'));
+
+    olderPdf.resolve({ blob: new Blob(['older PDF']), filename: savedRun.filename });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(newerBlob);
+    expect(screen.getByText('Generated package #43')).toBeTruthy();
+    expect(screen.getByTitle('Check package preview').getAttribute('src')).toBe('https://example.test/newer-checks.pdf');
   });
 });
