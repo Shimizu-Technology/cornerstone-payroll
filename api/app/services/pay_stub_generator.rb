@@ -308,8 +308,8 @@ class PayStubGenerator
       ]
     end
 
-    if payroll_item.additional_withholding.to_f > 0
-      ytd_addl = employee_ytd_additional_withholding
+    ytd_addl = employee_ytd_additional_withholding
+    if payroll_item.additional_withholding.to_d.nonzero? || ytd_addl.nonzero?
       deductions_data << [
         "Additional Withholding (W-4 4c)",
         format_currency(payroll_item.additional_withholding),
@@ -317,89 +317,14 @@ class PayStubGenerator
       ]
     end
 
-    # Retirement
-    if retirement_totals[:retirement].positive?
-      deductions_data << [
-        "401(k) Retirement",
-        format_currency(retirement_totals[:retirement]),
-        format_currency(retirement_ytd_totals[:retirement])
-      ]
-    end
-
-    # Roth Retirement
-    if retirement_totals[:roth_retirement].positive?
-      deductions_data << [
-        "Roth 401(k)",
-        format_currency(retirement_totals[:roth_retirement]),
-        format_currency(retirement_ytd_totals[:roth_retirement])
-      ]
-    end
-
-    # Insurance
-    if payroll_item.insurance_payment.to_f > 0 && payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").none? { |entry| entry.category == "insurance" }
-      deductions_data << [
-        "Health Insurance",
-        format_currency(payroll_item.insurance_payment),
-        format_currency(visible_legacy_insurance_ytd)
-      ]
-    end
-
-    # Loan
-    if visible_legacy_loan_payment.positive?
-      deductions_data << [
-        "Loan Repayment",
-        format_currency(visible_legacy_loan_payment),
-        format_currency(visible_legacy_loan_ytd)
-      ]
-    end
-
-    legacy_itemized_deduction_rows.each do |row|
-      deductions_data << [ row[:label], format_currency(row[:amount]), format_currency(row[:ytd]) ]
-    end
-
-    if payroll_item.tips_paid_out.to_f > 0
-      deductions_data << [
-        "Tips Paid Out",
-        format_currency(payroll_item.tips_paid_out),
-        format_currency(employee_ytd_tips_paid_out)
-      ]
-    end
-
-    Array(payroll_item.custom_deductions).each do |deduction|
-      amount = deduction["amount"].to_f
-      next unless amount.positive?
-
-      label = deduction["label"].presence || "Other Deduction"
-      deductions_data << [
-        label,
-        format_currency(amount),
-        format_currency(employee_ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)
-      ]
-    end
-
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
-
-      amount = adjustment["amount"].to_f
-      next unless amount.positive?
-
-      deductions_data << [
-        adjustment["label"].presence || "Payroll Adjustment",
-        format_currency(amount),
-        "—"
-      ]
-    end
-
-    payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
-      next if PayrollRetirementTotals.retirement_field?(entry)
-
-      deductions_data << [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
+    statement_ytd_breakdown.deductions.each do |row|
+      deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]
     end
 
     # Total deductions
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
-      { content: format_currency(payroll_item.total_deductions), font_style: :bold },
+      { content: format_currency(current_total_deductions), font_style: :bold },
       { content: format_currency(ytd_total_deductions), font_style: :bold }
     ]
 
@@ -417,22 +342,8 @@ class PayStubGenerator
   end
 
   def render_non_taxable_additions(pdf)
-    additions = []
-    if payroll_item.non_taxable_pay.to_f > 0
-      additions << [ "Non-Taxable Pay", format_currency(payroll_item.non_taxable_pay), "—" ]
-    end
-
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless adjustment["treatment"] == "non_taxable_addition"
-
-      amount = adjustment["amount"].to_f
-      next unless amount.positive?
-
-      additions << [ adjustment["label"].presence || "Non-Taxable Addition", format_currency(amount), "—" ]
-    end
-
-    payroll_field_entries_for("non_taxable_addition").each do |entry|
-      additions << [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
+    additions = statement_ytd_breakdown.other_pay.map do |row|
+      [ row.label, format_currency(row.current), format_currency(row.ytd) ]
     end
 
     return if additions.empty?
@@ -456,7 +367,7 @@ class PayStubGenerator
   end
 
   def render_employer_contributions(pdf)
-    entries = payroll_field_entries_for("employer_contribution").select { |entry| entry.amount.to_f.positive? }
+    entries = statement_ytd_breakdown.employer_contributions
     return if entries.empty?
 
     pdf.font_size(10) do
@@ -464,11 +375,13 @@ class PayStubGenerator
     end
     pdf.move_down 3
 
-    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map { |entry| [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] }
+    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map do |entry|
+      [ entry.label, format_currency(entry.current), format_currency(entry.ytd) ]
+    end
     rows << [
       { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold },
-      { content: format_currency(entries.sum { |entry| entry.amount.to_f }), font_style: :bold },
-      { content: format_currency(entries.sum { |entry| ytd_payroll_field_amount(entry) }), font_style: :bold }
+      { content: format_currency(entries.sum(0.to_d) { |entry| entry.current.to_d }), font_style: :bold },
+      { content: format_currency(entries.sum(0.to_d) { |entry| entry.ytd.to_d }), font_style: :bold }
     ]
 
     pdf.font_size(8) do
@@ -544,109 +457,26 @@ class PayStubGenerator
 
   def ytd_total_deductions
     payroll_item.ytd_withholding_tax.to_d + payroll_item.ytd_social_security_tax.to_d + payroll_item.ytd_medicare_tax.to_d +
-      employee_ytd_additional_withholding + retirement_ytd_totals[:retirement].to_d + retirement_ytd_totals[:roth_retirement].to_d +
-      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + legacy_itemized_deductions_ytd_total + employee_ytd_tips_paid_out +
-      employee_ytd_custom_deductions_total + ytd_payroll_field_deductions_total
+      employee_ytd_additional_withholding + statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }
   end
 
-  def legacy_itemized_deduction_rows
-    @legacy_itemized_deduction_rows ||= legacy_itemized_deductions_for_stub
-      .group_by(&:label)
-      .map do |label, deductions|
-        {
-          label: label,
-          amount: deductions.sum(0.to_d) { |deduction| deduction.amount.to_d },
-          ytd: legacy_itemized_deductions_ytd_by_label.fetch(label, 0.to_d)
-        }
-      end
-      .sort_by { |row| row[:label].to_s }
+  def current_total_deductions
+    payroll_item.withholding_tax.to_d + payroll_item.social_security_tax.to_d + payroll_item.medicare_tax.to_d +
+      payroll_item.additional_withholding.to_d + statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.current.to_d }
   end
 
-  def legacy_itemized_deductions_ytd_total
-    legacy_itemized_deduction_rows.sum(0.to_d) { |row| row[:ytd].to_d }
+  def statement_ytd_breakdown
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
   end
 
-  def legacy_itemized_deductions_for_stub
-    payroll_item.payroll_item_deductions.select do |deduction|
-      next false unless deduction.pre_tax? || deduction.post_tax?
-      next false if payroll_field_backed_deduction?(deduction)
-      next false if PayrollRetirementTotals.retirement_deduction?(deduction)
-
-      sub_category = deduction.deduction_type&.sub_category.to_s
-      !sub_category.in?(%w[insurance loan])
-    end
-  end
-
-  def legacy_itemized_deductions_ytd_by_label
-    @legacy_itemized_deductions_ytd_by_label ||= begin
-      labels = legacy_itemized_deductions_for_stub.map(&:label).uniq
-      if labels.empty?
-        Hash.new(0.to_d)
-      else
-        pay_date = payroll_item.pay_period.pay_date || Date.current
-        year_start = Date.new(pay_date.year, 1, 1)
-        PayrollItemDeduction.joins(:deduction_type, payroll_item: :pay_period)
-          .includes(:deduction_type)
-          .merge(PayrollItem.not_voided)
-          .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
-          .where(pay_periods: { pay_date: year_start..pay_date })
-          .where(label: labels, category: %w[pre_tax post_tax])
-          .where("deduction_types.sub_category IS NULL OR deduction_types.sub_category NOT IN (?)", %w[insurance loan])
-          .where.not("deduction_types.name LIKE ?", "Payroll Field%")
-          .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-            pay_date: pay_date,
-            pay_period_id: payroll_item.pay_period.id)
-          .reject { |deduction| PayrollRetirementTotals.retirement_deduction?(deduction) }
-          .group_by(&:label)
-          .transform_values { |deductions| deductions.sum(0.to_d) { |deduction| deduction.amount.to_d } }
-      end
-    end
-  end
-
-  def payroll_field_backed_deduction?(deduction)
-    deduction.deduction_type&.name.to_s.start_with?("Payroll Field")
-  end
-
-  def visible_legacy_insurance_ytd
-    return 0.to_d if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
-
-    employee_ytd_totals[:insurance].to_d
-  end
-
-  def visible_legacy_loan_ytd
-    field_total = ytd_payroll_field_totals.sum(0.to_d) do |(_label, treatment, category), amount|
-      treatment == "post_tax_deduction" && category == "loan" ? amount.to_d : 0.to_d
-    end
-    [ employee_ytd_totals[:loans].to_d - field_total, 0.to_d ].max
-  end
-
-  def visible_legacy_loan_payment
-    field_total = payroll_field_entries_for("post_tax_deduction")
-      .select { |entry| entry.category == "loan" }
-      .sum(0.to_d) { |entry| entry.amount.to_d }
-    [ payroll_item.loan_payment.to_d - field_total, 0.to_d ].max
-  end
-
-  def retirement_totals
-    @retirement_totals ||= PayrollRetirementTotals.for_item(payroll_item)
-  end
-
-  # Old paycheck snapshots omitted fixed/flexible retirement contributions.
-  # Derive display totals from saved components without rewriting those rows.
-  def retirement_ytd_totals
-    @retirement_ytd_totals ||= begin
-      pay_date = pay_period.pay_date
-      bridge = employee.historical_employee_ytd_balances
-        .joins(:historical_ytd_bridge)
-        .where(company_id: company.id, tax_year: pay_date.year, historical_ytd_bridges: { status: "applied" })
-        .where("historical_employee_ytd_balances.through_pay_date <= ?", pay_date)
-        .order(through_pay_date: :desc, "historical_ytd_bridges.applied_at" => :desc,
-               "historical_ytd_bridges.id" => :desc, id: :desc).first
-      totals = { retirement: bridge&.retirement.to_d, roth_retirement: bridge&.roth_retirement.to_d }
-      ytd_source_items.each do |item|
-        PayrollRetirementTotals.for_item(item).each { |key, amount| totals[key] += amount }
-      end
-      totals
+  def pay_stub_deduction_label(row)
+    case row.semantic
+    when PayrollReportingGroups::GROUP_401K_PRE_TAX.to_sym
+      "401(k) Retirement"
+    when :loan
+      row.label == "Loan" ? "Loan Repayment" : row.label
+    else
+      row.label
     end
   end
 
@@ -664,17 +494,6 @@ class PayStubGenerator
       # its components once; voided/superseded checks contribute no YTD money.
       items << payroll_item if !payroll_item.voided? && pay_period.correction_status.in?([ nil, "correction" ])
       items
-    end
-  end
-
-  def ytd_payroll_field_deductions_total
-    ytd_source_items.sum(0.to_d) do |item|
-      item.payroll_item_field_entries.sum(0.to_d) do |entry|
-        next 0.to_d unless entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
-        next 0.to_d if PayrollRetirementTotals.retirement_field?(entry)
-
-        entry.amount.to_d
-      end
     end
   end
 
@@ -706,55 +525,6 @@ class PayStubGenerator
 
   def employee_ytd_additional_withholding
     employee_ytd_totals[:additional_withholding].to_d
-  end
-
-  def employee_ytd_tips_paid_out
-    employee_ytd_totals[:tips_paid_out].to_d
-  end
-
-  def employee_ytd_custom_deductions_by_label
-    @employee_ytd_custom_deductions_by_label ||= begin
-      labels = Array(payroll_item.custom_deductions)
-        .filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence }
-        .uniq
-      if labels.empty?
-        {}
-      else
-        custom_deduction_items.each_with_object(Hash.new(0.to_d)) do |item, totals|
-          Array(item.custom_deductions).each do |deduction|
-            label = deduction["label"].to_s.strip.downcase
-            next unless labels.include?(label)
-
-            totals[label] += deduction["amount"].to_d
-          end
-        end
-      end
-    end
-  end
-
-  def employee_ytd_custom_deductions_total
-    @employee_ytd_custom_deductions_total ||= custom_deduction_items.sum(0.to_d) do |item|
-      item.custom_deductions_total.to_d + item.pre_tax_payroll_adjustments_total.to_d + item.post_tax_payroll_adjustments_total.to_d
-    end
-  end
-
-  def custom_deduction_items
-    year = payroll_item.pay_period.pay_date&.year || Date.current.year
-
-    payroll_item.employee.payroll_items
-      .joins(:pay_period)
-      .select(:id, :custom_deductions, :payroll_adjustments)
-      .not_voided
-      .where(pay_periods: {
-        company_id: payroll_item.company_id,
-        pay_date: Date.new(year, 1, 1)..payroll_item.pay_period.pay_date
-      })
-      .where(
-        "pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-        pay_date: payroll_item.pay_period.pay_date,
-        pay_period_id: payroll_item.pay_period.id
-      )
-      .to_a
   end
 
   def format_currency(amount)
