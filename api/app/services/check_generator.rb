@@ -288,7 +288,7 @@ class CheckGenerator
     # ================================================================
     table_y2 = row2_top
 
-    draw_section_table(pdf,
+    other_pay_height = draw_section_table(pdf,
       x: lx, y: table_y2, w: left_w - 8,
       title: "OTHER PAY",
       columns: %w[Current YTD],
@@ -313,7 +313,9 @@ class CheckGenerator
     # ================================================================
     # ROW 3:  Period/Date/Memo (left)  |  SUMMARY (right)
     # ================================================================
-    pdf.bounding_box([lx, row3_top], width: left_w) do
+    details_top = details_block_y(sect_bot, table_y2, row3_top, stub_cfg, other_pay_height)
+
+    pdf.bounding_box([ lx, details_top ], width: left_w) do
       pdf.font_size(6.5) do
         pdf.text "Pay Period", style: :bold
         pdf.text "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
@@ -324,7 +326,7 @@ class CheckGenerator
     end
 
     # MEMO label
-    pdf.bounding_box([lx, row3_top + stub_cfg["memo_y_offset"].to_f], width: left_w) do
+    pdf.bounding_box([ lx, details_top + stub_cfg["memo_y_offset"].to_f ], width: left_w) do
       pdf.font_size(6.5) { pdf.text "MEMO:", style: :bold }
     end
 
@@ -499,6 +501,14 @@ class CheckGenerator
     minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
 
     [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
+  end
+
+  def details_block_y(sect_bot, other_pay_top, default_top, stub_cfg, other_pay_height)
+    non_overlapping_top = other_pay_top - other_pay_height - 6.0
+    memo_clearance = -stub_cfg["memo_y_offset"].to_f + 16.0
+    minimum_top = sect_bot + [ 52.0, memo_clearance ].max
+
+    [ [ default_top, non_overlapping_top ].min, minimum_top ].max
   end
 
   # -----------------------------------------------------------------------
