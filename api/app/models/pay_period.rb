@@ -456,10 +456,10 @@ class PayPeriod < ApplicationRecord
       return
     end
     return if test_workspace_role.blank?
-    return if company&.training_replay? &&
+    return if company&.test_workspace? && (company.training_replay? || company.sandbox?) &&
       test_workspace_source_pay_period&.company_id == company.migration_source_company_id
 
-    errors.add(:test_workspace_source_pay_period, "must belong to the training workspace's live source client")
+    errors.add(:test_workspace_source_pay_period, "must belong to the test workspace's production source client")
   end
 
   def promotion_source_is_valid
@@ -489,7 +489,7 @@ class PayPeriod < ApplicationRecord
   def prevent_training_baseline_mutation
     return unless training_baseline?
 
-    errors.add(:base, "Training baseline payrolls are locked benchmark evidence")
+    errors.add(:base, "Copied payroll history is locked reference evidence")
     throw :abort
   end
 

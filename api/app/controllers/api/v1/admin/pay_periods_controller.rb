@@ -126,7 +126,7 @@ module Api
             message = if @pay_period.voided?
               "Cannot edit a voided pay period"
             elsif @pay_period.training_baseline?
-              "Training baseline payrolls are locked benchmark evidence"
+              "Copied payroll history is locked reference evidence"
             else
               "Cannot edit a committed pay period"
             end

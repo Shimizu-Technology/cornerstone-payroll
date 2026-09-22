@@ -114,6 +114,11 @@ Rails.application.routes.draw do
             get :training_replay_preview
             post :training_replay, action: :create_training_replay
             post :retry_training_replay
+            get :test_workspace_preview
+            post :test_workspace, action: :create_test_workspace
+            post :retry_test_workspace
+            post :archive_test_workspace
+            post :restore_test_workspace
             get :migration_promotion_preview
             post :migration_promotion_backup, action: :create_migration_promotion_backup
             post :migration_promotion, action: :apply_migration_promotion

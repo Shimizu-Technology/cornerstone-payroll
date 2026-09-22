@@ -103,7 +103,7 @@ function PayPeriodMobileCard({
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
           {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
-        {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+        {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
         {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
         {!readOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
       </div>
@@ -916,7 +916,7 @@ export function PayPeriods() {
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
                             {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
                           </Badge>
-                          {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked baseline</Badge><HelpTip label="locked baseline">Earlier payrolls preserve accurate year-to-date totals and cannot be edited.</HelpTip></span>}
+                          {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
                           {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
                       </TableCell>
