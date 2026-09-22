@@ -45,6 +45,7 @@ Implementation plans explain why a change was designed a certain way and what a 
 - [Pay schedules, salary timekeeping, and client cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
 - [Pay schedule, timekeeping, and MoSa history implementation](PAY_SCHEDULE_TIMEKEEPING_AND_MOSA_HISTORY_IMPLEMENTATION_PLAN_2026-08-03.md)
 - [Employee lifecycle and salary timekeeping](EMPLOYEE_LIFECYCLE_AND_SALARY_TIMEKEEPING_IMPLEMENTATION_2026-08-04.md)
+- [Test workspaces and saved check packages](TEST_WORKSPACES_AND_SAVED_PRINT_PACKAGES_2026-09-22.md) — flexible client sandboxes, access and lifecycle boundaries, optional migration promotion, saved print artifacts, and release evidence.
 - [QuickBooks historical import plan](QB_HISTORICAL_IMPORT_PLAN.md)
 
 ## Historical documents

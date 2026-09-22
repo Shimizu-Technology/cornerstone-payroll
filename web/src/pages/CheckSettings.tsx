@@ -15,8 +15,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { CheckLayoutEditor } from '@/components/checks/CheckLayoutEditor';
 import { checksApi, printerProfilesApi } from '@/services/api';
-import type { PrinterProfile } from '@/services/api';
+import type { PrinterProfile, PrinterProfileSelection } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
+import { selectedPrinterProfileLockVersion } from './checkSettingsPrinterProfile';
 
 type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
 
@@ -133,6 +134,7 @@ export function CheckSettingsPage() {
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
+  const [profileSelections, setProfileSelections] = useState<PrinterProfileSelection[]>([]);
   const [showAddProfile, setShowAddProfile] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   const [newProfileDescription, setNewProfileDescription] = useState('');
@@ -142,7 +144,6 @@ export function CheckSettingsPage() {
   const [editProfileDescription, setEditProfileDescription] = useState('');
   const [editProfileNotes, setEditProfileNotes] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
-  const [profileApplyingAllId, setProfileApplyingAllId] = useState<number | null>(null);
 
   const currentSettingsSnapshot = useMemo(() => checkSettingsSnapshot({
     stockType,
@@ -259,6 +260,7 @@ export function CheckSettingsPage() {
     try {
       const data = await printerProfilesApi.list();
       setProfiles(data.printer_profiles);
+      setProfileSelections(data.selections);
       setActivePrinterProfileId(data.active_printer_profile_id ?? null);
     } catch {
       // Non-critical — profiles section just stays empty
@@ -370,11 +372,19 @@ export function CheckSettingsPage() {
         check_memo_template: memoTemplate.trim() || null,
         auto_create_fit_check: autoCreateFitCheck,
         require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
+        printer_profile_lock_version: selectedPrinterProfileLockVersion(
+          settings?.active_printer_profile_id,
+          settings?.active_printer_profile_lock_version,
+          activePrinterProfileId,
+          activeProfile?.lock_version
+        ),
         check_layout_config: parsedLayoutOverrides,
       });
       applySettingsToForm(data.check_settings);
       await loadCheckLayout(stockType);
-      setSuccess(data.check_settings.active_printer_profile_id ? 'Settings saved for this client.' : 'Custom check settings saved for this client.');
+      setSuccess(data.check_settings.active_printer_profile_id
+        ? `Saved calibration to “${data.check_settings.active_printer_profile_name || 'your selected profile'}” and client check settings.`
+        : 'Client check settings saved. Select a printer profile to keep calibration with your printer.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -408,8 +418,19 @@ export function CheckSettingsPage() {
     setError(null);
     setPreparingAlignment(true);
     try {
-      const blob = await checksApi.alignmentTestPdf();
-      setCheckPreview({ blob, filename: 'alignment_test.pdf', title: 'Alignment test preview', note: 'Review the check-face anchors and stub baselines, then print on plain paper or download a copy.' });
+      const layoutConfig = parseLayoutOverridesForAction();
+      const { blob, filename } = await checksApi.alignmentTestPdf({
+        check_stock_type: stockType,
+        check_offset_x: parseOffsetInput(offsetX),
+        check_offset_y: parseOffsetInput(offsetY),
+        check_layout_config: layoutConfig,
+      });
+      setCheckPreview({
+        blob,
+        filename: filename || 'alignment_test.pdf',
+        title: 'Alignment test preview',
+        note: 'This preview uses the calibration currently on screen. Print at Actual Size / 100%—never Fit or Shrink.',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to prepare alignment test PDF');
     } finally {
@@ -468,7 +489,7 @@ export function CheckSettingsPage() {
       return;
     }
     try {
-      await printerProfilesApi.create({
+      const response = await printerProfilesApi.create({
         name: newProfileName.trim(),
         description: newProfileDescription.trim() || null,
         notes: newProfileNotes.trim() || null,
@@ -477,12 +498,37 @@ export function CheckSettingsPage() {
         check_offset_y: parseOffsetInput(offsetY),
         check_layout_config: layoutConfig,
       });
+      await printerProfilesApi.selectForMe(stockType, response.printer_profile.id);
       setNewProfileName('');
       setNewProfileDescription('');
       setNewProfileNotes('');
       setShowAddProfile(false);
-      setSuccess('Printer profile saved.');
-      loadProfiles();
+      setActivePrinterProfileId(response.printer_profile.id);
+      setActivePrinterProfileName(response.printer_profile.name);
+      setSettings((current) => current ? {
+        ...current,
+        check_offset_x: parseOffsetInput(offsetX),
+        check_offset_y: parseOffsetInput(offsetY),
+        check_layout_config: layoutConfig,
+        active_printer_profile_id: response.printer_profile.id,
+        active_printer_profile_name: response.printer_profile.name,
+        active_printer_profile_lock_version: response.printer_profile.lock_version,
+      } : current);
+      if (settings) {
+        setSavedSettingsSnapshot(checkSettingsSnapshot({
+          stockType: settings.check_stock_type,
+          offsetX,
+          offsetY,
+          bankName: settings.bank_name ?? '',
+          bankAddress: settings.bank_address ?? '',
+          layoutOverridesJson,
+          memoTemplate: settings.check_memo_template ?? '',
+          autoCreateFitCheck: settings.auto_create_fit_check,
+          requireDistinctCheckPrintConfirmer: settings.require_distinct_check_print_confirmer,
+        }));
+      }
+      setSuccess(`Saved and selected “${response.printer_profile.name}” for you.`);
+      await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save profile');
     } finally {
@@ -491,58 +537,41 @@ export function CheckSettingsPage() {
   };
 
   const handleApplyProfile = async (profile: PrinterProfile) => {
-    if (!confirmDiscardUnsavedChanges(`You have unsaved check setting changes. Applying "${profile.name}" will replace them with that printer profile. Continue?`)) return;
+    if (profile.check_stock_type !== stockType) {
+      setError(`“${profile.name}” is for ${profile.check_stock_type.replaceAll('_', ' ')} stock. Change this client’s stock type before selecting it.`);
+      return;
+    }
+    if (settings?.check_stock_type !== stockType) {
+      setError('Save this client’s new stock type before selecting its printer profile.');
+      return;
+    }
+    if (!confirmDiscardUnsavedChanges(`You have unsaved calibration changes. Selecting “${profile.name}” will replace the draft calibration on screen. Continue?`)) return;
 
     setError(null);
     try {
-      await printerProfilesApi.apply(profile.id);
+      await printerProfilesApi.selectForMe(stockType, profile.id);
       const data = await checksApi.getSettings();
       if (data.check_settings.check_stock_type !== stockType) {
         skipNextLayoutEffectRef.current = true;
       }
       applySettingsToForm(data.check_settings);
       await loadCheckLayout(data.check_settings.check_stock_type);
-      setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
+      setSuccess(`“${profile.name}” is now your selected printer profile for ${stockType.replaceAll('_', ' ')} stock.`);
       await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply profile');
     }
   };
 
-  const handleApplyProfileToAllCompanies = async (profile: PrinterProfile) => {
-    const message = `Use "${profile.name}" for every client in this organization? This updates each client's check stock, alignment, and active printer profile.`;
-    if (!window.confirm(message)) return;
-
-    setError(null);
-    setSuccess(null);
-    setProfileApplyingAllId(profile.id);
-    try {
-      const result = await printerProfilesApi.applyToAllCompanies(profile.id);
-      const data = await checksApi.getSettings();
-      if (data.check_settings.check_stock_type !== stockType) {
-        skipNextLayoutEffectRef.current = true;
-      }
-      applySettingsToForm(data.check_settings);
-      await loadCheckLayout(data.check_settings.check_stock_type);
-      setSuccess(`Applied "${profile.name}" to ${result.applied_count} client${result.applied_count === 1 ? '' : 's'}.`);
-      await loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply printer profile to all clients');
-    } finally {
-      setProfileApplyingAllId(null);
-    }
-  };
-
   const handleClearActiveProfile = async () => {
-    if (!window.confirm('Stop using a saved printer profile for this client? Current check settings will stay as-is.')) return;
+    if (!window.confirm(`Stop using a saved printer profile for yourself on ${stockType.replaceAll('_', ' ')} stock?`)) return;
     setError(null);
     setSuccess(null);
     try {
-      const data = await printerProfilesApi.clearActive();
+      await printerProfilesApi.clearSelection(stockType);
       setActivePrinterProfileId(null);
       setActivePrinterProfileName(null);
-      setSettings((current) => current ? { ...current, ...data.check_settings } : current);
-      setSuccess('No printer profile is selected for this client. Current check settings were kept.');
+      setSuccess('Your printer selection was cleared. Shared profiles are still available to everyone in the organization.');
       await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear active printer profile');
@@ -558,6 +587,7 @@ export function CheckSettingsPage() {
         name: editProfileName.trim(),
         description: editProfileDescription.trim() || null,
         notes: editProfileNotes.trim() || null,
+        lock_version: profiles.find((profile) => profile.id === id)?.lock_version,
       });
       setEditingProfileId(null);
       setSuccess('Profile updated.');
@@ -596,6 +626,7 @@ export function CheckSettingsPage() {
         check_offset_x: parseOffsetInput(offsetX),
         check_offset_y: parseOffsetInput(offsetY),
         check_layout_config: layoutConfig,
+        lock_version: profile.lock_version,
       });
       setSuccess(`Profile "${profile.name}" updated with current settings.`);
       loadProfiles();
@@ -614,9 +645,7 @@ export function CheckSettingsPage() {
     setOffsetX('0.000');
     setOffsetY('0.000');
     setLayoutOverridesJson('{}');
-    setActivePrinterProfileId(null);
-    setActivePrinterProfileName(null);
-    setSuccess('Calibration draft reset to defaults. Click Save Settings to save this custom setup for the active client.');
+    setSuccess('Calibration draft reset to defaults. Save to update your selected profile, or save it as a new profile.');
     setError(null);
   };
 
@@ -624,12 +653,22 @@ export function CheckSettingsPage() {
     if (nextStockType === stockType) return;
 
     const hasFieldOverrides = parsedLayoutOverrides === null || stableLayoutJson(parsedLayoutOverrides) !== '{}';
+    const nextSelection = profileSelections.find((selection) => selection.check_stock_type === nextStockType);
+    const nextProfile = nextSelection
+      ? profiles.find((profile) => profile.id === nextSelection.printer_profile_id) || null
+      : null;
     setStockType(nextStockType);
+    setActivePrinterProfileId(nextProfile?.id ?? null);
+    setActivePrinterProfileName(nextProfile?.name ?? null);
+    setOffsetX(Number(nextProfile?.check_offset_x ?? 0).toFixed(3));
+    setOffsetY(Number(nextProfile?.check_offset_y ?? 0).toFixed(3));
+    setLayoutOverridesJson(JSON.stringify(nextProfile?.check_layout_config ?? {}, null, 2));
     setError(null);
 
-    if (hasFieldOverrides) {
-      setLayoutOverridesJson('{}');
-      setSuccess("Stock type changed. Field-level calibration was reset to the selected stock's default map. Recalibrate and save when ready.");
+    if (nextProfile) {
+      setSuccess(`Stock type changed. Loaded your selected “${nextProfile.name}” calibration; save to apply this stock to the client.`);
+    } else if (hasFieldOverrides) {
+      setSuccess("Stock type changed. Calibration was reset because you have not selected a profile for this stock. Recalibrate and save when ready.");
     } else {
       setSuccess(null);
     }
@@ -665,14 +704,14 @@ export function CheckSettingsPage() {
 
         <Card className="overflow-hidden border-slate-200 bg-white">
           <div className="border-b bg-gradient-to-r from-slate-900 to-slate-700 px-5 py-4 text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Current printer source</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Your printer for this stock</p>
             <h2 className="mt-1 text-lg font-semibold">
-              {activeProfile ? activeProfile.name : 'Custom settings for this client'}
+              {activeProfile ? activeProfile.name : 'No printer profile selected'}
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-slate-200">
               {activeProfile
-                ? 'This client is using a shared organization printer profile. Use “Use for all clients” if this same office printer should follow you across every client.'
-                : 'No shared printer profile is selected. Save works as a client-specific custom override until you choose or create a printer profile.'}
+                ? 'You selected this shared organization profile. It follows you across clients that use the same check stock; it does not change anyone else’s selection.'
+                : 'Profiles are shared with the organization, but the profile you use is personal. Choose one below before generating an official print package.'}
             </p>
           </div>
           <CardContent className="grid gap-3 p-4 text-sm md:grid-cols-3">
@@ -685,8 +724,8 @@ export function CheckSettingsPage() {
               <p className="mt-1 font-mono font-semibold text-slate-900">X {offsetX || '0.000'} / Y {offsetY || '0.000'}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Save button</p>
-              <p className="mt-1 font-semibold text-slate-900">Saves this client’s active settings</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Selection scope</p>
+              <p className="mt-1 font-semibold text-slate-900">Only your account</p>
             </div>
           </CardContent>
         </Card>
@@ -700,25 +739,24 @@ export function CheckSettingsPage() {
                 Save and switch between alignment settings for different printers.
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                These profiles are shared with everyone in your organization &mdash; calibrate
-                an office printer once and reuse it across clients. <span className="font-medium">Use for this client</span>
-                {' '}updates only the active client; <span className="font-medium">Use for all clients</span> applies the same printer everywhere.
+                Everyone in your organization can reuse these profiles. Selecting one changes only
+                your printer choice, and your choice follows you across clients that use the same stock.
               </p>
               <p className="mt-2 text-sm">
                 {activePrinterProfileId ? (
                   <span className="inline-flex items-center rounded-md border border-green-200 bg-green-50 px-2 py-1 font-medium text-green-800">
-                    Active printer: {activePrinterProfileName || activeProfile?.name || 'Selected profile'}
+                    Selected for you: {activePrinterProfileName || activeProfile?.name || 'Selected profile'}
                   </span>
                 ) : (
                   <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700">
-                    No saved printer profile selected
+                    You have not selected a profile for this stock
                   </span>
                 )}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
               <Button variant="outline" size="sm" onClick={handleClearActiveProfile} disabled={!activePrinterProfileId}>
-                Use No Printer Profile
+                Clear My Selection
               </Button>
               <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
                 Reset Calibration Draft
@@ -755,7 +793,7 @@ export function CheckSettingsPage() {
                   <Textarea
                     value={newProfileNotes}
                     onChange={(e) => setNewProfileNotes(e.target.value)}
-                    placeholder="e.g., Set browser print to 'Fit to page', use tray 2 for check stock"
+                    placeholder="e.g., Print at Actual Size / 100%, use tray 2 for check stock"
                     className="min-h-[60px] text-sm"
                   />
                 </div>
@@ -815,7 +853,7 @@ export function CheckSettingsPage() {
                           <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Default</span>
                         )}
                         {profileMatchesCurrent && (
-                          <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Active for this client</span>
+                          <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Selected for you</span>
                         )}
                         {!profileMatchesCurrent && profileValuesMatchCurrent && (
                           <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Matches current settings</span>
@@ -838,11 +876,13 @@ export function CheckSettingsPage() {
                       )}
                     </div>
                     <div className="grid shrink-0 grid-cols-1 gap-2 sm:flex sm:flex-col sm:gap-1 [&>button]:w-full sm:[&>button]:w-auto">
-                      <Button size="sm" onClick={() => handleApplyProfile(profile)}>
-                        {profileMatchesCurrent ? 'Using for This Client' : 'Use for This Client'}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleApplyProfileToAllCompanies(profile)} disabled={profileApplyingAllId === profile.id}>
-                        {profileApplyingAllId === profile.id ? 'Applying...' : 'Use for All Clients'}
+                      <Button
+                        size="sm"
+                        onClick={() => handleApplyProfile(profile)}
+                        disabled={profileMatchesCurrent || profile.check_stock_type !== stockType}
+                        title={profile.check_stock_type !== stockType ? 'This profile uses a different check stock' : undefined}
+                      >
+                        {profileMatchesCurrent ? 'Selected for Me' : profile.check_stock_type === stockType ? 'Use This Profile' : 'Different Stock'}
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
                         Save Draft to Profile

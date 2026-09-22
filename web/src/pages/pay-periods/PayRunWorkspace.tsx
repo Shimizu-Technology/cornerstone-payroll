@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Header } from '@/components/layout/Header';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
@@ -27,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { HelpTip } from '@/components/ui/help-tip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import {
@@ -41,6 +43,7 @@ import {
 import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { checksApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
+import type { PromotedPaymentPreview } from '@/services/api';
 import type { PayPeriod, PayrollItem, PaymentDeliveryMethod } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
@@ -164,6 +167,20 @@ export function PayRunWorkspace(): ReactElement {
     );
   }
 
+  const isTrainingBaseline = payRun.test_workspace_role === 'baseline';
+  const readOnlyWorkspace = activeCompany?.id === companyId && (
+    activeCompany.test_workspace_purpose === 'backup_snapshot'
+      || Boolean(activeCompany.test_workspace_sealed_at)
+  );
+  const readOnlyMode: 'training_baseline' | 'backup_snapshot' | null = isTrainingBaseline
+    ? 'training_baseline'
+    : readOnlyWorkspace
+      ? 'backup_snapshot'
+      : null;
+  if (readOnlyMode && (activeTab === 'work' || activeTab === 'checks')) {
+    return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
+  }
+
   const items = payRun.payroll_items || [];
   const reportableItems = items.filter((item) => !item.voided);
   const statusConfig = payPeriodStatusConfig[payRun.status];
@@ -173,19 +190,21 @@ export function PayRunWorkspace(): ReactElement {
       <Header
         title={`Pay Period: ${formatDateRange(payRun.start_date, payRun.end_date)}`}
         description={`Pay date ${formatDate(payRun.pay_date)} · ${runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}`}
-        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
+        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{!readOnlyMode && activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
       />
 
       <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Pay run identity">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payRun.correction_status === 'voided' ? 'danger' : payRun.status === 'committed' ? 'success' : payRun.status === 'approved' ? 'info' : payRun.status === 'calculated' ? 'warning' : 'default'}>{payRun.correction_status === 'voided' ? 'Voided' : statusConfig?.label || payRun.status}</Badge>
           <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
-          {payRun.parallel_run && <Badge variant="info"><LockKeyhole className="mr-1.5 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>}
+          {!readOnlyWorkspace && payRun.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge><HelpTip label="parallel comparison">This run is isolated from live payroll actions. It can be calculated and reviewed, but never committed, paid, printed, or filed.</HelpTip></span>}
+          {isTrainingBaseline && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Locked reference history</Badge><HelpTip label="locked reference history">This copied payroll is view-only and preserves the year-to-date starting point for safe testing.</HelpTip></span>}
+          {readOnlyWorkspace && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Read-only snapshot</Badge><HelpTip label="read-only snapshot">This sealed backup is a recovery record. No payroll or employee data can be changed here.</HelpTip></span>}
           <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
         </div>
       </section>
 
-      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.map((tab) => ({
+      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.filter((tab) => !readOnlyMode || (tab.id !== 'work' && tab.id !== 'checks')).map((tab) => ({
         ...tab,
         href: payRunPath(companyId, payRunId, tab.id, { returnTo }),
         count: tab.id === 'checks'
@@ -194,7 +213,7 @@ export function PayRunWorkspace(): ReactElement {
       }))} />
 
       <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
-        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} />}
+        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
         {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handlePayRunChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
         {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
         {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
@@ -219,12 +238,24 @@ interface PayRunOverviewProps {
   items: PayrollItem[];
   returnTo: string;
   workspaceReturnTo: string;
+  readOnlyMode: 'training_baseline' | 'backup_snapshot' | null;
 }
 
-function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo }: PayRunOverviewProps): ReactElement {
+function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo, readOnlyMode }: PayRunOverviewProps): ReactElement {
   const totalGross = items.reduce((sum, item) => sum + Number(item.gross_pay || 0), 0);
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
   const sourceCount = new Set(items.map((item) => item.import_source || item.timekeeping_source || 'manual')).size;
+  const readOnly = readOnlyMode !== null;
+  const recordsTitle = readOnlyMode === 'training_baseline'
+    ? 'Locked reference records'
+    : readOnlyMode === 'backup_snapshot'
+      ? 'Read-only payroll records'
+      : 'Payroll records';
+  const recordsDescription = readOnlyMode === 'training_baseline'
+    ? 'These verified results provide year-to-date context and cannot be edited.'
+    : readOnlyMode === 'backup_snapshot'
+      ? 'This sealed backup is preserved for review and recovery. It cannot be changed.'
+      : 'Open an employee or the exact calculated result.';
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -236,9 +267,9 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo 
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.7fr)]">
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-4"><div><CardTitle>Payroll records</CardTitle><p className="mt-2 text-sm text-neutral-500">Open an employee or the exact calculated result.</p></div><Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link></CardHeader>
+          <CardHeader className="flex-row items-center justify-between gap-4"><div><CardTitle>{recordsTitle}</CardTitle><p className="mt-2 text-sm text-neutral-500">{recordsDescription}</p></div>{!readOnly && <Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link>}</CardHeader>
           <CardContent className="p-0">
-            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div><Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></div></div>)}</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
+            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div>{!readOnly && <Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>}</div></div>)}</div> : readOnly ? <div className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records were preserved for this period.</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
           </CardContent>
         </Card>
         <div className="space-y-6">
@@ -261,6 +292,7 @@ interface PayRunChecksProps {
 }
 
 function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, onChanged, isRehearsal }: PayRunChecksProps): ReactElement {
+  const { isAdmin } = useAuth();
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
   const [mockPreviewError, setMockPreviewError] = useState<string | null>(null);
@@ -273,9 +305,42 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const [confirmNotPaid, setConfirmNotPaid] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [paymentPreview, setPaymentPreview] = useState<PromotedPaymentPreview | null>(null);
+  const [paymentPreviewBusy, setPaymentPreviewBusy] = useState(false);
+  const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentStartingNumber, setPaymentStartingNumber] = useState('');
+  const [paymentCheckDate, setPaymentCheckDate] = useState('');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const nextMethod: PaymentDeliveryMethod = switchItem?.effective_payment_delivery_method === 'direct_deposit' ? 'paper_check' : 'direct_deposit';
   const mockPreviewEligible = items.filter((item) => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay || 0) > 0).length;
   const canPreviewMockChecks = isRehearsal && (payRun.status === 'calculated' || payRun.status === 'approved');
+  const recordOnlyPromoted = !isRehearsal && payRun.status === 'committed' &&
+    Boolean(payRun.promotion_source_pay_period_id) && payRun.promotion_payment_disposition === 'record_only' &&
+    countActivePayrollChecks(items) === 0;
+
+  useEffect(() => {
+    setPaymentPreview(null);
+    setPaymentPreviewError(null);
+    if (!recordOnlyPromoted || !isAdmin) return;
+
+    let active = true;
+    setPaymentPreviewBusy(true);
+    void payPeriodsApi.promotedPaymentPreview(payRun.id).then((response) => {
+      if (!active) return;
+      setPaymentPreview(response.promoted_payment);
+      setPaymentStartingNumber(response.promoted_payment.suggested_first_check_number || String(response.promoted_payment.current_next_check_number));
+    }).catch((error) => {
+      if (active) setPaymentPreviewError(error instanceof Error ? error.message : 'Could not verify this promoted payroll.');
+    }).finally(() => {
+      if (active) setPaymentPreviewBusy(false);
+    });
+
+    return () => { active = false; };
+  }, [isAdmin, payRun.id, recordOnlyPromoted]);
 
   const previewMockChecks = async () => {
     setMockPreviewBusy(true);
@@ -284,12 +349,12 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
       const result = await checksApi.rehearsalPreviewPdf(payRun.id);
       setMockPreview({
         blob: result.blob,
-        filename: result.filename || 'test_only_rehearsal_checks.pdf',
-        title: 'Preview mock checks',
-        note: 'TEST ONLY — NOT NEGOTIABLE. Review here, then print on plain paper or download a copy.',
+        filename: result.filename || 'void_rehearsal_checks.pdf',
+        title: 'Preview rehearsal checks',
+        note: 'Every check is marked VOID. This rehearsal copy cannot be used for payment. Review here, then print on plain paper or download a copy.',
       });
     } catch (error) {
-      setMockPreviewError(error instanceof Error ? error.message : 'Could not prepare the mock checks.');
+      setMockPreviewError(error instanceof Error ? error.message : 'Could not prepare the rehearsal checks.');
     } finally {
       setMockPreviewBusy(false);
     }
@@ -344,20 +409,83 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     }
   };
 
+  const resetPaymentDialog = () => {
+    setPaymentDialogOpen(false);
+    setPaymentCheckDate('');
+    setPaymentConfirmed(false);
+    setPaymentError(null);
+  };
+
+  const preparePromotedPayment = async () => {
+    if (!paymentPreview?.eligible || !paymentCheckDate || !paymentStartingNumber || !paymentConfirmed) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      const response = await payPeriodsApi.preparePromotedPayment(payRun.id, {
+        acknowledgement: 'PREPARE PROMOTED PAYROLL FOR PAYMENT',
+        starting_check_number: paymentStartingNumber,
+        check_date: paymentCheckDate,
+      });
+      onChanged(response.pay_period);
+      setPaymentPreview(response.promoted_payment);
+      setPaymentNotice(response.promoted_payment.paper_check_count === 1
+        ? '1 check is numbered and ready to review and print.'
+        : `${response.promoted_payment.paper_check_count} checks are numbered and ready to review and print.`);
+      setCheckPrintRefreshToken((value) => value + 1);
+      resetPaymentDialog();
+      setCheckPrintOpen(true);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : 'Could not prepare this promoted payroll for payment.');
+    } finally {
+      setPaymentBusy(false);
+    }
+  };
+
   return (
     <>
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
+      {paymentNotice && (
+        <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
+          <strong>Ready to print.</strong> {paymentNotice}
+        </div>
+      )}
+      {recordOnlyPromoted && (
+        <Card className="border-amber-200 bg-amber-50/70">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Promoted payroll is recorded but unpaid</p>
+              <h2 className="mt-2 text-lg font-semibold text-neutral-950">Prepare the original checks before printing</h2>
+              <p className="mt-2 text-sm leading-6 text-neutral-700">
+                This payroll was copied as a historical record, so check numbers were intentionally left blank. Preparing it assigns paper-check numbers once without recalculating pay or adding YTD, loan, or liability amounts again.
+              </p>
+              {!isAdmin && <p className="mt-2 text-sm font-medium text-amber-900">Ask an organization administrator to prepare this payroll. Accountants and managers can use the normal check workflow after that.</p>}
+              {paymentPreviewBusy && <p role="status" className="mt-2 text-sm text-neutral-600">Verifying that this payroll has no prior payment activity…</p>}
+              {paymentPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{paymentPreviewError}</p>}
+              {paymentPreview && !paymentPreview.eligible && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-danger-700">{paymentPreview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
+            </div>
+            {isAdmin && (
+              <Button
+                className="shrink-0"
+                onClick={() => setPaymentDialogOpen(true)}
+                disabled={paymentPreviewBusy || !paymentPreview?.eligible}
+              >
+                Prepare checks for payment
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-4">
           <div>
             <CardTitle>Checks and direct deposit</CardTitle>
-            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview watermarked mock checks, then print on plain paper or download the PDF. These are test documents, not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
+            <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview VOID-marked rehearsal checks, then print on plain paper or download the PDF. These documents are not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
             {printRefreshError && <p role="alert" className="mt-2 text-sm text-danger-700">{printRefreshError}</p>}
             {mockPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{mockPreviewError}</p>}
           </div>
           {canPreviewMockChecks && (
             <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
-              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview mock checks'}
+              <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview rehearsal checks'}
             </Button>
           )}
           {!isRehearsal && payRun.status === 'committed' && (
@@ -368,7 +496,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         </CardHeader>
         {isRehearsal && (
           <div role="note" className="mx-4 mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:mx-6">
-            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check TEST ONLY - NOT NEGOTIABLE. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before previewing mock checks.'} Previewing, downloading, and printing do not assign check numbers or mark checks printed.
+            <strong>Rehearsal only.</strong> {canPreviewMockChecks ? `The PDF marks every check VOID. ${mockPreviewEligible} positive-net paper check${mockPreviewEligible === 1 ? '' : 's'} available; direct-deposit records are excluded.` : 'Calculate this pay run before previewing rehearsal checks.'} Previewing, downloading, and printing do not assign check numbers or mark checks printed.
           </div>
         )}
         <CardContent className="p-0">
@@ -378,12 +506,12 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               <TableBody striped>
                 {items.map((item) => {
                   const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Mock ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
+                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
                   return (
                     <TableRow key={item.id}>
                       <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
                       <TableCell>{isDeposit ? 'Direct deposit' : 'Paper check'}</TableCell>
-                      <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Test preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
+                      <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Rehearsal preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
                       <TableCell><Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : item.check_printed_at ? 'success' : 'default'}>{status}</Badge></TableCell>
                       <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
                       <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
@@ -438,6 +566,49 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           <DialogFooter>
             <Button variant="outline" onClick={resetSwitchDialog} disabled={switchBusy}>Cancel</Button>
             <Button onClick={() => void switchPaymentMethod()} disabled={switchBusy || switchReason.trim().length < 10 || !confirmNotPaid}>{switchBusy ? 'Switching…' : 'Confirm switch'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={paymentDialogOpen} onOpenChange={(open) => { if (!open && !paymentBusy) resetPaymentDialog(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Prepare promoted payroll for payment</DialogTitle>
+            <DialogDescription>
+              Assign check numbers to the unpaid paper checks. Payroll amounts and financial totals will not be recalculated or posted again.
+            </DialogDescription>
+          </DialogHeader>
+          {paymentPreview && (
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+              <p><strong>{paymentPreview.paper_check_count}</strong> paper check{paymentPreview.paper_check_count === 1 ? '' : 's'} totaling <strong>{formatCurrency(Number(paymentPreview.paper_check_total))}</strong></p>
+              <p className="mt-1">Suggested range: {paymentPreview.suggested_first_check_number}–{paymentPreview.suggested_last_check_number}</p>
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="First physical check number"
+              inputMode="numeric"
+              value={paymentStartingNumber}
+              onChange={(event) => setPaymentStartingNumber(event.target.value.replace(/\D/g, '').slice(0, 7))}
+            />
+            <Input
+              label="Date to print on checks"
+              type="date"
+              min={payRun.end_date}
+              value={paymentCheckDate}
+              onChange={(event) => setPaymentCheckDate(event.target.value)}
+            />
+          </div>
+          <p className="text-sm leading-6 text-neutral-600">Use the actual date Cornerstone will issue these checks. Do not assume or backdate it to the original pay date.</p>
+          <label className="flex items-start gap-2 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+            <input type="checkbox" className="mt-1" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
+            I confirm this payroll has not been paid by paper check or bank transfer, and these are the original employee payments—not replacements.
+          </label>
+          {paymentError && <p role="alert" className="text-sm text-danger-700">{paymentError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={resetPaymentDialog} disabled={paymentBusy}>Cancel</Button>
+            <Button onClick={() => void preparePromotedPayment()} disabled={paymentBusy || !paymentStartingNumber || !paymentCheckDate || !paymentConfirmed}>
+              {paymentBusy ? 'Preparing checks…' : 'Assign check numbers'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

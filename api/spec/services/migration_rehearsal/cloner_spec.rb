@@ -145,9 +145,16 @@ RSpec.describe MigrationRehearsal::Cloner do
 
     expect(@target).to have_attributes(
       payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "migration_rehearsal",
       migration_rehearsal_status: "pending",
       migration_source_company_id: source_company.id,
       ein: source_company.ein
+    )
+    expect(@target.test_workspace_manifest).to include(
+      "version" => 1,
+      "purpose" => "migration_rehearsal",
+      "source_company_id" => source_company.id,
+      "source_historical_import_batch_id" => batch.id
     )
     expect(organization.reload.companies.live_payroll.count).to eq(1)
   end
@@ -235,7 +242,7 @@ RSpec.describe MigrationRehearsal::Cloner do
     expect(copied_batch.historical_import_source_files.sole.storage_key).not_to eq(source_key)
     expect(storage.download(copied_batch.historical_import_source_files.sole.storage_key)).to eq(source_bytes)
     expect(batch.reload.historical_paychecks.sole.gross_pay).to eq(1_500.to_d)
-    expect(CompanyAssignment.exists?(user: actor, company: target)).to be(true)
+    expect(CompanyAssignment.exists?(user: actor, company: target)).to be(false)
     expect(CompanyAssignment.exists?(user: client_user, company: target)).to be(false)
   end
 
@@ -279,6 +286,56 @@ RSpec.describe MigrationRehearsal::Cloner do
     expect(target.reload).to have_attributes(migration_rehearsal_status: "pending", migration_rehearsal_error: nil)
   end
 
+  it "creates a sealed backup snapshot with employee lineage and only empty draft payrolls" do
+    batch.update_columns(importer_version: "legacy-test-importer")
+    source_draft = create(
+      :pay_period,
+      company: source_company,
+      start_date: Date.new(2026, 8, 24),
+      end_date: Date.new(2026, 9, 6),
+      pay_date: Date.new(2026, 9, 10)
+    )
+    PayPeriodExcludedEmployee.create!(
+      pay_period: source_draft,
+      employee: employee,
+      excluded_by: actor,
+      reason: "Not scheduled"
+    )
+    target = Company.create!(
+      organization: organization,
+      name: "Example Payroll — Promotion Backup",
+      payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "backup_snapshot",
+      migration_source_company: source_company,
+      migration_source_batch: batch,
+      migration_rehearsal_status: "pending",
+      test_workspace_manifest: { "promotion_source_rehearsal_id" => 123 }
+    )
+
+    described_class.new(company: target, source_batch: batch, actor: actor, storage: storage).call
+
+    copied_employee = target.employees.sole
+    copied_draft = target.pay_periods.sole
+    expect(target.reload).to have_attributes(
+      migration_rehearsal_status: "ready"
+    )
+    expect(target.test_workspace_sealed_at).to be_present
+    expect(copied_employee.test_workspace_source_employee).to eq(employee)
+    expect(copied_draft).to have_attributes(
+      status: "draft",
+      parallel_run: true,
+      start_date: source_draft.start_date,
+      end_date: source_draft.end_date,
+      pay_date: source_draft.pay_date
+    )
+    expect(copied_draft.pay_period_excluded_employees.sole).to have_attributes(
+      employee: copied_employee,
+      excluded_by: actor,
+      reason: "Not scheduled"
+    )
+    expect(AuditLog.where(company: target, action: "migration_promotion#backup_ready")).to exist
+  end
+
   it "records a safe retryable failure after rolling back an incomplete copy" do
     target = Company.create!(
       organization: organization,
@@ -298,7 +355,7 @@ RSpec.describe MigrationRehearsal::Cloner do
 
     expect(target.reload).to have_attributes(
       migration_rehearsal_status: "failed",
-      migration_rehearsal_error: "The rehearsal copy did not finish. No source data changed. Retry the verified copy."
+      migration_rehearsal_error: "The test-workspace copy did not finish. No source data changed. Retry the verified copy."
     )
     expect(target.employees).to be_empty
     expect(target.historical_import_batches).to be_empty

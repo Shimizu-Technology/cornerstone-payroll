@@ -170,6 +170,30 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).to include("Employee setup", "Post tax deduction", "$50.00")
     end
 
+    it "renders 1099 contractors in a separate detail section" do
+      report_data[:contractors] = [
+        {
+          employee_id: 2,
+          employee_name: "Kai Santos",
+          employment_type: "contractor",
+          hours_worked: 20,
+          gross_pay: 600,
+          total_deductions: 0,
+          net_pay: 600,
+          check_number: "1099-1",
+          payroll_adjustments: [],
+          payroll_field_entries: []
+        }
+      ]
+      report_data[:summary].merge!(contractor_count: 1, contractor_total_gross: 600, contractor_total_net: 600)
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("W-2 Employee Detail", "Alice Terlaje")
+      expect(text).to include("1099 Contractor Detail", "Kai Santos", "$600.00")
+      expect(text).to include("Contractor payments are reported separately")
+    end
+
     it "labels same-name adjustment totals with their saved payroll item identity" do
       report_data[:employees].first[:payroll_adjustments] = [
         { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "manual", amount: BigDecimal("12") },

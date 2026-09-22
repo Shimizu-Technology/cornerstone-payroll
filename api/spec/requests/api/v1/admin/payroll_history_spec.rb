@@ -182,6 +182,58 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
     expect(response.parsed_body.dig("meta", "total_count")).to eq(3)
   end
 
+  it "keeps a training baseline visible without offering edit actions" do
+    source_company = create(:company, organization: company.organization)
+    company.update!(
+      payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "training_replay",
+      migration_source_company: source_company,
+      migration_rehearsal_status: "ready"
+    )
+    source_period = create(:pay_period, :committed, company: source_company)
+    baseline = create(
+      :pay_period,
+      :approved,
+      company: company,
+      parallel_run: true,
+      test_workspace_role: "baseline",
+      test_workspace_source_pay_period: source_period
+    )
+
+    get "/api/v1/admin/payroll_history"
+
+    expect(response).to have_http_status(:ok), response.body
+    record = response.parsed_body.fetch("data").find { |entry| entry.fetch("id") == baseline.id }
+    expect(record.fetch("test_workspace_role")).to eq("baseline")
+    expect(record.fetch("capabilities")).to include(
+      "view" => true,
+      "edit" => false,
+      "delete" => false,
+      "enter_hours" => false,
+      "run" => false,
+      "approve" => false,
+      "commit" => false
+    )
+  end
+
+  it "shows the operator when an organization administrator commits payroll for another client" do
+    home_company = create(:company, organization: company.organization)
+    organization_admin = create(
+      :user,
+      company: home_company,
+      organization: company.organization,
+      role: "admin",
+      name: "Organization Payroll Admin"
+    )
+    period = create(:pay_period, :committed, company: company, committed_by_id: organization_admin.id)
+
+    get "/api/v1/admin/payroll_history"
+
+    expect(response).to have_http_status(:ok), response.body
+    record = response.parsed_body.fetch("data").find { |entry| entry.fetch("id") == period.id }
+    expect(record.fetch("processed_by_name")).to eq("Organization Payroll Admin")
+  end
+
   it "shows a paginated imported detail without exposing private source metadata" do
     employee = create(:employee, company: company, first_name: "Linked", last_name: "Worker")
     batch = create_batch(company: company, status: "locked", suffix: "detail")

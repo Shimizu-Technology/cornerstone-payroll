@@ -38,6 +38,8 @@ export type UserRole = 'super_admin' | 'org_admin' | 'admin' | 'manager' | 'empl
 export interface AssignedCompanySummary {
   id: number;
   name: string;
+  test_workspace?: boolean;
+  workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin' | null;
 }
 
 export interface User {
@@ -1089,6 +1091,13 @@ export interface PayPeriod {
   pay_date: string;
   status: PayPeriodStatus;
   parallel_run?: boolean;
+  test_workspace_role?: 'baseline' | 'practice' | null;
+  test_workspace_source_pay_period_id?: number | null;
+  promotion_source_pay_period_id?: number | null;
+  promotion_payment_disposition?: 'record_only' | 'process_in_cornerstone' | null;
+  promoted_payment_prepared_at?: string | null;
+  promoted_payment_prepared_by_id?: number | null;
+  training_baseline_locked?: boolean;
   run_purpose: PayRunPurpose;
   includes_base_salary: boolean;
   includes_recurring_items: boolean;
@@ -1306,6 +1315,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
+  comparison_kind: 'previous_period' | 'training_benchmark';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;
@@ -1316,6 +1326,13 @@ export interface PayPeriodComparisonResponse {
     review_count: number;
     message: string;
   };
+  benchmark: {
+    mode: 'immutable_snapshot' | 'live_legacy';
+    immutable: boolean;
+    captured_at?: string;
+    source_status?: 'calculated' | 'approved' | 'committed';
+    sha256?: string;
+  } | null;
 }
 
 // ----------------
@@ -1799,6 +1816,13 @@ export interface CheckPrintQueueResponse {
     voided: number;
     check_stock_type: CheckStockType;
     slot_count: number;
+    printer_profile: {
+      id: number;
+      name: string;
+      check_stock_type: CheckStockType;
+      lock_version: number;
+      updated_at: string;
+    } | null;
   };
 }
 
@@ -1807,6 +1831,10 @@ export interface CheckPrintRun {
   pay_period_id: number;
   status: 'generated' | 'confirmed';
   check_stock_type: CheckStockType;
+  printer_profile_id: number | null;
+  printer_profile_name: string | null;
+  printer_profile_lock_version: number | null;
+  calibration_digest: string | null;
   starting_slot: number;
   selected_count: number;
   manifest: Array<{
@@ -1828,6 +1856,8 @@ export interface CheckPrintRun {
   confirmed_by_name: string | null;
   requires_distinct_confirmer: boolean;
   can_current_user_confirm: boolean;
+  confirmation_state: 'ready' | 'confirmed' | 'stale';
+  confirmation_issue: string | null;
 }
 
 export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
@@ -1845,6 +1875,7 @@ export interface CheckSettings {
   check_layout_config: Record<string, unknown>;
   active_printer_profile_id: number | null;
   active_printer_profile_name: string | null;
+  active_printer_profile_lock_version: number | null;
 }
 
 export type CheckRegisterSourceType = 'payroll_item' | 'non_employee_check';

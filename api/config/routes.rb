@@ -6,6 +6,7 @@ Rails.application.routes.draw do
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
+  get "health/dependencies" => "health/dependencies#show", as: :dependency_health_check
 
   # API v1 routes
   namespace :api do
@@ -92,7 +93,7 @@ Rails.application.routes.draw do
         get   "companies/check_layout",       to: "checks#check_layout"
         post  "companies/test_check_pdf",     to: "checks#test_check_pdf"
         patch "companies/next_check_number",  to: "checks#update_next_check_number"
-        get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
+        match "companies/alignment_test_pdf", to: "checks#alignment_test_pdf", via: [ :get, :post ]
 
         # Printer Profiles (saved check alignment presets per printer)
         resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
@@ -104,12 +105,25 @@ Rails.application.routes.draw do
             post :apply_to_all_companies
           end
         end
+        put "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#update"
+        delete "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#destroy"
 
         resources :companies, only: [:index, :show, :create, :update] do
           member do
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal
             post :retry_migration_rehearsal
+            get :training_replay_preview
+            post :training_replay, action: :create_training_replay
+            post :retry_training_replay
+            get :test_workspace_preview
+            post :test_workspace, action: :create_test_workspace
+            post :retry_test_workspace
+            post :archive_test_workspace
+            post :restore_test_workspace
+            get :migration_promotion_preview
+            post :migration_promotion_backup, action: :create_migration_promotion_backup
+            post :migration_promotion, action: :apply_migration_promotion
           end
         end
         resources :organizations, only: [ :index, :show, :create, :update ] do
@@ -268,6 +282,8 @@ Rails.application.routes.draw do
             post :approve
             post :unapprove
             post :commit
+            get :promoted_payment_preview
+            post :prepare_promoted_payment
             patch :correct_pay_date
             post :generate_fit_check
             post :retry_tax_sync
@@ -315,6 +331,7 @@ Rails.application.routes.draw do
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
           get  "check_print_queue",          to: "check_print_runs#queue"
+          get  "check_print_runs",           to: "check_print_runs#index"
           patch "check_numbers",              to: "check_numbers#update"
           post "check_print_runs",           to: "check_print_runs#create"
         end

@@ -7,6 +7,13 @@ class Company < ApplicationRecord
   PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel].freeze
   PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze
   MIGRATION_REHEARSAL_STATUSES = %w[pending ready failed].freeze
+  TEST_WORKSPACE_PURPOSES = %w[sandbox migration_rehearsal training_replay backup_snapshot].freeze
+  TEST_WORKSPACE_PURPOSE_LABELS = {
+    "sandbox" => "General test workspace",
+    "migration_rehearsal" => "Migration rehearsal",
+    "training_replay" => "Training replay",
+    "backup_snapshot" => "Backup snapshot"
+  }.freeze
 
   belongs_to :organization
   belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
@@ -15,12 +22,19 @@ class Company < ApplicationRecord
   belongs_to :migration_rehearsal_created_by, class_name: "User", optional: true
 
   has_many :migration_rehearsals,
+           -> { where(test_workspace_purpose: "migration_rehearsal") },
+           class_name: "Company",
+           foreign_key: :migration_source_company_id,
+           inverse_of: :migration_source_company,
+           dependent: :restrict_with_error
+  has_many :test_workspaces,
            class_name: "Company",
            foreign_key: :migration_source_company_id,
            inverse_of: :migration_source_company,
            dependent: :restrict_with_error
 
   has_many :departments, dependent: :destroy
+  has_many :company_assignments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy
   has_many :time_tracking_delegations, dependent: :destroy
@@ -40,6 +54,7 @@ class Company < ApplicationRecord
   has_many :user_invitations, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
+  has_many :training_replay_benchmarks, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :general_transmittals, dependent: :destroy
   has_many :general_transmittal_artifacts, dependent: :restrict_with_error
@@ -84,15 +99,17 @@ class Company < ApplicationRecord
   # accounting firm can share the same physical printer calibration.
 
   before_validation :normalize_blanks
+  before_validation :default_test_workspace_purpose
 
   validates :name, presence: true
-  validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :migration_rehearsal?
+  validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :test_workspace?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :payroll_environment, inclusion: { in: PAYROLL_ENVIRONMENTS }
   validates :migration_rehearsal_status, inclusion: { in: MIGRATION_REHEARSAL_STATUSES }, allow_nil: true
-  validates :migration_source_company, presence: true, if: :migration_rehearsal?
-  validates :migration_rehearsal_status, presence: true, if: :migration_rehearsal?
-  validate :migration_rehearsal_source_is_valid
+  validates :test_workspace_purpose, inclusion: { in: TEST_WORKSPACE_PURPOSES }, allow_nil: true
+  validates :migration_source_company, presence: true, if: :test_workspace?
+  validates :migration_rehearsal_status, presence: true, if: :test_workspace?
+  validate :test_workspace_source_is_valid
   validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
@@ -102,13 +119,48 @@ class Company < ApplicationRecord
   scope :active, -> { where(active: true) }
   scope :live_payroll, -> { where(payroll_environment: "live") }
   scope :migration_rehearsal, -> { where(payroll_environment: "migration_rehearsal") }
+  scope :test_workspace, -> { where(payroll_environment: "migration_rehearsal") }
+
+  def test_workspace?
+    payroll_environment == "migration_rehearsal"
+  end
 
   def migration_rehearsal?
-    payroll_environment == "migration_rehearsal"
+    test_workspace? && test_workspace_purpose.in?([ nil, "migration_rehearsal" ])
   end
 
   def live_payroll?
     payroll_environment == "live"
+  end
+
+  def training_replay?
+    test_workspace? && test_workspace_purpose == "training_replay"
+  end
+
+  def sandbox?
+    test_workspace? && test_workspace_purpose == "sandbox"
+  end
+
+  def backup_snapshot?
+    test_workspace? && test_workspace_purpose == "backup_snapshot"
+  end
+
+  def test_workspace_ready?
+    test_workspace? && migration_rehearsal_status == "ready" && test_workspace_archived_at.nil?
+  end
+
+  def test_workspace_expired?
+    test_workspace? && test_workspace_expires_at.present? && test_workspace_expires_at <= Time.current
+  end
+
+  def test_workspace_read_only?
+    backup_snapshot? || test_workspace_sealed_at.present? || test_workspace_archived_at.present? || test_workspace_expired?
+  end
+
+  def test_workspace_purpose_label
+    return unless test_workspace?
+
+    TEST_WORKSPACE_PURPOSE_LABELS.fetch(test_workspace_purpose, "Test workspace")
   end
 
   # ---------------------------------------------------------------------------
@@ -227,6 +279,10 @@ class Company < ApplicationRecord
     self.payroll_intake_source_types = Array(payroll_intake_source_types).compact_blank.map(&:to_s).uniq
   end
 
+  def default_test_workspace_purpose
+    self.test_workspace_purpose ||= "migration_rehearsal" if test_workspace?
+  end
+
   def check_layout_config_must_be_hash
     return if check_layout_config.is_a?(Hash)
 
@@ -240,17 +296,17 @@ class Company < ApplicationRecord
     errors.add(:payroll_intake_source_types, "contains unsupported source type(s): #{unsupported.join(', ')}")
   end
 
-  def migration_rehearsal_source_is_valid
-    if live_payroll? && (migration_source_company_id.present? || migration_source_batch_id.present? || migration_rehearsal_status.present?)
-      errors.add(:base, "Live clients cannot reference a migration rehearsal source")
+  def test_workspace_source_is_valid
+    if live_payroll? && (migration_source_company_id.present? || migration_source_batch_id.present? || migration_rehearsal_status.present? || test_workspace_purpose.present?)
+      errors.add(:base, "Production clients cannot reference a test workspace source")
       return
     end
-    return unless migration_rehearsal? && migration_source_company
+    return unless test_workspace? && migration_source_company
 
-    errors.add(:migration_source_company, "must be a live client") unless migration_source_company.live_payroll?
+    errors.add(:migration_source_company, "must be a production client") unless migration_source_company.live_payroll?
     errors.add(:migration_source_company, "must belong to the same organization") if migration_source_company.organization_id != organization_id
     errors.add(:migration_source_company, "cannot reference itself") if migration_source_company_id == id
-    if migration_source_batch.blank? || migration_source_batch.company_id != migration_source_company_id || !migration_source_batch.locked?
+    if migration_rehearsal? && (migration_source_batch.blank? || migration_source_batch.company_id != migration_source_company_id || !migration_source_batch.locked?)
       errors.add(:migration_source_batch, "must be a locked import from the source client")
     end
   end

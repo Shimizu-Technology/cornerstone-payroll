@@ -68,6 +68,15 @@ class Employee < ApplicationRecord
 
   belongs_to :company
   belongs_to :department, optional: true
+  belongs_to :test_workspace_source_employee,
+             class_name: "Employee",
+             optional: true,
+             inverse_of: :training_replay_copies
+  has_many :training_replay_copies,
+           class_name: "Employee",
+           foreign_key: :test_workspace_source_employee_id,
+           inverse_of: :test_workspace_source_employee,
+           dependent: :restrict_with_error
   belongs_to :previous_employee,
              class_name: "Employee",
              optional: true,
@@ -137,6 +146,7 @@ class Employee < ApplicationRecord
   validate :previous_employee_transition_is_valid
   validate :portal_pending_employee_is_inactive
   validate :aire_onboarding_needs_review_is_inactive
+  validate :test_workspace_source_employee_is_valid
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -465,6 +475,14 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def test_workspace_source_employee_is_valid
+    return if test_workspace_source_employee.blank?
+    return if company&.test_workspace? &&
+      test_workspace_source_employee.company_id == company.migration_source_company_id
+
+    errors.add(:test_workspace_source_employee, "must belong to the test workspace's source client")
+  end
 
   SOURCE_FIELD_CONFIGURATION_REVIEW_CODES = %w[
     verify_hire_date quickbooks_nevada_address_suppressed employee_address_missing

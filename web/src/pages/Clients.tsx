@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useId, type ReactElement } from 'react';
+import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
-import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Archive, RotateCcw, Clock3 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -12,8 +12,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { HelpTip } from '@/components/ui/help-tip';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { companiesApi, ApiError } from '@/services/api';
-import type { CompanyListItem, CompanyFormData, MigrationRehearsalPreview } from '@/services/api';
+import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, PromotionPaymentDisposition, TestWorkspaceCopyMode, TestWorkspacePreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -62,6 +65,32 @@ function formatBytes(value = 0): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatShortDate(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatMoney(value: number | string): string {
+  return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+const isTestWorkspace = (company: CompanyListItem): boolean =>
+  company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
+
+const testWorkspaceLabel = (company: CompanyListItem): string =>
+  company.test_workspace_purpose_label || 'Test workspace';
+
+const isReadOnlyWorkspace = (company: CompanyListItem): boolean =>
+  company.test_workspace_read_only === true || company.test_workspace_purpose === 'backup_snapshot' || Boolean(company.test_workspace_sealed_at) || Boolean(company.test_workspace_archived_at) || company.test_workspace_expired === true;
+
+const isExpiredWorkspace = (company: CompanyListItem): boolean =>
+  company.test_workspace_expired === true || Boolean(company.test_workspace_expires_at && new Date(company.test_workspace_expires_at) <= new Date());
+
+const testWorkspaceOpenLabel = (company: CompanyListItem): string => {
+  if (company.test_workspace_purpose === 'backup_snapshot') return 'Open backup';
+  if (company.test_workspace_sealed_at) return 'Open read-only';
+  return 'Open test';
+};
+
 interface SettingToggleProps {
   checked: boolean;
   label: string;
@@ -105,6 +134,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
 export function Clients() {
   const navigate = useNavigate();
   const rehearsalNameId = useId();
+  const workspaceNameId = useId();
   const { refreshCompanies, switchCompany } = useCompany();
   const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
@@ -118,6 +148,23 @@ export function Clients() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
+  const [workspaceBuilderOpen, setWorkspaceBuilderOpen] = useState(false);
+  const [workspaceBuilderSourceId, setWorkspaceBuilderSourceId] = useState<number | null>(null);
+  const [workspacePreview, setWorkspacePreview] = useState<TestWorkspacePreview | null>(null);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceCopyMode, setWorkspaceCopyMode] = useState<TestWorkspaceCopyMode>('all_committed');
+  const [workspaceExcludedPayrolls, setWorkspaceExcludedPayrolls] = useState(2);
+  const [workspaceCutoffPayPeriodId, setWorkspaceCutoffPayPeriodId] = useState<number | null>(null);
+  const [workspaceExpirationDays, setWorkspaceExpirationDays] = useState<30 | 60 | 90 | 180>(90);
+  const [workspaceAssignments, setWorkspaceAssignments] = useState<Record<number, 'operator' | 'reviewer' | 'workspace_admin'>>({});
+  const [workspaceConfirmed, setWorkspaceConfirmed] = useState(false);
+  const [loadingWorkspacePreview, setLoadingWorkspacePreview] = useState(false);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspacePreviewRequestIdRef = useRef(0);
+  const [showArchivedWorkspaces, setShowArchivedWorkspaces] = useState(false);
+  const [archiveWorkspace, setArchiveWorkspace] = useState<CompanyListItem | null>(null);
+  const [workspaceLifecycleId, setWorkspaceLifecycleId] = useState<number | null>(null);
   const [rehearsalSourceId, setRehearsalSourceId] = useState<number | null>(null);
   const [rehearsalPreview, setRehearsalPreview] = useState<MigrationRehearsalPreview | null>(null);
   const [rehearsalName, setRehearsalName] = useState('');
@@ -126,6 +173,28 @@ export function Clients() {
   const [rehearsalConfirmed, setRehearsalConfirmed] = useState(false);
   const [rehearsalError, setRehearsalError] = useState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
+  const [promotionRehearsalId, setPromotionRehearsalId] = useState<number | null>(null);
+  const [promotionPreview, setPromotionPreview] = useState<MigrationPromotionPreview | null>(null);
+  const [loadingPromotion, setLoadingPromotion] = useState(false);
+  const [promotionAction, setPromotionAction] = useState<'backup' | 'apply' | null>(null);
+  const [promotionConfirmed, setPromotionConfirmed] = useState(false);
+  const [promotionDispositions, setPromotionDispositions] = useState<Record<number, PromotionPaymentDisposition>>({});
+  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionNotice, setPromotionNotice] = useState<string | null>(null);
+  const promotionPreviewRequestIdRef = useRef(0);
+  const productionCompanies = companies.filter(company => !isTestWorkspace(company));
+  const testWorkspaces = companies.filter(isTestWorkspace);
+  const activeTestWorkspaces = testWorkspaces.filter(company => !company.test_workspace_archived_at);
+  const archivedTestWorkspaces = testWorkspaces.filter(company => Boolean(company.test_workspace_archived_at));
+  const allPromotionDispositionsSelected = Boolean(promotionPreview?.source_periods.length) &&
+    promotionPreview!.source_periods.every(period => Boolean(promotionDispositions[period.id]));
+  const groupedCompanies = [
+    { label: 'Production clients', companies: productionCompanies },
+    { label: 'Test workspaces', companies: activeTestWorkspaces },
+    ...(showArchivedWorkspaces ? [{ label: 'Archived test workspaces', companies: archivedTestWorkspaces }] : []),
+  ].filter(group => group.companies.length > 0);
+  const orderedCompanies = groupedCompanies.flatMap(group => group.companies);
+  const groupStartLabels = new Map(groupedCompanies.map(group => [group.companies[0].id, group.label]));
 
   const load = useCallback(async (quiet = false) => {
     try {
@@ -144,11 +213,76 @@ export function Clients() {
 
   useEffect(() => {
     if (!companies.some(company => company.migration_rehearsal_status === 'pending')) return;
-    const timer = window.setTimeout(() => { void load(true); }, 3000);
+    const timer = window.setTimeout(() => {
+      void Promise.all([load(true), refreshCompanies()]);
+    }, 3000);
     return () => window.clearTimeout(timer);
-  }, [companies, load]);
+  }, [companies, load, refreshCompanies]);
+
+  useEffect(() => {
+    if (!workspaceBuilderOpen || !workspaceBuilderSourceId) {
+      setWorkspacePreview(null);
+      return;
+    }
+
+    const requestId = ++workspacePreviewRequestIdRef.current;
+    setWorkspacePreview(null);
+    setLoadingWorkspacePreview(true);
+    setWorkspaceError(null);
+    setWorkspaceConfirmed(false);
+    void companiesApi.testWorkspacePreview(workspaceBuilderSourceId, {
+      copy_mode: workspaceCopyMode,
+      excluded_payrolls: workspaceCopyMode === 'exclude_recent' ? workspaceExcludedPayrolls : undefined,
+      cutoff_pay_period_id: workspaceCopyMode === 'through_pay_period' && workspaceCutoffPayPeriodId
+        ? workspaceCutoffPayPeriodId
+        : undefined,
+    }).then(response => {
+      if (workspacePreviewRequestIdRef.current === requestId) setWorkspacePreview(response.test_workspace);
+    }).catch(err => {
+      if (workspacePreviewRequestIdRef.current === requestId) {
+        setWorkspaceError(err instanceof Error ? err.message : 'Could not preview the test workspace');
+      }
+    }).finally(() => {
+      if (workspacePreviewRequestIdRef.current === requestId) setLoadingWorkspacePreview(false);
+    });
+  }, [workspaceBuilderOpen, workspaceBuilderSourceId, workspaceCopyMode, workspaceExcludedPayrolls, workspaceCutoffPayPeriodId]);
+
+  const refreshPromotionPreview = useCallback(async (rehearsalId: number, quiet = false) => {
+    const requestId = ++promotionPreviewRequestIdRef.current;
+    if (!quiet) setLoadingPromotion(true);
+    setPromotionError(null);
+    try {
+      const response = await companiesApi.migrationPromotionPreview(rehearsalId);
+      if (promotionPreviewRequestIdRef.current === requestId) {
+        setPromotionPreview(response.migration_promotion);
+        setPromotionDispositions(current => Object.fromEntries(
+          response.migration_promotion.source_periods
+            .filter(period => current[period.id])
+            .map(period => [period.id, current[period.id]]),
+        ));
+        setPromotionConfirmed(false);
+      }
+    } catch (err) {
+      if (promotionPreviewRequestIdRef.current === requestId) {
+        setPromotionError(err instanceof Error ? err.message : 'Could not check the rehearsal promotion');
+      }
+    } finally {
+      if (!quiet && promotionPreviewRequestIdRef.current === requestId) setLoadingPromotion(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!promotionRehearsalId || promotionPreview?.backup?.status !== 'pending') return;
+    const timer = window.setTimeout(() => {
+      void refreshPromotionPreview(promotionRehearsalId, true);
+      void load(true);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [load, promotionPreview, promotionRehearsalId, refreshPromotionPreview]);
 
   const handleOpenRehearsal = async (company: CompanyListItem) => {
+    setWorkspaceBuilderOpen(false);
+    handleClosePromotion();
     setRehearsalSourceId(company.id);
     setRehearsalPreview(null);
     setRehearsalName(`${company.name} Migration Test`);
@@ -192,15 +326,80 @@ export function Clients() {
     }
   };
 
-  const handleRetryRehearsal = async (companyId: number) => {
-    setRetryingRehearsalId(companyId);
+  const handleOpenPromotion = (company: CompanyListItem) => {
+    handleCloseWorkspaceBuilder();
+    handleCloseRehearsal();
+    setPromotionRehearsalId(company.id);
+    setPromotionPreview(null);
+    setPromotionDispositions({});
+    setPromotionConfirmed(false);
+    setPromotionError(null);
+    setPromotionNotice(null);
+    void refreshPromotionPreview(company.id);
+  };
+
+  const handleClosePromotion = () => {
+    promotionPreviewRequestIdRef.current += 1;
+    setPromotionRehearsalId(null);
+    setPromotionPreview(null);
+    setPromotionDispositions({});
+    setPromotionConfirmed(false);
+    setPromotionError(null);
+    setPromotionAction(null);
+  };
+
+  const handleCreatePromotionBackup = async () => {
+    if (!promotionRehearsalId || !promotionPreview?.ready_to_back_up || !promotionConfirmed) return;
+    setPromotionAction('backup');
+    setPromotionError(null);
+    try {
+      await companiesApi.createMigrationPromotionBackup(promotionRehearsalId, 'CREATE READ-ONLY BACKUP');
+      await Promise.all([load(true), refreshCompanies()]);
+      await refreshPromotionPreview(promotionRehearsalId, true);
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not create the clean-client backup');
+    } finally {
+      setPromotionAction(null);
+    }
+  };
+
+  const handleApplyPromotion = async () => {
+    if (!promotionRehearsalId || !promotionPreview?.ready_to_apply || !promotionConfirmed ||
+      !promotionPreview.source_periods.every(period => promotionDispositions[period.id])) return;
+    setPromotionAction('apply');
+    setPromotionError(null);
+    try {
+      const response = await companiesApi.applyMigrationPromotion(
+        promotionRehearsalId,
+        'APPLY REHEARSAL TO LIVE CLIENT',
+        promotionDispositions,
+      );
+      const targetName = response.company.name;
+      handleClosePromotion();
+      setPromotionNotice(`${targetName} now has the verified rehearsal setup and both migrated payrolls.`);
+      await Promise.all([load(), refreshCompanies()]);
+    } catch (err) {
+      setPromotionError(err instanceof Error ? err.message : 'Could not apply the rehearsal to the clean client');
+    } finally {
+      setPromotionAction(null);
+    }
+  };
+
+  const handleRetryWorkspace = async (company: CompanyListItem) => {
+    setRetryingRehearsalId(company.id);
     setError(null);
     try {
-      await companiesApi.retryMigrationRehearsal(companyId);
+      if (company.test_workspace_purpose === 'sandbox') {
+        await companiesApi.retryTestWorkspace(company.id);
+      } else if (company.test_workspace_purpose === 'training_replay') {
+        await companiesApi.retryTrainingReplay(company.id);
+      } else {
+        await companiesApi.retryMigrationRehearsal(company.id);
+      }
       await load();
       await refreshCompanies();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not retry the migration rehearsal');
+      setError(err instanceof Error ? err.message : 'Could not retry the test workspace copy');
     } finally {
       setRetryingRehearsalId(null);
     }
@@ -212,13 +411,114 @@ export function Clients() {
   };
 
   const handleAddNew = () => {
+    setWorkspaceBuilderOpen(false);
+    handleCloseRehearsal();
+    handleClosePromotion();
     setEditingId(null);
     setForm({ ...emptyForm });
     setFormError(null);
     setShowForm(true);
   };
 
+  const handleOpenWorkspaceBuilder = () => {
+    setShowForm(false);
+    handleCloseRehearsal();
+    handleClosePromotion();
+    const source = productionCompanies.length === 1 ? productionCompanies[0] : null;
+    setWorkspaceBuilderSourceId(source?.id ?? null);
+    setWorkspaceName(source ? `${source.name} Test Workspace` : '');
+    setWorkspaceCopyMode('all_committed');
+    setWorkspaceExcludedPayrolls(2);
+    setWorkspaceCutoffPayPeriodId(null);
+    setWorkspaceExpirationDays(90);
+    setWorkspaceAssignments({});
+    setWorkspaceConfirmed(false);
+    setWorkspaceError(null);
+    setWorkspaceBuilderOpen(true);
+  };
+
+  const handleCloseWorkspaceBuilder = () => {
+    workspacePreviewRequestIdRef.current += 1;
+    setWorkspaceBuilderOpen(false);
+    setWorkspaceBuilderSourceId(null);
+    setWorkspacePreview(null);
+    setWorkspaceAssignments({});
+    setWorkspaceConfirmed(false);
+    setWorkspaceError(null);
+  };
+
+  const handleSelectWorkspaceSource = (companyId: number | null) => {
+    const source = productionCompanies.find(company => company.id === companyId);
+    setWorkspaceBuilderSourceId(companyId);
+    setWorkspaceName(source ? `${source.name} Test Workspace` : '');
+    setWorkspaceAssignments({});
+    setWorkspaceCutoffPayPeriodId(null);
+    setWorkspaceConfirmed(false);
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (!workspaceBuilderSourceId || !workspacePreview?.ready || !workspaceName.trim() || !workspaceConfirmed) return;
+
+    setCreatingWorkspace(true);
+    setWorkspaceError(null);
+    try {
+      await companiesApi.createTestWorkspace(workspaceBuilderSourceId, {
+        name: workspaceName.trim(),
+        copy_mode: workspaceCopyMode,
+        excluded_payrolls: workspaceCopyMode === 'exclude_recent' ? workspaceExcludedPayrolls : undefined,
+        cutoff_pay_period_id: workspaceCopyMode === 'through_pay_period' && workspaceCutoffPayPeriodId
+          ? workspaceCutoffPayPeriodId
+          : undefined,
+        expiration_days: workspaceExpirationDays,
+        acknowledgement: 'CREATE TEST WORKSPACE',
+        assignments: Object.entries(workspaceAssignments).map(([userId, workspaceAccessLevel]) => ({
+          user_id: Number(userId),
+          workspace_access_level: workspaceAccessLevel,
+        })),
+      });
+      handleCloseWorkspaceBuilder();
+      await Promise.all([load(), refreshCompanies()]);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Could not create the test workspace');
+    } finally {
+      setCreatingWorkspace(false);
+    }
+  };
+
+  const handleArchiveWorkspace = async () => {
+    if (!archiveWorkspace) return;
+    setWorkspaceLifecycleId(archiveWorkspace.id);
+    setError(null);
+    try {
+      await companiesApi.archiveTestWorkspace(archiveWorkspace.id);
+      setArchiveWorkspace(null);
+      await Promise.all([load(), refreshCompanies()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not archive the test workspace');
+    } finally {
+      setWorkspaceLifecycleId(null);
+    }
+  };
+
+  const handleRestoreWorkspace = async (company: CompanyListItem) => {
+    setWorkspaceLifecycleId(company.id);
+    setError(null);
+    try {
+      await companiesApi.restoreTestWorkspace(company.id);
+      await Promise.all([load(), refreshCompanies()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restore the test workspace');
+    } finally {
+      setWorkspaceLifecycleId(null);
+    }
+  };
+
+  const workspaceBuilderSource = productionCompanies.find(company => company.id === workspaceBuilderSourceId);
+
   const handleEdit = async (id: number) => {
+    handleCloseWorkspaceBuilder();
+    handleCloseRehearsal();
+    handleClosePromotion();
     setLoadingEditId(id);
     try {
       const data = await companiesApi.get(id);
@@ -314,15 +614,182 @@ export function Clients() {
             {error}
           </div>
         )}
+        {promotionNotice && (
+          <div role="status" className="flex items-start justify-between gap-4 rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
+            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
+            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button>
+          </div>
+        )}
 
-        {/* Add new button */}
+        {/* Primary actions */}
         {canManageClients && !showForm && (
-          <div className="flex justify-end">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen} disabled={productionCompanies.length === 0}>
+                <FlaskConical className="mr-2 h-4 w-4" />
+                Create test workspace
+              </Button>
+              {productionCompanies.length === 0 && <p className="text-xs text-neutral-500">Add a production client before creating a test workspace.</p>}
+            </div>
             <Button onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-2" />
               Add New Client
             </Button>
           </div>
+        )}
+
+        {workspaceBuilderOpen && (
+          <Card className="overflow-hidden border-primary-200">
+            <div className="border-b border-primary-100 bg-primary-50/70 p-4 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Safe copy</p>
+                  <h2 className="mt-2 text-lg font-semibold tracking-tight text-neutral-950">Create a test workspace</h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">Copy a production client into an isolated workspace, give the right staff access, and test freely without changing live payroll.</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleCloseWorkspaceBuilder} aria-label="Close test workspace setup">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-6 p-4 sm:p-6">
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <label htmlFor="test-workspace-source" className="text-sm font-semibold text-neutral-900">Production client</label>
+                  <Select
+                    id="test-workspace-source"
+                    className="mt-2"
+                    value={workspaceBuilderSourceId ?? ''}
+                    onChange={event => handleSelectWorkspaceSource(event.target.value ? Number(event.target.value) : null)}
+                  >
+                    <option value="">Select a production client</option>
+                    {productionCompanies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
+                  </Select>
+                  <p className="mt-2 text-xs leading-5 text-neutral-500">The production client is only read while the isolated copy is built.</p>
+                </div>
+                <div>
+                  <label htmlFor={workspaceNameId} className="text-sm font-semibold text-neutral-900">Workspace name</label>
+                  <Input id={workspaceNameId} className="mt-2" value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} disabled={!workspaceBuilderSource} />
+                  <p className="mt-2 text-xs leading-5 text-neutral-500">Use a name that makes the test and owner obvious.</p>
+                </div>
+              </div>
+
+              {workspaceBuilderSource && (
+                <>
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">What should be copied?</p>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {([
+                        ['all_committed', 'Setup + committed payroll history', 'Best for general testing with the same year-to-date starting point.'],
+                        ['exclude_recent', 'Leave out the latest payrolls', 'Copy the setup and earlier history, then let someone process new practice payrolls.'],
+                        ['through_pay_period', 'Copy through a chosen payroll', 'Use a specific payroll as the last locked history in the workspace.'],
+                        ['setup_only', 'Setup and employees only', 'Copy employee setup, recurring items, schedules, and settings without payroll history.'],
+                      ] as Array<[TestWorkspaceCopyMode, string, string]>).map(([mode, title, description]) => (
+                        <label key={mode} className={`cursor-pointer rounded-xl border p-4 transition ${workspaceCopyMode === mode ? 'border-primary-400 bg-primary-50/70 ring-2 ring-primary-100' : 'border-neutral-200 hover:border-primary-200'}`}>
+                          <span className="flex items-start gap-3">
+                            <input type="radio" name="test-workspace-copy-mode" value={mode} checked={workspaceCopyMode === mode} onChange={() => { setWorkspaceCopyMode(mode); setWorkspaceCutoffPayPeriodId(null); }} className="mt-1 h-4 w-4" />
+                            <span><span className="block text-sm font-semibold text-neutral-900">{title}</span><span className="mt-1 block text-xs leading-5 text-neutral-600">{description}</span></span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {workspaceCopyMode === 'exclude_recent' && (
+                    <div className="max-w-sm">
+                      <label htmlFor="test-workspace-excluded-count" className="text-sm font-semibold text-neutral-900">Recent payrolls to leave out</label>
+                      <Select id="test-workspace-excluded-count" className="mt-2" value={workspaceExcludedPayrolls} onChange={event => setWorkspaceExcludedPayrolls(Number(event.target.value))}>
+                        {Array.from({ length: 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} payroll{count === 1 ? '' : 's'}</option>)}
+                      </Select>
+                    </div>
+                  )}
+
+                  {workspaceCopyMode === 'through_pay_period' && (
+                    <div className="max-w-xl">
+                      <label htmlFor="test-workspace-cutoff" className="text-sm font-semibold text-neutral-900">Last payroll to include</label>
+                      <Select id="test-workspace-cutoff" className="mt-2" value={workspaceCutoffPayPeriodId ?? ''} onChange={event => setWorkspaceCutoffPayPeriodId(event.target.value ? Number(event.target.value) : null)}>
+                        <option value="">Select a payroll</option>
+                        {workspacePreview?.recent_payrolls.map(period => <option key={period.id} value={period.id}>{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)} · {period.status}</option>)}
+                      </Select>
+                    </div>
+                  )}
+
+                  {loadingWorkspacePreview ? (
+                    <div role="status" className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600"><RefreshCw className="h-4 w-4 animate-spin" />Checking what will be copied…</div>
+                  ) : workspacePreview && (
+                    <div className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.active_employees} active · {workspacePreview.copy_summary.employees} total</p></div>
+                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Locked payroll history</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.payrolls_to_copy} payrolls</p></div>
+                        <div className="rounded-xl bg-neutral-50 p-4">
+                          <p className="text-xs text-neutral-500">Not copied</p>
+                          <p className="mt-1 font-semibold">
+                            {workspacePreview.copy_mode === 'exclude_recent'
+                              ? `${workspacePreview.copy_summary.recent_payrolls_excluded} latest · ${workspacePreview.copy_summary.other_open_payrolls_not_copied} other open`
+                              : `${workspacePreview.copy_summary.open_payrolls_not_copied} open payrolls`}
+                          </p>
+                        </div>
+                      </div>
+
+                      {workspacePreview.copy_mode === 'exclude_recent' && workspacePreview.copy_summary.recent_payrolls_excluded > 0 && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                          <p className="text-sm font-semibold text-amber-950">Latest payrolls left out for practice</p>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {workspacePreview.recent_payrolls.slice(0, workspacePreview.copy_summary.recent_payrolls_excluded).map(period => (
+                              <div key={period.id} className="rounded-lg border border-amber-100 bg-white/80 p-3 text-sm text-neutral-700">
+                                <p className="font-semibold text-neutral-900">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
+                                <p className="mt-1 text-xs text-neutral-600">Pay date {formatShortDate(period.pay_date)} · <span className="capitalize">{period.status}</span></p>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-3 text-xs leading-5 text-amber-900">These payrolls are not copied, even when they are Draft or Calculated. Staff can recreate them—or test anything else—in the isolated workspace.</p>
+                        </div>
+                      )}
+
+                      {workspacePreview.blockers.length > 0 && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Fix this before copying</div><ul className="mt-2 list-disc space-y-1 pl-6">{workspacePreview.blockers.map(item => <li key={item}>{item}</li>)}</ul></div>
+                      )}
+                      <div className="rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800"><div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Production stays protected</div><ul className="mt-2 list-disc space-y-1 pl-6">{workspacePreview.warnings.map(item => <li key={item}>{item}</li>)}</ul></div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_14rem]">
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-900">Who should have access?</p>
+                      <p className="mt-1 text-sm text-neutral-600">Admins already have full access. Assign managers and accountants only when they need this copy.</p>
+                      <div className="mt-3"><WorkspaceRoleGuide /></div>
+                      {workspacePreview && workspacePreview.assignable_staff.length > 0 && (
+                        <div className="mt-3 divide-y divide-neutral-200 rounded-xl border border-neutral-200">
+                          {workspacePreview.assignable_staff.map(staff => {
+                            const access = workspaceAssignments[staff.id];
+                            return <div key={staff.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                              <label className="flex cursor-pointer items-start gap-2"><input type="checkbox" checked={Boolean(access)} onChange={event => setWorkspaceAssignments(current => { const next = { ...current }; if (event.target.checked) next[staff.id] = 'operator'; else delete next[staff.id]; return next; })} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span><span className="block text-sm font-medium text-neutral-900">{staff.name}</span><span className="mt-1 block text-xs text-neutral-500">{staff.email} · {staff.role}</span></span></label>
+                              {access && <Select aria-label={`Access level for ${staff.name}`} value={access} onChange={event => setWorkspaceAssignments(current => ({ ...current, [staff.id]: event.target.value as 'operator' | 'reviewer' | 'workspace_admin' }))} className="sm:w-48"><option value="operator">Operator — process</option><option value="reviewer">Reviewer — review</option><option value="workspace_admin">Workspace admin</option></Select>}
+                            </div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label htmlFor="test-workspace-expiration" className="flex items-center gap-2 text-sm font-semibold text-neutral-900"><Clock3 className="h-4 w-4 text-neutral-500" />Automatic expiration</label>
+                      <Select id="test-workspace-expiration" className="mt-2" value={workspaceExpirationDays} onChange={event => setWorkspaceExpirationDays(Number(event.target.value) as 30 | 60 | 90 | 180)}>
+                        <option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option><option value={180}>180 days</option>
+                      </Select>
+                      <p className="mt-2 text-xs leading-5 text-neutral-500">After this date the workspace becomes read-only until an admin restores it.</p>
+                    </div>
+                  </div>
+
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
+                  {workspaceError && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{workspaceError}</div>}
+
+                  <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <button type="button" onClick={() => void handleOpenRehearsal(workspaceBuilderSource)} className="text-left text-sm font-semibold text-warning-800 hover:text-warning-900">Need an exact migration rehearsal and verified promotion instead?</button>
+                    <div className="flex justify-end gap-3"><Button variant="outline" onClick={handleCloseWorkspaceBuilder}>Cancel</Button><Button onClick={handleCreateWorkspace} disabled={!workspacePreview?.ready || !workspaceName.trim() || !workspaceConfirmed || creatingWorkspace}>{creatingWorkspace ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FlaskConical className="mr-2 h-4 w-4" />}{creatingWorkspace ? 'Creating protected copy…' : 'Create test workspace'}</Button></div>
+                  </div>
+                </>
+              )}
+            </div>
+          </Card>
         )}
 
         {rehearsalSourceId && (
@@ -369,7 +836,7 @@ export function Clients() {
 
                 {rehearsalPreview.ready && (
                   <>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <div className="rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
                       <div className="flex items-center gap-2 font-semibold"><ShieldCheck className="h-4 w-4" />Built-in safety</div>
                       <p className="mt-1 leading-6">The original remains untouched. Practice runs are always parallel-only and cannot be committed. Check, payment, and official filing actions are blocked.</p>
                     </div>
@@ -392,6 +859,191 @@ export function Clients() {
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
                 <FlaskConical className="mr-2 h-4 w-4" />{creatingRehearsal ? 'Creating verified copy…' : 'Create migration test'}
               </Button>
+            </div>
+          </Card>
+        )}
+
+        {promotionRehearsalId && (
+          <Card className="overflow-hidden border-primary-200">
+            <div className="border-b border-primary-100 bg-primary-50/70 p-4 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-800">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Verified migration handoff</p>
+                    <h3 className="mt-1 text-lg font-semibold tracking-tight text-neutral-950">Move rehearsal results to the clean client</h3>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+                      Cornerstone verifies the employee match and both payrolls, takes a sealed backup, then applies everything in one transaction. Nothing is sent, printed, filed, or synced externally.
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleClosePromotion} aria-label="Close migration handoff">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-6">
+              {loadingPromotion ? (
+                <div role="status" className="flex items-center gap-3 py-8 text-sm text-neutral-600">
+                  <RefreshCw className="h-4 w-4 animate-spin" />Verifying the rehearsal, clean client, and backup…
+                </div>
+              ) : promotionPreview && (
+                <div className="space-y-6">
+                  <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Rehearsal source</p>
+                      <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.rehearsal.name}</p>
+                      <p className="mt-1 text-sm text-neutral-600">
+                        {promotionPreview.rehearsal.employee_count} employees · {promotionPreview.source_periods.length} reviewed {promotionPreview.source_periods.length === 1 ? 'payroll' : 'payrolls'}
+                      </p>
+                    </div>
+                    <ArrowRight className="mx-auto hidden h-5 w-5 text-neutral-400 lg:block" />
+                    <div className="rounded-xl border border-primary-200 bg-primary-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-primary-800">Clean client destination</p>
+                      <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.target_company?.name || 'Missing clean client'}</p>
+                      <p className="mt-1 text-sm text-neutral-600">{promotionPreview.target_company?.employee_count ?? 0} employee records</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
+                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
+                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">Choose how each payroll should continue</p>
+                    <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-600">
+                      Tell Cornerstone whether each rehearsal payroll was already paid elsewhere or still needs to be paid from the clean client.
+                    </p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {promotionPreview.source_periods.map((period, index) => (
+                        <div key={period.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-neutral-900">Payroll {index + 1}</p>
+                            <Badge variant="default"><span className="capitalize">{period.status}</span></Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
+                          <p className="mt-1 text-xs text-neutral-500">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
+                          <div className="mt-3 flex gap-6 border-t border-neutral-200 pt-3 text-sm"><span><span className="text-neutral-500">Gross </span><strong>{formatMoney(period.gross_pay)}</strong></span><span><span className="text-neutral-500">Net </span><strong>{formatMoney(period.net_pay)}</strong></span></div>
+                          <fieldset className="mt-4 space-y-2">
+                            <legend className="sr-only">Payment status for payroll {index + 1}</legend>
+                            <label className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition ${promotionDispositions[period.id] === 'record_only' ? 'border-primary-400 ring-2 ring-primary-100' : 'border-neutral-200 hover:border-primary-200'}`}>
+                              <input
+                                type="radio"
+                                name={`promotion-disposition-${period.id}`}
+                                value="record_only"
+                                checked={promotionDispositions[period.id] === 'record_only'}
+                                onChange={() => {
+                                  setPromotionDispositions(current => ({ ...current, [period.id]: 'record_only' }));
+                                  setPromotionConfirmed(false);
+                                }}
+                                className="mt-1 h-4 w-4 border-neutral-300 text-primary-700"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-neutral-900">Already paid elsewhere — record only</span>
+                                <span className="mt-1 block text-xs leading-5 text-neutral-600">Save it as a locked historical payroll and rebuild YTD totals. No checks or payment actions will be created.</span>
+                              </span>
+                            </label>
+                            <label className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition ${promotionDispositions[period.id] === 'process_in_cornerstone' ? 'border-primary-400 ring-2 ring-primary-100' : 'border-neutral-200 hover:border-primary-200'}`}>
+                              <input
+                                type="radio"
+                                name={`promotion-disposition-${period.id}`}
+                                value="process_in_cornerstone"
+                                checked={promotionDispositions[period.id] === 'process_in_cornerstone'}
+                                onChange={() => {
+                                  setPromotionDispositions(current => ({ ...current, [period.id]: 'process_in_cornerstone' }));
+                                  setPromotionConfirmed(false);
+                                }}
+                                className="mt-1 h-4 w-4 border-neutral-300 text-primary-700"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-neutral-900">Unpaid — process in Cornerstone</span>
+                                <span className="mt-1 block text-xs leading-5 text-neutral-600">Bring it in as calculated. Review, approve, and commit it normally before assigning and printing checks.</span>
+                              </span>
+                            </label>
+                          </fieldset>
+                        </div>
+                      ))}
+                    </div>
+                    {promotionPreview.ready_to_apply && !allPromotionDispositionsSelected && (
+                      <p role="alert" className="mt-3 flex items-center gap-2 text-sm font-medium text-amber-800">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />Choose a payment status for every payroll before applying the rehearsal.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className={`rounded-xl border p-4 ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'border-success-100 bg-success-50' : 'border-neutral-200 bg-neutral-50'}`}>
+                      <div className="flex items-start gap-3">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'bg-success-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}>1</div>
+                        <div>
+                          <p className="flex items-center gap-2 font-semibold text-neutral-950">Seal a clean-client backup <HelpTip label="current backup">A backup is current only while the clean client remains unchanged after the backup was created. Any later change requires a fresh backup.</HelpTip></p>
+                          {promotionPreview.backup ? (
+                            <p className="mt-1 text-sm leading-6 text-neutral-600">
+                              {promotionPreview.backup.status === 'pending'
+                                ? 'The backup is being copied and verified now. This page will refresh automatically.'
+                                : promotionPreview.backup.status === 'failed'
+                                  ? 'The last backup did not finish. Create a replacement before applying.'
+                                  : promotionPreview.backup.current
+                                    ? `${promotionPreview.backup.name} is verified and read only.`
+                                    : 'The clean client changed after this backup. Create a fresh replacement.'}
+                            </p>
+                          ) : <p className="mt-1 text-sm leading-6 text-neutral-600">Required before the clean client can change. The backup keeps its current setup, archive, and empty draft.</p>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`rounded-xl border p-4 ${promotionPreview.ready_to_apply ? 'border-primary-200 bg-primary-50' : 'border-neutral-200 bg-neutral-50'}`}>
+                      <div className="flex items-start gap-3">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.ready_to_apply ? 'bg-primary-700 text-white' : 'bg-neutral-200 text-neutral-700'}`}>2</div>
+                        <div>
+                          <p className="font-semibold text-neutral-950">Apply setup and both payrolls</p>
+                          <p className="mt-1 text-sm leading-6 text-neutral-600">Replaces only the verified setup and matching empty draft. Paid payrolls become locked records; unpaid payrolls return to the normal review-and-payment workflow. The rehearsal is then sealed.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {promotionPreview.blockers.length > 0 && !promotionPreview.ready_to_back_up && (
+                    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                      <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Action required</div>
+                      <ul className="mt-2 list-disc space-y-1 pl-6">{promotionPreview.blockers.map(item => <li key={item}>{item}</li>)}</ul>
+                    </div>
+                  )}
+
+                  {(promotionPreview.ready_to_back_up || (promotionPreview.ready_to_apply && allPromotionDispositionsSelected)) && (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-300 p-4 text-sm text-neutral-700">
+                      <input type="checkbox" checked={promotionConfirmed} onChange={event => setPromotionConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
+                      <span>{promotionPreview.ready_to_apply
+                        ? `I reviewed the employee match, both payroll totals, and the verified backup. Apply this rehearsal to ${promotionPreview.target_company?.name}.`
+                        : `Create a sealed, read-only backup of ${promotionPreview.target_company?.name} before any migration data is applied.`}</span>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {promotionError && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{promotionError}</div>}
+              <div className="mt-6 flex flex-col-reverse gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:justify-between">
+                <Button variant="outline" onClick={handleClosePromotion}>Cancel</Button>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button variant="outline" onClick={() => void refreshPromotionPreview(promotionRehearsalId)} disabled={loadingPromotion || Boolean(promotionAction)}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loadingPromotion ? 'animate-spin' : ''}`} />Refresh verification
+                  </Button>
+                  {promotionPreview?.ready_to_back_up && (
+                    <Button onClick={handleCreatePromotionBackup} disabled={!promotionConfirmed || Boolean(promotionAction)}>
+                      <ShieldCheck className="mr-2 h-4 w-4" />{promotionAction === 'backup' ? 'Creating backup…' : promotionPreview.backup ? 'Replace backup' : 'Create read-only backup'}
+                    </Button>
+                  )}
+                  {promotionPreview?.ready_to_apply && (
+                    <Button onClick={handleApplyPromotion} disabled={!promotionConfirmed || !allPromotionDispositionsSelected || Boolean(promotionAction)}>
+                      <ArrowRight className="mr-2 h-4 w-4" />{promotionAction === 'apply' ? 'Applying verified migration…' : 'Apply to clean client'}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           </Card>
         )}
@@ -612,18 +1264,35 @@ export function Clients() {
           </Card>
         )}
 
+        {canManageClients && <TestWorkspaceGuide />}
+
+        {canManageClients && archivedTestWorkspaces.length > 0 && (
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setShowArchivedWorkspaces(value => !value)}>
+              <Archive className="mr-2 h-4 w-4" />
+              {showArchivedWorkspaces ? 'Hide archived workspaces' : `Show archived workspaces (${archivedTestWorkspaces.length})`}
+            </Button>
+          </div>
+        )}
+
         {/* Clients list */}
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-500">Loading clients…</div>
         ) : (
           <>
             <div className="space-y-3 sm:hidden">
-              {companies.length === 0 ? (
+              {orderedCompanies.length === 0 ? (
                 <MobileRecordCard className="text-center text-sm text-neutral-500">
                   {canManageClients ? 'No clients found. Add a new client to get started.' : 'No assigned clients found.'}
                 </MobileRecordCard>
-              ) : companies.map((c) => (
-                <MobileRecordCard key={c.id}>
+              ) : orderedCompanies.map((c) => (
+                <Fragment key={c.id}>
+                  {groupStartLabels.has(c.id) && (
+                    <h2 className="px-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                      {groupStartLabels.get(c.id)}
+                    </h2>
+                  )}
+                  <MobileRecordCard>
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
                       <Building2 className="h-5 w-5" />
@@ -632,16 +1301,22 @@ export function Clients() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-neutral-950">{c.name}</p>
-                          {c.payroll_environment === 'migration_rehearsal' && (
-                            <p className="mt-0.5 text-xs font-semibold text-amber-700">Migration rehearsal · {c.migration_rehearsal_status}</p>
+                          {isTestWorkspace(c) && (
+                            <p className="mt-0.5 text-xs font-semibold text-amber-700">{testWorkspaceLabel(c)} · {c.migration_rehearsal_status}</p>
                           )}
                         </div>
-                        <Badge variant={c.migration_rehearsal_status === 'pending' ? 'info' : c.migration_rehearsal_status === 'failed' ? 'danger' : c.active !== false ? 'success' : 'default'}>
-                          {c.migration_rehearsal_status === 'pending'
+                        <Badge variant={c.test_workspace_archived_at ? 'default' : c.migration_rehearsal_status === 'pending' ? 'info' : c.migration_rehearsal_status === 'failed' ? 'danger' : c.active !== false ? 'success' : 'default'}>
+                          {c.test_workspace_archived_at
+                            ? 'Archived'
+                            : isExpiredWorkspace(c)
+                              ? 'Expired · read only'
+                            : c.migration_rehearsal_status === 'pending'
                             ? 'Preparing'
                             : c.migration_rehearsal_status === 'failed'
                               ? 'Needs attention'
-                              : c.payroll_environment === 'migration_rehearsal'
+                              : isReadOnlyWorkspace(c)
+                                ? 'Read only'
+                                : isTestWorkspace(c)
                                 ? 'Ready to test'
                                 : c.active !== false ? 'Active' : 'Inactive'}
                         </Badge>
@@ -652,40 +1327,53 @@ export function Clients() {
                       </div>
                       {canEditAssignedClients && (
                         <MobileCardActions>
-                          {c.payroll_environment === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && (
+                          {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                             <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)}>
-                              Open test <ArrowRight className="ml-1 h-4 w-4" />
+                              {testWorkspaceOpenLabel(c)} <ArrowRight className="ml-1 h-4 w-4" />
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEdit(c.id)}
-                            disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
-                          >
-                            <Pencil className="mr-1 h-4 w-4" />
-                            {loadingEditId === c.id ? 'Loading...' : 'Edit'}
-                          </Button>
-                          {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                          {canManageClients && !isReadOnlyWorkspace(c) && c.test_workspace_purpose === 'migration_rehearsal' && !c.test_workspace_sealed_at && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                            <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)}>
+                              <ShieldCheck className="mr-1 h-4 w-4" />Promote rehearsal
+                            </Button>
+                          )}
+                          {!isReadOnlyWorkspace(c) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEdit(c.id)}
+                              disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
+                            >
+                              <Pencil className="mr-1 h-4 w-4" />
+                              {loadingEditId === c.id ? 'Loading...' : 'Edit'}
+                            </Button>
+                          )}
+                          {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
                             </Button>
                           )}
-                          {canManageClients && c.payroll_environment === 'live' && (
-                            <Button size="sm" variant="outline" onClick={() => handleOpenRehearsal(c)}>
-                              <FlaskConical className="mr-1 h-4 w-4" />Migration test
+                          {canManageClients && !isReadOnlyWorkspace(c) && c.migration_rehearsal_status === 'failed' && (
+                            <Button size="sm" variant="outline" onClick={() => handleRetryWorkspace(c)} disabled={retryingRehearsalId === c.id}>
+                              {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
                             </Button>
                           )}
-                          {canManageClients && c.migration_rehearsal_status === 'failed' && (
-                            <Button size="sm" variant="outline" onClick={() => handleRetryRehearsal(c.id)} disabled={retryingRehearsalId === c.id}>
-                              {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
+                          {canManageClients && isTestWorkspace(c) && !c.test_workspace_archived_at && c.test_workspace_purpose !== 'backup_snapshot' && (
+                            <Button size="sm" variant="outline" onClick={() => setArchiveWorkspace(c)} disabled={workspaceLifecycleId === c.id}>
+                              <Archive className="mr-1 h-4 w-4" />Archive
+                            </Button>
+                          )}
+                          {canManageClients && (Boolean(c.test_workspace_archived_at) || isExpiredWorkspace(c)) && c.test_workspace_purpose !== 'backup_snapshot' && (
+                            <Button size="sm" variant="outline" onClick={() => void handleRestoreWorkspace(c)} disabled={workspaceLifecycleId === c.id}>
+                              <RotateCcw className="mr-1 h-4 w-4" />{workspaceLifecycleId === c.id ? 'Updating…' : isExpiredWorkspace(c) ? 'Extend 90 days' : 'Restore'}
                             </Button>
                           )}
                         </MobileCardActions>
                       )}
                     </div>
                   </div>
-                </MobileRecordCard>
+                  </MobileRecordCard>
+                </Fragment>
               ))}
             </div>
             <Card className="hidden sm:block">
@@ -701,22 +1389,30 @@ export function Clients() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {companies.length === 0 ? (
+                {orderedCompanies.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="text-center py-8 text-gray-500">
                       {canManageClients ? 'No clients found. Click "Add New Client" to get started.' : 'No assigned clients found.'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  companies.map((c) => (
-                    <TableRow key={c.id}>
+                  orderedCompanies.map((c) => (
+                    <Fragment key={c.id}>
+                    {groupStartLabels.has(c.id) && (
+                      <TableRow className="bg-neutral-50/80 hover:bg-neutral-50/80">
+                        <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                          {groupStartLabels.get(c.id)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {c.payroll_environment === 'migration_rehearsal' ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-gray-400" />}
+                          {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-gray-400" />}
                           <div>
                             <span className="font-medium text-gray-900">{c.name}</span>
-                            {c.payroll_environment === 'migration_rehearsal' && (
-                              <p className="text-xs font-medium text-amber-700">Migration rehearsal · source: {c.migration_source_company_name || 'linked client'}</p>
+                            {isTestWorkspace(c) && (
+                              <p className="text-xs font-medium text-amber-700">{testWorkspaceLabel(c)} · source: {c.migration_source_company_name || 'linked client'}</p>
                             )}
                             {c.migration_rehearsal_status === 'failed' && c.migration_rehearsal_error && (
                               <p className="mt-1 max-w-md text-xs text-red-700">{c.migration_rehearsal_error}</p>
@@ -731,12 +1427,16 @@ export function Clients() {
                         <span className="text-gray-400 text-xs ml-1">/ {c.total_employees}</span>
                       </TableCell>
                       <TableCell className="text-center">
-                        {c.migration_rehearsal_status === 'pending' ? (
+                        {c.test_workspace_archived_at ? (
+                          <Badge variant="default">Archived</Badge>
+                        ) : isExpiredWorkspace(c) ? (
+                          <Badge variant="default">Expired · read only</Badge>
+                        ) : c.migration_rehearsal_status === 'pending' ? (
                           <Badge variant="info">Preparing</Badge>
                         ) : c.migration_rehearsal_status === 'failed' ? (
                           <Badge variant="danger">Needs attention</Badge>
                         ) : c.active !== false ? (
-                          <Badge variant="success">{c.payroll_environment === 'migration_rehearsal' ? 'Ready to test' : 'Active'}</Badge>
+                          <Badge variant="success">{isReadOnlyWorkspace(c) ? 'Read only' : isTestWorkspace(c) ? 'Ready to test' : 'Active'}</Badge>
                         ) : (
                           <Badge variant="default">Inactive</Badge>
                         )}
@@ -744,38 +1444,50 @@ export function Clients() {
                       {canEditAssignedClients && (
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {c.payroll_environment === 'migration_rehearsal' && c.migration_rehearsal_status === 'ready' && (
+                            {isTestWorkspace(c) && c.migration_rehearsal_status === 'ready' && (
                               <Button size="sm" onClick={() => handleOpenReadyRehearsal(c.id)} className="text-xs">
-                                Open test <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                                {testWorkspaceOpenLabel(c)} <ArrowRight className="ml-1 h-3.5 w-3.5" />
                               </Button>
                             )}
-                            {canManageClients && c.payroll_environment === 'live' && (
-                              <Button size="sm" variant="outline" onClick={() => handleOpenRehearsal(c)} className="text-xs">
-                                <FlaskConical className="mr-1 h-3.5 w-3.5" />Migration test
+                            {canManageClients && !isReadOnlyWorkspace(c) && c.test_workspace_purpose === 'migration_rehearsal' && !c.test_workspace_sealed_at && c.migration_rehearsal_status === 'ready' && c.test_workspace_manifest?.promotion_status !== 'completed' && (
+                              <Button size="sm" variant="outline" onClick={() => handleOpenPromotion(c)} className="text-xs">
+                                <ShieldCheck className="mr-1 h-3.5 w-3.5" />Promote rehearsal
                               </Button>
                             )}
-                            {canManageClients && c.migration_rehearsal_status === 'failed' && (
-                              <Button size="sm" variant="outline" onClick={() => handleRetryRehearsal(c.id)} disabled={retryingRehearsalId === c.id} className="text-xs">
+                            {canManageClients && !isReadOnlyWorkspace(c) && c.migration_rehearsal_status === 'failed' && (
+                              <Button size="sm" variant="outline" onClick={() => handleRetryWorkspace(c)} disabled={retryingRehearsalId === c.id} className="text-xs">
                                 {retryingRehearsalId === c.id ? 'Retrying…' : 'Retry copy'}
                               </Button>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleEdit(c.id)}
-                              className="text-xs"
-                              disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
-                            >
-                              {loadingEditId === c.id ? (
-                                <>
-                                  <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
-                                  Loading...
-                                </>
-                              ) : (
-                                <><Pencil className="w-3 h-3 mr-1" /> Edit</>
-                              )}
-                            </Button>
-                            {canManageClients && c.payroll_environment !== 'migration_rehearsal' && (
+                            {canManageClients && isTestWorkspace(c) && !c.test_workspace_archived_at && c.test_workspace_purpose !== 'backup_snapshot' && (
+                              <Button size="sm" variant="outline" onClick={() => setArchiveWorkspace(c)} disabled={workspaceLifecycleId === c.id} className="text-xs">
+                                <Archive className="mr-1 h-3.5 w-3.5" />Archive
+                              </Button>
+                            )}
+                            {canManageClients && (Boolean(c.test_workspace_archived_at) || isExpiredWorkspace(c)) && c.test_workspace_purpose !== 'backup_snapshot' && (
+                              <Button size="sm" variant="outline" onClick={() => void handleRestoreWorkspace(c)} disabled={workspaceLifecycleId === c.id} className="text-xs">
+                                <RotateCcw className="mr-1 h-3.5 w-3.5" />{workspaceLifecycleId === c.id ? 'Updating…' : isExpiredWorkspace(c) ? 'Extend 90 days' : 'Restore'}
+                              </Button>
+                            )}
+                            {!isReadOnlyWorkspace(c) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEdit(c.id)}
+                                className="text-xs"
+                                disabled={loadingEditId === c.id || c.migration_rehearsal_status === 'pending'}
+                              >
+                                {loadingEditId === c.id ? (
+                                  <>
+                                    <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                    Loading...
+                                  </>
+                                ) : (
+                                  <><Pencil className="w-3 h-3 mr-1" /> Edit</>
+                                )}
+                              </Button>
+                            )}
+                            {canManageClients && !isTestWorkspace(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                                 Time tracking
                               </Button>
@@ -784,6 +1496,7 @@ export function Clients() {
                         </TableCell>
                       )}
                     </TableRow>
+                    </Fragment>
                   ))
                 )}
               </TableBody>
@@ -792,6 +1505,21 @@ export function Clients() {
           </>
         )}
       </div>
+
+      <Dialog open={archiveWorkspace !== null} onOpenChange={open => { if (!open && workspaceLifecycleId === null) setArchiveWorkspace(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive this test workspace?</DialogTitle>
+            <DialogDescription>{archiveWorkspace?.name} will leave the normal client list and become read-only. Its payroll data and audit history are preserved, and an admin can restore it later.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveWorkspace(null)} disabled={workspaceLifecycleId !== null}>Cancel</Button>
+            <Button onClick={() => void handleArchiveWorkspace()} disabled={workspaceLifecycleId !== null}>
+              <Archive className="mr-2 h-4 w-4" />{workspaceLifecycleId !== null ? 'Archiving…' : 'Archive workspace'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

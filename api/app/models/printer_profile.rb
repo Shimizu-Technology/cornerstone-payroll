@@ -5,13 +5,24 @@
 # the same calibration across that firm's client companies.
 class PrinterProfile < ApplicationRecord
   belongs_to :organization
+  belongs_to :created_by, class_name: "User", optional: true
+  belongs_to :updated_by, class_name: "User", optional: true
+  has_many :user_printer_profile_selections, dependent: :destroy
+  has_many :check_print_runs, dependent: :nullify
 
-  validates :name, presence: true, uniqueness: { scope: :organization_id }
+  validates :name, presence: true,
+    uniqueness: { scope: :organization_id, conditions: -> { where(archived_at: nil) } }
   validates :check_stock_type, inclusion: { in: Company::CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
+  validate :selected_profile_stock_type_is_stable
 
-  scope :ordered, -> { order(:name) }
+  scope :active, -> { where(archived_at: nil) }
+  scope :ordered, -> { active.order(:name) }
+
+  def archived?
+    archived_at.present?
+  end
 
   # Only one default profile per organization — the rest get cleared automatically
   # when a new default is set so we never end up with multiple defaults.
@@ -25,5 +36,12 @@ class PrinterProfile < ApplicationRecord
                     .where.not(id: id)
                     .update_all(is_default: false)
     end
+  end
+
+  def selected_profile_stock_type_is_stable
+    return unless will_save_change_to_check_stock_type?
+    return unless user_printer_profile_selections.exists?
+
+    errors.add(:check_stock_type, "cannot change while operators are using this profile; create a new profile instead")
   end
 end

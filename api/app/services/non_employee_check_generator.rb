@@ -31,9 +31,9 @@ class NonEmployeeCheckGenerator
     deep_merge(default_layout_config, stringify_layout(source_layout || {}))
   end
 
-  def initialize(non_employee_check, layout_config: nil)
+  def initialize(non_employee_check, layout_config: nil, company: nil)
     @check   = non_employee_check
-    @company = non_employee_check.company
+    @company = company || non_employee_check.company
     @layout_config_override = layout_config
   end
 
