@@ -53,6 +53,28 @@ const queue: CheckPrintQueueResponse = {
   },
 };
 
+const printerProfile = {
+  id: 8,
+  organization_id: 2,
+  name: 'Payroll Room Printer',
+  description: null,
+  notes: null,
+  check_stock_type: 'bottom_check' as const,
+  check_offset_x: 0.125,
+  check_offset_y: -0.05,
+  check_layout_config: {},
+  is_default: false,
+  created_by_id: 1,
+  created_by_name: 'Leon',
+  updated_by_id: 1,
+  updated_by_name: 'Leon',
+  selection_count: 1,
+  selected_for_current_user: true,
+  lock_version: 3,
+  created_at: '2026-09-22T00:00:00Z',
+  updated_at: '2026-09-22T00:00:00Z',
+};
+
 const savedRun: CheckPrintRun = {
   id: 42,
   pay_period_id: 9,
@@ -185,5 +207,31 @@ describe('UnifiedCheckPrintDialog', () => {
       printerProfileLockVersion: 3,
       payrollItemIds: [7],
     }));
+  });
+
+  it('surfaces profile loading errors and recovers without reopening the dialog', async () => {
+    const user = userEvent.setup();
+    const printableQueue = {
+      ...queue,
+      items: [{ ...queue.items[0], status: 'unprinted' as const, printed_at: null, print_count: 0 }],
+      meta: { ...queue.meta, unprinted: 1, printed: 0, printer_profile: null },
+    };
+    apiMocks.printQueue
+      .mockResolvedValueOnce(printableQueue)
+      .mockResolvedValueOnce({ ...printableQueue, meta: { ...printableQueue.meta, printer_profile: queue.meta.printer_profile } });
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [] });
+    apiMocks.listPrinterProfiles
+      .mockRejectedValueOnce(new Error('Profiles unavailable'))
+      .mockResolvedValueOnce({ printer_profiles: [printerProfile], selections: [], active_printer_profile_id: null });
+    apiMocks.selectPrinterProfile.mockResolvedValue({ selection: { id: 1 } });
+
+    render(<UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={vi.fn()} onConfirmed={vi.fn()} />);
+
+    expect(await screen.findByText('Profiles unavailable')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Retry printer profiles' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Printer profile' }), '8');
+
+    await waitFor(() => expect(apiMocks.selectPrinterProfile).toHaveBeenCalledWith('bottom_check', 8));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Generate print package' }) as HTMLButtonElement).disabled).toBe(false));
   });
 });
