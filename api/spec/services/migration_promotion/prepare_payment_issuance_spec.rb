@@ -124,6 +124,18 @@ RSpec.describe MigrationPromotion::PreparePaymentIssuance do
     expect(AuditLog.where(company: company, action: "migration_promotion#payment_prepared", record_id: pay_period.id)).to exist
   end
 
+  it "accepts a numeric JSON check number" do
+    numeric_service = described_class.new(
+      pay_period: pay_period,
+      actor: admin,
+      acknowledgement: described_class::ACKNOWLEDGEMENT,
+      starting_check_number: 5001,
+      check_date: "2026-09-24"
+    )
+
+    expect { numeric_service.call }.to change { first_item.reload.check_number }.from(nil).to("5001")
+  end
+
   it "is idempotent after a successful preparation" do
     first = service.call
     second = service.call

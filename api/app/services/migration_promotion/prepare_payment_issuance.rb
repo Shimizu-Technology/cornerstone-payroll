@@ -34,7 +34,11 @@ module MigrationPromotion
         pay_period.reload
 
         if already_prepared?
-          result = build_summary(blockers: [], starting_number: company.next_check_number).merge(already_prepared: true)
+          result = build_summary(
+            blockers: [],
+            starting_number: company.next_check_number,
+            reload_items: true
+          ).merge(already_prepared: true)
           next
         end
 
@@ -52,7 +56,11 @@ module MigrationPromotion
           promoted_payment_prepared_by: actor
         )
         audit_prepared!(parsed_check_date, parsed_starting_number)
-        result = build_summary(blockers: [], starting_number: parsed_starting_number).merge(already_prepared: false)
+        result = build_summary(
+          blockers: [],
+          starting_number: parsed_starting_number,
+          reload_items: true
+        ).merge(already_prepared: false)
       end
 
       result
@@ -118,7 +126,7 @@ module MigrationPromotion
 
     def parse_starting_check_number!
       value = begin
-        Integer(starting_check_number, 10)
+        Integer(starting_check_number.to_s.strip, 10)
       rescue ArgumentError, TypeError
         raise ArgumentError, "Enter the first physical check number"
       end
@@ -147,8 +155,11 @@ module MigrationPromotion
       end)
     end
 
-    def build_summary(blockers:, starting_number:)
-      assigned_numbers = payable_items.filter_map { |item| item.reload.check_number.presence }
+    def build_summary(blockers:, starting_number:, reload_items: false)
+      assigned_numbers = payable_items.filter_map do |item|
+        item.reload if reload_items
+        item.check_number.presence
+      end
       preview_numbers = assigned_numbers.presence || available_numbers(starting_number, payable_items.length)
       {
         eligible: blockers.empty?,
