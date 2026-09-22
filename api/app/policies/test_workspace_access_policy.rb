@@ -9,7 +9,7 @@ class TestWorkspaceAccessPolicy
     return true unless company&.test_workspace?
     return false unless user&.staff_member?
     return true if ADMIN_ROLES.include?(user.role) && GLOBAL_ADMIN_CAPABILITIES.include?(capability)
-    return request_method.in?(%w[GET HEAD]) if company.backup_snapshot? || company.test_workspace_sealed_at.present?
+    return request_method.in?(%w[GET HEAD]) if company.test_workspace_read_only?
     return true if ADMIN_ROLES.include?(user.role)
 
     assignment = user.company_assignments.active_access.find_by(company_id: company.id)

@@ -12,6 +12,9 @@ const apiMocks = vi.hoisted(() => ({
   printQueue: vi.fn(),
   promotedPaymentPreview: vi.fn(),
   preparePromotedPayment: vi.fn(),
+  liabilities: vi.fn(),
+  payrollFieldInputs: vi.fn(),
+  employeesList: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
@@ -31,7 +34,10 @@ vi.mock('@/services/api', () => ({
     get: apiMocks.getPayPeriod,
     promotedPaymentPreview: apiMocks.promotedPaymentPreview,
     preparePromotedPayment: apiMocks.preparePromotedPayment,
+    liabilities: apiMocks.liabilities,
+    payrollFieldInputs: apiMocks.payrollFieldInputs,
   },
+  employeesApi: { list: apiMocks.employeesList },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
   payrollItemsApi: { updatePaymentMethod: vi.fn() },
 }));
@@ -95,6 +101,9 @@ describe('PayRunWorkspace rehearsal checks', () => {
       filename: 'void_rehearsal_checks_2026-09-24.pdf',
     });
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+    apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+    apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   });
 
   it('describes and previews rehearsal checks with only the VOID marking', async () => {
@@ -133,8 +142,8 @@ describe('PayRunWorkspace rehearsal checks', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Locked training baseline')).toBeTruthy();
-    expect(screen.getByText('Locked baseline records')).toBeTruthy();
+    expect(await screen.findByText('Locked reference history')).toBeTruthy();
+    expect(screen.getByText('Locked reference records')).toBeTruthy();
     expect(screen.queryByText('Process payroll')).toBeNull();
     expect(screen.queryByText('Checks & direct deposit')).toBeNull();
   });

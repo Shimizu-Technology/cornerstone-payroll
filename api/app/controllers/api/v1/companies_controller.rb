@@ -45,6 +45,8 @@ module Api
           test_workspace_expires_at: company.test_workspace_expires_at,
           test_workspace_archived_at: company.test_workspace_archived_at,
           test_workspace_sealed_at: company.test_workspace_sealed_at,
+          test_workspace_expired: company.test_workspace_expired?,
+          test_workspace_read_only: company.test_workspace_read_only?,
           migration_rehearsal_status: company.migration_rehearsal_status,
           migration_source_company_id: company.migration_source_company_id,
           migration_source_company_name: company.migration_source_company&.name,

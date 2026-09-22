@@ -3345,12 +3345,14 @@ export interface CompanyListItem {
   client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
   test_workspace?: boolean;
-  test_workspace_purpose?: 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
+  test_workspace_purpose?: 'sandbox' | 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
   test_workspace_purpose_label?: string;
   test_workspace_manifest?: Record<string, unknown>;
   test_workspace_expires_at?: string | null;
   test_workspace_archived_at?: string | null;
   test_workspace_sealed_at?: string | null;
+  test_workspace_expired?: boolean;
+  test_workspace_read_only?: boolean;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;
@@ -3398,6 +3400,41 @@ export interface TrainingReplayPreview {
     baseline_pay_periods: number;
     practice_pay_periods: number;
   };
+  assignable_staff: Array<{
+    id: number;
+    name: string;
+    email: string;
+    role: 'manager' | 'accountant';
+  }>;
+}
+
+export type TestWorkspaceCopyMode = 'setup_only' | 'all_committed' | 'exclude_recent' | 'through_pay_period';
+
+export interface TestWorkspacePreview {
+  source_company: { id: number; name: string };
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  copy_mode: TestWorkspaceCopyMode;
+  excluded_payrolls: number;
+  cutoff_pay_period_id: number | null;
+  copy_summary: {
+    employees: number;
+    active_employees: number;
+    committed_payrolls_available: number;
+    payrolls_to_copy: number;
+    recent_payrolls_excluded: number;
+    open_payrolls_not_copied: number;
+    other_open_payrolls_not_copied: number;
+  };
+  recent_payrolls: Array<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: 'draft' | 'calculated' | 'approved' | 'committed';
+    employee_count: number;
+  }>;
   assignable_staff: Array<{
     id: number;
     name: string;
@@ -3551,6 +3588,31 @@ export const companiesApi = {
   }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/training_replay`, input),
   retryTrainingReplay: (id: number) =>
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_training_replay`),
+  testWorkspacePreview: (id: number, input: {
+    copy_mode: TestWorkspaceCopyMode;
+    excluded_payrolls?: number;
+    cutoff_pay_period_id?: number;
+  }) => {
+    const query = new URLSearchParams({ copy_mode: input.copy_mode });
+    if (input.excluded_payrolls !== undefined) query.set('excluded_payrolls', String(input.excluded_payrolls));
+    if (input.cutoff_pay_period_id !== undefined) query.set('cutoff_pay_period_id', String(input.cutoff_pay_period_id));
+    return api.get<{ test_workspace: TestWorkspacePreview }>(`/admin/companies/${id}/test_workspace_preview?${query.toString()}`);
+  },
+  createTestWorkspace: (id: number, input: {
+    name?: string;
+    copy_mode: TestWorkspaceCopyMode;
+    excluded_payrolls?: number;
+    cutoff_pay_period_id?: number;
+    expiration_days: 30 | 60 | 90 | 180;
+    acknowledgement: string;
+    assignments: Array<{ user_id: number; workspace_access_level: 'operator' | 'reviewer' | 'workspace_admin' }>;
+  }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/test_workspace`, input),
+  retryTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_test_workspace`),
+  archiveTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/archive_test_workspace`),
+  restoreTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/restore_test_workspace`),
   migrationPromotionPreview: (id: number) =>
     api.get<{ migration_promotion: MigrationPromotionPreview }>(`/admin/companies/${id}/migration_promotion_preview`),
   createMigrationPromotionBackup: (id: number, acknowledgement: string) =>
