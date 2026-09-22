@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe PayrollStatementYtdBreakdown do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) { create(:company, name: "MoSa's Migration Test") }
   let(:employee) { create(:employee, company: company, first_name: "Monique", last_name: "Amani", employment_type: "salary") }
   let(:pay_date) { Date.new(2026, 9, 24) }
@@ -13,36 +15,6 @@ RSpec.describe PayrollStatementYtdBreakdown do
   let(:payroll_item) do
     create(:payroll_item, pay_period: pay_period, company: company, employee: employee,
       employment_type: "salary", gross_pay: 9_527.02, net_pay: 6_806.85)
-  end
-
-  def apply_historical_balance(employee:, source_breakdown:, through_pay_date: Date.new(2026, 9, 10), **attributes)
-    batch = create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current)
-    bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: batch, status: "applied")
-    actor = create(:user, company: company)
-    bridge = HistoricalYtdBridge.create!(
-      company: company,
-      historical_import_batch: batch,
-      historical_client_bootstrap: bootstrap,
-      status: "applied",
-      plan_digest: SecureRandom.hex(16),
-      applied_at: Time.current,
-      applied_by: actor,
-      apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
-      preview_summary: {
-        "through_period_end" => Date.new(2026, 9, 6).iso8601,
-        "through_pay_date" => through_pay_date.iso8601
-      }
-    )
-    HistoricalEmployeeYtdBalance.create!(
-      historical_ytd_bridge: bridge,
-      company: company,
-      employee: employee,
-      tax_year: through_pay_date.year,
-      through_period_end: Date.new(2026, 9, 6),
-      through_pay_date: through_pay_date,
-      source_breakdown: source_breakdown,
-      **attributes
-    )
   end
 
   def field_entry(item:, label:, amount:, treatment:, category:, reporting_group: nil)
@@ -64,9 +36,23 @@ RSpec.describe PayrollStatementYtdBreakdown do
       reporting_group: reporting_group)
   end
 
+  it "reuses payroll report data while building each statement section" do
+    allow(QuickbooksPayrollReportData).to receive(:new).and_call_original
+    breakdown = described_class.new(payroll_item)
+
+    breakdown.deductions
+    breakdown.other_pay
+    breakdown.employer_contributions
+
+    expect(QuickbooksPayrollReportData).to have_received(:new).once.with(pay_period)
+  end
+
   it "carries migrated retirement, tips paid out, and employer match into one set of statement rows" do
-    apply_historical_balance(
+    apply_historical_ytd_balance(
+      company: company,
       employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
       tips_paid_out: 1_900.80,
       source_breakdown: {
         "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
@@ -91,8 +77,11 @@ RSpec.describe PayrollStatementYtdBreakdown do
 
   it "matches migrated health and child support to differently worded current fields" do
     verna = create(:employee, company: company, first_name: "Verna", last_name: "John", employment_type: "hourly")
-    apply_historical_balance(
+    apply_historical_ytd_balance(
+      company: company,
       employee: verna,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "pretax_deduction_breakdown" => {},
         "after_tax_deduction_breakdown" => {
@@ -115,8 +104,11 @@ RSpec.describe PayrollStatementYtdBreakdown do
 
   it "carries Sara's migrated allotment, rent, and auto-loan reimbursements into Other Pay" do
     sara = create(:employee, company: company, first_name: "Sara", last_name: "Doctor", employment_type: "salary")
-    apply_historical_balance(
+    apply_historical_ytd_balance(
+      company: company,
       employee: sara,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "earnings_breakdown" => {
           "Allotment - Douglas" => "7713.28",
@@ -139,8 +131,11 @@ RSpec.describe PayrollStatementYtdBreakdown do
   end
 
   it "keeps distinct loans separate instead of guessing between ambiguous matches" do
-    apply_historical_balance(
+    apply_historical_ytd_balance(
+      company: company,
       employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "pretax_deduction_breakdown" => {},
         "after_tax_deduction_breakdown" => {
@@ -164,8 +159,10 @@ RSpec.describe PayrollStatementYtdBreakdown do
       start_date: Date.new(2026, 8, 24), end_date: Date.new(2026, 9, 6), pay_date: cutoff)
     overlapping = create(:payroll_item, pay_period: overlapping_period, company: company, employee: employee,
       employment_type: "salary", retirement_payment: 999)
-    apply_historical_balance(
+    apply_historical_ytd_balance(
+      company: company,
       employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
       through_pay_date: cutoff,
       source_breakdown: {
         "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "100.00" },

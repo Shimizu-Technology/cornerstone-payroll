@@ -4,6 +4,8 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe CheckGenerator do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) do
     create(:company,
       name: "MoSa's Restaurant",
@@ -65,9 +67,10 @@ RSpec.describe CheckGenerator do
       category: "loan", amount: BigDecimal("250"), source: "employee_default")
     payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
 
-    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("428.36")))
+    expect(generator.send(:deduction_rows)).to include(
+      [ "Loan", "428.36", "428.36" ],
+      [ "Loan - Madela Severin", "250.00", "250.00" ]
+    )
     expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
   end
 
@@ -188,8 +191,27 @@ RSpec.describe CheckGenerator do
       expect(text).to include("25.00")
     end
 
+    it "prints earlier additional withholding when the current check has none" do
+      earlier_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 19))
+      create(:payroll_item,
+        pay_period: earlier_period,
+        employee: employee,
+        company: company,
+        additional_withholding: 15)
+
+      expect(generator.send(:tax_rows)).to include([ "Addtl W/H (W-4 4c)", "0.00", "15.00" ])
+    end
+
     it "renders migrated deduction and employer contribution YTD balances on the check stubs" do
-      apply_historical_balance(
+      apply_historical_ytd_balance(
+        company: company,
+        employee: employee,
+        through_period_end: Date.new(2026, 2, 28),
+        through_pay_date: Date.new(2026, 3, 10),
         source_breakdown: {
           "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
           "after_tax_deduction_breakdown" => {
@@ -325,10 +347,10 @@ RSpec.describe CheckGenerator do
         source: "manual"
       )
 
-      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+      row = generator.send(:statement_deduction_rows).find { |candidate| candidate.label == "Rent Deduction" }
 
-      expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(25.0)
-      expect(generator.send(:ytd_visible_deds)).to eq(generator.send(:ytd)[:deds] + 25.0)
+      expect(row).to have_attributes(current: 25.to_d, ytd: 25.to_d)
+      expect(generator.send(:ytd_visible_deds)).to eq(25.to_d)
     end
 
     it "prints taxable payroll field additions with year-to-date amounts in pay rows" do
@@ -479,35 +501,6 @@ RSpec.describe CheckGenerator do
       method.call(text, options)
     end
     void_draws
-  end
-
-  def apply_historical_balance(source_breakdown:, tips_paid_out: 0)
-    batch = create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current)
-    bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: batch, status: "applied")
-    bridge = HistoricalYtdBridge.create!(
-      company: company,
-      historical_import_batch: batch,
-      historical_client_bootstrap: bootstrap,
-      status: "applied",
-      plan_digest: SecureRandom.hex(16),
-      applied_at: Time.current,
-      applied_by: create(:user, company: company),
-      apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
-      preview_summary: {
-        "through_period_end" => Date.new(2026, 2, 28).iso8601,
-        "through_pay_date" => Date.new(2026, 3, 10).iso8601
-      }
-    )
-    HistoricalEmployeeYtdBalance.create!(
-      historical_ytd_bridge: bridge,
-      company: company,
-      employee: employee,
-      tax_year: 2026,
-      through_period_end: Date.new(2026, 2, 28),
-      through_pay_date: Date.new(2026, 3, 10),
-      source_breakdown: source_breakdown,
-      tips_paid_out: tips_paid_out
-    )
   end
 
   def create_statement_field_entry(label:, amount:, treatment:, category:)

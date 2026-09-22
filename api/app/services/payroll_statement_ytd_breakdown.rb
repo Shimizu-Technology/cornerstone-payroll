@@ -77,7 +77,7 @@ class PayrollStatementYtdBreakdown
   end
 
   def components_for(item, kind)
-    report_data = QuickbooksPayrollReportData.new(item.pay_period)
+    report_data = report_data_for(item.pay_period)
     components = case kind
     when :deduction
       report_data.deduction_contribution_entries_for_item(item).filter_map do |entry|
@@ -108,6 +108,11 @@ class PayrollStatementYtdBreakdown
     end
 
     aggregate_components(components)
+  end
+
+  def report_data_for(period)
+    @report_data_by_period_id ||= {}
+    @report_data_by_period_id[period.id] ||= QuickbooksPayrollReportData.new(period)
   end
 
   def aggregate_components(components)

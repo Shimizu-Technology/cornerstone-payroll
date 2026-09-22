@@ -148,19 +148,11 @@ class CheckGenerator
       ss      = totals[:social_security_tax].to_f
       med     = totals[:medicare_tax].to_f
       addl_wh = totals[:additional_withholding].to_f
-      retire  = totals[:retirement].to_f
-      roth    = totals[:roth_retirement].to_f
-      ins     = totals[:insurance].to_f
-      loan    = totals[:loans].to_f
-      tips_paid_out = totals[:tips_paid_out].to_f
-      custom_deds = ytd_custom_deductions_total
 
       taxes = fit + ss + med + addl_wh
-      deds  = retire + roth + ins + loan + tips_paid_out + custom_deds
 
       { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
-        retire: retire, roth: roth, ins: ins, loan: loan, tips_paid_out: tips_paid_out,
-        custom_deds: custom_deds, taxes: taxes, deds: deds, net: totals[:net_pay].to_f }
+        taxes: taxes, net: totals[:net_pay].to_f }
     end
   end
 
@@ -429,7 +421,9 @@ class CheckGenerator
 
     rows << ["Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss])]
     rows << ["Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med])]
-    rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])] if payroll_item.additional_withholding.to_f > 0
+    if payroll_item.additional_withholding.to_d.nonzero? || ytd[:addl_wh].to_d.nonzero?
+      rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])]
+    end
 
     rows << [
       { content: "TOTAL", font_style: :bold },
@@ -463,23 +457,6 @@ class CheckGenerator
     rows
   end
 
-  def payroll_field_entries_for(*treatments)
-    payroll_item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
-  end
-
-  def visible_legacy_insurance_payment
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
-
-    payroll_item.insurance_payment.to_f
-  end
-
-  def visible_legacy_loan_payment
-    field_total = payroll_field_entries_for("post_tax_deduction")
-      .select { |entry| entry.category == "loan" }
-      .sum(0.to_d) { |entry| entry.amount.to_d }
-    [ payroll_item.loan_payment.to_d - field_total, 0.to_d ].max
-  end
-
   def ytd_visible_deds
     statement_deduction_rows.sum(0.to_d) { |row| row.ytd.to_d }
   end
@@ -492,94 +469,6 @@ class CheckGenerator
 
   def statement_ytd_breakdown
     @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
-  end
-
-  def visible_legacy_insurance_ytd
-    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
-
-    ytd[:ins]
-  end
-
-  def visible_legacy_loan_ytd
-    field_total = ytd_payroll_field_totals.sum do |(_label, treatment, category), amount|
-      treatment == "post_tax_deduction" && category == "loan" ? amount.to_f : 0.0
-    end
-    [ ytd[:loan] - field_total, 0.0 ].max
-  end
-
-  def ytd_payroll_field_deductions_total
-    ytd_payroll_field_totals.sum do |(_label, treatment, _category), amount|
-      %w[pre_tax_deduction post_tax_deduction].include?(treatment) ? amount.to_f : 0.0
-    end
-  end
-
-  def ytd_payroll_field_amount(entry)
-    ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.0)
-  end
-
-  def ytd_payroll_field_totals
-    @ytd_payroll_field_totals ||= begin
-      entries = payroll_item.payroll_item_field_entries.select(&:active?)
-      keys = entries.map { |entry| [ entry.label, entry.tax_treatment, entry.category ] }.uniq
-      if keys.empty?
-        {}
-      else
-        labels = keys.map(&:first).uniq
-        treatments = keys.map { |key| key[1] }.uniq
-        categories = keys.map { |key| key[2] }.uniq
-        pay_date = pay_period.pay_date || Date.current
-        year_start = Date.new(pay_date.year, 1, 1)
-        raw_totals = PayrollItemFieldEntry.joins(payroll_item: :pay_period)
-          .merge(PayrollItem.not_voided)
-          .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
-          .where(pay_periods: { pay_date: year_start..pay_date })
-          .where(active: true, label: labels, tax_treatment: treatments, category: categories)
-          .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-            pay_date: pay_date,
-            pay_period_id: pay_period.id)
-          .group(:label, :tax_treatment, :category)
-          .sum(:amount)
-
-        raw_totals.each_with_object(Hash.new(0.0)) do |((label, treatment, category), amount), totals|
-          key = [ label, treatment, category ]
-          totals[key] = amount.to_f if keys.include?(key)
-        end
-      end
-    end
-  end
-
-  def ytd_custom_deductions_by_label
-    @ytd_custom_deductions_by_label ||= begin
-      labels = (
-        Array(payroll_item.custom_deductions).filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence } +
-        payroll_item.active_payroll_adjustments.filter_map do |adjustment|
-          next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
-
-          adjustment["label"].to_s.strip.downcase.presence
-        end
-      ).uniq
-      if labels.empty?
-        {}
-      else
-        custom_deduction_items.each_with_object(Hash.new(0.0)) do |item, totals|
-          Array(item.custom_deductions).each do |deduction|
-            label = deduction["label"].to_s.strip.downcase
-            next unless labels.include?(label)
-
-            totals[label] += deduction["amount"].to_f
-          end
-
-          item.active_payroll_adjustments.each do |adjustment|
-            next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
-
-            label = adjustment["label"].to_s.strip.downcase
-            next unless labels.include?(label)
-
-            totals[label] += adjustment["amount"].to_f
-          end
-        end
-      end
-    end
   end
 
   def ytd_custom_deductions_total

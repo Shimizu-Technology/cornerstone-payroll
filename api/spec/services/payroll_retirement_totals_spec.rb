@@ -70,7 +70,6 @@ RSpec.describe PayrollRetirementTotals do
     expect(roth_line.scan("$110.00").length).to eq(2)
     expect(text).not_to include("Extra 401(k)")
     expect(text).to include("Separate pension")
-    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(0)
     # The displayed total is derived from the displayed rows, so the saved
     # itemized Health row remains visible and contributes once even though this
     # fixture deliberately omits the legacy insurance aggregate snapshot.
