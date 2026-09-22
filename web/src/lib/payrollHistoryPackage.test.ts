@@ -12,7 +12,7 @@ describe('buildPayrollHistoryPackage', () => {
       meta: { company_name: 'AIRE Services' },
       source: { label: 'Cornerstone' },
       pay_period: { key: run.key, id: 42, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date, status: 'committed' },
-      summary: { employee_count: 2, contractor_count: 1, total_gross: 1_000, contractor_total_gross: 600, total_net: 800, contractor_total_net: 600 },
+      summary: { employee_count: 2, contractor_count: 1, total_gross: 1_000, contractor_total_gross: 600, total_net: 249.34, contractor_total_net: 249 },
     } as PayrollRegisterReport['report'];
     const fetchReport = vi.fn().mockResolvedValue({ report });
     const fetchFile = vi.fn().mockResolvedValue({ blob: new Blob(['workbook']), filename: 'register.xlsx' });
@@ -30,7 +30,7 @@ describe('buildPayrollHistoryPackage', () => {
     expect(manifest).toMatchObject({ company: 'AIRE Services', report_format: 'xlsx', payroll_run_count: 1 });
     expect(manifest.payroll_runs[0]).toMatchObject({
       pay_run_key: 'native:42', w2_employee_count: 2, contractor_count: 1,
-      combined_gross: 1_600, combined_net: 1_400,
+      combined_gross: 1_600, w2_net: 249.34, contractor_net: 249, combined_net: 498.34,
     });
     expect(await archive.file('reports/001_native-42_register.xlsx')!.async('string')).toBe('workbook');
   });

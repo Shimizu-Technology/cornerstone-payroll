@@ -69,12 +69,17 @@ function manifestCsv(rows: PayrollHistoryManifestRow[]): string {
   return `${lines.join('\r\n')}\r\n`;
 }
 
+function money(value: unknown): number {
+  const amount = Number(value || 0);
+  return Math.round((amount + Math.sign(amount) * Number.EPSILON) * 100) / 100;
+}
+
 function manifestRow(report: PayrollRegisterReport['report'], path: string, fallbackKey: string): PayrollHistoryManifestRow {
   const summary = report.summary;
-  const w2Gross = Number(summary.total_gross || 0);
-  const contractorGross = Number(summary.contractor_total_gross || 0);
-  const w2Net = Number(summary.total_net || 0);
-  const contractorNet = Number(summary.contractor_total_net || 0);
+  const w2Gross = money(summary.total_gross);
+  const contractorGross = money(summary.contractor_total_gross);
+  const w2Net = money(summary.total_net);
+  const contractorNet = money(summary.contractor_total_net);
   return {
     pay_run_key: report.pay_period.key || fallbackKey,
     source: report.source?.label || 'Unknown',
@@ -86,10 +91,10 @@ function manifestRow(report: PayrollRegisterReport['report'], path: string, fall
     contractor_count: Number(summary.contractor_count || 0),
     w2_gross: w2Gross,
     contractor_gross: contractorGross,
-    combined_gross: w2Gross + contractorGross,
+    combined_gross: money(w2Gross + contractorGross),
     w2_net: w2Net,
     contractor_net: contractorNet,
-    combined_net: w2Net + contractorNet,
+    combined_net: money(w2Net + contractorNet),
     report_file: path,
   };
 }
