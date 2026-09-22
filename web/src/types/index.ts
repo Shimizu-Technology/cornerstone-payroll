@@ -998,6 +998,10 @@ export interface PayPeriod {
   parallel_run?: boolean;
   test_workspace_role?: 'baseline' | 'practice' | null;
   test_workspace_source_pay_period_id?: number | null;
+  promotion_source_pay_period_id?: number | null;
+  promotion_payment_disposition?: 'record_only' | 'process_in_cornerstone' | null;
+  promoted_payment_prepared_at?: string | null;
+  promoted_payment_prepared_by_id?: number | null;
   training_baseline_locked?: boolean;
   run_purpose: PayRunPurpose;
   includes_base_salary: boolean;

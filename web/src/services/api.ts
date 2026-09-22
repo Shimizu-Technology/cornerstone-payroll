@@ -1203,6 +1203,10 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  promotedPaymentPreview: (id: number) =>
+    api.get<{ promoted_payment: PromotedPaymentPreview }>(`/admin/pay_periods/${id}/promoted_payment_preview`),
+  preparePromotedPayment: (id: number, data: { acknowledgement: string; starting_check_number: string; check_date: string }) =>
+    api.post<{ promoted_payment: PromotedPaymentPreview; pay_period: PayPeriod }>(`/admin/pay_periods/${id}/prepare_promoted_payment`, data),
   correctPayDate: (id: number, data: { pay_date: string; reason: string }) =>
     api.patch<PayPeriodResponse & {
       correction: {
@@ -3410,6 +3414,8 @@ export interface MigrationPromotionPeriod {
   net_pay: number | string;
 }
 
+export type PromotionPaymentDisposition = 'record_only' | 'process_in_cornerstone';
+
 export interface MigrationPromotionPreview {
   rehearsal: { id: number; name: string; status: 'pending' | 'ready' | 'failed'; employee_count: number };
   target_company: { id: number; name: string; status: 'pending' | 'ready' | 'failed' | null; employee_count: number } | null;
@@ -3431,6 +3437,24 @@ export interface MigrationPromotionPreview {
     employee_count: number;
     current: boolean;
   } | null;
+}
+
+export interface PromotedPaymentPreview {
+  eligible: boolean;
+  blockers: string[];
+  pay_period_id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  paper_check_count: number;
+  paper_check_total: number | string;
+  direct_deposit_count: number;
+  current_next_check_number: number;
+  suggested_first_check_number: string | null;
+  suggested_last_check_number: string | null;
+  prepared_at: string | null;
+  prepared_by_name: string | null;
+  already_prepared?: boolean;
 }
 
 export interface CompanyDetail extends CompanyListItem {
@@ -3528,8 +3552,14 @@ export const companiesApi = {
     api.get<{ migration_promotion: MigrationPromotionPreview }>(`/admin/companies/${id}/migration_promotion_preview`),
   createMigrationPromotionBackup: (id: number, acknowledgement: string) =>
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_promotion_backup`, { acknowledgement }),
-  applyMigrationPromotion: (id: number, acknowledgement: string) =>
-    api.post<{ company: CompanyDetail; promoted_pay_period_ids: number[] }>(`/admin/companies/${id}/migration_promotion`, { acknowledgement }),
+  applyMigrationPromotion: (
+    id: number,
+    acknowledgement: string,
+    paymentDispositions: Record<number, PromotionPaymentDisposition>,
+  ) => api.post<{ company: CompanyDetail; promoted_pay_period_ids: number[] }>(`/admin/companies/${id}/migration_promotion`, {
+    acknowledgement,
+    payment_dispositions: paymentDispositions,
+  }),
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));
