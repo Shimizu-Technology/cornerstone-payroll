@@ -182,6 +182,16 @@ describe('Clients migration promotion', () => {
     expect(screen.queryByText('Test workspace guide')).toBeNull();
   });
 
+  it('explains why test-workspace creation is unavailable without a production client', async () => {
+    apiMocks.list.mockResolvedValue({ companies: [rehearsal] });
+
+    render(<Clients />);
+
+    const createWorkspace = await screen.findByRole('button', { name: 'Create test workspace' });
+    expect((createWorkspace as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Add a production client before creating a test workspace.')).toBeTruthy();
+  });
+
   it('closes the workspace builder before opening client editing', async () => {
     const user = userEvent.setup();
     apiMocks.get.mockResolvedValue({ company: target });

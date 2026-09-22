@@ -13,7 +13,7 @@ export function TestWorkspaceGuide(): ReactElement {
         </div>
         <ChevronDown aria-hidden="true" className="h-5 w-5 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="grid gap-6 border-t border-neutral-200 px-4 py-5 sm:px-6 lg:grid-cols-2">
+      <div className="grid gap-6 border-t border-neutral-200 px-4 py-4 sm:px-6 lg:grid-cols-2">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Environment types</p>
           <dl className="mt-4 space-y-4 text-sm">

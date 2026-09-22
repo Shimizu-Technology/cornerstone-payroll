@@ -545,10 +545,13 @@ export function Clients() {
         {/* Primary actions */}
         {canManageClients && !showForm && (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen}>
-              <FlaskConical className="mr-2 h-4 w-4" />
-              Create test workspace
-            </Button>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen} disabled={productionCompanies.length === 0}>
+                <FlaskConical className="mr-2 h-4 w-4" />
+                Create test workspace
+              </Button>
+              {productionCompanies.length === 0 && <p className="text-xs text-neutral-500">Add a production client before creating a test workspace.</p>}
+            </div>
             <Button onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-2" />
               Add New Client
@@ -718,11 +721,11 @@ export function Clients() {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-2 font-semibold">{trainingPreview.copy_summary.active_employees} active · {trainingPreview.copy_summary.employees} total</p></div>
                   <div className="rounded-xl bg-neutral-50 p-4">
-                    <p className="flex items-center gap-1 text-xs text-neutral-500">Locked YTD baseline <HelpTip label="locked YTD baseline">Earlier committed payrolls are copied only to preserve accurate year-to-date totals. Trainees can view them but cannot edit them.</HelpTip></p>
+                    <p className="flex items-center gap-2 text-xs text-neutral-500">Locked YTD baseline <HelpTip label="locked YTD baseline">Earlier committed payrolls are copied only to preserve accurate year-to-date totals. Trainees can view them but cannot edit them.</HelpTip></p>
                     <p className="mt-2 font-semibold">{trainingPreview.copy_summary.baseline_pay_periods} earlier pay periods</p>
                   </div>
                   <div className="rounded-xl bg-neutral-50 p-4">
-                    <p className="flex items-center gap-1 text-xs text-neutral-500">Practice payrolls <HelpTip label="practice payrolls">The latest two committed payrolls are recreated with their original inputs but without their calculated results. The trainee processes them oldest first.</HelpTip></p>
+                    <p className="flex items-center gap-2 text-xs text-neutral-500">Practice payrolls <HelpTip label="practice payrolls">The latest two committed payrolls are recreated with their original inputs but without their calculated results. The trainee processes them oldest first.</HelpTip></p>
                     <p className="mt-2 font-semibold">{trainingPreview.copy_summary.practice_pay_periods} payroll periods</p>
                   </div>
                 </div>
@@ -868,9 +871,9 @@ export function Clients() {
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-1 text-xs text-neutral-500">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
-                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-1 text-xs text-neutral-500">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
-                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-1 text-xs text-neutral-500">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
+                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
+                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
+                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
                   </div>
 
                   <div>
@@ -895,7 +898,7 @@ export function Clients() {
                       <div className="flex items-start gap-3">
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.backup?.status === 'ready' && promotionPreview.backup.current ? 'bg-success-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}>1</div>
                         <div>
-                          <p className="flex items-center gap-1 font-semibold text-neutral-950">Seal a clean-client backup <HelpTip label="current backup">A backup is current only while the clean client remains unchanged after the backup was created. Any later change requires a fresh backup.</HelpTip></p>
+                          <p className="flex items-center gap-2 font-semibold text-neutral-950">Seal a clean-client backup <HelpTip label="current backup">A backup is current only while the clean client remains unchanged after the backup was created. Any later change requires a fresh backup.</HelpTip></p>
                           {promotionPreview.backup ? (
                             <p className="mt-1 text-sm leading-6 text-neutral-600">
                               {promotionPreview.backup.status === 'pending'
