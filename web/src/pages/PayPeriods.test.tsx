@@ -124,7 +124,7 @@ describe('PayPeriods test workspaces', () => {
       11,
     ));
     expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
-    expect(screen.getAllByText('Locked baseline')).toHaveLength(2);
+    expect(screen.getAllByText('Locked reference history')).toHaveLength(2);
     expect(screen.getAllByText('Practice payroll')).toHaveLength(2);
     const baselineRow = screen.getByRole('row', { name: /Aug 10 - 23, 2026/ });
     const practiceRow = screen.getByRole('row', { name: /Aug 24 - Sep 6, 2026/ });

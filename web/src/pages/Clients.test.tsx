@@ -21,6 +21,11 @@ const apiMocks = vi.hoisted(() => ({
   trainingReplayPreview: vi.fn(),
   createTrainingReplay: vi.fn(),
   retryTrainingReplay: vi.fn(),
+  testWorkspacePreview: vi.fn(),
+  createTestWorkspace: vi.fn(),
+  retryTestWorkspace: vi.fn(),
+  archiveTestWorkspace: vi.fn(),
+  restoreTestWorkspace: vi.fn(),
   auth: { isAdmin: true, isAccountant: false, isManager: false },
 }));
 
@@ -83,6 +88,30 @@ const basePreview: Omit<MigrationPromotionPreview, 'ready_to_back_up' | 'ready_t
   backup: null,
 };
 
+const generalWorkspacePreview = {
+  source_company: { id: target.id, name: target.name },
+  ready: true,
+  blockers: [],
+  warnings: ['The production client stays unchanged.'],
+  copy_mode: 'all_committed' as const,
+  excluded_payrolls: 0,
+  cutoff_pay_period_id: null,
+  copy_summary: {
+    employees: 114,
+    active_employees: 57,
+    committed_payrolls_available: 20,
+    payrolls_to_copy: 20,
+    recent_payrolls_excluded: 0,
+    open_payrolls_not_copied: 1,
+    other_open_payrolls_not_copied: 1,
+  },
+  recent_payrolls: [
+    { id: 62, start_date: '2026-09-07', end_date: '2026-09-20', pay_date: '2026-09-24', status: 'calculated' as const, employee_count: 57 },
+    { id: 61, start_date: '2026-08-24', end_date: '2026-09-06', pay_date: '2026-09-10', status: 'committed' as const, employee_count: 57 },
+  ],
+  assignable_staff: [{ id: 4, name: 'Training Accountant', email: 'training@example.com', role: 'accountant' as const }],
+};
+
 afterEach(() => cleanup());
 
 describe('Clients migration promotion', () => {
@@ -90,27 +119,12 @@ describe('Clients migration promotion', () => {
     vi.clearAllMocks();
     apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
     apiMocks.list.mockResolvedValue({ companies: [target, rehearsal] });
+    apiMocks.testWorkspacePreview.mockResolvedValue({ test_workspace: generalWorkspacePreview });
     refreshCompanies.mockResolvedValue(undefined);
   });
 
   it('uses one guided entry point for test workspace creation', async () => {
     const user = userEvent.setup();
-    apiMocks.trainingReplayPreview.mockResolvedValue({
-      training_replay: {
-        source_company: { id: target.id, name: target.name },
-        ready: true,
-        blockers: [],
-        warnings: [],
-        existing_replay: null,
-        practice_periods: [
-          { id: 61, start_date: '2026-08-24', end_date: '2026-09-06', pay_date: '2026-09-10', status: 'committed', employee_count: 57 },
-          { id: 62, start_date: '2026-09-07', end_date: '2026-09-20', pay_date: '2026-09-24', status: 'committed', employee_count: 57 },
-        ],
-        copy_summary: { employees: 114, active_employees: 57, baseline_pay_periods: 18, practice_pay_periods: 2 },
-        assignable_staff: [{ id: 4, name: 'Training Accountant', email: 'training@example.com', role: 'accountant' }],
-      },
-    });
-
     render(<Clients />);
 
     const createWorkspace = await screen.findByRole('button', { name: 'Create test workspace' });
@@ -118,14 +132,37 @@ describe('Clients migration promotion', () => {
     expect(screen.queryByRole('button', { name: 'Training replay' })).toBeNull();
 
     await user.click(createWorkspace);
-    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
-    await user.click(screen.getByRole('button', { name: /Practice completed payrolls/i }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
 
-    await waitFor(() => expect(apiMocks.trainingReplayPreview).toHaveBeenCalledWith(target.id));
+    await waitFor(() => expect(apiMocks.testWorkspacePreview).toHaveBeenCalledWith(target.id, expect.objectContaining({ copy_mode: 'all_committed' })));
+    expect(await screen.findByText('Setup + committed payroll history')).toBeTruthy();
+    expect(screen.getByText('Leave out the latest payrolls')).toBeTruthy();
     expect(await screen.findByText('Access levels')).toBeTruthy();
     expect(screen.getByText('Operator')).toBeTruthy();
     expect(screen.getByText('Reviewer')).toBeTruthy();
     expect(screen.getByText('Workspace admin')).toBeTruthy();
+  });
+
+  it('creates an unstructured workspace that leaves the latest two payrolls out', async () => {
+    const user = userEvent.setup();
+    apiMocks.createTestWorkspace.mockResolvedValue({ company: { id: 20 } });
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
+    await screen.findByText('Setup + committed payroll history');
+    await user.click(screen.getByRole('radio', { name: /Leave out the latest payrolls/i }));
+    await user.click(screen.getByRole('checkbox', { name: /Training Accountant/i }));
+    await user.click(screen.getByRole('checkbox', { name: /I understand this copy contains protected/i }));
+    await user.click(screen.getAllByRole('button', { name: 'Create test workspace' }).at(-1)!);
+
+    await waitFor(() => expect(apiMocks.createTestWorkspace).toHaveBeenCalledWith(target.id, expect.objectContaining({
+      copy_mode: 'exclude_recent',
+      excluded_payrolls: 2,
+      expiration_days: 90,
+      acknowledgement: 'CREATE TEST WORKSPACE',
+      assignments: [{ user_id: 4, workspace_access_level: 'operator' }],
+    })));
   });
 
   it('routes the guided migration choice into the rehearsal preview', async () => {
@@ -152,8 +189,9 @@ describe('Clients migration promotion', () => {
     render(<Clients />);
 
     await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
-    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
-    await user.click(screen.getByRole('button', { name: /Rehearse a migration/i }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
+    await screen.findByText('Setup + committed payroll history');
+    await user.click(screen.getByRole('button', { name: /Need an exact migration rehearsal/i }));
 
     await waitFor(() => expect(apiMocks.migrationRehearsalPreview).toHaveBeenCalledWith(target.id));
     expect(await screen.findByRole('heading', { name: 'Create a migration rehearsal' })).toBeTruthy();
@@ -222,8 +260,9 @@ describe('Clients migration promotion', () => {
     render(<Clients />);
 
     await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
-    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
-    await user.click(screen.getByRole('button', { name: /Rehearse a migration/i }));
+    await user.selectOptions(screen.getByLabelText('Production client'), String(target.id));
+    await screen.findByText('Setup + committed payroll history');
+    await user.click(screen.getByRole('button', { name: /Need an exact migration rehearsal/i }));
     expect(await screen.findByRole('heading', { name: 'Create a migration rehearsal' })).toBeTruthy();
 
     await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);

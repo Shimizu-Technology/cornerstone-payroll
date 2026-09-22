@@ -29,7 +29,7 @@ module TrainingBaselineImmutable
   end
 
   def reject_training_baseline_mutation
-    errors.add(:base, "Training baseline payrolls are locked benchmark evidence")
+    errors.add(:base, "Copied payroll history is locked reference evidence")
     throw :abort
   end
 end

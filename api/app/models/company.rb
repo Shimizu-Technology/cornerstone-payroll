@@ -7,8 +7,9 @@ class Company < ApplicationRecord
   PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel].freeze
   PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze
   MIGRATION_REHEARSAL_STATUSES = %w[pending ready failed].freeze
-  TEST_WORKSPACE_PURPOSES = %w[migration_rehearsal training_replay backup_snapshot].freeze
+  TEST_WORKSPACE_PURPOSES = %w[sandbox migration_rehearsal training_replay backup_snapshot].freeze
   TEST_WORKSPACE_PURPOSE_LABELS = {
+    "sandbox" => "General test workspace",
     "migration_rehearsal" => "Migration rehearsal",
     "training_replay" => "Training replay",
     "backup_snapshot" => "Backup snapshot"
@@ -136,12 +137,24 @@ class Company < ApplicationRecord
     test_workspace? && test_workspace_purpose == "training_replay"
   end
 
+  def sandbox?
+    test_workspace? && test_workspace_purpose == "sandbox"
+  end
+
   def backup_snapshot?
     test_workspace? && test_workspace_purpose == "backup_snapshot"
   end
 
   def test_workspace_ready?
     test_workspace? && migration_rehearsal_status == "ready" && test_workspace_archived_at.nil?
+  end
+
+  def test_workspace_expired?
+    test_workspace? && test_workspace_expires_at.present? && test_workspace_expires_at <= Time.current
+  end
+
+  def test_workspace_read_only?
+    backup_snapshot? || test_workspace_sealed_at.present? || test_workspace_archived_at.present? || test_workspace_expired?
   end
 
   def test_workspace_purpose_label

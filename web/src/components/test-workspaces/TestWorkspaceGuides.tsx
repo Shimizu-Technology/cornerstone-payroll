@@ -18,7 +18,7 @@ export function TestWorkspaceGuide(): ReactElement {
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Environment types</p>
           <dl className="mt-4 space-y-4 text-sm">
             <div className="flex gap-2"><ShieldCheck aria-hidden="true" className="h-4 w-4 shrink-0 text-primary-700" /><div><dt className="font-semibold text-neutral-900">Production client</dt><dd className="mt-2 leading-5 text-neutral-600">The live payroll record. Normal approvals, commits, payments, and reporting happen here.</dd></div></div>
-            <div className="flex gap-2"><FlaskConical aria-hidden="true" className="h-4 w-4 shrink-0 text-warning-700" /><div><dt className="font-semibold text-neutral-900">Test workspace</dt><dd className="mt-2 leading-5 text-neutral-600">A protected copy for migration rehearsal or payroll practice. It cannot send live payroll actions.</dd></div></div>
+            <div className="flex gap-2"><FlaskConical aria-hidden="true" className="h-4 w-4 shrink-0 text-warning-700" /><div><dt className="font-semibold text-neutral-900">Test workspace</dt><dd className="mt-2 leading-5 text-neutral-600">A flexible protected copy for trying setup changes, payrolls, reports, or staff workflows. It cannot send live payroll actions.</dd></div></div>
             <div className="flex gap-2"><DatabaseBackup aria-hidden="true" className="h-4 w-4 shrink-0 text-neutral-600" /><div><dt className="font-semibold text-neutral-900">Read-only backup</dt><dd className="mt-2 leading-5 text-neutral-600">A sealed recovery copy made immediately before approved migration data changes the clean client.</dd></div></div>
           </dl>
         </div>
@@ -29,6 +29,7 @@ export function TestWorkspaceGuide(): ReactElement {
             <div><dt><Badge variant="success">Ready to test</Badge></dt><dd className="mt-2 leading-5 text-neutral-600">The copy is verified and available to assigned staff.</dd></div>
             <div><dt><Badge variant="danger">Needs attention</Badge></dt><dd className="mt-2 leading-5 text-neutral-600">The copy did not finish. Review the error and retry.</dd></div>
             <div><dt><Badge variant="default">Read only</Badge></dt><dd className="mt-2 leading-5 text-neutral-600">The workspace is sealed and cannot be changed.</dd></div>
+            <div><dt><Badge variant="default">Archived</Badge></dt><dd className="mt-2 leading-5 text-neutral-600">The workspace is hidden from the normal list but its evidence and audit history remain available.</dd></div>
           </dl>
         </div>
       </div>
@@ -41,8 +42,8 @@ export function WorkspaceRoleGuide(): ReactElement {
     <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
       <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Access levels</p>
       <dl className="mt-4 grid gap-4 text-sm lg:grid-cols-3">
-        <div><dt className="font-semibold text-neutral-900">Operator</dt><dd className="mt-2 leading-5 text-neutral-600">Enters payroll inputs and processes the practice runs.</dd></div>
-        <div><dt className="font-semibold text-neutral-900">Reviewer</dt><dd className="mt-2 leading-5 text-neutral-600">Reviews payroll and compares results with the benchmark.</dd></div>
+        <div><dt className="font-semibold text-neutral-900">Operator</dt><dd className="mt-2 leading-5 text-neutral-600">Changes test setup and processes practice payrolls.</dd></div>
+        <div><dt className="font-semibold text-neutral-900">Reviewer</dt><dd className="mt-2 leading-5 text-neutral-600">Reviews workspace setup, payrolls, and reports without changing them.</dd></div>
         <div><dt className="font-semibold text-neutral-900">Workspace admin</dt><dd className="mt-2 leading-5 text-neutral-600">Manages this workspace and its assigned access.</dd></div>
       </dl>
       <p className="mt-4 border-t border-neutral-200 pt-4 text-xs leading-5 text-neutral-600">System admins already have full access and do not need to be assigned.</p>

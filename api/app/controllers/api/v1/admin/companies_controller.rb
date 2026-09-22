@@ -20,11 +20,13 @@ module Api
         skip_before_action :enforce_test_workspace_access!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
           training_replay_preview create_training_replay retry_training_replay
+          test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace
           migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
         skip_before_action :enforce_test_workspace_safety!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
           training_replay_preview create_training_replay retry_training_replay
+          test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace
           migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
 
@@ -152,6 +154,65 @@ module Api
           render_service_errors(e)
         end
 
+        # GET /api/v1/admin/companies/:id/test_workspace_preview
+        def test_workspace_preview
+          source = accessible_company!
+          render json: {
+            test_workspace: TestWorkspace::Preview.new(
+              source_company: source,
+              copy_mode: params[:copy_mode].presence || "all_committed",
+              excluded_payrolls: params[:excluded_payrolls].presence || 2,
+              cutoff_pay_period_id: params[:cutoff_pay_period_id]
+            ).call
+          }
+        end
+
+        # POST /api/v1/admin/companies/:id/test_workspace
+        def create_test_workspace
+          source = accessible_company!
+          company = TestWorkspace::Create.new(
+            source_company: source,
+            actor: current_user,
+            name: params[:name],
+            acknowledgement: params[:acknowledgement],
+            assignments: test_workspace_assignments,
+            copy_mode: params[:copy_mode].presence || "all_committed",
+            excluded_payrolls: params[:excluded_payrolls].presence || 2,
+            cutoff_pay_period_id: params[:cutoff_pay_period_id],
+            expiration_days: params[:expiration_days].presence || 90
+          ).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/retry_test_workspace
+        def retry_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Retry.new(company: company, actor: current_user).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/archive_test_workspace
+        def archive_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Lifecycle.new(company: company, actor: current_user).archive!
+          render json: { company: company_payload(company, detailed: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/restore_test_workspace
+        def restore_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Lifecycle.new(company: company, actor: current_user).restore!
+          render json: { company: company_payload(company, detailed: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
         # GET /api/v1/admin/companies/:id/migration_promotion_preview
         def migration_promotion_preview
           rehearsal = accessible_company!
@@ -238,6 +299,10 @@ module Api
           params.permit(assignments: %i[user_id workspace_access_level]).fetch(:assignments, [])
         end
 
+        def test_workspace_assignments
+          params.permit(assignments: %i[user_id workspace_access_level]).fetch(:assignments, [])
+        end
+
         def staff_company_params
           params.require(:company).permit(*STAFF_EDITABLE_COMPANY_FIELDS)
         end
@@ -283,6 +348,8 @@ module Api
             test_workspace_expires_at: company.test_workspace_expires_at,
             test_workspace_archived_at: company.test_workspace_archived_at,
             test_workspace_sealed_at: company.test_workspace_sealed_at,
+            test_workspace_expired: company.test_workspace_expired?,
+            test_workspace_read_only: company.test_workspace_read_only?,
             migration_rehearsal_status: company.migration_rehearsal_status,
             migration_source_company_id: company.migration_source_company_id,
             migration_source_company_name: company.migration_source_company&.name,

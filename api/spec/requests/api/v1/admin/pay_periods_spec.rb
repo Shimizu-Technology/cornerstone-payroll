@@ -607,7 +607,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
     end
 
-    it "explains that a training baseline is locked benchmark evidence" do
+    it "explains that copied payroll history is locked reference evidence" do
       source_company = create(:company, organization: organization)
       source_period = create(:pay_period, :committed, company: source_company)
       company.update!(
@@ -629,7 +629,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response.parsed_body.fetch("error")).to eq("Training baseline payrolls are locked benchmark evidence")
+      expect(response.parsed_body.fetch("error")).to eq("Copied payroll history is locked reference evidence")
     end
 
     it "rolls back date changes if reverting a non-draft period to draft fails" do
