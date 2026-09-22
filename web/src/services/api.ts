@@ -2200,6 +2200,14 @@ export interface YtdSummaryReport {
     meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
     period: PayrollReportPeriod;
+    included_payroll_runs?: Array<{
+      key: string;
+      source: string;
+      status: string;
+      work_period_start: string;
+      work_period_end: string;
+      pay_date: string;
+    }>;
     employee_visibility?: { include_zero_pay: boolean; active_zero_pay_count: number; displayed_count: number };
     employees: {
       employee_id: number;
@@ -2782,6 +2790,8 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
   payrollRegisterXlsx: (payRunKey: string | number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
+  payrollRegisterHistoryPackage: (format: 'xlsx' | 'pdf') =>
+    api.getBlobWithParams('/admin/reports/payroll_register_history_package', { format }),
   payrollFinalRecord: (payPeriodId: number) =>
     api.get<{ final_record: PayrollFinalRecord }>(`/admin/pay_periods/${payPeriodId}/final_record`),
   payrollFinalRecordXlsx: (payPeriodId: number) =>

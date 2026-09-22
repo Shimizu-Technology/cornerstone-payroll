@@ -4,6 +4,7 @@ require "rails_helper"
 require "csv"
 require "pdf/reader"
 require "roo"
+require "zip"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
   include ActiveSupport::Testing::TimeHelpers
@@ -2022,6 +2023,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("period", "basis")).to eq("pay_date")
       expect(report.dig("period", "custom")).to be(true)
       expect(report.dig("company_totals", "gross_pay").to_f).to eq(525.0)
+      expect(report.fetch("included_payroll_runs")).to contain_exactly(
+        include(
+          "key" => "native:#{inside_period.id}",
+          "work_period_start" => "2026-05-01",
+          "work_period_end" => "2026-05-14",
+          "pay_date" => "2026-05-16"
+        )
+      )
       expect(report.dig("payroll_fields", "totals", 0, "label")).to eq("Archived Shift Bonus")
       expect(report.dig("payroll_fields", "totals", 0, "amount").to_f).to eq(25.0)
       expect(report.dig("payroll_fields", "entries", 0, "employee_name")).to eq(employee.full_name)
@@ -2884,6 +2893,57 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: other_period.id }
 
       expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/payroll_register_history_package" do
+    let!(:first_period) do
+      create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 15), pay_date: Date.new(2026, 4, 30))
+    end
+    let!(:second_period) do
+      create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 4, 16), end_date: Date.new(2026, 4, 30), pay_date: Date.new(2026, 5, 15))
+    end
+
+    before do
+      create(:payroll_item, pay_period: first_period, employee: employee, company: company, gross_pay: 1_000, net_pay: 800)
+      contractor = create(:employee, company: company, department: department, employment_type: "contractor")
+      create(:payroll_item, pay_period: first_period, employee: contractor, company: company,
+        employment_type: "contractor", gross_pay: 600, net_pay: 600)
+      create(:payroll_item, pay_period: second_period, employee: employee, company: company, gross_pay: 1_100, net_pay: 850)
+    end
+
+    it "downloads one Excel register per run with reconciliation manifests" do
+      get "/api/v1/admin/reports/payroll_register_history_package", params: { format: "xlsx" }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.content_type).to include("application/zip")
+      expect(response.headers.fetch("Content-Disposition")).to include("payroll_history_")
+
+      Zip::File.open_buffer(StringIO.new(response.body)) do |archive|
+        report_files = archive.entries.map(&:name).grep(%r{\Areports/.+\.xlsx\z})
+        expect(report_files.length).to eq(2)
+        expect(report_files).to all(satisfy { |path| archive.read(path).start_with?("PK") })
+        manifest = JSON.parse(archive.read("manifest.json"))
+        expect(manifest.fetch("payroll_run_count")).to eq(2)
+        first_run = manifest.fetch("payroll_runs").find { |run| run.fetch("pay_run_key") == "native:#{first_period.id}" }
+        expect(first_run).to include(
+          "work_period_start" => "2026-04-01",
+          "work_period_end" => "2026-04-15",
+          "pay_date" => "2026-04-30",
+          "w2_employee_count" => 1,
+          "contractor_count" => 1,
+          "combined_gross" => 1_600.0
+        )
+      end
+    end
+
+    it "rejects unsupported package formats" do
+      get "/api/v1/admin/reports/payroll_register_history_package", params: { format: "csv" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/xlsx or pdf/)
     end
   end
 

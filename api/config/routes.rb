@@ -354,6 +354,7 @@ Rails.application.routes.draw do
         get "reports/payroll_register_csv", to: "reports#payroll_register_csv"
         get "reports/payroll_register_pdf", to: "reports#payroll_register_pdf"
         get "reports/payroll_register_xlsx", to: "reports#payroll_register_xlsx"
+        get "reports/payroll_register_history_package", to: "reports#payroll_register_history_package"
         get "reports/employee_pay_history", to: "reports#employee_pay_history"
         get "reports/employee_pay_history_csv", to: "reports#employee_pay_history_csv"
         get "reports/employee_pay_history_pdf", to: "reports#employee_pay_history_pdf"

@@ -505,6 +505,7 @@ DEPENDENCIES
   roo
   rspec-rails
   rubocop-rails-omakase
+  rubyzip (~> 3.0)
   solid_cable
   solid_cache
   solid_queue

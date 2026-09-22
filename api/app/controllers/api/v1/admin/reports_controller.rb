@@ -104,6 +104,45 @@ module Api
           )
         end
 
+        def payroll_register_history_package
+          report_format = params[:format].presence || "xlsx"
+          unless report_format.in?(PayrollRegisterHistoryPackageExporter::FORMATS)
+            return render json: { error: "format must be xlsx or pdf" }, status: :unprocessable_entity
+          end
+
+          entries = register_eligible_pay_runs.each_with_index.map do |pay_run, index|
+            report_data, error_response = build_payroll_register_data(pay_run.fetch(:key))
+            return error_response if error_response
+
+            generator = if report_format == "pdf"
+              PayrollRegisterPdfGenerator.new(report_data)
+            else
+              SpreadsheetReportExporter.new(
+                filename: PayrollRegisterCsvExporter.new(report_data).filename.sub(/\.csv\z/, ".xlsx"),
+                sheets: payroll_register_sheets(report_data)
+              )
+            end
+            basename = generator.filename
+            {
+              report: report_data,
+              path: Kernel.format("reports/%03d_%s_%s", index + 1, pay_run.fetch(:key).tr(":", "-"), basename),
+              content: generator.generate
+            }
+          end
+
+          exporter = PayrollRegisterHistoryPackageExporter.new(
+            company: current_company,
+            format: report_format,
+            entries: entries
+          )
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: PayrollRegisterHistoryPackageExporter::CONTENT_TYPE,
+            disposition: "attachment"
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/employee_pay_history
         # Individual employee pay records
         def employee_pay_history
@@ -1099,7 +1138,7 @@ module Api
           period = payroll_reporting_period
           report = build_period_summary_report(period)
           send_tabular_pdf!(
-            title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Period" : "Payroll Summary by Period",
+            title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Pay Date" : "Payroll Summary by Pay Date",
             subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}#{report.dig(:meta, :provisional) ? ' — calculated, not paid' : ''}",
             filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.pdf",
             sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
@@ -1319,8 +1358,8 @@ module Api
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
         # pay_run_key accepts native:<id> or imported:<id>. pay_period_id remains
         # supported for older native-payroll clients.
-        def build_payroll_register_data
-          raw_key = params[:pay_run_key].presence
+        def build_payroll_register_data(raw_key_override = nil)
+          raw_key = raw_key_override.presence || params[:pay_run_key].presence
           raw_key ||= "native:#{params[:pay_period_id]}" if params[:pay_period_id].present?
 
           if raw_key.blank?
@@ -1378,7 +1417,9 @@ module Api
                 "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
             },
             pay_period: {
+              key: "native:#{pay_period.id}",
               id: pay_period.id,
+              record_type: "native",
               start_date: pay_period.start_date,
               end_date: pay_period.end_date,
               pay_date: pay_period.pay_date,
@@ -1443,6 +1484,22 @@ module Api
           [ report_data, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
+        end
+
+        def register_eligible_pay_runs
+          pay_runs = []
+          page = 1
+          loop do
+            result = PayrollHistoryQuery.new(
+              company_id: current_company_id,
+              params: { page: page, per_page: PayrollHistoryQuery::MAX_PER_PAGE, sort: "pay_date", direction: "asc", register_eligible: true }
+            ).call
+            pay_runs.concat(result.data)
+            break if page >= result.meta.fetch(:total_pages)
+
+            page += 1
+          end
+          pay_runs
         end
 
         # Shared data builder for tax summary (JSON + CSV + PDF).
@@ -1834,6 +1891,7 @@ module Api
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
+            included_payroll_runs: included_payroll_runs(period, historical_paychecks),
             employees: employee_rows,
             employee_visibility: {
               include_zero_pay: include_zero_pay_employees?,
@@ -1867,6 +1925,27 @@ module Api
               treatment_totals: adjustment_disclosure.treatment_totals
             }
           }
+        end
+
+        def included_payroll_runs(period, historical_paychecks)
+          native = reportable_pay_periods(period).order(:pay_date, :start_date, :id).map do |pay_period|
+            {
+              key: "native:#{pay_period.id}", source: "Cornerstone", status: pay_period.status,
+              work_period_start: pay_period.start_date, work_period_end: pay_period.end_date, pay_date: pay_period.pay_date
+            }
+          end
+          imported = historical_paychecks
+            .map(&:historical_pay_period)
+            .select { |historical_period| historical_period.period_type == "regular" }
+            .uniq(&:id)
+            .map do |historical_period|
+              {
+                key: "imported:#{historical_period.id}", source: "QuickBooks import", status: "locked",
+                work_period_start: historical_period.start_date, work_period_end: historical_period.end_date, pay_date: historical_period.pay_date
+              }
+            end
+
+          (native + imported).sort_by { |pay_run| [ pay_run[:pay_date], pay_run[:work_period_start], pay_run[:key] ] }
         end
 
         def period_summary_component_columns(entries, employee_ids)
@@ -3768,7 +3847,7 @@ module Api
             payroll_field_activity_for_report_sheet(report),
             report_info_sheet(
               report,
-              title: "Payroll Summary by Period",
+              title: "Payroll Summary by Pay Date",
               description: "Bonus is included in gross. Retirement and loan payments are included in deductions. Payroll field and source breakdown columns are views of these totals, not additional money."
             )
           ]
