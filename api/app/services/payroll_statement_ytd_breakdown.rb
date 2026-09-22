@@ -14,6 +14,8 @@ class PayrollStatementYtdBreakdown
   ALLOTMENT = /allotment/i
   RENT = /\brent\b/i
   REIMBURSEMENT = /reimb(?:ursement|ursem)?/i
+  AUTO_LOAN_REIMBURSEMENT = /\bauto\s+loan\s+reimb(?:ursement|ursem)?/i
+  GENERIC_REIMBURSEMENT = /\Areimb(?:ursement|ursem)?\z/i
 
   def initialize(payroll_item)
     @payroll_item = payroll_item
@@ -190,7 +192,29 @@ class PayrollStatementYtdBreakdown
     return nil unless semantic_fallback && component.semantic != :other
 
     semantic_matches = targets.select { |target| target.fetch(:semantic) == component.semantic }
-    semantic_matches.one? ? semantic_matches.first : nil
+    return semantic_matches.first if semantic_matches.one?
+
+    legacy_other_pay_target(targets, component)
+  end
+
+  def legacy_other_pay_target(targets, component)
+    return unless component.semantic == :reimbursement && component.label.match?(GENERIC_REIMBURSEMENT)
+
+    # QuickBooks can export an employee allotment under the generic label
+    # "Reimb" while the reviewed current field has an explicit allotment name.
+    # Bridge that rename only when one allotment target exists and the locked
+    # historical total is an exact repetition of its current recurring amount.
+    candidates = targets.select do |target|
+      target.fetch(:semantic) == :allotment &&
+        repeated_recurring_amount?(component.amount, target.fetch(:component).amount)
+    end
+    candidates.one? ? candidates.first : nil
+  end
+
+  def repeated_recurring_amount?(historical_amount, current_amount)
+    historical = historical_amount.to_d.abs
+    current = current_amount.to_d.abs
+    current.positive? && historical >= current && (historical % current).zero?
   end
 
   def append_ytd_only_target!(targets, component)
@@ -263,6 +287,7 @@ class PayrollStatementYtdBreakdown
     text = label.to_s
     return :allotment if text.match?(ALLOTMENT)
     return :rent if text.match?(RENT)
+    return :auto_loan_reimbursement if text.match?(AUTO_LOAN_REIMBURSEMENT)
     return :reimbursement if text.match?(REIMBURSEMENT)
 
     :other
