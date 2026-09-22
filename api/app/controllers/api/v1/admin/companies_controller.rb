@@ -17,8 +17,17 @@ module Api
         ).freeze
 
         skip_before_action :enforce_company_access!, only: [ :index ]
-        skip_before_action :enforce_migration_rehearsal_safety!, only: %i[
+        skip_before_action :enforce_test_workspace_access!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+          training_replay_preview create_training_replay retry_training_replay
+          test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace
+          migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
+        ]
+        skip_before_action :enforce_test_workspace_safety!, only: %i[
+          index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
+          training_replay_preview create_training_replay retry_training_replay
+          test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace
+          migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
 
         # GET /api/v1/admin/companies
@@ -103,8 +112,7 @@ module Api
           ).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
         end
 
         # POST /api/v1/admin/companies/:id/retry_migration_rehearsal
@@ -113,8 +121,134 @@ module Api
           company = MigrationRehearsal::Retry.new(company: company, actor: current_user).call
           render json: { company: company_payload(company, detailed: true) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
-          messages = e.respond_to?(:record) && e.record ? e.record.errors.full_messages : [ e.message ]
-          render json: { errors: messages }, status: :unprocessable_entity
+          render_service_errors(e)
+        end
+
+        # GET /api/v1/admin/companies/:id/training_replay_preview
+        def training_replay_preview
+          source = accessible_company!
+          render json: { training_replay: TrainingReplay::Preview.new(source_company: source).call }
+        end
+
+        # POST /api/v1/admin/companies/:id/training_replay
+        def create_training_replay
+          source = accessible_company!
+          company = TrainingReplay::Create.new(
+            source_company: source,
+            actor: current_user,
+            name: params[:name],
+            acknowledgement: params[:acknowledgement],
+            assignments: training_replay_assignments
+          ).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/retry_training_replay
+        def retry_training_replay
+          company = accessible_company!
+          company = TrainingReplay::Retry.new(company: company, actor: current_user).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # GET /api/v1/admin/companies/:id/test_workspace_preview
+        def test_workspace_preview
+          source = accessible_company!
+          render json: {
+            test_workspace: TestWorkspace::Preview.new(
+              source_company: source,
+              copy_mode: params[:copy_mode].presence || "all_committed",
+              excluded_payrolls: params[:excluded_payrolls].presence || 2,
+              cutoff_pay_period_id: params[:cutoff_pay_period_id]
+            ).call
+          }
+        end
+
+        # POST /api/v1/admin/companies/:id/test_workspace
+        def create_test_workspace
+          source = accessible_company!
+          company = TestWorkspace::Create.new(
+            source_company: source,
+            actor: current_user,
+            name: params[:name],
+            acknowledgement: params[:acknowledgement],
+            assignments: test_workspace_assignments,
+            copy_mode: params[:copy_mode].presence || "all_committed",
+            excluded_payrolls: params[:excluded_payrolls].presence || 2,
+            cutoff_pay_period_id: params[:cutoff_pay_period_id],
+            expiration_days: params[:expiration_days].presence || 90
+          ).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/retry_test_workspace
+        def retry_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Retry.new(company: company, actor: current_user).call
+          render json: { company: company_payload(company, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/archive_test_workspace
+        def archive_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Lifecycle.new(company: company, actor: current_user).archive!
+          render json: { company: company_payload(company, detailed: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/restore_test_workspace
+        def restore_test_workspace
+          company = accessible_company!
+          company = TestWorkspace::Lifecycle.new(company: company, actor: current_user).restore!
+          render json: { company: company_payload(company, detailed: true) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # GET /api/v1/admin/companies/:id/migration_promotion_preview
+        def migration_promotion_preview
+          rehearsal = accessible_company!
+          render json: { migration_promotion: MigrationPromotion::Preview.new(rehearsal: rehearsal).call }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/migration_promotion_backup
+        def create_migration_promotion_backup
+          rehearsal = accessible_company!
+          backup = MigrationPromotion::CreateBackup.new(
+            rehearsal: rehearsal,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement]
+          ).call
+          render json: { company: company_payload(backup, detailed: true) }, status: :accepted
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
+        end
+
+        # POST /api/v1/admin/companies/:id/migration_promotion
+        def apply_migration_promotion
+          rehearsal = accessible_company!
+          periods = MigrationPromotion::Apply.new(
+            rehearsal: rehearsal,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement],
+            payment_dispositions: payment_disposition_params
+          ).call
+          render json: {
+            company: company_payload(rehearsal.migration_source_company.reload, detailed: true),
+            promoted_pay_period_ids: periods.map(&:id)
+          }
+        rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
+          render_service_errors(e)
         end
 
         # PATCH/PUT /api/v1/admin/companies/:id
@@ -124,7 +258,7 @@ module Api
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          unless current_user&.organization_admin? || staff_can_update_company?(company)
+          unless can_update_company?(company)
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
@@ -159,6 +293,14 @@ module Api
             :client_payroll_approval_required,
             check_layout_config: {}
           )
+        end
+
+        def training_replay_assignments
+          params.permit(assignments: %i[user_id workspace_access_level]).fetch(:assignments, [])
+        end
+
+        def test_workspace_assignments
+          params.permit(assignments: %i[user_id workspace_access_level]).fetch(:assignments, [])
         end
 
         def staff_company_params
@@ -199,6 +341,15 @@ module Api
             historical_payroll_enabled: company.historical_payroll_enabled,
             client_payroll_approval_required: company.client_payroll_approval_required,
             payroll_environment: company.payroll_environment,
+            test_workspace: company.test_workspace?,
+            test_workspace_purpose: company.test_workspace_purpose,
+            test_workspace_purpose_label: company.test_workspace_purpose_label,
+            test_workspace_manifest: company.test_workspace_manifest,
+            test_workspace_expires_at: company.test_workspace_expires_at,
+            test_workspace_archived_at: company.test_workspace_archived_at,
+            test_workspace_sealed_at: company.test_workspace_sealed_at,
+            test_workspace_expired: company.test_workspace_expired?,
+            test_workspace_read_only: company.test_workspace_read_only?,
             migration_rehearsal_status: company.migration_rehearsal_status,
             migration_source_company_id: company.migration_source_company_id,
             migration_source_company_name: company.migration_source_company&.name,
@@ -231,11 +382,28 @@ module Api
             )
           end
 
+          can_update = can_update_company?(company)
           payload[:organization_id] = company.organization_id
-          payload[:can_update] = current_user&.organization_admin? || staff_can_update_company?(company)
-          payload[:editable_fields] = current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          payload[:can_update] = can_update
+          payload[:editable_fields] = if can_update
+            current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          else
+            []
+          end
 
           payload
+        end
+
+        def can_update_company?(company)
+          role_allows_update = current_user&.organization_admin? || staff_can_update_company?(company)
+          return false unless role_allows_update
+
+          TestWorkspaceAccessPolicy.allowed?(
+            user: current_user,
+            company: company,
+            request_method: "PATCH",
+            capability: :manage_client_configuration
+          )
         end
 
         def staff_client_access?
@@ -259,6 +427,22 @@ module Api
           raise ActiveRecord::RecordNotFound unless current_user&.can_access_company?(company.id)
 
           company
+        end
+
+        def payment_disposition_params
+          dispositions = params.require(:payment_dispositions)
+          unless dispositions.is_a?(ActionController::Parameters)
+            raise ArgumentError, "Choose whether each rehearsal payroll was already paid or should be processed in Cornerstone"
+          end
+
+          dispositions.each_pair.to_h do |period_id, disposition|
+            [ period_id.to_s, disposition.to_s ]
+          end
+        end
+
+        def render_service_errors(error)
+          messages = error.respond_to?(:record) && error.record ? error.record.errors.full_messages : [ error.message ]
+          render json: { errors: messages }, status: :unprocessable_entity
         end
 
         def selected_locked_batch(company)

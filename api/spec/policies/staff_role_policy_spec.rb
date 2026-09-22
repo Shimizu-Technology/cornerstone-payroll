@@ -89,11 +89,17 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/payroll_filing_responsibilities",
         action_name: "upsert"
       )).to eq(:manage_filing_review)
-      %w[create update destroy apply apply_to_all_companies clear_active].each do |action_name|
+      %w[create update destroy apply_to_all_companies].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",
           action_name: action_name
         )).to eq(:manage_client_configuration)
+      end
+      %w[apply clear_active].each do |action_name|
+        expect(described_class.capability_for(
+          controller_path: "api/v1/admin/printer_profiles",
+          action_name: action_name
+        )).to eq(:payroll_operations)
       end
       expect(described_class.capability_for(
         controller_path: "api/v1/admin/organizations",

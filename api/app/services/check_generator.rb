@@ -87,11 +87,11 @@ class CheckGenerator
     }
   end
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, company: nil)
     @payroll_item = payroll_item
     @employee     = payroll_item.employee
     @pay_period   = payroll_item.pay_period
-    @company      = pay_period.company
+    @company      = company || pay_period.company
   end
 
   def generate
@@ -204,8 +204,7 @@ class CheckGenerator
   # CHECK FACE  – keep the top third clean like QuickBooks
   # -----------------------------------------------------------------------
   def draw_check_face(pdf, sect_bot, voided, rehearsal_preview: false)
-    draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
-    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
+    draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
     date_cfg = layout_field(:check_face, :date)
     payee_cfg = layout_field(:check_face, :payee)
     payee_address_cfg = layout_field(:check_face, :payee_address)
@@ -246,7 +245,6 @@ class CheckGenerator
         pdf.text resolve_memo_text
       end
     end
-
   end
 
   # -----------------------------------------------------------------------
@@ -351,8 +349,7 @@ class CheckGenerator
       stub_cfg: stub_cfg
     )
 
-    draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
-    draw_rehearsal_watermark(pdf, sect_bot) if rehearsal_preview
+    draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
   end
 
   # -----------------------------------------------------------------------
@@ -397,76 +394,14 @@ class CheckGenerator
   # Data row builders
   # -----------------------------------------------------------------------
   def pay_rows
-    rows = []
-    is_c = employee.contractor?
-    earnings = payroll_item.payroll_item_earnings.to_a
-
-    if is_c
-      if employee.contractor_hourly?
-        hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
-        if hourly_earnings.any?
-          hourly_earnings.each do |earning|
-            rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
-          end
-        else
-          rp = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
-          rows << [label_or("Contract Labor"), fh(payroll_item.hours_worked), fn(payroll_item.pay_rate), fn(rp), fn(ytd[:gross])]
-          if payroll_item.overtime_hours.to_f > 0
-            ot_r = payroll_item.pay_rate.to_f * 1.5
-            ot_p = payroll_item.overtime_hours.to_f * ot_r
-            rows << ["Contract OT", fh(payroll_item.overtime_hours), fn(ot_r), fn(ot_p), fn(ot_p)]
-          end
-        end
-      else
-        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
-        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - ce_total), fn(ytd[:gross])]
-      end
-    elsif payroll_item.hourly?
-      hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
-      if hourly_earnings.any?
-        hourly_earnings.each do |earning|
-          rows << [stub_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
-        end
-      else
-        dept = employee.department&.name || "Regular"
-        reg = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
-        rows << [dept, fh(payroll_item.hours_worked), fn(payroll_item.pay_rate), fn(reg), fn(ytd[:gross])]
-        if payroll_item.overtime_hours.to_f > 0
-          otr = payroll_item.pay_rate.to_f * 1.5
-          rows << ["Overtime Pay", "-", fn(otr), fn(payroll_item.overtime_hours.to_f * otr), fn(payroll_item.overtime_hours.to_f * otr)]
-        end
-        if payroll_item.holiday_hours.to_f > 0
-          rows << ["Holiday", fh(payroll_item.holiday_hours), fn(payroll_item.pay_rate), fn(payroll_item.holiday_hours.to_f * payroll_item.pay_rate.to_f), "-"]
-        end
-        if payroll_item.pto_hours.to_f > 0
-          rows << ["PTO", fh(payroll_item.pto_hours), fn(payroll_item.pay_rate), fn(payroll_item.pto_hours.to_f * payroll_item.pay_rate.to_f), "-"]
-        end
-      end
-    else
-      sal_label = "Salary"
-      sal_label = "Salary - #{employee.first_name&.first} #{employee.last_name}" if employee.first_name.present?
-      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
-      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total
-      rows << [sal_label, "-", "-", fn(sal_cur), fn(ytd[:gross])]
-    end
-
-    rows << ["Bonus", "-", "-", fn(payroll_item.bonus), fn(payroll_item.bonus)] if payroll_item.bonus.to_f > 0
-    rows << ["Paycheck Tips", "-", "-", fn(payroll_item.reported_tips), fn(payroll_item.reported_tips)] if payroll_item.reported_tips.to_f > 0
-
-    Array(payroll_item.custom_earnings).each do |ce|
-      amt = ce["amount"].to_f
-      rows << [stub_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
-    end
-
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless adjustment["treatment"] == "taxable_addition"
-
-      amt = adjustment["amount"].to_f
-      rows << [stub_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
-    end
-
-    payroll_field_entries_for("taxable_addition").each do |entry|
-      rows << [stub_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
+    rows = PayrollEarningsYtdBreakdown.new(payroll_item).call.map do |earning|
+      [
+        stub_label(earning.label),
+        earning.hours.present? ? fh(earning.hours) : "-",
+        earning.rate.present? ? fn(earning.rate) : "-",
+        fn(earning.current),
+        fn(earning.ytd)
+      ]
     end
 
     rows << [
@@ -758,26 +693,9 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # Non-negotiable rehearsal and void watermarks
+  # Void watermark
   # -----------------------------------------------------------------------
-  def draw_rehearsal_watermark(pdf, sect_bot)
-    center = [ PAGE_WIDTH / 2, sect_bot + SECTION_HEIGHT / 2 ]
-    pdf.save_graphics_state do
-      pdf.fill_color "B91C1C"
-      pdf.font_size(10) do
-        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 205, sect_bot + SECTION_HEIGHT - 13 ], style: :bold
-      end
-      pdf.transparent(0.28) do
-        pdf.font_size(55) do
-          pdf.rotate(20, origin: center) do
-            pdf.draw_text "VOID - TEST", at: [ 118, sect_bot + 100 ], style: :bold
-          end
-        end
-      end
-    end
-  end
-
-  def draw_void_watermark(pdf, sect_bot, sect_top)
+  def draw_void_watermark(pdf, sect_bot)
     cx = PAGE_WIDTH / 2
     cy = sect_bot + SECTION_HEIGHT / 2
     pdf.save_graphics_state do
@@ -832,9 +750,10 @@ class CheckGenerator
       end
       pdf.bounding_box([0, PAGE_HEIGHT - 4], width: PAGE_WIDTH) do
         pdf.font_size(7) do
-          pdf.text "ALIGNMENT TEST – Print on plain paper.", align: :center, color: "CC0000"
+          pdf.text "ALIGNMENT TEST – Print on plain paper at Actual Size / 100% (never Fit or Shrink).", align: :center, color: "CC0000"
         end
       end
+      draw_one_inch_scale_reference(pdf)
     end.render
   end
 
@@ -943,5 +862,19 @@ class CheckGenerator
     end
     pdf.fill_color "000000"
     pdf.stroke_color "000000"
+  end
+
+  def draw_one_inch_scale_reference(pdf)
+    x = 20
+    y = 14
+    pdf.save_graphics_state do
+      pdf.stroke_color "CC0000"
+      pdf.fill_color "CC0000"
+      pdf.line_width 0.8
+      pdf.stroke_line [ x, y ], [ x + 72, y ]
+      pdf.stroke_line [ x, y - 4 ], [ x, y + 4 ]
+      pdf.stroke_line [ x + 72, y - 4 ], [ x + 72, y + 4 ]
+      pdf.font_size(6) { pdf.draw_text "This line must measure exactly 1 inch", at: [ x + 78, y - 2 ] }
+    end
   end
 end

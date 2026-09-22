@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollItemDeduction < ApplicationRecord
+  include TrainingBaselineImmutable
   CATEGORIES = %w[pre_tax post_tax employer_contribution].freeze
   REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 

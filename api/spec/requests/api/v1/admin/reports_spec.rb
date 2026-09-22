@@ -1722,6 +1722,50 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("company_totals", "gross_pay")).to eq(1_250.0)
     end
 
+    it "keeps a selected payroll run isolated when another source has the same pay date" do
+      _batch, historical_period, = create_locked_historical_paycheck(
+        employee: employee, suffix: "same-date-selection", pay_date: native_period.pay_date,
+        gross_pay: 250, net_pay: 200
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "native:#{native_period.id}"
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      native_report = response.parsed_body.fetch("report")
+      expect(native_report.dig("company_totals", "gross_pay")).to eq(1_000.0)
+      expect(native_report.fetch("included_payroll_runs").pluck("key")).to eq([ "native:#{native_period.id}" ])
+
+      imported_params = {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "imported:#{historical_period.id}"
+      }
+      get "/api/v1/admin/reports/ytd_summary", params: imported_params
+
+      expect(response).to have_http_status(:ok), response.body
+      imported_report = response.parsed_body.fetch("report")
+      expect(imported_report.dig("company_totals", "gross_pay")).to eq(250.0)
+      expect(imported_report.fetch("included_payroll_runs").pluck("key")).to eq([ "imported:#{historical_period.id}" ])
+
+      get "/api/v1/admin/reports/ytd_summary_csv", params: imported_params
+      expect(response).to have_http_status(:ok), response.body
+      expect(CSV.parse(response.body, headers: true).first.fetch("Gross Pay").to_f).to eq(250.0)
+    end
+
+    it "rejects a summary pay-run key outside the selected company" do
+      other_period = create(:pay_period, :committed, company: create(:company), pay_date: native_period.pay_date)
+
+      get "/api/v1/admin/reports/ytd_summary", params: {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "native:#{other_period.id}"
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Pay run not found")
+    end
+
     it "reconciles source overtime and labeled deductions without guessing their classification" do
       native_item.update!(overtime_hours: 2.3)
       PayrollItemFieldEntry.create!(
@@ -2022,6 +2066,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("period", "basis")).to eq("pay_date")
       expect(report.dig("period", "custom")).to be(true)
       expect(report.dig("company_totals", "gross_pay").to_f).to eq(525.0)
+      expect(report.fetch("included_payroll_runs")).to contain_exactly(
+        include(
+          "key" => "native:#{inside_period.id}",
+          "work_period_start" => "2026-05-01",
+          "work_period_end" => "2026-05-14",
+          "pay_date" => "2026-05-16"
+        )
+      )
       expect(report.dig("payroll_fields", "totals", 0, "label")).to eq("Archived Shift Bonus")
       expect(report.dig("payroll_fields", "totals", 0, "amount").to_f).to eq(25.0)
       expect(report.dig("payroll_fields", "entries", 0, "employee_name")).to eq(employee.full_name)

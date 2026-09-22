@@ -6,7 +6,7 @@ require "prawn/table"
 # PayrollRegisterPdfGenerator
 #
 # Generates a Prawn PDF payroll register from report data.
-# Layout: pay period metadata → summary totals → employee detail table.
+# Layout: pay period metadata → summary totals → W-2 detail → 1099 detail.
 #
 # Usage:
 #   report_data = build_payroll_register_data(pay_period)
@@ -132,7 +132,8 @@ class PayrollRegisterPdfGenerator
     pdf.move_down 4
 
     rows = [
-      [ "Employee Count",       s[:employee_count].to_s ],
+      [ "W-2 Employee Count",  s[:employee_count].to_s ],
+      [ "1099 Contractor Count", s[:contractor_count].to_s ],
       [ "Total Hours",          decimal(s[:total_hours]) ],
       [ "Total OT Hours",       decimal(s[:total_overtime_hours]) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
@@ -148,7 +149,9 @@ class PayrollRegisterPdfGenerator
       [ "Employer Contributions", fmt(s[:total_employer_contributions]) ],
       [ "Employer Payroll Cost", fmt(s[:total_employer_payroll_cost]) ],
       [ "Total Deductions",     fmt(s[:total_deductions]) ],
-      [ "Total Net Pay",        fmt(s[:total_net]) ]
+      [ "Total Net Pay",        fmt(s[:total_net]) ],
+      [ "1099 Gross Pay",       fmt(s[:contractor_total_gross]) ],
+      [ "1099 Net Pay",         fmt(s[:contractor_total_net]) ]
     ]
     rows.insert(2, [ "Custom Earnings", fmt(s[:total_custom_earnings]) ]) if custom_earnings_column?
     rows.insert(-3, [ "Custom Deductions", fmt(s[:total_custom_deductions]) ]) if custom_deductions_column?
@@ -428,13 +431,45 @@ class PayrollRegisterPdfGenerator
 
   def render_employee_table(pdf)
     employees = report[:employees] || []
+    contractors = report[:contractors] || []
 
+    if employees.empty? && contractors.empty?
+      pdf.start_new_page if pdf.cursor < 140
+      pdf.font_size(11) { pdf.text "W-2 Employee Detail", style: :bold }
+      pdf.move_down 6
+      pdf.font_size(9) { pdf.text "No payroll items found for this pay period.", style: :italic, color: TEXT_MUTED }
+      return
+    end
+
+    render_worker_table(
+      pdf,
+      workers: employees,
+      title: "W-2 Employee Detail",
+      empty_message: "No W-2 employee payroll items were found for this pay period.",
+      totals: report[:summary] || {}
+    )
+    return if contractors.empty?
+
+    render_worker_table(
+      pdf,
+      workers: contractors,
+      title: "1099 Contractor Detail",
+      note: "Contractor payments are reported separately and are not included in W-2 employee tax or deduction totals.",
+      totals: worker_table_totals(contractors)
+    )
+  end
+
+  def render_worker_table(pdf, workers:, title:, totals:, empty_message: nil, note: nil)
     pdf.start_new_page if pdf.cursor < 140
-    pdf.font_size(11) { pdf.text "Employee Detail", style: :bold }
+    pdf.font_size(11) { pdf.text title, style: :bold }
+    if note.present?
+      pdf.move_down 2
+      pdf.font_size(7) { pdf.text note, color: TEXT_MUTED }
+    end
     pdf.move_down 6
 
-    if employees.empty?
-      pdf.font_size(9) { pdf.text "No payroll items found for this pay period.", style: :italic, color: TEXT_MUTED }
+    if workers.empty?
+      pdf.font_size(9) { pdf.text empty_message, style: :italic, color: TEXT_MUTED }
       return
     end
 
@@ -449,11 +484,8 @@ class PayrollRegisterPdfGenerator
       }.compact
     end
 
-    rows = employees.map { |emp| employee_table_row(emp, columns) }
-
-    # Totals footer
-    s = report[:summary] || {}
-    totals_row = columns.map { |column| total_table_cell(column, s) }
+    rows = workers.map { |worker| employee_table_row(worker, columns) }
+    totals_row = columns.map { |column| total_table_cell(column, totals) }
 
     table_data = [ header ] + rows + [ totals_row ]
 
@@ -478,6 +510,34 @@ class PayrollRegisterPdfGenerator
     end
 
     pdf.fill_color TEXT_DARK
+  end
+
+  def worker_table_totals(workers)
+    {
+      total_hours: sum_workers(workers, :hours_worked),
+      total_overtime_hours: sum_workers(workers, :overtime_hours),
+      total_gross: sum_workers(workers, :gross_pay),
+      total_bonus: sum_workers(workers, :bonus),
+      total_custom_earnings: sum_workers(workers, :custom_earnings_total),
+      total_reported_tips: sum_workers(workers, :reported_tips),
+      total_tips_paid_out: sum_workers(workers, :tips_paid_out),
+      total_withholding: sum_workers(workers, :withholding_tax),
+      total_additional_withholding: sum_workers(workers, :additional_withholding),
+      total_social_security: sum_workers(workers, :social_security_tax),
+      total_medicare: sum_workers(workers, :medicare_tax),
+      total_retirement: sum_workers(workers, :retirement_payment),
+      total_straight_loan_deductions: sum_workers(workers, :straight_loan_deduction),
+      total_installment_loan_payments: sum_workers(workers, :installment_loan_payment),
+      total_custom_deductions: sum_workers(workers, :custom_deductions_total),
+      total_deductions: sum_workers(workers, :total_deductions),
+      total_net: sum_workers(workers, :net_pay),
+      total_employer_contributions: sum_workers(workers, :employer_contributions_total),
+      total_employer_payroll_cost: sum_workers(workers, :employer_payroll_cost)
+    }
+  end
+
+  def sum_workers(workers, key)
+    workers.sum { |worker| worker[key].to_d }
   end
 
   def employee_table_row(emp, columns)
@@ -585,13 +645,13 @@ class PayrollRegisterPdfGenerator
   def custom_earnings_column?
     summary = report[:summary] || {}
     summary[:total_custom_earnings].to_f.positive? ||
-      Array(report[:employees]).any? { |emp| emp[:custom_earnings_total].to_f.positive? }
+      payroll_workers.any? { |worker| worker[:custom_earnings_total].to_f.positive? }
   end
 
   def custom_deductions_column?
     summary = report[:summary] || {}
     summary[:total_custom_deductions].to_f.positive? ||
-      Array(report[:employees]).any? { |emp| emp[:custom_deductions_total].to_f.positive? }
+      payroll_workers.any? { |worker| worker[:custom_deductions_total].to_f.positive? }
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────
