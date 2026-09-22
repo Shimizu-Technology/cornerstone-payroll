@@ -226,6 +226,7 @@ export function Clients() {
     }
 
     const requestId = ++workspacePreviewRequestIdRef.current;
+    setWorkspacePreview(null);
     setLoadingWorkspacePreview(true);
     setWorkspaceError(null);
     setWorkspaceConfirmed(false);
@@ -698,7 +699,7 @@ export function Clients() {
                     <div className="max-w-sm">
                       <label htmlFor="test-workspace-excluded-count" className="text-sm font-semibold text-neutral-900">Recent payrolls to leave out</label>
                       <Select id="test-workspace-excluded-count" className="mt-2" value={workspaceExcludedPayrolls} onChange={event => setWorkspaceExcludedPayrolls(Number(event.target.value))}>
-                        {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count} payroll{count === 1 ? '' : 's'}</option>)}
+                        {Array.from({ length: 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} payroll{count === 1 ? '' : 's'}</option>)}
                       </Select>
                     </div>
                   )}
