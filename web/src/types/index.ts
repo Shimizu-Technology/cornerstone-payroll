@@ -1715,6 +1715,13 @@ export interface CheckPrintQueueResponse {
     voided: number;
     check_stock_type: CheckStockType;
     slot_count: number;
+    printer_profile: {
+      id: number;
+      name: string;
+      check_stock_type: CheckStockType;
+      lock_version: number;
+      updated_at: string;
+    } | null;
   };
 }
 
@@ -1723,6 +1730,10 @@ export interface CheckPrintRun {
   pay_period_id: number;
   status: 'generated' | 'confirmed';
   check_stock_type: CheckStockType;
+  printer_profile_id: number | null;
+  printer_profile_name: string | null;
+  printer_profile_lock_version: number | null;
+  calibration_digest: string | null;
   starting_slot: number;
   selected_count: number;
   manifest: Array<{
@@ -1763,6 +1774,7 @@ export interface CheckSettings {
   check_layout_config: Record<string, unknown>;
   active_printer_profile_id: number | null;
   active_printer_profile_name: string | null;
+  active_printer_profile_lock_version: number | null;
 }
 
 export type CheckRegisterSourceType = 'payroll_item' | 'non_employee_check';

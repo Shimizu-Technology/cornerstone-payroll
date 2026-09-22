@@ -314,14 +314,15 @@ module Api
             return render json: { error: "No printable non-employee checks found" }, status: :unprocessable_entity
           end
 
-          pdf_data = if checks.first.company.first_hawaiian_4up_checks?
+          render_company = render_company_for(checks.first.company)
+          pdf_data = if render_company.first_hawaiian_4up_checks?
             FirstHawaiianFourUpCheckGenerator.new(
-              company: checks.first.company,
+              company: render_company,
               non_employee_checks: checks,
               starting_slot: params[:starting_slot]
             ).generate
           else
-            combine_pdfs(checks.map { |check| NonEmployeeCheckGenerator.new(check).generate })
+            combine_pdfs(checks.map { |check| NonEmployeeCheckGenerator.new(check, company: render_company).generate })
           end
 
           send_data pdf_data,
@@ -367,16 +368,17 @@ module Api
           if verified_print_package_required?(@check)
             return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
-          if @check.company.first_hawaiian_4up_checks?
+          render_company = render_company_for(@check.company)
+          if render_company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
-              company: @check.company,
+              company: render_company,
               non_employee_checks: [ @check ],
               starting_slot: params[:starting_slot]
             )
             pdf_data = generator.generate
             filename = "fhb_ne_check_#{@check.check_number || @check.id}.pdf"
           else
-            generator = NonEmployeeCheckGenerator.new(@check)
+            generator = NonEmployeeCheckGenerator.new(@check, company: render_company)
             pdf_data  = @check.voided? ? generator.generate_voided : generator.generate
             filename = generator.filename
           end
@@ -385,6 +387,8 @@ module Api
             type: "application/pdf",
             disposition: "inline",
             filename: filename
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/non_employee_checks/:id/voucher_pdf
@@ -397,6 +401,13 @@ module Api
         end
 
         private
+
+        def render_company_for(company)
+          CheckRenderSettings.resolve(
+            company: company,
+            actor: current_user
+          ).apply_to(company)
+        end
 
         def verified_print_package_required?(check)
           check.pay_period.present? && check.company.require_distinct_check_print_confirmer?

@@ -114,12 +114,29 @@ class FirstHawaiianFourUpCheckGenerator
         end
       end
       pdf.bounding_box([ 0, PAGE_HEIGHT - 4 ], width: PAGE_WIDTH) do
-        pdf.font_size(7) { pdf.text "FIRST HAWAIIAN 4-UP ALIGNMENT TEST - Print on plain paper.", align: :center, color: "CC0000" }
+        pdf.font_size(7) do
+          pdf.text "FIRST HAWAIIAN 4-UP ALIGNMENT TEST - Print at Actual Size / 100% (never Fit or Shrink).", align: :center, color: "CC0000"
+        end
       end
+      draw_one_inch_scale_reference(pdf)
     end.render
   end
 
   private
+
+  def draw_one_inch_scale_reference(pdf)
+    x = 20
+    y = 14
+    pdf.save_graphics_state do
+      pdf.stroke_color "CC0000"
+      pdf.fill_color "CC0000"
+      pdf.line_width 0.8
+      pdf.stroke_line [ x, y ], [ x + 72, y ]
+      pdf.stroke_line [ x, y - 4 ], [ x, y + 4 ]
+      pdf.stroke_line [ x + 72, y - 4 ], [ x + 72, y + 4 ]
+      pdf.font_size(6) { pdf.draw_text "This line must measure exactly 1 inch", at: [ x + 78, y - 2 ] }
+    end
+  end
 
   def check_number_sort_key(value)
     number = value.to_s

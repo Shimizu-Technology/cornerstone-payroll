@@ -93,7 +93,7 @@ Rails.application.routes.draw do
         get   "companies/check_layout",       to: "checks#check_layout"
         post  "companies/test_check_pdf",     to: "checks#test_check_pdf"
         patch "companies/next_check_number",  to: "checks#update_next_check_number"
-        get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
+        match "companies/alignment_test_pdf", to: "checks#alignment_test_pdf", via: [ :get, :post ]
 
         # Printer Profiles (saved check alignment presets per printer)
         resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
@@ -105,6 +105,8 @@ Rails.application.routes.draw do
             post :apply_to_all_companies
           end
         end
+        put "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#update"
+        delete "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#destroy"
 
         resources :companies, only: [:index, :show, :create, :update] do
           member do

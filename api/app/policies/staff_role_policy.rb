@@ -105,6 +105,8 @@ class StaffRolePolicy
     "api/v1/admin/printer_profiles#apply" => :manage_client_configuration,
     "api/v1/admin/printer_profiles#apply_to_all_companies" => :manage_client_configuration,
     "api/v1/admin/printer_profiles#clear_active" => :manage_client_configuration,
+    "api/v1/admin/printer_profile_selections#update" => :payroll_operations,
+    "api/v1/admin/printer_profile_selections#destroy" => :payroll_operations,
     "api/v1/admin/employee_change_requests#index" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,

@@ -15,6 +15,10 @@ class User < ApplicationRecord
   has_many :company_assignments, dependent: :destroy
   has_many :assigned_companies, through: :company_assignments, source: :company
   has_many :time_tracking_delegations, dependent: :destroy
+  has_many :user_printer_profile_selections, dependent: :destroy
+  has_many :selected_printer_profiles, through: :user_printer_profile_selections, source: :printer_profile
+  has_many :created_printer_profiles, class_name: "PrinterProfile", foreign_key: :created_by_id, dependent: :nullify
+  has_many :updated_printer_profiles, class_name: "PrinterProfile", foreign_key: :updated_by_id, dependent: :nullify
   has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
   has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify
