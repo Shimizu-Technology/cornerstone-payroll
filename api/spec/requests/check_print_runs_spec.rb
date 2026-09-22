@@ -42,6 +42,86 @@ RSpec.describe "Check print runs", type: :request do
     )
   end
 
+  it "lists saved packages for the current pay period without exposing another client" do
+    print_run.update!(
+      status: "confirmed",
+      confirmed_at: Time.current,
+      confirmed_by: admin_user
+    )
+    other_company = create(:company)
+    other_period = create(:pay_period, :committed, company: other_company)
+    CheckPrintRun.create!(
+      company: other_company,
+      pay_period: other_period,
+      status: "confirmed",
+      check_stock_type: other_company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ { "source_type" => "payroll_item", "source_id" => 999 } ],
+      storage_key: "check-print-runs/other-package.pdf",
+      filename: "other-package.pdf",
+      sha256: "b" * 64,
+      byte_size: 100,
+      generated_at: Time.current,
+      confirmed_at: Time.current
+    )
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("check_print_runs").sole).to include(
+      "id" => print_run.id,
+      "confirmation_state" => "confirmed",
+      "confirmation_issue" => nil
+    )
+  end
+
+  it "marks an unconfirmed saved package stale when its check data changed" do
+    employee = create(:employee, company: company)
+    item = create(
+      :payroll_item,
+      company: company,
+      pay_period: pay_period,
+      employee: employee,
+      net_pay: 500,
+      check_number: "4101",
+      check_print_count: 0,
+      check_printed_at: nil
+    )
+    run = CheckPrintRun.create!(
+      company: company,
+      pay_period: pay_period,
+      created_by: admin_user,
+      status: "generated",
+      check_stock_type: company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ {
+        "key" => "payroll_item:#{item.id}",
+        "source_type" => "payroll_item",
+        "source_id" => item.id,
+        "check_number" => item.check_number,
+        "payee" => employee.full_name,
+        "amount" => "500.00",
+        "source_updated_at" => item.updated_at.iso8601(6),
+        "printed_at" => nil,
+        "print_count" => 0
+      } ],
+      storage_key: "check-print-runs/stale-package.pdf",
+      filename: "stale-package.pdf",
+      sha256: "c" * 64,
+      byte_size: 100,
+      generated_at: Time.current
+    )
+    item.update_columns(net_pay: 501, updated_at: Time.current)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
+    expect(payload).to include("confirmation_state" => "stale")
+    expect(payload.fetch("confirmation_issue")).to include("different amount")
+  end
+
   it "returns a structured retryable response when package generation has an infrastructure failure" do
     service = instance_double(CheckPrintRunGenerationService)
     allow(CheckPrintRunGenerationService).to receive(:new).and_return(service)

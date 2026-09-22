@@ -3138,6 +3138,9 @@ export const checksApi = {
   printQueue: (payPeriodId: number) =>
     api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
 
+  printRuns: (payPeriodId: number) =>
+    api.get<{ check_print_runs: CheckPrintRun[] }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`),
+
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
       starting_slot: startingSlot,

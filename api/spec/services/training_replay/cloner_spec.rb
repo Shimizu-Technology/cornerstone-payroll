@@ -27,13 +27,13 @@ RSpec.describe TrainingReplay::Cloner do
   before { ActiveJob::Base.queue_adapter = :test }
   after { clear_enqueued_jobs }
 
-  it "blocks the preview until both latest completed periods are committed" do
+  it "uses a calculated latest period without committing it" do
+    trainee
     second_practice_source.update_columns(status: "calculated", committed_at: nil)
 
     preview = TrainingReplay::Preview.new(source_company: source_company).call
 
-    expect(preview).to include(ready: false)
-    expect(preview.fetch(:blockers).join).to include("Commit both latest payrolls")
+    expect(preview).to include(ready: true, blockers: [])
     expect(preview.fetch(:practice_periods).map { |row| row.fetch(:status) }).to eq(%w[committed calculated])
   end
 
@@ -108,6 +108,7 @@ RSpec.describe TrainingReplay::Cloner do
     expect(practices.map { |period| period.payroll_items.sole.hours_worked }).to eq([ 72.to_d, 72.to_d ])
     expect(practices.map { |period| period.payroll_items.sole.gross_pay }).to eq([ 0.to_d, 0.to_d ])
     expect(target.payroll_items.where.not(check_number: nil)).to be_empty
+    expect(target.training_replay_benchmarks.order(:source_pay_period_id).pluck(:source_status)).to eq(%w[committed committed])
 
     expect(baseline.update(notes: "changed")).to be(false)
     expect(baseline.errors.full_messages.join).to include("locked benchmark evidence")
@@ -141,6 +142,29 @@ RSpec.describe TrainingReplay::Cloner do
       .fetch(:flags)
       .find { |flag| flag.fetch(:key) == "new_employee" }
     expect(added_flag.fetch(:message)).to include("training benchmark")
+  end
+
+  it "freezes a calculated source result so later live changes cannot alter training comparison" do
+    second_practice_source.update_columns(status: "calculated", committed_at: nil)
+    target = build_target
+
+    described_class.new(company: target, actor: actor).call
+
+    practice = target.pay_periods.find_by!(test_workspace_source_pay_period: second_practice_source)
+    benchmark = practice.training_replay_benchmark
+    original_expected = PayPeriodComparisonBuilder.new(practice).call.dig(:summary, :gross_pay, :previous)
+    second_practice_source.payroll_items.sole.update!(gross_pay: 99_999, net_pay: 88_888)
+    second_practice_source.update_columns(status: "draft")
+
+    comparison = PayPeriodComparisonBuilder.new(practice).call
+    expect(comparison.dig(:summary, :gross_pay, :previous)).to eq(original_expected)
+    expect(comparison.fetch(:benchmark)).to include(
+      mode: "immutable_snapshot",
+      immutable: true,
+      source_status: "calculated"
+    )
+    expect(benchmark.update(source_status: "committed")).to be(false)
+    expect(benchmark.errors.full_messages).to include("Training replay benchmarks are immutable")
   end
 
   it "carries a calculated practice loan payment into the second practice run without committing" do
