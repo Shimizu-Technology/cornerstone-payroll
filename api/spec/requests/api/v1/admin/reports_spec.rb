@@ -1723,6 +1723,50 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("company_totals", "gross_pay")).to eq(1_250.0)
     end
 
+    it "keeps a selected payroll run isolated when another source has the same pay date" do
+      _batch, historical_period, = create_locked_historical_paycheck(
+        employee: employee, suffix: "same-date-selection", pay_date: native_period.pay_date,
+        gross_pay: 250, net_pay: 200
+      )
+
+      get "/api/v1/admin/reports/ytd_summary", params: {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "native:#{native_period.id}"
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      native_report = response.parsed_body.fetch("report")
+      expect(native_report.dig("company_totals", "gross_pay")).to eq(1_000.0)
+      expect(native_report.fetch("included_payroll_runs").pluck("key")).to eq([ "native:#{native_period.id}" ])
+
+      imported_params = {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "imported:#{historical_period.id}"
+      }
+      get "/api/v1/admin/reports/ytd_summary", params: imported_params
+
+      expect(response).to have_http_status(:ok), response.body
+      imported_report = response.parsed_body.fetch("report")
+      expect(imported_report.dig("company_totals", "gross_pay")).to eq(250.0)
+      expect(imported_report.fetch("included_payroll_runs").pluck("key")).to eq([ "imported:#{historical_period.id}" ])
+
+      get "/api/v1/admin/reports/ytd_summary_csv", params: imported_params
+      expect(response).to have_http_status(:ok), response.body
+      expect(CSV.parse(response.body, headers: true).first.fetch("Gross Pay").to_f).to eq(250.0)
+    end
+
+    it "rejects a summary pay-run key outside the selected company" do
+      other_period = create(:pay_period, :committed, company: create(:company), pay_date: native_period.pay_date)
+
+      get "/api/v1/admin/reports/ytd_summary", params: {
+        start_date: native_period.pay_date.to_s, end_date: native_period.pay_date.to_s,
+        pay_run_key: "native:#{other_period.id}"
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Pay run not found")
+    end
+
     it "reconciles source overtime and labeled deductions without guessing their classification" do
       native_item.update!(overtime_hours: 2.3)
       PayrollItemFieldEntry.create!(
@@ -2893,57 +2937,6 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: other_period.id }
 
       expect(response).to have_http_status(:not_found)
-    end
-  end
-
-  describe "GET /api/v1/admin/reports/payroll_register_history_package" do
-    let!(:first_period) do
-      create(:pay_period, :committed, company: company,
-        start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 15), pay_date: Date.new(2026, 4, 30))
-    end
-    let!(:second_period) do
-      create(:pay_period, :committed, company: company,
-        start_date: Date.new(2026, 4, 16), end_date: Date.new(2026, 4, 30), pay_date: Date.new(2026, 5, 15))
-    end
-
-    before do
-      create(:payroll_item, pay_period: first_period, employee: employee, company: company, gross_pay: 1_000, net_pay: 800)
-      contractor = create(:employee, company: company, department: department, employment_type: "contractor")
-      create(:payroll_item, pay_period: first_period, employee: contractor, company: company,
-        employment_type: "contractor", gross_pay: 600, net_pay: 600)
-      create(:payroll_item, pay_period: second_period, employee: employee, company: company, gross_pay: 1_100, net_pay: 850)
-    end
-
-    it "downloads one Excel register per run with reconciliation manifests" do
-      get "/api/v1/admin/reports/payroll_register_history_package", params: { format: "xlsx" }
-
-      expect(response).to have_http_status(:ok), response.body
-      expect(response.content_type).to include("application/zip")
-      expect(response.headers.fetch("Content-Disposition")).to include("payroll_history_")
-
-      Zip::File.open_buffer(StringIO.new(response.body)) do |archive|
-        report_files = archive.entries.map(&:name).grep(%r{\Areports/.+\.xlsx\z})
-        expect(report_files.length).to eq(2)
-        expect(report_files).to all(satisfy { |path| archive.read(path).start_with?("PK") })
-        manifest = JSON.parse(archive.read("manifest.json"))
-        expect(manifest.fetch("payroll_run_count")).to eq(2)
-        first_run = manifest.fetch("payroll_runs").find { |run| run.fetch("pay_run_key") == "native:#{first_period.id}" }
-        expect(first_run).to include(
-          "work_period_start" => "2026-04-01",
-          "work_period_end" => "2026-04-15",
-          "pay_date" => "2026-04-30",
-          "w2_employee_count" => 1,
-          "contractor_count" => 1,
-          "combined_gross" => 1_600.0
-        )
-      end
-    end
-
-    it "rejects unsupported package formats" do
-      get "/api/v1/admin/reports/payroll_register_history_package", params: { format: "csv" }
-
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/xlsx or pdf/)
     end
   end
 

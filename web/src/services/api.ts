@@ -2173,6 +2173,7 @@ export interface PayrollReportPeriodParams {
   end_date?: string;
   all_time?: boolean;
   include_zero_pay?: boolean;
+  pay_run_key?: string;
 }
 
 export interface TaxSummaryReport {
@@ -2293,6 +2294,7 @@ export interface YtdSummaryParams {
   employment_type?: string;
   status?: string;
   include_zero_pay?: boolean;
+  pay_run_key?: string;
   sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'custom_earnings_total' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'total_deductions' | 'custom_deductions_total' | 'net_pay';
   sort_direction?: 'asc' | 'desc';
 }
@@ -2790,8 +2792,6 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
   payrollRegisterXlsx: (payRunKey: string | number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_run_key: typeof payRunKey === 'number' ? `native:${payRunKey}` : payRunKey }),
-  payrollRegisterHistoryPackage: (format: 'xlsx' | 'pdf') =>
-    api.getBlobWithParams('/admin/reports/payroll_register_history_package', { format }),
   payrollFinalRecord: (payPeriodId: number) =>
     api.get<{ final_record: PayrollFinalRecord }>(`/admin/pay_periods/${payPeriodId}/final_record`),
   payrollFinalRecordXlsx: (payPeriodId: number) =>

@@ -184,7 +184,9 @@ describe('YtdSummaryPanel', () => {
     expect(runOption).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
-    expect(apiMocks.ytdSummary).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-04-30', end_date: '2026-04-30' }));
+    expect(apiMocks.ytdSummary).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: '2026-04-30', end_date: '2026-04-30', pay_run_key: 'native:27',
+    }));
     expect(await screen.findByText('Payroll Summary by Pay Date — 2026-04-01 – 2026-04-15 (paid 2026-04-30)')).toBeTruthy();
   });
 

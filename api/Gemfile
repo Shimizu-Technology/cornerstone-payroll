@@ -47,7 +47,6 @@ gem "combine_pdf"
 
 # Excel generation for sign-off sheets and exports
 gem "caxlsx"
-gem "rubyzip", "~> 3.0"
 
 # PDF + Excel parsing for payroll imports
 gem "pdf-reader"

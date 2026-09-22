@@ -104,45 +104,6 @@ module Api
           )
         end
 
-        def payroll_register_history_package
-          report_format = params[:format].presence || "xlsx"
-          unless report_format.in?(PayrollRegisterHistoryPackageExporter::FORMATS)
-            return render json: { error: "format must be xlsx or pdf" }, status: :unprocessable_entity
-          end
-
-          entries = register_eligible_pay_runs.each_with_index.map do |pay_run, index|
-            report_data, error_response = build_payroll_register_data(pay_run.fetch(:key))
-            return error_response if error_response
-
-            generator = if report_format == "pdf"
-              PayrollRegisterPdfGenerator.new(report_data)
-            else
-              SpreadsheetReportExporter.new(
-                filename: PayrollRegisterCsvExporter.new(report_data).filename.sub(/\.csv\z/, ".xlsx"),
-                sheets: payroll_register_sheets(report_data)
-              )
-            end
-            basename = generator.filename
-            {
-              report: report_data,
-              path: Kernel.format("reports/%03d_%s_%s", index + 1, pay_run.fetch(:key).tr(":", "-"), basename),
-              content: generator.generate
-            }
-          end
-
-          exporter = PayrollRegisterHistoryPackageExporter.new(
-            company: current_company,
-            format: report_format,
-            entries: entries
-          )
-          send_data exporter.generate,
-            filename: exporter.filename,
-            type: PayrollRegisterHistoryPackageExporter::CONTENT_TYPE,
-            disposition: "attachment"
-        rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
-        end
-
         # GET /api/v1/admin/reports/employee_pay_history
         # Individual employee pay records
         def employee_pay_history
@@ -1486,22 +1447,6 @@ module Api
           [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
         end
 
-        def register_eligible_pay_runs
-          pay_runs = []
-          page = 1
-          loop do
-            result = PayrollHistoryQuery.new(
-              company_id: current_company_id,
-              params: { page: page, per_page: PayrollHistoryQuery::MAX_PER_PAGE, sort: "pay_date", direction: "asc", register_eligible: true }
-            ).call
-            pay_runs.concat(result.data)
-            break if page >= result.meta.fetch(:total_pages)
-
-            page += 1
-          end
-          pay_runs
-        end
-
         # Shared data builder for tax summary (JSON + CSV + PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
         # year defaults to current year; quarter is optional (1-4). Exact
@@ -1832,16 +1777,20 @@ module Api
           payroll_reporting_period
         end
 
-        def reportable_pay_periods(period)
-          PayPeriod.reportable_for_company(current_company)
-                   .where(pay_date: period.range)
+        def reportable_pay_periods(period, pay_run: nil)
+          scope = PayPeriod.reportable_for_company(current_company)
+                           .where(pay_date: period.range)
+          return scope unless pay_run
+          return scope.none if pay_run.fetch(:record_type) == "imported"
+
+          scope.where(id: pay_run.fetch(:id))
         end
 
-        def reportable_payroll_items(period)
+        def reportable_payroll_items(period, pay_run: nil)
           PayrollItem.joins(:pay_period)
                      .includes(:employee, :pay_period, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type)
                      .not_voided
-                     .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
+                     .where(pay_periods: { id: reportable_pay_periods(period, pay_run: pay_run).select(:id) })
         end
 
         def employee_pay_history_items(employee, period)
@@ -1855,13 +1804,14 @@ module Api
         end
 
         def build_period_summary_report(period)
+          pay_run = selected_summary_pay_run(period)
           employees = filtered_ytd_employees
-          items = reportable_payroll_items(period).to_a
+          items = reportable_payroll_items(period, pay_run: pay_run).to_a
           items_by_employee = items.group_by(&:employee_id)
           unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
-          historical_paychecks = unified.historical_paychecks
+          historical_paychecks = filter_summary_historical_records(unified.historical_paychecks, pay_run)
           historical_by_employee = historical_paychecks.group_by(&:employee_id)
-          historical_adjustments = unified.historical_adjustments
+          historical_adjustments = filter_summary_historical_adjustments(unified.historical_adjustments, pay_run)
           adjustments_by_employee = historical_adjustments.group_by { |adjustment| adjustment.historical_paycheck.employee_id }
           disclosure = PayrollFieldDisclosure.new(items)
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
@@ -1891,7 +1841,7 @@ module Api
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
-            included_payroll_runs: included_payroll_runs(period, historical_paychecks),
+            included_payroll_runs: included_payroll_runs(period, historical_paychecks, pay_run: pay_run),
             employees: employee_rows,
             employee_visibility: {
               include_zero_pay: include_zero_pay_employees?,
@@ -1912,7 +1862,7 @@ module Api
               native_items: items,
               historical_paychecks: historical_paychecks,
               historical_adjustments: historical_adjustments,
-              excluded_unlinked_paychecks: unified.unlinked_historical_paychecks
+              excluded_unlinked_paychecks: filter_summary_historical_records(unified.unlinked_historical_paychecks, pay_run)
             ),
             payroll_fields: {
               totals: disclosure.totals,
@@ -1927,8 +1877,8 @@ module Api
           }
         end
 
-        def included_payroll_runs(period, historical_paychecks)
-          native = reportable_pay_periods(period).order(:pay_date, :start_date, :id).map do |pay_period|
+        def included_payroll_runs(period, historical_paychecks, pay_run: nil)
+          native = reportable_pay_periods(period, pay_run: pay_run).order(:pay_date, :start_date, :id).map do |pay_period|
             {
               key: "native:#{pay_period.id}", source: "Cornerstone", status: pay_period.status,
               work_period_start: pay_period.start_date, work_period_end: pay_period.end_date, pay_date: pay_period.pay_date
@@ -1946,6 +1896,45 @@ module Api
             end
 
           (native + imported).sort_by { |pay_run| [ pay_run[:pay_date], pay_run[:work_period_start], pay_run[:key] ] }
+        end
+
+        def selected_summary_pay_run(period)
+          raw_key = params[:pay_run_key].presence
+          return nil unless raw_key
+
+          match = raw_key.to_s.match(/\A(native|imported):(\d+)\z/)
+          raise ArgumentError, "pay_run_key must use native:<id> or imported:<id>" unless match
+
+          record_type = match[1]
+          record_id = match[2].to_i
+          pay_date = if record_type == "native"
+            PayPeriod.reportable_for_company(current_company).where(id: record_id).pick(:pay_date)
+          else
+            HistoricalPayPeriod
+              .joins(:historical_import_batch)
+              .where(id: record_id, company_id: current_company_id, period_type: "regular")
+              .where(historical_import_batches: { company_id: current_company_id, status: "locked" })
+              .pick(:pay_date)
+          end
+          raise ArgumentError, "Pay run not found" unless pay_date && period.range.cover?(pay_date)
+
+          { key: raw_key.to_s, record_type: record_type, id: record_id }
+        end
+
+        def filter_summary_historical_records(records, pay_run)
+          return records unless pay_run
+          return [] if pay_run.fetch(:record_type) == "native"
+
+          records.select { |record| record.historical_pay_period_id == pay_run.fetch(:id) }
+        end
+
+        def filter_summary_historical_adjustments(adjustments, pay_run)
+          return adjustments unless pay_run
+          return [] if pay_run.fetch(:record_type) == "native"
+
+          adjustments.select do |adjustment|
+            adjustment.historical_paycheck.historical_pay_period_id == pay_run.fetch(:id)
+          end
         end
 
         def period_summary_component_columns(entries, employee_ids)

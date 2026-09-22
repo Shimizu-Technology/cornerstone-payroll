@@ -22,6 +22,7 @@ import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/repo
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
+import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -68,6 +69,22 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+/** Loads every payroll run that can be rendered as a final or rehearsal register. */
+async function fetchRegisterEligiblePayRuns(companyId: number): Promise<PayrollHistoryRecord[]> {
+  const runs: PayrollHistoryRecord[] = [];
+  let page = 1;
+  let totalPages = 1;
+  while (page <= totalPages) {
+    const response = await payrollHistoryApi.list({
+      page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true,
+    }, companyId);
+    runs.push(...response.data);
+    totalPages = response.meta.total_pages;
+    page += 1;
+  }
+  return runs;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -148,15 +165,7 @@ export function PayrollRegisterPanel() {
     let cancelled = false;
     const loadPeriods = async () => {
       try {
-        const periods: PayrollHistoryRecord[] = [];
-        let page = 1;
-        let totalPages = 1;
-        while (page <= totalPages) {
-          const res = await payrollHistoryApi.list({ page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true }, activeCompanyId);
-          periods.push(...res.data);
-          totalPages = res.meta.total_pages;
-          page += 1;
-        }
+        const periods = await fetchRegisterEligiblePayRuns(activeCompanyId);
         if (cancelled) return;
         setPayPeriods(periods);
         setSelectedPayRunKey(periods[0]?.key || '');
@@ -278,8 +287,15 @@ export function PayrollRegisterPanel() {
     setExportingHistoryPackage(format);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.payrollRegisterHistoryPackage(format);
-      triggerDownload(blob, filename || `payroll_history_${format}.zip`);
+      const { blob, filename } = await buildPayrollHistoryPackage({
+        runs: payPeriods,
+        format,
+        fetchReport: (runKey) => reportsApi.payrollRegister(runKey),
+        fetchFile: (runKey) => format === 'pdf'
+          ? reportsApi.payrollRegisterPdf(runKey)
+          : reportsApi.payrollRegisterXlsx(runKey),
+      });
+      triggerDownload(blob, filename);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1386,15 +1402,7 @@ export function YtdSummaryPanel() {
     setSelectedPayRunKey('');
     void (async () => {
       try {
-        const runs: PayrollHistoryRecord[] = [];
-        let page = 1;
-        let totalPages = 1;
-        while (page <= totalPages) {
-          const response = await payrollHistoryApi.list({ page, per_page: 100, sort: 'pay_date', direction: 'desc', register_eligible: true }, activeCompanyId);
-          runs.push(...response.data);
-          totalPages = response.meta.total_pages;
-          page += 1;
-        }
+        const runs = await fetchRegisterEligiblePayRuns(activeCompanyId);
         if (cancelled) return;
         setPayRuns(runs);
         setSelectedPayRunKey(runs[0]?.key || '');
@@ -1422,7 +1430,9 @@ export function YtdSummaryPanel() {
   }
 
   function selectedPeriodParams(): PayrollReportPeriodParams {
-    if (periodMode === 'pay_run' && selectedPayRun) return { start_date: selectedPayRun.pay_date, end_date: selectedPayRun.pay_date };
+    if (periodMode === 'pay_run' && selectedPayRun) {
+      return { start_date: selectedPayRun.pay_date, end_date: selectedPayRun.pay_date, pay_run_key: selectedPayRun.key };
+    }
     if (periodMode === 'ytd') return { start_date: `${currentYear}-01-01`, end_date: localIsoDate(new Date()) };
     if (periodMode === 'rolling_year') {
       const end = new Date();
