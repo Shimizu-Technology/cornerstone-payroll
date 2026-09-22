@@ -134,8 +134,8 @@ module MigrationPromotion
     def warnings
       [
         "The backup is a sealed, read-only copy of the clean client and its locked historical archive.",
-        "Applying replaces the clean client's employee setup and empty overlapping draft, then records the two rehearsal payrolls as migrated committed payroll.",
-        "No checks are printed, payments sent, filings submitted, messages sent, or external payroll syncs started."
+        "Choose the payment state for each payroll before applying: already-paid payrolls become locked records; unpaid payrolls return to the normal live review and commit workflow.",
+        "Applying replaces the clean client's employee setup and empty overlapping draft. No checks are printed, payments sent, filings submitted, messages sent, or external payroll syncs started."
       ]
     end
   end

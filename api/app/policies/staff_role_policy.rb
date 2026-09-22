@@ -83,6 +83,8 @@ class StaffRolePolicy
     "api/v1/admin/payroll_filing_records#create_event" => :manage_filing_review,
     "api/v1/admin/non_employee_checks#mark_paid" => :payroll_operations,
     "api/v1/admin/payroll_items#update_payment_method" => :payroll_operations,
+    "api/v1/admin/pay_periods#promoted_payment_preview" => :manage_organization,
+    "api/v1/admin/pay_periods#prepare_promoted_payment" => :manage_organization,
     "api/v1/admin/pay_periods#adopt_confirmed_workweek" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#create" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#update" => :manage_client_configuration,

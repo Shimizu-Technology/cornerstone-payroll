@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { companiesApi, ApiError } from '@/services/api';
-import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, TrainingReplayPreview } from '@/services/api';
+import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, PromotionPaymentDisposition, TrainingReplayPreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -168,11 +168,14 @@ export function Clients() {
   const [loadingPromotion, setLoadingPromotion] = useState(false);
   const [promotionAction, setPromotionAction] = useState<'backup' | 'apply' | null>(null);
   const [promotionConfirmed, setPromotionConfirmed] = useState(false);
+  const [promotionDispositions, setPromotionDispositions] = useState<Record<number, PromotionPaymentDisposition>>({});
   const [promotionError, setPromotionError] = useState<string | null>(null);
   const [promotionNotice, setPromotionNotice] = useState<string | null>(null);
   const promotionPreviewRequestIdRef = useRef(0);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
   const testWorkspaces = companies.filter(isTestWorkspace);
+  const allPromotionDispositionsSelected = Boolean(promotionPreview?.source_periods.length) &&
+    promotionPreview!.source_periods.every(period => Boolean(promotionDispositions[period.id]));
   const groupedCompanies = [
     { label: 'Production clients', companies: productionCompanies },
     { label: 'Test workspaces', companies: testWorkspaces },
@@ -209,6 +212,11 @@ export function Clients() {
       const response = await companiesApi.migrationPromotionPreview(rehearsalId);
       if (promotionPreviewRequestIdRef.current === requestId) {
         setPromotionPreview(response.migration_promotion);
+        setPromotionDispositions(current => Object.fromEntries(
+          response.migration_promotion.source_periods
+            .filter(period => current[period.id])
+            .map(period => [period.id, current[period.id]]),
+        ));
         setPromotionConfirmed(false);
       }
     } catch (err) {
@@ -338,6 +346,7 @@ export function Clients() {
     handleCloseTraining();
     setPromotionRehearsalId(company.id);
     setPromotionPreview(null);
+    setPromotionDispositions({});
     setPromotionConfirmed(false);
     setPromotionError(null);
     setPromotionNotice(null);
@@ -348,6 +357,7 @@ export function Clients() {
     promotionPreviewRequestIdRef.current += 1;
     setPromotionRehearsalId(null);
     setPromotionPreview(null);
+    setPromotionDispositions({});
     setPromotionConfirmed(false);
     setPromotionError(null);
     setPromotionAction(null);
@@ -369,11 +379,16 @@ export function Clients() {
   };
 
   const handleApplyPromotion = async () => {
-    if (!promotionRehearsalId || !promotionPreview?.ready_to_apply || !promotionConfirmed) return;
+    if (!promotionRehearsalId || !promotionPreview?.ready_to_apply || !promotionConfirmed ||
+      !promotionPreview.source_periods.every(period => promotionDispositions[period.id])) return;
     setPromotionAction('apply');
     setPromotionError(null);
     try {
-      const response = await companiesApi.applyMigrationPromotion(promotionRehearsalId, 'APPLY REHEARSAL TO LIVE CLIENT');
+      const response = await companiesApi.applyMigrationPromotion(
+        promotionRehearsalId,
+        'APPLY REHEARSAL TO LIVE CLIENT',
+        promotionDispositions,
+      );
       const targetName = response.company.name;
       handleClosePromotion();
       setPromotionNotice(`${targetName} now has the verified rehearsal setup and both migrated payrolls.`);
@@ -877,7 +892,10 @@ export function Clients() {
                   </div>
 
                   <div>
-                    <p className="text-sm font-semibold text-neutral-900">Payrolls that will be recorded</p>
+                    <p className="text-sm font-semibold text-neutral-900">Choose how each payroll should continue</p>
+                    <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-600">
+                      Tell Cornerstone whether each rehearsal payroll was already paid elsewhere or still needs to be paid from the clean client.
+                    </p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       {promotionPreview.source_periods.map((period, index) => (
                         <div key={period.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
@@ -888,9 +906,51 @@ export function Clients() {
                           <p className="mt-2 text-sm text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
                           <p className="mt-1 text-xs text-neutral-500">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
                           <div className="mt-3 flex gap-6 border-t border-neutral-200 pt-3 text-sm"><span><span className="text-neutral-500">Gross </span><strong>{formatMoney(period.gross_pay)}</strong></span><span><span className="text-neutral-500">Net </span><strong>{formatMoney(period.net_pay)}</strong></span></div>
+                          <fieldset className="mt-4 space-y-2">
+                            <legend className="sr-only">Payment status for payroll {index + 1}</legend>
+                            <label className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition ${promotionDispositions[period.id] === 'record_only' ? 'border-primary-400 ring-2 ring-primary-100' : 'border-neutral-200 hover:border-primary-200'}`}>
+                              <input
+                                type="radio"
+                                name={`promotion-disposition-${period.id}`}
+                                value="record_only"
+                                checked={promotionDispositions[period.id] === 'record_only'}
+                                onChange={() => {
+                                  setPromotionDispositions(current => ({ ...current, [period.id]: 'record_only' }));
+                                  setPromotionConfirmed(false);
+                                }}
+                                className="mt-1 h-4 w-4 border-neutral-300 text-primary-700"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-neutral-900">Already paid elsewhere — record only</span>
+                                <span className="mt-1 block text-xs leading-5 text-neutral-600">Save it as a locked historical payroll and rebuild YTD totals. No checks or payment actions will be created.</span>
+                              </span>
+                            </label>
+                            <label className={`flex cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 transition ${promotionDispositions[period.id] === 'process_in_cornerstone' ? 'border-primary-400 ring-2 ring-primary-100' : 'border-neutral-200 hover:border-primary-200'}`}>
+                              <input
+                                type="radio"
+                                name={`promotion-disposition-${period.id}`}
+                                value="process_in_cornerstone"
+                                checked={promotionDispositions[period.id] === 'process_in_cornerstone'}
+                                onChange={() => {
+                                  setPromotionDispositions(current => ({ ...current, [period.id]: 'process_in_cornerstone' }));
+                                  setPromotionConfirmed(false);
+                                }}
+                                className="mt-1 h-4 w-4 border-neutral-300 text-primary-700"
+                              />
+                              <span>
+                                <span className="block text-sm font-semibold text-neutral-900">Unpaid — process in Cornerstone</span>
+                                <span className="mt-1 block text-xs leading-5 text-neutral-600">Bring it in as calculated. Review, approve, and commit it normally before assigning and printing checks.</span>
+                              </span>
+                            </label>
+                          </fieldset>
                         </div>
                       ))}
                     </div>
+                    {promotionPreview.ready_to_apply && !allPromotionDispositionsSelected && (
+                      <p role="alert" className="mt-3 flex items-center gap-2 text-sm font-medium text-amber-800">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />Choose a payment status for every payroll before applying the rehearsal.
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -918,7 +978,7 @@ export function Clients() {
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${promotionPreview.ready_to_apply ? 'bg-primary-700 text-white' : 'bg-neutral-200 text-neutral-700'}`}>2</div>
                         <div>
                           <p className="font-semibold text-neutral-950">Apply setup and both payrolls</p>
-                          <p className="mt-1 text-sm leading-6 text-neutral-600">Replaces only the verified setup and matching empty draft, records both payrolls, rebuilds YTD totals, and seals the rehearsal.</p>
+                          <p className="mt-1 text-sm leading-6 text-neutral-600">Replaces only the verified setup and matching empty draft. Paid payrolls become locked records; unpaid payrolls return to the normal review-and-payment workflow. The rehearsal is then sealed.</p>
                         </div>
                       </div>
                     </div>
@@ -931,7 +991,7 @@ export function Clients() {
                     </div>
                   )}
 
-                  {(promotionPreview.ready_to_back_up || promotionPreview.ready_to_apply) && (
+                  {(promotionPreview.ready_to_back_up || (promotionPreview.ready_to_apply && allPromotionDispositionsSelected)) && (
                     <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-300 p-4 text-sm text-neutral-700">
                       <input type="checkbox" checked={promotionConfirmed} onChange={event => setPromotionConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
                       <span>{promotionPreview.ready_to_apply
@@ -955,7 +1015,7 @@ export function Clients() {
                     </Button>
                   )}
                   {promotionPreview?.ready_to_apply && (
-                    <Button onClick={handleApplyPromotion} disabled={!promotionConfirmed || Boolean(promotionAction)}>
+                    <Button onClick={handleApplyPromotion} disabled={!promotionConfirmed || !allPromotionDispositionsSelected || Boolean(promotionAction)}>
                       <ArrowRight className="mr-2 h-4 w-4" />{promotionAction === 'apply' ? 'Applying verified migration…' : 'Apply to clean client'}
                     </Button>
                   )}

@@ -268,6 +268,8 @@ Rails.application.routes.draw do
             post :approve
             post :unapprove
             post :commit
+            get :promoted_payment_preview
+            post :prepare_promoted_payment
             patch :correct_pay_date
             post :generate_fit_check
             post :retry_tax_sync

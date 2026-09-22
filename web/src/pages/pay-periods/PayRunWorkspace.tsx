@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Header } from '@/components/layout/Header';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
@@ -42,6 +43,7 @@ import {
 import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { checksApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
+import type { PromotedPaymentPreview } from '@/services/api';
 import type { PayPeriod, PayrollItem, PaymentDeliveryMethod } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
@@ -290,6 +292,7 @@ interface PayRunChecksProps {
 }
 
 function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, onChanged, isRehearsal }: PayRunChecksProps): ReactElement {
+  const { isAdmin } = useAuth();
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
   const [mockPreviewError, setMockPreviewError] = useState<string | null>(null);
@@ -302,9 +305,42 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const [confirmNotPaid, setConfirmNotPaid] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [paymentPreview, setPaymentPreview] = useState<PromotedPaymentPreview | null>(null);
+  const [paymentPreviewBusy, setPaymentPreviewBusy] = useState(false);
+  const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentStartingNumber, setPaymentStartingNumber] = useState('');
+  const [paymentCheckDate, setPaymentCheckDate] = useState('');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const nextMethod: PaymentDeliveryMethod = switchItem?.effective_payment_delivery_method === 'direct_deposit' ? 'paper_check' : 'direct_deposit';
   const mockPreviewEligible = items.filter((item) => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay || 0) > 0).length;
   const canPreviewMockChecks = isRehearsal && (payRun.status === 'calculated' || payRun.status === 'approved');
+  const recordOnlyPromoted = !isRehearsal && payRun.status === 'committed' &&
+    Boolean(payRun.promotion_source_pay_period_id) && payRun.promotion_payment_disposition === 'record_only' &&
+    countActivePayrollChecks(items) === 0;
+
+  useEffect(() => {
+    setPaymentPreview(null);
+    setPaymentPreviewError(null);
+    if (!recordOnlyPromoted || !isAdmin) return;
+
+    let active = true;
+    setPaymentPreviewBusy(true);
+    void payPeriodsApi.promotedPaymentPreview(payRun.id).then((response) => {
+      if (!active) return;
+      setPaymentPreview(response.promoted_payment);
+      setPaymentStartingNumber(response.promoted_payment.suggested_first_check_number || String(response.promoted_payment.current_next_check_number));
+    }).catch((error) => {
+      if (active) setPaymentPreviewError(error instanceof Error ? error.message : 'Could not verify this promoted payroll.');
+    }).finally(() => {
+      if (active) setPaymentPreviewBusy(false);
+    });
+
+    return () => { active = false; };
+  }, [isAdmin, payRun.id, recordOnlyPromoted]);
 
   const previewMockChecks = async () => {
     setMockPreviewBusy(true);
@@ -373,9 +409,72 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     }
   };
 
+  const resetPaymentDialog = () => {
+    setPaymentDialogOpen(false);
+    setPaymentCheckDate('');
+    setPaymentConfirmed(false);
+    setPaymentError(null);
+  };
+
+  const preparePromotedPayment = async () => {
+    if (!paymentPreview?.eligible || !paymentCheckDate || !paymentStartingNumber || !paymentConfirmed) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      const response = await payPeriodsApi.preparePromotedPayment(payRun.id, {
+        acknowledgement: 'PREPARE PROMOTED PAYROLL FOR PAYMENT',
+        starting_check_number: paymentStartingNumber,
+        check_date: paymentCheckDate,
+      });
+      onChanged(response.pay_period);
+      setPaymentPreview(response.promoted_payment);
+      setPaymentNotice(response.promoted_payment.paper_check_count === 1
+        ? '1 check is numbered and ready to review and print.'
+        : `${response.promoted_payment.paper_check_count} checks are numbered and ready to review and print.`);
+      setCheckPrintRefreshToken((value) => value + 1);
+      resetPaymentDialog();
+      setCheckPrintOpen(true);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : 'Could not prepare this promoted payroll for payment.');
+    } finally {
+      setPaymentBusy(false);
+    }
+  };
+
   return (
     <>
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
+      {paymentNotice && (
+        <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
+          <strong>Ready to print.</strong> {paymentNotice}
+        </div>
+      )}
+      {recordOnlyPromoted && (
+        <Card className="border-amber-200 bg-amber-50/70">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Promoted payroll is recorded but unpaid</p>
+              <h2 className="mt-2 text-lg font-semibold text-neutral-950">Prepare the original checks before printing</h2>
+              <p className="mt-2 text-sm leading-6 text-neutral-700">
+                This payroll was copied as a historical record, so check numbers were intentionally left blank. Preparing it assigns paper-check numbers once without recalculating pay or adding YTD, loan, or liability amounts again.
+              </p>
+              {!isAdmin && <p className="mt-2 text-sm font-medium text-amber-900">Ask an organization administrator to prepare this payroll. Accountants and managers can use the normal check workflow after that.</p>}
+              {paymentPreviewBusy && <p role="status" className="mt-2 text-sm text-neutral-600">Verifying that this payroll has no prior payment activity…</p>}
+              {paymentPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{paymentPreviewError}</p>}
+              {paymentPreview && !paymentPreview.eligible && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-danger-700">{paymentPreview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
+            </div>
+            {isAdmin && (
+              <Button
+                className="shrink-0"
+                onClick={() => setPaymentDialogOpen(true)}
+                disabled={paymentPreviewBusy || !paymentPreview?.eligible}
+              >
+                Prepare checks for payment
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader className="flex-row items-start justify-between gap-4">
           <div>
@@ -467,6 +566,49 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           <DialogFooter>
             <Button variant="outline" onClick={resetSwitchDialog} disabled={switchBusy}>Cancel</Button>
             <Button onClick={() => void switchPaymentMethod()} disabled={switchBusy || switchReason.trim().length < 10 || !confirmNotPaid}>{switchBusy ? 'Switching…' : 'Confirm switch'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={paymentDialogOpen} onOpenChange={(open) => { if (!open && !paymentBusy) resetPaymentDialog(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Prepare promoted payroll for payment</DialogTitle>
+            <DialogDescription>
+              Assign check numbers to the unpaid paper checks. Payroll amounts and financial totals will not be recalculated or posted again.
+            </DialogDescription>
+          </DialogHeader>
+          {paymentPreview && (
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+              <p><strong>{paymentPreview.paper_check_count}</strong> paper check{paymentPreview.paper_check_count === 1 ? '' : 's'} totaling <strong>{formatCurrency(Number(paymentPreview.paper_check_total))}</strong></p>
+              <p className="mt-1">Suggested range: {paymentPreview.suggested_first_check_number}–{paymentPreview.suggested_last_check_number}</p>
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="First physical check number"
+              inputMode="numeric"
+              value={paymentStartingNumber}
+              onChange={(event) => setPaymentStartingNumber(event.target.value.replace(/\D/g, '').slice(0, 7))}
+            />
+            <Input
+              label="Date to print on checks"
+              type="date"
+              min={payRun.end_date}
+              value={paymentCheckDate}
+              onChange={(event) => setPaymentCheckDate(event.target.value)}
+            />
+          </div>
+          <p className="text-sm leading-6 text-neutral-600">Use the actual date Cornerstone will issue these checks. Do not assume or backdate it to the original pay date.</p>
+          <label className="flex items-start gap-2 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+            <input type="checkbox" className="mt-1" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
+            I confirm this payroll has not been paid by paper check or bank transfer, and these are the original employee payments—not replacements.
+          </label>
+          {paymentError && <p role="alert" className="text-sm text-danger-700">{paymentError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={resetPaymentDialog} disabled={paymentBusy}>Cancel</Button>
+            <Button onClick={() => void preparePromotedPayment()} disabled={paymentBusy || !paymentStartingNumber || !paymentCheckDate || !paymentConfirmed}>
+              {paymentBusy ? 'Preparing checks…' : 'Assign check numbers'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
