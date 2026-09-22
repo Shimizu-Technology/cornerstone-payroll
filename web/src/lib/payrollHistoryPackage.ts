@@ -69,17 +69,24 @@ function manifestCsv(rows: PayrollHistoryManifestRow[]): string {
   return `${lines.join('\r\n')}\r\n`;
 }
 
+function shiftDecimal(value: number, places: number): number {
+  const [coefficient, exponent = '0'] = value.toString().split('e');
+  return Number(`${coefficient}e${Number(exponent) + places}`);
+}
+
 function money(value: unknown): number {
-  const amount = Number(value || 0);
-  return Math.round((amount + Math.sign(amount) * Number.EPSILON) * 100) / 100;
+  const amount = Number(value ?? 0);
+  const roundedMagnitude = shiftDecimal(Math.round(shiftDecimal(Math.abs(amount), 2)), -2);
+  const rounded = roundedMagnitude * Math.sign(amount);
+  return Object.is(rounded, -0) ? 0 : rounded;
 }
 
 function manifestRow(report: PayrollRegisterReport['report'], path: string, fallbackKey: string): PayrollHistoryManifestRow {
   const summary = report.summary;
-  const w2Gross = money(summary.total_gross);
-  const contractorGross = money(summary.contractor_total_gross);
-  const w2Net = money(summary.total_net);
-  const contractorNet = money(summary.contractor_total_net);
+  const w2GrossAmount = Number(summary.total_gross ?? 0);
+  const contractorGrossAmount = Number(summary.contractor_total_gross ?? 0);
+  const w2NetAmount = Number(summary.total_net ?? 0);
+  const contractorNetAmount = Number(summary.contractor_total_net ?? 0);
   return {
     pay_run_key: report.pay_period.key || fallbackKey,
     source: report.source?.label || 'Unknown',
@@ -89,12 +96,12 @@ function manifestRow(report: PayrollRegisterReport['report'], path: string, fall
     pay_date: report.pay_period.pay_date,
     w2_employee_count: Number(summary.employee_count || 0),
     contractor_count: Number(summary.contractor_count || 0),
-    w2_gross: w2Gross,
-    contractor_gross: contractorGross,
-    combined_gross: money(w2Gross + contractorGross),
-    w2_net: w2Net,
-    contractor_net: contractorNet,
-    combined_net: money(w2Net + contractorNet),
+    w2_gross: money(w2GrossAmount),
+    contractor_gross: money(contractorGrossAmount),
+    combined_gross: money(w2GrossAmount + contractorGrossAmount),
+    w2_net: money(w2NetAmount),
+    contractor_net: money(contractorNetAmount),
+    combined_net: money(w2NetAmount + contractorNetAmount),
     report_file: path,
   };
 }
