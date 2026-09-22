@@ -4,6 +4,8 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe CheckGenerator do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) do
     create(:company,
       name: "MoSa's Restaurant",
@@ -65,9 +67,10 @@ RSpec.describe CheckGenerator do
       category: "loan", amount: BigDecimal("250"), source: "employee_default")
     payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
 
-    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("428.36")))
+    expect(generator.send(:deduction_rows)).to include(
+      [ "Loan", "428.36", "428.36" ],
+      [ "Loan - Madela Severin", "250.00", "250.00" ]
+    )
     expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
   end
 
@@ -187,6 +190,57 @@ RSpec.describe CheckGenerator do
       expect(text).to include("15.00")
       expect(text).to include("25.00")
     end
+
+    it "prints earlier additional withholding when the current check has none" do
+      earlier_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 19))
+      create(:payroll_item,
+        pay_period: earlier_period,
+        employee: employee,
+        company: company,
+        additional_withholding: 15)
+
+      expect(generator.send(:tax_rows)).to include([ "Addtl W/H (W-4 4c)", "0.00", "15.00" ])
+    end
+
+    it "renders migrated deduction and employer contribution YTD balances on the check stubs" do
+      apply_historical_ytd_balance(
+        company: company,
+        employee: employee,
+        through_period_end: Date.new(2026, 2, 28),
+        through_pay_date: Date.new(2026, 3, 10),
+        source_breakdown: {
+          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
+          "after_tax_deduction_breakdown" => {
+            "Health Insurance" => "2457.00",
+            "Case No. 2952492" => "3024.00"
+          },
+          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "7646.04" }
+        },
+        tips_paid_out: 1_900.80
+      )
+      create_statement_field_entry(
+        label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
+      create_statement_field_entry(
+        label: "Remittance ID 2952492", amount: 168, treatment: "post_tax_deduction", category: "child_support")
+      payroll_item.update!(retirement_payment: 927.91, employer_retirement_match: 381.08)
+
+      deduction_rows = generator.send(:deduction_rows)
+      other_pay_rows = generator.send(:other_pay_rows)
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(deduction_rows).to include([ "401(k) Pre-Tax", "927.91", "18,558.20" ])
+      expect(deduction_rows).to include([ "Health Insurance", "126.00", "2,583.00" ])
+      expect(deduction_rows).to include([ "Remittance ID 2952492", "168.00", "3,192.00" ])
+      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
+      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "381.08", "8,027.12" ])
+      expect(text).to include("401(k) Pre-Tax", "18,558.20")
+      expect(text).to include("ER 401(k) Pre-Tax", "8,027.12")
+      expect(text).to include("26,234.00")
+    end
   end
 
   describe "#generate_voided" do
@@ -293,10 +347,10 @@ RSpec.describe CheckGenerator do
         source: "manual"
       )
 
-      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+      row = generator.send(:statement_deduction_rows).find { |candidate| candidate.label == "Rent Deduction" }
 
-      expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(25.0)
-      expect(generator.send(:ytd_visible_deds)).to eq(generator.send(:ytd)[:deds] + 25.0)
+      expect(row).to have_attributes(current: 25.to_d, ytd: 25.to_d)
+      expect(generator.send(:ytd_visible_deds)).to eq(25.to_d)
     end
 
     it "prints taxable payroll field additions with year-to-date amounts in pay rows" do
@@ -447,5 +501,26 @@ RSpec.describe CheckGenerator do
       method.call(text, options)
     end
     void_draws
+  end
+
+  def create_statement_field_entry(label:, amount:, treatment:, category:)
+    definition = create(
+      :payroll_field_definition,
+      company: company,
+      name: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category
+    )
+    create(
+      :payroll_item_field_entry,
+      payroll_item: payroll_item,
+      payroll_field_definition: definition,
+      label: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category,
+      amount: amount
+    )
   end
 end

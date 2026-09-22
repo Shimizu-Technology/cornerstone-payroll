@@ -278,7 +278,21 @@ RSpec.describe PayStubGenerator do
 
     rent_entry = payroll_item.payroll_item_field_entries.find_by!(label: "Rent Deduction")
     expect(generator.send(:ytd_payroll_field_amount, rent_entry)).to eq(20.0)
-    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(1024.0)
+    expect(PayrollStatementYtdBreakdown.new(payroll_item).deductions.sum(0.to_d, &:ytd)).to eq(1064.0)
+  end
+
+  it "prints earlier additional withholding when the current check has none" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      additional_withholding: 15)
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+    row = text.lines.find { |line| line.include?("Additional Withholding") }
+
+    expect(row).to include("$0.00", "$15.00")
   end
 
   it "limits payroll field YTD values to the current calendar year" do
