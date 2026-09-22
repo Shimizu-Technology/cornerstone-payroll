@@ -27,6 +27,13 @@ const queueResponse = {
     voided: 0,
     check_stock_type: 'bottom_check',
     slot_count: 1,
+    printer_profile: {
+      id: 8,
+      name: 'Payroll Room Printer',
+      check_stock_type: 'bottom_check',
+      lock_version: 3,
+      updated_at: '2026-09-22T00:00:00Z',
+    },
   },
 };
 
