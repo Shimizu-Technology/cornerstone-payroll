@@ -128,6 +128,38 @@ describe('Clients migration promotion', () => {
     expect(screen.getByText('Workspace admin')).toBeTruthy();
   });
 
+  it('routes the guided migration choice into the rehearsal preview', async () => {
+    const user = userEvent.setup();
+    apiMocks.migrationRehearsalPreview.mockResolvedValue({
+      migration_rehearsal: {
+        source_company: { id: target.id, name: target.name },
+        historical_import_batch_id: 12,
+        ready: true,
+        blockers: [],
+        warnings: ['The live client remains unchanged.'],
+        existing_rehearsal: null,
+        copy_summary: {
+          employees: 114,
+          active_employees: 57,
+          imported_pay_periods: 2,
+          imported_paychecks: 114,
+          retained_source_files: 3,
+          source_file_bytes: 4096,
+        },
+      },
+    });
+
+    render(<Clients />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create test workspace' }));
+    await user.selectOptions(screen.getByLabelText('Choose a production client'), String(target.id));
+    await user.click(screen.getByRole('button', { name: /Rehearse a migration/i }));
+
+    await waitFor(() => expect(apiMocks.migrationRehearsalPreview).toHaveBeenCalledWith(target.id));
+    expect(await screen.findByRole('heading', { name: 'Create a migration rehearsal' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Create a test workspace' })).toBeNull();
+  });
+
   it('explains workspace types and statuses in the expandable guide', async () => {
     const user = userEvent.setup();
     render(<Clients />);

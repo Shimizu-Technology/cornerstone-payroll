@@ -541,7 +541,7 @@ export function Clients() {
 
         {/* Primary actions */}
         {canManageClients && !showForm && (
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen}>
               <FlaskConical className="mr-2 h-4 w-4" />
               Create test workspace
@@ -559,7 +559,7 @@ export function Clients() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Guided setup</p>
-                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-neutral-950">Create a test workspace</h2>
+                  <h2 className="mt-2 text-lg font-semibold tracking-tight text-neutral-950">Create a test workspace</h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">Choose the live client first, then choose what the workspace is for. The live client remains unchanged.</p>
                 </div>
                 <Button variant="ghost" size="sm" onClick={handleCloseWorkspaceBuilder} aria-label="Close test workspace setup">
@@ -575,7 +575,7 @@ export function Clients() {
                 </div>
                 <Select
                   id="test-workspace-source"
-                  className="mt-3"
+                  className="mt-4"
                   value={workspaceBuilderSourceId ?? ''}
                   onChange={event => setWorkspaceBuilderSourceId(event.target.value ? Number(event.target.value) : null)}
                 >
@@ -589,7 +589,7 @@ export function Clients() {
                   <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${workspaceBuilderSource ? 'bg-primary-700 text-white' : 'bg-neutral-200 text-neutral-500'}`}>2</span>
                   <p className="text-sm font-semibold text-neutral-900">Choose the goal</p>
                 </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <button
                     type="button"
                     disabled={!workspaceBuilderSource}
@@ -597,19 +597,19 @@ export function Clients() {
                     className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:pointer-events-none disabled:opacity-50"
                   >
                     <GraduationCap aria-hidden="true" className="h-5 w-5 text-primary-700" />
-                    <span className="mt-3 block font-semibold text-neutral-950">Practice completed payrolls</span>
-                    <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-primary-700">Training replay</span>
+                    <span className="mt-4 block font-semibold text-neutral-950">Practice completed payrolls</span>
+                    <span className="mt-2 block text-xs font-semibold uppercase tracking-wide text-primary-700">Training replay</span>
                     <span className="mt-2 block text-sm leading-5 text-neutral-600">A trainee safely reproduces the latest two real payrolls and compares results.</span>
                   </button>
                   <button
                     type="button"
                     disabled={!workspaceBuilderSource}
                     onClick={() => workspaceBuilderSource && void handleOpenRehearsal(workspaceBuilderSource)}
-                    className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:pointer-events-none disabled:opacity-50"
+                    className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-warning-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <FlaskConical aria-hidden="true" className="h-5 w-5 text-amber-700" />
-                    <span className="mt-3 block font-semibold text-neutral-950">Rehearse a migration</span>
-                    <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-amber-700">Migration test</span>
+                    <FlaskConical aria-hidden="true" className="h-5 w-5 text-warning-700" />
+                    <span className="mt-4 block font-semibold text-neutral-950">Rehearse a migration</span>
+                    <span className="mt-2 block text-xs font-semibold uppercase tracking-wide text-warning-700">Migration test</span>
                     <span className="mt-2 block text-sm leading-5 text-neutral-600">Review imported employee and payroll data in a protected working copy.</span>
                   </button>
                 </div>

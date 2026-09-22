@@ -22,6 +22,7 @@ describe('HelpTip', () => {
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('supports tap-style toggling', async () => {

@@ -75,7 +75,8 @@ function PayPeriodMobileCard({
   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
 
   return (
-    <MobileRecordCard>
+    <div role="group" aria-label={`Pay period ${formatDateRange(period.start_date, period.end_date)}`}>
+      <MobileRecordCard>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
@@ -129,7 +130,8 @@ function PayPeriodMobileCard({
         {!readOnly && !commitBlocked && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
         {readOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
       </MobileCardActions>
-    </MobileRecordCard>
+      </MobileRecordCard>
+    </div>
   );
 }
 

@@ -55,12 +55,11 @@ export function HelpTip({ label, children, className }: HelpTipProps): ReactElem
         aria-label={`About ${label}`}
         aria-expanded={open}
         aria-describedby={open ? tooltipId : undefined}
-        onClick={(event) => {
+        onClick={() => {
           if (pinned) {
             setPinned(false);
             setHovered(false);
             setFocused(false);
-            event.currentTarget.blur();
           } else {
             setPinned(true);
           }
@@ -70,7 +69,6 @@ export function HelpTip({ label, children, className }: HelpTipProps): ReactElem
             setPinned(false);
             setHovered(false);
             setFocused(false);
-            event.currentTarget.blur();
           }
         }}
         className="inline-flex h-6 w-6 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
