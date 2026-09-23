@@ -191,6 +191,11 @@ RSpec.describe "Check print runs", type: :request do
     payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
     expect(payload).to include("confirmation_state" => "outdated")
     expect(payload.fetch("confirmation_issue")).to include("different amount")
+
+    get "/api/v1/admin/check_print_runs/#{run.id}/pdf"
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to include("different amount")
   end
 
   it "returns a structured retryable response when package generation has an infrastructure failure" do
@@ -214,6 +219,7 @@ RSpec.describe "Check print runs", type: :request do
   end
 
   it "does not expose storage details when a generated package download fails" do
+    print_run.update!(status: "confirmed", confirmed_at: Time.current, confirmed_by: admin_user)
     allow_any_instance_of(R2StorageService)
       .to receive(:download).and_raise(R2StorageService::DownloadError, "private R2 endpoint detail")
     allow(Rails.logger).to receive(:error)
@@ -232,6 +238,7 @@ RSpec.describe "Check print runs", type: :request do
   end
 
   it "returns the same sanitized response for an unexpected package download failure" do
+    print_run.update!(status: "confirmed", confirmed_at: Time.current, confirmed_by: admin_user)
     allow_any_instance_of(R2StorageService)
       .to receive(:download).and_raise(NoMethodError, "unexpected private implementation detail")
     allow(Rails.logger).to receive(:error)
