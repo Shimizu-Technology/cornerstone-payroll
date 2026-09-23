@@ -81,6 +81,13 @@ describe('audit display', () => {
     expect(groupAuditEntries([first, second])).toHaveLength(2);
   });
 
+  it('keeps generated check-print packages out of document-access grouping', () => {
+    const first = audit({ id: 32, action: 'check_print_runs#generated', event_category: 'export' });
+    const second = audit({ id: 33, action: 'check_print_runs#generated', event_category: 'export' });
+
+    expect(groupAuditEntries([first, second])).toHaveLength(2);
+  });
+
   it('does not display NaN for malformed legacy payroll totals', () => {
     const facts = auditBusinessFacts(audit({
       metadata: { business_summary: { total_gross: 'not-a-number' } },

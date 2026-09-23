@@ -72,8 +72,8 @@ function CompanyActivityHistory(): ReactElement {
       const response = await auditLogsApi.list({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        event_category: activityView === 'documents' ? 'export' : undefined,
-        exclude_event_category: activityView === 'important' ? 'export' : undefined,
+        event_category: activityView === 'documents' ? 'document_access' : undefined,
+        exclude_event_category: activityView === 'important' ? 'document_access' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
@@ -116,8 +116,8 @@ function CompanyActivityHistory(): ReactElement {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        event_category: activityView === 'documents' ? 'export' : undefined,
-        exclude_event_category: activityView === 'important' ? 'export' : undefined,
+        event_category: activityView === 'documents' ? 'document_access' : undefined,
+        exclude_event_category: activityView === 'important' ? 'document_access' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
@@ -341,7 +341,7 @@ function CompanyActivityHistory(): ReactElement {
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Card>
-              <div className="space-y-3 p-3 xl:hidden">
+              <div className="space-y-4 p-4 xl:hidden">
                 {groups.map((group) => (
                   <MobileRecordCard key={group.key} tone={selectedLogId === group.primary.id ? 'primary' : 'default'}>
                     <button
@@ -354,7 +354,7 @@ function CompanyActivityHistory(): ReactElement {
                       <p className="mt-1 text-sm text-neutral-500">
                         {group.primary.user_name || 'System'} • {formatGuamDateTime(group.primary.created_at)}
                       </p>
-                      <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="mt-4 grid grid-cols-2 gap-4">
                         <MobileField label="Affected record" value={group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')} />
                         <MobileField label="Client" value={group.primary.company_name || 'Organization-wide'} />
                       </div>

@@ -202,9 +202,15 @@ module Api
         end
 
         def audit_record_changes
-          return AuditRecordSnapshot.changes_for(@employee) unless @employee_audit_before_values
+          saved_changes = AuditRecordSnapshot.changes_for(@employee)
+          return saved_changes unless @employee_audit_before_values
 
-          AuditRecordSnapshot.changes_from(@employee, @employee_audit_before_values)
+          snapshot_changes = AuditRecordSnapshot.changes_from(@employee, @employee_audit_before_values)
+          redacted_fields = saved_changes[:redacted_fields]
+          snapshot_changes.merge(
+            changed_fields: (snapshot_changes[:changed_fields] | redacted_fields).sort,
+            redacted_fields: redacted_fields
+          )
         end
 
         def set_employee
