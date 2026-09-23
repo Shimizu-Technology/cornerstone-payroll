@@ -30,6 +30,7 @@ class CheckGenerator
   MARGIN         = 0.0
   SECTION_HEIGHT = PAGE_HEIGHT / 3.0  # ~264 pts / 3.667"
   M              = 16.0               # inner margin for all sections
+  MIN_SUMMARY_BOX_WIDTH = 230.0
   DEFAULT_LAYOUT = {
     check_face: {
       date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
@@ -52,7 +53,7 @@ class CheckGenerator
       other_pay_x_offset: 100.0,
       other_pay_y_offset: -10.0,
       memo_y_offset: -36.0,
-      summary_x_offset: -18.0,
+      summary_x_offset: 0.0,
       summary_y_offset: 0.0,
       table_height: 56.0,
       table_padding_y: 1.0,
@@ -365,11 +366,16 @@ class CheckGenerator
     end
 
     # SUMMARY box (bordered)
+    # Keep the summary inside the right column without making its table too
+    # narrow to print monetary values. Legacy offsets may be negative or large.
+    requested_shift = [stub_cfg["summary_x_offset"].to_f, 0.0].max
+    maximum_shift = [right_w - MIN_SUMMARY_BOX_WIDTH, 0.0].max
+    summary_x = rx + [requested_shift, maximum_shift].min
     draw_summary_box(
       pdf,
-      x: rx + stub_cfg["summary_x_offset"].to_f,
+      x: summary_x,
       y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
-      w: right_w,
+      w: right_w - (summary_x - rx),
       stub_cfg: stub_cfg
     )
 

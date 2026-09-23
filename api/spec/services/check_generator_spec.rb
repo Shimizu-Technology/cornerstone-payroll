@@ -203,6 +203,64 @@ RSpec.describe CheckGenerator do
       )
     end
 
+    it "keeps Sara-shaped Other Pay YTD values clear of the summary box with a legacy offset" do
+      company.update!(check_layout_config: { stub: { summary_x_offset: -18.0 } })
+      allow(generator).to receive(:other_pay_rows).and_return([
+        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Rent Reimbursement", "150.00", "3,000.00" ],
+        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Loan (Nena Joe)", "0.00", "350.00" ],
+        [ "Loan - Douglas Phill", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+      ])
+      allow(generator).to receive(:deduction_rows).and_return([
+        [ "401(k) Pre-Tax", "1,216.35", "24,327.00" ],
+        [ "Loan", "41.50", "2,587.50" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "1,257.85", font_style: :bold }, { content: "26,914.50", font_style: :bold } ]
+      ])
+
+      summary_boxes = []
+      allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+        summary_boxes << { x: point.first, y: point.last, height: height } if height == 48.0
+        method.call(point, width, height)
+      end
+
+      page = PDF::Reader.new(StringIO.new(generator.generate)).pages.first
+      expect(summary_boxes.size).to eq(2)
+      ytd_runs = page.runs.select { |run| run.text == "8,177.03" }
+      expect(ytd_runs.size).to eq(2)
+      ytd_runs.zip(summary_boxes).each do |run, box|
+        expect(run.y).to be_between(box[:y] - box[:height], box[:y])
+        expect(box[:x] - run.endx).to be >= 4.0
+      end
+    end
+
+    [12.0, 1_000.0].each do |offset|
+      it "keeps the summary readable and within the right column with a #{offset} point offset" do
+        company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
+        summary_boxes = []
+        allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+          summary_boxes << { x: point.first, width: width } if height == 48.0
+          method.call(point, width, height)
+        end
+
+        text = PDF::Reader.new(StringIO.new(generator.generate)).pages.first.text
+        stub_layout = CheckGenerator::DEFAULT_LAYOUT.fetch(:stub)
+        right_edge = CheckGenerator::PAGE_WIDTH - stub_layout.fetch(:right)
+        left_edge = stub_layout.fetch(:left) +
+          (right_edge - stub_layout.fetch(:left)) * stub_layout.fetch(:left_ratio)
+
+        expect(summary_boxes.size).to eq(2)
+        summary_boxes.each do |box|
+          expect(box[:x]).to be >= left_edge
+          expect(box[:width]).to be >= CheckGenerator::MIN_SUMMARY_BOX_WIDTH
+          expect(box[:x] + box[:width]).to be_within(0.01).of(right_edge)
+        end
+        expect(text).to include("Total Pay", "Taxes", "Deductions")
+        expect(text).not_to include("[SUMMARY]")
+      end
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,
@@ -533,7 +591,7 @@ RSpec.describe CheckGenerator do
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row3_y)).to eq(118.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :table_height)).to eq(56.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_box_h)).to eq(48.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(-18.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(0.0)
     end
   end
 
