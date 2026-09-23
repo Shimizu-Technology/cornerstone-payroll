@@ -55,6 +55,8 @@ module Api
         end
 
         def pdf
+          CheckPrintRunSelectionVerifier.new(run: @run).call unless @run.confirmed?
+
           data = R2StorageService.new.download(@run.storage_key)
           return render json: { error: "The generated check package is unavailable" }, status: :not_found unless data
           unless data.bytesize == @run.byte_size && Digest::SHA256.hexdigest(data) == @run.sha256
@@ -65,6 +67,8 @@ module Api
                     filename: @run.filename,
                     type: "application/pdf",
                     disposition: params[:disposition] == "attachment" ? "attachment" : "inline"
+        rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
+          render json: { error: e.message }, status: :conflict
         rescue StandardError => e
           Rails.logger.error(
             "[check_print_runs#pdf] run=#{@run&.id} request_id=#{request.request_id} " \
