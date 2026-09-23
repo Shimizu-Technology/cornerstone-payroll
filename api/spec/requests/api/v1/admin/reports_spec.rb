@@ -719,7 +719,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(first_record[274]).to eq("S")
 
       audit = AuditLog.where(action: "reports#quarterly_compliance_packet_swica_ascii").last
-      expect(audit).to have_attributes(event_category: "export", record_type: "reports")
+      expect(audit).to have_attributes(event_category: "document_access", record_type: "reports")
       expect(audit.metadata).to include(
         "changed_fields" => [],
         "report_key" => "quarterly_compliance_packet_swica",
@@ -2911,7 +2911,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         record_type: "reports",
         record_id: pay_period.id,
         subject_name: AuditRecordSnapshot.subject_name(pay_period),
-        event_category: "export"
+        event_category: "document_access"
       )
       expect(audit.metadata).to include(
         "changed_fields" => [],

@@ -125,6 +125,9 @@ module Auditable
   end
 
   def audit_event_category
+    if SAFE_METHODS.include?(request.request_method) && (document_response? || action_name.match?(SENSITIVE_READ_PATTERN))
+      return "document_access"
+    end
     return "export" if document_response? || action_name.match?(SENSITIVE_READ_PATTERN)
     return "security" if controller_path.match?(/users|organizations|company_assignments|invitations/)
 

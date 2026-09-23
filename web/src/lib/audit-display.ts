@@ -150,7 +150,12 @@ export function auditBusinessFacts(log: AuditLogEntry): AuditFact[] {
 }
 
 export function isDocumentAccess(log: AuditLogEntry): boolean {
-  return log.event_category === 'export';
+  if (log.event_category === 'document_access') return true;
+  if (log.event_category !== 'export') return false;
+
+  const actionVerb = log.action.split('#').at(-1) || log.action;
+  return typeof log.metadata?.access_type === 'string'
+    || /(download|export|pdf|csv|xlsx|ascii|print|preview)/i.test(actionVerb);
 }
 
 function groupIdentity(log: AuditLogEntry): string {

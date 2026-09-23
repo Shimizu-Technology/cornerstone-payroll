@@ -1164,7 +1164,7 @@ module Api
         end
 
         def audit_record_metadata(record)
-          return {} unless audit_event_category == "export"
+          return {} unless %w[document_access export].include?(audit_event_category)
 
           action_key = action_name.to_s
           format = {

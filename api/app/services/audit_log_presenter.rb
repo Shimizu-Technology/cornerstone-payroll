@@ -61,8 +61,38 @@ class AuditLogPresenter
     "void_pay_period" => "voided payroll for"
   }.freeze
 
-  def initialize(log)
+  def self.preload_pay_period_subjects(logs)
+    references = logs.filter_map { |log| pay_period_reference(log) }.uniq
+    return {} if references.empty?
+
+    company_ids = references.map(&:first).uniq
+    pay_period_ids = references.map(&:last).uniq
+    reference_set = references.index_with(true)
+
+    PayPeriod.where(company_id: company_ids, id: pay_period_ids)
+      .pluck(:company_id, :id, :start_date, :end_date)
+      .each_with_object({}) do |(company_id, id, start_date, end_date), subjects|
+        reference = [ company_id, id ]
+        next unless reference_set.key?(reference)
+
+        subjects[reference] = "#{start_date&.strftime('%b %-d, %Y')} – #{end_date&.strftime('%b %-d, %Y')}"
+      end
+  end
+
+  def self.pay_period_reference(log)
+    pay_period_id = if %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
+      log.record_id
+    else
+      log.metadata&.fetch("pay_period_id", nil)
+    end
+    return if pay_period_id.blank? || log.company_id.blank?
+
+    [ log.company_id, pay_period_id.to_i ]
+  end
+
+  def initialize(log, pay_period_subjects: {})
     @log = log
+    @pay_period_subjects = pay_period_subjects
   end
 
   def headline
@@ -117,6 +147,9 @@ class AuditLogPresenter
     return unless pay_period_record?
     return if log.record_id.blank? || log.company_id.blank?
 
+    reference = [ log.company_id, log.record_id.to_i ]
+    return @resolved_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
+
     pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: log.record_id, company_id: log.company_id)
     @resolved_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
   end
@@ -126,7 +159,7 @@ class AuditLogPresenter
   end
 
   def report_action?
-    return false unless log.event_category == "export"
+    return false unless %w[document_access export].include?(log.event_category)
 
     normalized_record_type = log.record_type.to_s.sub(/^client_/, "")
     normalized_record_type == "reports" || log.action.to_s.match?(%r{\A(?:client_)?reports#})
@@ -189,6 +222,9 @@ class AuditLogPresenter
 
     pay_period_id = log.metadata&.fetch("pay_period_id", nil)
     return if pay_period_id.blank? || log.company_id.blank?
+
+    reference = [ log.company_id, pay_period_id.to_i ]
+    return @resolved_report_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
 
     pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id)
     @resolved_report_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
