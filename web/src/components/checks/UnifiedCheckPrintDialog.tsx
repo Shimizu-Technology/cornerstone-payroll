@@ -407,7 +407,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
   const generate = async (): Promise<void> => {
     const printerProfile = queue?.meta.printer_profile;
-    if (generationRequestRef.current || selectedItems.length === 0 || !printerProfile) return;
+    if (generationRequestRef.current || selectedItems.length === 0 || !printerProfile || hasUnsavedNumbers || hasNumberErrors || savingNumbers) return;
     const workspaceToken = workspaceRequestRef.current;
     generationRequestRef.current = true;
     setStartingGeneration(true);
@@ -591,7 +591,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                 </section>
 
                 <aside className="space-y-4 bg-slate-50 p-5 lg:sticky lg:top-0 lg:self-start">
-                  {generation && <OperationStatusPanel generation={generation} showLongRunningHint={showLongRunningHint} onRetry={() => void generate()} />}
+                  {generation && <OperationStatusPanel generation={generation} showLongRunningHint={showLongRunningHint} onRetry={() => void generate()} retryDisabled={hasUnsavedNumbers || hasNumberErrors || savingNumbers} />}
 
                   <section className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between gap-3"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Printer profile</div>{!run && <Button size="sm" variant="ghost" className="gap-1.5 px-2" onClick={() => setProfileManagerOpen(true)} disabled={!queue || generationInProgress}><Settings2 className="h-3.5 w-3.5" /> Manage</Button>}</div>
