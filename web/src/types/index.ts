@@ -1755,8 +1755,35 @@ export interface CheckPrintRun {
   confirmed_by_name: string | null;
   requires_distinct_confirmer: boolean;
   can_current_user_confirm: boolean;
-  confirmation_state: 'ready' | 'confirmed' | 'stale';
+  confirmation_state: 'verification_required' | 'ready' | 'confirmed' | 'outdated';
   confirmation_issue: string | null;
+}
+
+export type CheckPrintGenerationStatus = 'queued' | 'processing' | 'ready' | 'failed';
+export type CheckPrintGenerationPhase =
+  | 'queued'
+  | 'validating'
+  | 'rendering'
+  | 'assembling'
+  | 'uploading'
+  | 'verifying'
+  | 'ready'
+  | 'failed';
+
+export interface CheckPrintGeneration {
+  id: number;
+  pay_period_id: number;
+  status: CheckPrintGenerationStatus;
+  phase: CheckPrintGenerationPhase;
+  completed_items: number;
+  total_items: number;
+  error_code: string | null;
+  error_message: string | null;
+  check_print_run_id: number | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  failed_at: string | null;
 }
 
 export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';

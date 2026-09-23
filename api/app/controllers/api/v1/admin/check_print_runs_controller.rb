@@ -42,7 +42,7 @@ module Api
           ).call
 
           render json: { check_print_run: run_payload(run) }, status: :created
-        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+        rescue ArgumentError, CheckPrintRunGenerationService::InvalidSelectionError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue StandardError => e
           Rails.logger.error(
@@ -55,6 +55,8 @@ module Api
         end
 
         def pdf
+          CheckPrintRunSelectionVerifier.new(run: @run).call unless @run.confirmed?
+
           data = R2StorageService.new.download(@run.storage_key)
           return render json: { error: "The generated check package is unavailable" }, status: :not_found unless data
           unless data.bytesize == @run.byte_size && Digest::SHA256.hexdigest(data) == @run.sha256
@@ -65,6 +67,8 @@ module Api
                     filename: @run.filename,
                     type: "application/pdf",
                     disposition: params[:disposition] == "attachment" ? "attachment" : "inline"
+        rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
+          render json: { error: e.message }, status: :conflict
         rescue StandardError => e
           Rails.logger.error(
             "[check_print_runs#pdf] run=#{@run&.id} request_id=#{request.request_id} " \
@@ -145,7 +149,7 @@ module Api
           CheckPrintRunSelectionVerifier.new(run: run).call
           [ "ready", nil ]
         rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
-          [ "stale", e.message ]
+          [ "outdated", e.message ]
         end
       end
     end

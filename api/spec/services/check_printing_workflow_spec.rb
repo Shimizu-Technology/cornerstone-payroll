@@ -33,6 +33,7 @@ RSpec.describe "Unified check printing workflow" do
   let(:storage) do
     instance_double(R2StorageService).tap do |service|
       allow(service).to receive(:upload) { |key, io, **| stored[key] = io.read }
+      allow(service).to receive(:download) { |key| stored[key] }
       allow(service).to receive(:delete) { |key| stored.delete(key) }
     end
   end
@@ -203,5 +204,19 @@ RSpec.describe "Unified check printing workflow" do
 
     expect(CheckPrintRunConfirmationService.new(run:, actor: confirmer).call.fetch(:marked_printed)).to eq(1)
     expect(run.reload).to have_attributes(status: "confirmed", confirmed_by_id: confirmer.id)
+  end
+
+  it "keeps PDF parser details out of package assembly errors" do
+    service = CheckPrintRunGenerationService.allocate
+    allow(CombinePDF).to receive(:parse).and_raise(ArgumentError, "private xref parser detail")
+    allow(Rails.logger).to receive(:error)
+
+    expect {
+      service.send(:combine_pdfs, [ "first", "second" ])
+    }.to raise_error(
+      CheckPrintRunGenerationService::PdfAssemblyError,
+      "The package PDF could not be assembled"
+    )
+    expect(Rails.logger).to have_received(:error).with(include("ArgumentError: private xref parser detail"))
   end
 end
