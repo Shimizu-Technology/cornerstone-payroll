@@ -353,6 +353,7 @@ import type {
   User,
   CheckListResponse,
   CheckPrintQueueResponse,
+  CheckPrintGeneration,
   CheckPrintRun,
   CheckItem,
   CheckLayoutResponse,
@@ -752,6 +753,9 @@ export interface AuditLogEntry {
 export const auditLogsApi = {
   list: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -761,10 +765,13 @@ export const auditLogsApi = {
     per_page?: number;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) =>
+  }): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> =>
     api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params),
   exportCsv: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -772,7 +779,20 @@ export const auditLogsApi = {
     to?: string;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) => api.getBlobWithParams('/admin/audit_logs/export', params),
+  }): Promise<BlobDownload> => api.getBlobWithParams('/admin/audit_logs/export', params),
+};
+
+export const recordActivitiesApi = {
+  list: (
+    recordType: 'employees' | 'pay_periods',
+    recordId: number,
+    params: { page?: number; per_page?: number } = {},
+    companyId?: number,
+  ): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
+    `/admin/record_activities/${recordType}/${recordId}`,
+    params,
+    { companyId },
+  ),
 };
 
 // Tax Configs (Admin API)
@@ -3173,6 +3193,16 @@ export const checksApi = {
   printRuns: (payPeriodId: number) =>
     api.get<{ check_print_runs: CheckPrintRun[] }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`),
 
+  activePrintGeneration: (payPeriodId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration | null }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/active`
+    ),
+
+  printGeneration: (payPeriodId: number, generationId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/${generationId}`
+    ),
+
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
       starting_slot: startingSlot,
@@ -3187,16 +3217,18 @@ export const checksApi = {
     { changes, reason }
   ),
 
-  createPrintRun: (
+  createPrintGeneration: (
     payPeriodId: number,
     data: {
+      idempotencyKey: string;
       payrollItemIds: number[];
       nonEmployeeCheckIds: number[];
       startingSlot: number;
       printerProfileId: number;
       printerProfileLockVersion: number;
     }
-  ) => api.post<{ check_print_run: CheckPrintRun }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`, {
+  ) => api.post<{ check_print_generation: CheckPrintGeneration }>(`/admin/pay_periods/${payPeriodId}/check_print_generations`, {
+    idempotency_key: data.idempotencyKey,
     payroll_item_ids: data.payrollItemIds,
     non_employee_check_ids: data.nonEmployeeCheckIds,
     starting_slot: data.startingSlot,
@@ -3367,6 +3399,13 @@ export interface PrinterProfile {
   updated_by_name: string | null;
   selection_count: number;
   selected_for_current_user: boolean;
+  owned_by_current_user: boolean;
+  can_edit: boolean;
+  can_update_calibration: boolean;
+  can_archive: boolean;
+  calibration_locked: boolean;
+  source_profile_id: number | null;
+  revision_number: number;
   lock_version: number;
   created_at: string;
   updated_at: string;
@@ -3393,6 +3432,8 @@ export const printerProfilesApi = {
     api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
   update: (id: number, data: Partial<PrinterProfile>) =>
     api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
+  clone: (id: number, name?: string): Promise<{ printer_profile: PrinterProfile }> =>
+    api.post<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}/clone`, name ? { name } : undefined),
   delete: (id: number) =>
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
@@ -3638,6 +3679,7 @@ interface AuthApiUser {
   company_name: string;
   home_company_id: number;
   assigned_company_ids: number[];
+  capabilities: string[];
 }
 
 export const companiesApi = {

@@ -4,6 +4,11 @@ class StaffRolePolicy
   CAPABILITY_ROLES = {
     staff_workspace: %w[super_admin org_admin admin manager accountant],
     payroll_operations: %w[super_admin org_admin admin manager accountant],
+    use_printer_profiles: %w[super_admin org_admin admin manager accountant],
+    create_printer_profiles: %w[super_admin org_admin admin manager accountant],
+    manage_printer_profile_library: %w[super_admin org_admin admin manager],
+    manage_client_check_settings: %w[super_admin org_admin admin manager],
+    view_record_activity: %w[super_admin org_admin admin manager accountant],
     manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
@@ -14,6 +19,11 @@ class StaffRolePolicy
   CAPABILITY_ERRORS = {
     staff_workspace: "Staff access required",
     payroll_operations: "Payroll operations access required",
+    use_printer_profiles: "Printer profile access required",
+    create_printer_profiles: "Printer profile creation access required",
+    manage_printer_profile_library: "Printer profile library management access required",
+    manage_client_check_settings: "Manager or admin access required",
+    view_record_activity: "Record activity access required",
     manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager or admin access required",
@@ -27,6 +37,7 @@ class StaffRolePolicy
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,
     "api/v1/admin/audit_logs" => :view_audit_history,
+    "api/v1/admin/record_activities" => :view_record_activity,
     "api/v1/admin/historical_imports" => :payroll_operations,
     "api/v1/admin/historical_reports" => :payroll_operations,
     "api/v1/admin/payroll_history" => :payroll_operations,
@@ -97,17 +108,16 @@ class StaffRolePolicy
     "api/v1/admin/employee_payroll_fields#create_personal" => :payroll_operations,
     "api/v1/admin/payroll_reminder_configs#update" => :manage_client_configuration,
     "api/v1/admin/payroll_reminder_configs#test" => :manage_client_configuration,
-    "api/v1/admin/checks#update_check_settings" => :manage_client_configuration,
-    "api/v1/admin/checks#update_next_check_number" => :manage_client_configuration,
+    "api/v1/admin/checks#update_check_settings" => :manage_client_check_settings,
+    "api/v1/admin/checks#update_next_check_number" => :manage_client_check_settings,
     "api/v1/admin/checks#confirm_direct_deposit_payment" => :payroll_operations,
-    "api/v1/admin/printer_profiles#create" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#update" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#destroy" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#apply" => :payroll_operations,
-    "api/v1/admin/printer_profiles#apply_to_all_companies" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#clear_active" => :payroll_operations,
-    "api/v1/admin/printer_profile_selections#update" => :payroll_operations,
-    "api/v1/admin/printer_profile_selections#destroy" => :payroll_operations,
+    "api/v1/admin/printer_profiles#create" => :create_printer_profiles,
+    "api/v1/admin/printer_profiles#clone" => :create_printer_profiles,
+    "api/v1/admin/printer_profiles#apply" => :use_printer_profiles,
+    "api/v1/admin/printer_profiles#apply_to_all_companies" => :manage_printer_profile_library,
+    "api/v1/admin/printer_profiles#clear_active" => :use_printer_profiles,
+    "api/v1/admin/printer_profile_selections#update" => :use_printer_profiles,
+    "api/v1/admin/printer_profile_selections#destroy" => :use_printer_profiles,
     "api/v1/admin/employee_change_requests#index" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
@@ -146,6 +156,10 @@ class StaffRolePolicy
     return false unless user
 
     CAPABILITY_ROLES.fetch(capability).include?(user.role)
+  end
+
+  def self.capabilities_for(user)
+    CAPABILITY_ROLES.keys.select { |capability| allowed?(user, capability) }.map(&:to_s)
   end
 
   def self.error_message(capability)

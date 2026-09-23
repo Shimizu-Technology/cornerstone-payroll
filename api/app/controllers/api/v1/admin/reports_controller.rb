@@ -1153,6 +1153,60 @@ module Api
 
         private
 
+        # Report routes use several target contracts, including pay_period_id
+        # and pay_run_key. Builders retain the resolved target so document
+        # access stays understandable without trusting a raw numeric :id.
+        def audit_record
+          return @audit_report_record if defined?(@audit_report_record)
+          return if params[:pay_period_id].blank?
+
+          PayPeriod.find_by(id: params[:pay_period_id], company_id: current_company_id)
+        end
+
+        def audit_record_metadata(record)
+          return {} unless %w[document_access export].include?(audit_event_category)
+
+          action_key = action_name.to_s
+          format = {
+            "application/pdf" => "PDF",
+            "text/csv" => "CSV",
+            "text/plain" => "TXT",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "XLSX"
+          }[response.media_type]
+          format ||= %w[pdf csv xlsx ascii].find { |candidate| action_key.end_with?("_#{candidate}") }&.upcase
+          report_key = action_key.sub(/_(pdf|csv|xlsx|ascii)\z/, "").sub(/_preview\z/, "").sub(/_print\z/, "")
+          disposition = response.headers["Content-Disposition"].to_s
+          access_type = if disposition.match?(/attachment/i)
+            "download"
+          elsif action_key.include?("preview")
+            "preview"
+          else
+            "view"
+          end
+          pay_period_id = record.id if record.is_a?(PayPeriod)
+          target_key = @audit_report_target_key.presence || ("native:#{pay_period_id}" if pay_period_id)
+          period_subject = @audit_report_period_subject.presence || AuditRecordSnapshot.subject_name(record)
+
+          {
+            report_key: report_key,
+            report_format: format,
+            access_type: access_type,
+            report_target_key: target_key,
+            report_period_subject: period_subject,
+            pay_period_id: pay_period_id
+          }.compact
+        end
+
+        def remember_audit_report_target!(report, record: nil)
+          pay_period = report.fetch(:pay_period)
+          @audit_report_record = record
+          @audit_report_target_key = pay_period.fetch(:key)
+          @audit_report_period_subject = [ pay_period[:start_date], pay_period[:end_date] ]
+            .map { |date| date&.to_date&.strftime("%b %-d, %Y") }
+            .compact
+            .join(" – ")
+        end
+
         YTD_SORT_FIELDS = %w[
           name employment_type status gross_pay withholding_tax social_security_tax
           medicare_tax retirement total_deductions custom_earnings_total custom_deductions_total net_pay
@@ -1339,6 +1393,7 @@ module Api
               company_id: current_company_id,
               historical_pay_period_id: record_id
             ).call
+            remember_audit_report_target!(report)
             return [ report, nil ]
           end
 
@@ -1350,6 +1405,10 @@ module Api
           unless pay_period && !pay_period.draft? && !pay_period.voided?
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
           end
+
+          @audit_report_record = pay_period
+          @audit_report_target_key = "native:#{pay_period.id}"
+          @audit_report_period_subject = AuditRecordSnapshot.subject_name(pay_period)
 
           items = sorted_payroll_items(
             pay_period.payroll_items.not_voided.includes(

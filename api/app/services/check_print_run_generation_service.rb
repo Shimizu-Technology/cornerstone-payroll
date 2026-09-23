@@ -4,8 +4,12 @@ require "combine_pdf"
 require "digest"
 
 class CheckPrintRunGenerationService
+  class InvalidSelectionError < StandardError; end
+  class PdfAssemblyError < StandardError; end
+
   def initialize(pay_period:, actor:, payroll_item_ids:, non_employee_check_ids:, starting_slot:, ip_address: nil,
-                 printer_profile_id:, printer_profile_lock_version:, storage: R2StorageService.new)
+                 printer_profile_id:, printer_profile_lock_version:, storage: R2StorageService.new,
+                 generation: nil, generation_worker_job_id: nil, progress: nil)
     @pay_period = pay_period
     @actor = actor
     @payroll_item_ids = normalize_ids(payroll_item_ids)
@@ -15,6 +19,9 @@ class CheckPrintRunGenerationService
     @printer_profile_id = printer_profile_id
     @printer_profile_lock_version = printer_profile_lock_version
     @storage = storage
+    @generation = generation
+    @generation_worker_job_id = generation_worker_job_id
+    @progress = progress
   rescue ArgumentError, TypeError
     raise ArgumentError, "Starting slot must be a number from 1 through 4"
   end
@@ -22,59 +29,39 @@ class CheckPrintRunGenerationService
   def call
     key = nil
     validate_request!
-    run = nil
+    notify_progress("validating", 0)
 
-    PayPeriod.transaction do
-      locked_period = PayPeriod.lock.find(pay_period.id)
-      raise ArgumentError, "Checks are only available for committed pay periods" unless locked_period.committed?
+    render_settings = resolve_render_settings(pay_period.company)
+    render_company = render_settings.apply_to(pay_period.company)
+    payroll_items = load_payroll_items(pay_period, lock: false)
+    non_employee_checks = load_non_employee_checks(pay_period, lock: false)
+    validate_scoped_selection!(payroll_items, non_employee_checks)
+    validate_printable_records!(payroll_items, non_employee_checks)
+    manifest = build_manifest(payroll_items, non_employee_checks)
+    raise InvalidSelectionError, "Select at least one printable check" if manifest.empty?
 
-      render_settings = CheckRenderSettings.resolve(
-        company: locked_period.company,
-        actor: actor,
-        printer_profile_id: printer_profile_id,
-        printer_profile_lock_version: printer_profile_lock_version,
-        require_profile: true,
-        lock_profile: true
-      )
-      render_company = render_settings.apply_to(locked_period.company)
-      payroll_items = load_payroll_items(locked_period)
-      non_employee_checks = load_non_employee_checks(locked_period)
-      validate_scoped_selection!(payroll_items, non_employee_checks)
-      validate_printable_records!(payroll_items, non_employee_checks)
+    notify_progress("rendering", 0)
+    pdf_bytes, render_digests = render_pdf(payroll_items, non_employee_checks, manifest, render_company)
+    manifest.each { |entry| entry["render_input_digest"] = render_digests.fetch(entry.fetch("key")) }
 
-      manifest = build_manifest(payroll_items, non_employee_checks)
-      raise ArgumentError, "Select at least one printable check" if manifest.empty?
+    artifact_id = SecureRandom.uuid
+    key = storage_key(artifact_id)
+    filename = print_run_filename(artifact_id)
+    sha256 = Digest::SHA256.hexdigest(pdf_bytes)
 
-      # Keep rendering and storage inside this lock boundary intentionally. The immutable manifest must describe the
-      # exact rows used by the PDF; releasing the locks before upload would allow a correction to make them diverge.
-      pdf_bytes = render_pdf(payroll_items, non_employee_checks, manifest, render_company)
-      artifact_id = SecureRandom.uuid
-      key = storage_key(artifact_id)
-      filename = print_run_filename(artifact_id)
-      storage.upload(key, StringIO.new(pdf_bytes), content_type: "application/pdf")
+    notify_progress("uploading", manifest.size)
+    storage.upload(key, StringIO.new(pdf_bytes), content_type: "application/pdf")
+    notify_progress("verifying", manifest.size)
+    verify_uploaded_artifact!(key, sha256, pdf_bytes.bytesize)
 
-      run = CheckPrintRun.create!(
-        company: pay_period.company,
-        pay_period: pay_period,
-        created_by: actor,
-        printer_profile: render_settings.printer_profile,
-        status: "generated",
-        check_stock_type: render_settings.check_stock_type,
-        starting_slot: effective_starting_slot(render_settings.check_stock_type),
-        selected_count: manifest.size,
-        manifest: manifest,
-        calibration_snapshot: render_settings.snapshot,
-        storage_key: key,
-        filename: filename,
-        sha256: Digest::SHA256.hexdigest(pdf_bytes),
-        byte_size: pdf_bytes.bytesize,
-        generated_at: Time.current
-      )
-
-      record_generation_audit!(run, payroll_items, non_employee_checks)
-    end
-
-    run
+    finalize_run!(
+      render_settings: render_settings,
+      manifest: manifest,
+      storage_key: key,
+      filename: filename,
+      sha256: sha256,
+      byte_size: pdf_bytes.bytesize
+    )
   rescue StandardError
     cleanup_storage(key)
     raise
@@ -83,7 +70,22 @@ class CheckPrintRunGenerationService
   private
 
   attr_reader :pay_period, :actor, :payroll_item_ids, :non_employee_check_ids, :starting_slot, :ip_address,
-    :printer_profile_id, :printer_profile_lock_version, :storage
+    :printer_profile_id, :printer_profile_lock_version, :storage, :generation, :generation_worker_job_id, :progress
+
+  def notify_progress(phase, completed_items = nil)
+    progress&.call(phase, completed_items)
+  end
+
+  def resolve_render_settings(company, lock_profile: false)
+    CheckRenderSettings.resolve(
+      company: company,
+      actor: actor,
+      printer_profile_id: printer_profile_id,
+      printer_profile_lock_version: printer_profile_lock_version,
+      require_profile: true,
+      lock_profile: lock_profile
+    )
+  end
 
   def normalize_ids(values)
     Array(values).filter_map do |value|
@@ -95,29 +97,29 @@ class CheckPrintRunGenerationService
   end
 
   def validate_request!
-    raise ArgumentError, "Checks are only available for committed pay periods" unless pay_period.committed?
-    raise ArgumentError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
-    raise ArgumentError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)
+    raise InvalidSelectionError, "Checks are only available for committed pay periods" unless pay_period.committed?
+    raise InvalidSelectionError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
+    raise InvalidSelectionError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)
     if printer_profile_id.blank? || printer_profile_lock_version.blank?
-      raise ArgumentError, "Choose a printer profile and refresh its calibration before generating checks"
+      raise InvalidSelectionError, "Choose a printer profile and refresh its calibration before generating checks"
     end
   end
 
-  def load_payroll_items(locked_period)
-    PayrollItem
-      .where(id: payroll_item_ids, pay_period_id: locked_period.id, company_id: locked_period.company_id)
+  def load_payroll_items(period, lock:)
+    scope = PayrollItem
+      .where(id: payroll_item_ids, pay_period_id: period.id, company_id: period.company_id)
       .includes(:payroll_item_earnings, :payroll_item_field_entries,
                 { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
-      .lock
-      .to_a
+    scope = scope.lock if lock
+    scope.to_a
   end
 
-  def load_non_employee_checks(locked_period)
-    NonEmployeeCheck
-      .where(id: non_employee_check_ids, pay_period_id: locked_period.id, company_id: locked_period.company_id)
+  def load_non_employee_checks(period, lock:)
+    scope = NonEmployeeCheck
+      .where(id: non_employee_check_ids, pay_period_id: period.id, company_id: period.company_id)
       .includes(:company, :pay_period, :line_items)
-      .lock
-      .to_a
+    scope = scope.lock if lock
+    scope.to_a
   end
 
   def validate_scoped_selection!(payroll_items, non_employee_checks)
@@ -125,18 +127,18 @@ class CheckPrintRunGenerationService
     missing_non_employee = non_employee_check_ids - non_employee_checks.map(&:id)
     return if missing_employee.empty? && missing_non_employee.empty?
 
-    raise ArgumentError, "One or more selected checks do not belong to this pay period"
+    raise InvalidSelectionError, "One or more selected checks do not belong to this pay period"
   end
 
   def validate_printable_records!(payroll_items, non_employee_checks)
     invalid_employee = payroll_items.find { |item| item.voided? || item.check_number.blank? || !item.net_pay.to_d.positive? }
     if invalid_employee
-      raise ArgumentError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"
+      raise InvalidSelectionError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"
     end
 
     invalid_non_employee = non_employee_checks.find { |check| check.voided? || check.non_employee_check_supersession || check.check_number.blank? }
     if invalid_non_employee
-      raise ArgumentError, "Non-employee check ##{invalid_non_employee.check_number.presence || invalid_non_employee.id} is no longer printable"
+      raise InvalidSelectionError, "Non-employee check ##{invalid_non_employee.check_number.presence || invalid_non_employee.id} is no longer printable"
     end
   end
 
@@ -176,24 +178,93 @@ class CheckPrintRunGenerationService
 
   def render_pdf(payroll_items, non_employee_checks, manifest, render_company)
     if render_company.first_hawaiian_4up_checks?
-      return FirstHawaiianFourUpCheckGenerator.new(
+      generator = FirstHawaiianFourUpCheckGenerator.new(
         company: render_company,
         payroll_items: payroll_items,
         non_employee_checks: non_employee_checks,
         starting_slot: effective_starting_slot(render_company.check_stock_type)
-      ).generate
+      )
+      pdf = generator.generate
+      notify_progress("rendering", manifest.size)
+      notify_progress("assembling", manifest.size)
+      digests = generator.render_input_payloads.transform_values do |payload|
+        CheckPrintRenderFingerprint.for_payload(payload)
+      end
+      return [ pdf, digests ]
     end
 
     employee_by_id = payroll_items.index_by(&:id)
     non_employee_by_id = non_employee_checks.index_by(&:id)
-    pdfs = manifest.map do |entry|
-      if entry.fetch("source_type") == "payroll_item"
-        CheckGenerator.new(employee_by_id.fetch(entry.fetch("source_id")), company: render_company).generate
+    digests = {}
+    pdfs = manifest.each_with_index.map do |entry, index|
+      generator = if entry.fetch("source_type") == "payroll_item"
+        CheckGenerator.new(employee_by_id.fetch(entry.fetch("source_id")), company: render_company)
       else
-        NonEmployeeCheckGenerator.new(non_employee_by_id.fetch(entry.fetch("source_id")), company: render_company).generate
+        NonEmployeeCheckGenerator.new(non_employee_by_id.fetch(entry.fetch("source_id")), company: render_company)
       end
+      pdf = generator.generate
+      digests[entry.fetch("key")] = CheckPrintRenderFingerprint.for_payload(generator.render_input_payload)
+      notify_progress("rendering", index + 1)
+      pdf
     end
-    combine_pdfs(pdfs)
+    notify_progress("assembling", manifest.size)
+    [ combine_pdfs(pdfs), digests ]
+  end
+
+  def verify_uploaded_artifact!(key, expected_sha256, expected_byte_size)
+    stored = storage.download(key)
+    unless stored && stored.bytesize == expected_byte_size && Digest::SHA256.hexdigest(stored) == expected_sha256
+      raise R2StorageService::UploadError, "The saved check package failed its integrity check"
+    end
+  end
+
+  def finalize_run!(render_settings:, manifest:, storage_key:, filename:, sha256:, byte_size:)
+    run = nil
+
+    PayPeriod.transaction do
+      locked_period = PayPeriod.lock.find(pay_period.id)
+      locked_generation = CheckPrintGeneration.lock.find(generation.id) if generation
+      locked_generation&.assert_worker_lease!(job_id: generation_worker_job_id)
+      raise InvalidSelectionError, "Checks are only available for committed pay periods" unless locked_period.committed?
+
+      current_settings = resolve_render_settings(locked_period.company, lock_profile: true)
+      unless current_settings.calibration_digest == render_settings.calibration_digest
+        raise CheckPrintRunSelectionVerifier::StaleSelectionError,
+          "Printer calibration changed while this package was generated. Review it and generate a replacement package."
+      end
+
+      payroll_items = load_payroll_items(locked_period, lock: true)
+      non_employee_checks = load_non_employee_checks(locked_period, lock: true)
+      validate_scoped_selection!(payroll_items, non_employee_checks)
+      validate_printable_records!(payroll_items, non_employee_checks)
+
+      run = CheckPrintRun.create!(
+        company: locked_period.company,
+        pay_period: locked_period,
+        created_by: actor,
+        printer_profile: current_settings.printer_profile,
+        status: "generated",
+        check_stock_type: current_settings.check_stock_type,
+        starting_slot: effective_starting_slot(current_settings.check_stock_type),
+        selected_count: manifest.size,
+        manifest: manifest,
+        calibration_snapshot: current_settings.snapshot,
+        storage_key: storage_key,
+        filename: filename,
+        sha256: sha256,
+        byte_size: byte_size,
+        generated_at: Time.current
+      )
+
+      CheckPrintRunSelectionVerifier.new(
+        run: run,
+        current_records: [ payroll_items.index_by(&:id), non_employee_checks.index_by(&:id) ]
+      ).call
+      locked_generation&.complete_with!(run, job_id: generation_worker_job_id)
+      record_generation_audit!(run, payroll_items, non_employee_checks)
+    end
+
+    run
   end
 
   def combine_pdfs(pdf_binaries)
@@ -203,7 +274,8 @@ class CheckPrintRunGenerationService
     pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
     combined.to_pdf
   rescue StandardError => e
-    raise ArgumentError, "Failed to merge check PDFs: #{e.message}"
+    Rails.logger.error("[CheckPrintRunGenerationService] PDF assembly failed: #{e.class}: #{e.message}")
+    raise PdfAssemblyError, "The package PDF could not be assembled"
   end
 
   def effective_starting_slot(stock_type)

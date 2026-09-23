@@ -717,6 +717,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(first_record[1, 9]).to eq("123456789")
       expect(first_record[133]).to eq("2")
       expect(first_record[274]).to eq("S")
+
+      audit = AuditLog.where(action: "reports#quarterly_compliance_packet_swica_ascii").last
+      expect(audit).to have_attributes(event_category: "document_access", record_type: "reports")
+      expect(audit.metadata).to include(
+        "changed_fields" => [],
+        "report_key" => "quarterly_compliance_packet_swica",
+        "report_format" => "TXT",
+        "access_type" => "download"
+      )
+      expect(AuditLogPresenter.new(audit).headline).to eq("Reports Admin downloaded the SWICA wage record")
     end
 
     it "returns 422 instead of 500 when SWICA export encounters stale employee rows" do
@@ -2892,10 +2902,29 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "returns 200 with PDF content-type" do
-      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_run_key: "native:#{pay_period.id}" }
 
       expect(response).to have_http_status(:ok)
       expect(response.content_type).to include("application/pdf")
+      audit = AuditLog.where(action: "reports#payroll_register_pdf").last
+      expect(audit).to have_attributes(
+        record_type: "reports",
+        record_id: pay_period.id,
+        subject_name: AuditRecordSnapshot.subject_name(pay_period),
+        event_category: "document_access"
+      )
+      expect(audit.metadata).to include(
+        "changed_fields" => [],
+        "report_key" => "payroll_register",
+        "report_format" => "PDF",
+        "access_type" => "download",
+        "report_target_key" => "native:#{pay_period.id}",
+        "report_period_subject" => AuditRecordSnapshot.subject_name(pay_period),
+        "pay_period_id" => pay_period.id
+      )
+      expect(AuditLogPresenter.new(audit).headline).to eq(
+        "Reports Admin downloaded the payroll register for #{AuditRecordSnapshot.subject_name(pay_period)}"
+      )
     end
 
     it "includes a Content-Disposition attachment header with .pdf filename" do

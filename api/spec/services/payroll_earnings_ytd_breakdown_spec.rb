@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe PayrollEarningsYtdBreakdown do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) { create(:company, name: "MoSa's Migration Test") }
   let(:employee) { create(:employee, company: company, first_name: "Ayana", last_name: "Joint", employment_type: "hourly") }
   let(:pay_date) { Date.new(2026, 9, 24) }
@@ -17,25 +19,9 @@ RSpec.describe PayrollEarningsYtdBreakdown do
   end
 
   def apply_historical_balance(employee:, gross_pay:, earnings:, through_pay_date: Date.new(2026, 9, 10))
-    batch = create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current)
-    bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: batch, status: "applied")
-    actor = create(:user, company: company)
-    bridge = HistoricalYtdBridge.create!(
-      company: company,
-      historical_import_batch: batch,
-      historical_client_bootstrap: bootstrap,
-      status: "applied",
-      plan_digest: SecureRandom.hex(16),
-      applied_at: Time.current,
-      applied_by: actor,
-      apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
-      preview_summary: { "through_period_end" => Date.new(2026, 9, 6).iso8601, "through_pay_date" => through_pay_date.iso8601 }
-    )
-    HistoricalEmployeeYtdBalance.create!(
-      historical_ytd_bridge: bridge,
+    apply_historical_ytd_balance(
       company: company,
       employee: employee,
-      tax_year: through_pay_date.year,
       through_period_end: Date.new(2026, 9, 6),
       through_pay_date: through_pay_date,
       gross_pay: gross_pay,

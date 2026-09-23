@@ -147,7 +147,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 600, net_pay: 500)
     end
     let(:endpoint) { "/api/v1/admin/payroll_items/#{deposit_item.id}/direct_deposit/confirm_payment" }
-    let(:evidence) { { settled_on: Date.current.iso8601, bank_reference: "BANK-TEST-123", attestation: true } }
+    let(:evidence) { { settled_on: PayrollBusinessClock.today.iso8601, bank_reference: "BANK-TEST-123", attestation: true } }
 
     it "requires actual bank evidence and records it only once" do
       post endpoint, params: evidence.merge(attestation: false)
@@ -165,14 +165,14 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(DirectDepositPaymentConfirmation.count).to eq(1)
 
       get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
-      expect(response.parsed_body.fetch("direct_deposit_items").sole.dig("payment_confirmation", "settled_on")).to eq(Date.current.iso8601)
+      expect(response.parsed_body.fetch("direct_deposit_items").sole.dig("payment_confirmation", "settled_on")).to eq(PayrollBusinessClock.today.iso8601)
     end
 
     it "rejects a paper check or a future settlement date" do
       post "/api/v1/admin/payroll_items/#{item_a.id}/direct_deposit/confirm_payment", params: evidence
       expect(response).to have_http_status(:unprocessable_entity)
 
-      post endpoint, params: evidence.merge(settled_on: (Date.current + 1).iso8601)
+      post endpoint, params: evidence.merge(settled_on: (PayrollBusinessClock.today + 1).iso8601)
       expect(response).to have_http_status(:unprocessable_entity)
       expect(DirectDepositPaymentConfirmation.count).to eq(0)
     end

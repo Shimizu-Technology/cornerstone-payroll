@@ -10,6 +10,11 @@ RSpec.describe StaffRolePolicy do
     expected_roles = {
       staff_workspace: %w[super_admin org_admin admin manager accountant],
       payroll_operations: %w[super_admin org_admin admin manager accountant],
+      use_printer_profiles: %w[super_admin org_admin admin manager accountant],
+      create_printer_profiles: %w[super_admin org_admin admin manager accountant],
+      manage_printer_profile_library: %w[super_admin org_admin admin manager],
+      manage_client_check_settings: %w[super_admin org_admin admin manager],
+      view_record_activity: %w[super_admin org_admin admin manager accountant],
       manage_filing_review: %w[super_admin org_admin admin manager accountant],
       manage_client_configuration: %w[super_admin org_admin admin manager],
       manage_organization: %w[super_admin org_admin admin],
@@ -89,17 +94,27 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/payroll_filing_responsibilities",
         action_name: "upsert"
       )).to eq(:manage_filing_review)
-      %w[create update destroy apply_to_all_companies].each do |action_name|
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/printer_profiles",
+        action_name: "apply_to_all_companies"
+      )).to eq(:manage_printer_profile_library)
+      %w[update destroy].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",
           action_name: action_name
-        )).to eq(:manage_client_configuration)
+        )).to be_nil
+      end
+      %w[create clone].each do |action_name|
+        expect(described_class.capability_for(
+          controller_path: "api/v1/admin/printer_profiles",
+          action_name: action_name
+        )).to eq(:create_printer_profiles)
       end
       %w[apply clear_active].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",
           action_name: action_name
-        )).to eq(:payroll_operations)
+        )).to eq(:use_printer_profiles)
       end
       expect(described_class.capability_for(
         controller_path: "api/v1/admin/organizations",

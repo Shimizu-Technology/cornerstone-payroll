@@ -15,6 +15,7 @@ const apiMocks = vi.hoisted(() => ({
   liabilities: vi.fn(),
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
+  recordActivities: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
@@ -38,6 +39,7 @@ vi.mock('@/services/api', () => ({
     payrollFieldInputs: apiMocks.payrollFieldInputs,
   },
   employeesApi: { list: apiMocks.employeesList },
+  recordActivitiesApi: { list: apiMocks.recordActivities },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
   payrollItemsApi: { updatePaymentMethod: vi.fn() },
 }));
@@ -104,6 +106,10 @@ describe('PayRunWorkspace rehearsal checks', () => {
     apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
     apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
     apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+    apiMocks.recordActivities.mockResolvedValue({
+      data: [],
+      meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0 },
+    });
   });
 
   it('describes and previews rehearsal checks with only the VOID marking', async () => {
@@ -264,5 +270,19 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText(/Ask an organization administrator/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Prepare checks for payment' })).toBeNull();
     expect(apiMocks.promotedPaymentPreview).not.toHaveBeenCalled();
+  });
+
+  it('combines complete record activity with payroll milestones', async () => {
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/activity']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Complete activity history')).toBeTruthy();
+    expect(screen.getByText('Payroll milestones')).toBeTruthy();
+    expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
   });
 });
