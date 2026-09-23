@@ -11,7 +11,11 @@ class CheckPrintRunHistoryVerifier
     runs.index_with do |run|
       next [ "confirmed", nil ] if run.confirmed?
 
-      CheckPrintRunSelectionVerifier.new(run: run, current_records: current_records).call
+      CheckPrintRunSelectionVerifier.new(
+        run: run,
+        current_records: current_records,
+        verify_render_inputs: false
+      ).call
       [ "ready", nil ]
     rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
       [ "outdated", e.message ]

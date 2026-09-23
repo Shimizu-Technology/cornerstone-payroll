@@ -4,9 +4,12 @@ require "combine_pdf"
 require "digest"
 
 class CheckPrintRunGenerationService
+  class InvalidSelectionError < StandardError; end
+  class PdfAssemblyError < StandardError; end
+
   def initialize(pay_period:, actor:, payroll_item_ids:, non_employee_check_ids:, starting_slot:, ip_address: nil,
                  printer_profile_id:, printer_profile_lock_version:, storage: R2StorageService.new,
-                 generation: nil, progress: nil)
+                 generation: nil, generation_worker_job_id: nil, progress: nil)
     @pay_period = pay_period
     @actor = actor
     @payroll_item_ids = normalize_ids(payroll_item_ids)
@@ -17,6 +20,7 @@ class CheckPrintRunGenerationService
     @printer_profile_lock_version = printer_profile_lock_version
     @storage = storage
     @generation = generation
+    @generation_worker_job_id = generation_worker_job_id
     @progress = progress
   rescue ArgumentError, TypeError
     raise ArgumentError, "Starting slot must be a number from 1 through 4"
@@ -34,7 +38,7 @@ class CheckPrintRunGenerationService
     validate_scoped_selection!(payroll_items, non_employee_checks)
     validate_printable_records!(payroll_items, non_employee_checks)
     manifest = build_manifest(payroll_items, non_employee_checks)
-    raise ArgumentError, "Select at least one printable check" if manifest.empty?
+    raise InvalidSelectionError, "Select at least one printable check" if manifest.empty?
 
     notify_progress("rendering", 0)
     pdf_bytes, render_digests = render_pdf(payroll_items, non_employee_checks, manifest, render_company)
@@ -66,7 +70,7 @@ class CheckPrintRunGenerationService
   private
 
   attr_reader :pay_period, :actor, :payroll_item_ids, :non_employee_check_ids, :starting_slot, :ip_address,
-    :printer_profile_id, :printer_profile_lock_version, :storage, :generation, :progress
+    :printer_profile_id, :printer_profile_lock_version, :storage, :generation, :generation_worker_job_id, :progress
 
   def notify_progress(phase, completed_items = nil)
     progress&.call(phase, completed_items)
@@ -93,11 +97,11 @@ class CheckPrintRunGenerationService
   end
 
   def validate_request!
-    raise ArgumentError, "Checks are only available for committed pay periods" unless pay_period.committed?
-    raise ArgumentError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
-    raise ArgumentError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)
+    raise InvalidSelectionError, "Checks are only available for committed pay periods" unless pay_period.committed?
+    raise InvalidSelectionError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
+    raise InvalidSelectionError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)
     if printer_profile_id.blank? || printer_profile_lock_version.blank?
-      raise ArgumentError, "Choose a printer profile and refresh its calibration before generating checks"
+      raise InvalidSelectionError, "Choose a printer profile and refresh its calibration before generating checks"
     end
   end
 
@@ -123,18 +127,18 @@ class CheckPrintRunGenerationService
     missing_non_employee = non_employee_check_ids - non_employee_checks.map(&:id)
     return if missing_employee.empty? && missing_non_employee.empty?
 
-    raise ArgumentError, "One or more selected checks do not belong to this pay period"
+    raise InvalidSelectionError, "One or more selected checks do not belong to this pay period"
   end
 
   def validate_printable_records!(payroll_items, non_employee_checks)
     invalid_employee = payroll_items.find { |item| item.voided? || item.check_number.blank? || !item.net_pay.to_d.positive? }
     if invalid_employee
-      raise ArgumentError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"
+      raise InvalidSelectionError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"
     end
 
     invalid_non_employee = non_employee_checks.find { |check| check.voided? || check.check_number.blank? }
     if invalid_non_employee
-      raise ArgumentError, "Non-employee check ##{invalid_non_employee.check_number.presence || invalid_non_employee.id} is no longer printable"
+      raise InvalidSelectionError, "Non-employee check ##{invalid_non_employee.check_number.presence || invalid_non_employee.id} is no longer printable"
     end
   end
 
@@ -219,7 +223,9 @@ class CheckPrintRunGenerationService
 
     PayPeriod.transaction do
       locked_period = PayPeriod.lock.find(pay_period.id)
-      raise ArgumentError, "Checks are only available for committed pay periods" unless locked_period.committed?
+      locked_generation = CheckPrintGeneration.lock.find(generation.id) if generation
+      locked_generation&.assert_worker_lease!(job_id: generation_worker_job_id)
+      raise InvalidSelectionError, "Checks are only available for committed pay periods" unless locked_period.committed?
 
       current_settings = resolve_render_settings(locked_period.company, lock_profile: true)
       unless current_settings.calibration_digest == render_settings.calibration_digest
@@ -254,7 +260,7 @@ class CheckPrintRunGenerationService
         run: run,
         current_records: [ payroll_items.index_by(&:id), non_employee_checks.index_by(&:id) ]
       ).call
-      CheckPrintGeneration.lock.find(generation.id).complete_with!(run) if generation
+      locked_generation&.complete_with!(run, job_id: generation_worker_job_id)
       record_generation_audit!(run, payroll_items, non_employee_checks)
     end
 
@@ -268,7 +274,8 @@ class CheckPrintRunGenerationService
     pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
     combined.to_pdf
   rescue StandardError => e
-    raise ArgumentError, "Failed to merge check PDFs: #{e.message}"
+    Rails.logger.error("[CheckPrintRunGenerationService] PDF assembly failed: #{e.class}: #{e.message}")
+    raise PdfAssemblyError, "The package PDF could not be assembled"
   end
 
   def effective_starting_slot(stock_type)

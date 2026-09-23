@@ -154,6 +154,25 @@ RSpec.describe "Check print generations", type: :request do
     )
   end
 
+  it "requeues a queue-unavailable failure when the same request is retried" do
+    attempts = 0
+    allow(CheckPrintGenerationJob).to receive(:perform_later) do
+      attempts += 1
+      raise ActiveJob::EnqueueError, "temporary queue outage" if attempts == 1
+    end
+    allow(Rails.logger).to receive(:error)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_generations", params: request_params
+    expect(response).to have_http_status(:service_unavailable)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_generations", params: request_params
+
+    expect(response).to have_http_status(:accepted)
+    expect(CheckPrintGeneration.count).to eq(1)
+    expect(CheckPrintGeneration.sole).to have_attributes(status: "queued", error_code: nil)
+    expect(attempts).to eq(2)
+  end
+
   it "forbids client-portal users" do
     client_user = create(:user, company:, organization: company.organization, role: "client")
     allow_any_instance_of(Api::V1::Admin::CheckPrintGenerationsController)

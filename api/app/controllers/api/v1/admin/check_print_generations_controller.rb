@@ -20,7 +20,8 @@ module Api
             }, status: :conflict
           end
 
-          enqueue_generation(generation) if created
+          enqueue_generation(generation) if created || generation.retry_queue_failure!
+          generation.reload
           render json: { check_print_generation: generation_payload(generation) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity

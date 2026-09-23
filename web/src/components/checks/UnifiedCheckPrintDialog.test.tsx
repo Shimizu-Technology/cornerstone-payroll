@@ -228,6 +228,36 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(apiMocks.createPrintGeneration.mock.calls[1][1].payrollItemIds).toEqual([7]);
   });
 
+  it('reuses the pending generation key after a transport failure', async () => {
+    const user = userEvent.setup();
+    apiMocks.createPrintGeneration
+      .mockRejectedValueOnce(new Error('Network connection lost'))
+      .mockResolvedValueOnce({ check_print_generation: queuedGeneration });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
+    expect(await screen.findByText('Network connection lost')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Generate and save package' }));
+
+    await waitFor(() => expect(apiMocks.createPrintGeneration).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createPrintGeneration.mock.calls[0][1].idempotencyKey)
+      .toBe(apiMocks.createPrintGeneration.mock.calls[1][1].idempotencyKey);
+  });
+
+  it('reconnects to a generation whose start response was lost', async () => {
+    const user = userEvent.setup();
+    apiMocks.createPrintGeneration.mockRejectedValueOnce(new Error('Request timed out'));
+    apiMocks.activePrintGeneration
+      .mockResolvedValueOnce({ check_print_generation: null })
+      .mockResolvedValueOnce({ check_print_generation: queuedGeneration });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
+
+    expect(await screen.findByText('Generating and saving package')).toBeTruthy();
+    expect(screen.queryByText('Request timed out')).toBeNull();
+  });
+
   it('creates a shared printer profile inline and automatically selects it', async () => {
     const user = userEvent.setup();
     const unconfiguredQueue = { ...queue, meta: { ...queue.meta, printer_profile: null } };
@@ -246,6 +276,30 @@ describe('UnifiedCheckPrintDialog', () => {
       check_stock_type: 'bottom_check',
     })));
     await waitFor(() => expect(apiMocks.selectPrinterProfile).toHaveBeenCalledWith('bottom_check', 19));
+  });
+
+  it('does not create a duplicate profile when automatic selection fails', async () => {
+    const user = userEvent.setup();
+    const unconfiguredQueue = { ...queue, meta: { ...queue.meta, printer_profile: null } };
+    const createdProfile = { ...printerProfile, id: 19, name: 'Front Office Printer', lock_version: 0 };
+    apiMocks.printQueue.mockResolvedValue(unconfiguredQueue);
+    apiMocks.createPrinterProfile.mockResolvedValue({ printer_profile: createdProfile });
+    apiMocks.selectPrinterProfile
+      .mockRejectedValueOnce(new Error('Selection unavailable'))
+      .mockResolvedValueOnce({ selection: { id: 2 } });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Manage' }));
+    await user.click(screen.getByRole('button', { name: 'New profile' }));
+    await user.type(screen.getByLabelText('Profile name'), 'Front Office Printer');
+    await user.click(screen.getByRole('button', { name: 'Create and use profile' }));
+
+    expect(await screen.findByText(/profile was created but could not be selected/i)).toBeTruthy();
+    const useProfileButtons = screen.getAllByRole('button', { name: 'Use profile' });
+    await user.click(useProfileButtons[useProfileButtons.length - 1]);
+
+    await waitFor(() => expect(apiMocks.selectPrinterProfile).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createPrinterProfile).toHaveBeenCalledTimes(1);
   });
 
   it('blocks printing and confirmation for an outdated package and offers replacement generation', async () => {

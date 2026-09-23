@@ -109,4 +109,33 @@ RSpec.describe CheckPrintGenerationJob do
     expect(CheckPrintRun.where(pay_period:)).to be_empty
     expect(stored).to be_empty
   end
+
+  it "does not classify an internal argument error as a source change" do
+    generation = create_generation
+    service = instance_double(CheckPrintRunGenerationService)
+    allow(CheckPrintRunGenerationService).to receive(:new).and_return(service)
+    allow(service).to receive(:call).and_raise(ArgumentError, "private parser detail")
+    allow(Rails.logger).to receive(:error)
+
+    described_class.perform_now(generation.id)
+
+    expect(generation.reload).to have_attributes(status: "failed", error_code: "generation_failed")
+    expect(generation.error_message).not_to include("private parser detail")
+  end
+
+  it "cannot finalize a package after recovery ends the worker lease" do
+    generation = create_generation
+    allow(storage).to receive(:download) do |key|
+      generation.update_column(:updated_at, 31.minutes.ago)
+      CheckPrintGenerationRecoveryJob.perform_now
+      stored[key]
+    end
+    allow(Rails.logger).to receive(:info)
+
+    described_class.perform_now(generation.id)
+
+    expect(generation.reload).to have_attributes(status: "failed", error_code: "generation_abandoned")
+    expect(CheckPrintRun.where(pay_period:)).to be_empty
+    expect(stored).to be_empty
+  end
 end

@@ -31,7 +31,7 @@ RSpec.describe CheckPrintGeneration do
 
   it "allows the same queue execution to resume after an interrupted worker" do
     expect(generation.begin_processing!(job_id: "job-123")).to be(true)
-    generation.advance!("rendering", completed_items: 1)
+    generation.advance!("rendering", completed_items: 1, job_id: "job-123")
 
     expect(generation.begin_processing!(job_id: "job-123")).to be(true)
     expect(generation).to have_attributes(
@@ -47,5 +47,37 @@ RSpec.describe CheckPrintGeneration do
 
     expect(generation.begin_processing!(job_id: "job-456")).to be(false)
     expect(generation.reload.worker_job_id).to eq("job-123")
+  end
+
+  it "lets the database unique index arbitrate concurrent idempotent inserts" do
+    generation
+    duplicate = generation.dup
+
+    expect(duplicate).to be_valid
+    expect { duplicate.save! }.to raise_error(ActiveRecord::RecordNotUnique)
+  end
+
+  it "requeues only queue-unavailable failures" do
+    generation.fail_safely!(code: "queue_unavailable", message: "Try again")
+
+    expect(generation.retry_queue_failure!).to be(true)
+    expect(generation.reload).to have_attributes(
+      status: "queued",
+      phase: "queued",
+      error_code: nil,
+      failed_at: nil
+    )
+    expect(generation.retry_queue_failure!).to be(false)
+  end
+
+  it "rejects progress from a worker after abandoned-generation recovery" do
+    expect(generation.begin_processing!(job_id: "job-123")).to be(true)
+    generation.update_column(:updated_at, 31.minutes.ago)
+
+    expect(generation.recover_if_abandoned!(cutoff: 30.minutes.ago)).to be(true)
+    expect(generation.advance!("rendering", completed_items: 1, job_id: "job-123")).to be(false)
+    expect {
+      generation.reload.assert_worker_lease!(job_id: "job-123")
+    }.to raise_error(CheckPrintGeneration::WorkerLeaseLostError)
   end
 end

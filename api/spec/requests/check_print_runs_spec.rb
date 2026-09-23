@@ -108,7 +108,8 @@ RSpec.describe "Check print runs", type: :request do
       "amount" => "500.00",
       "source_updated_at" => item.updated_at.iso8601(6),
       "printed_at" => nil,
-      "print_count" => 0
+      "print_count" => 0,
+      "render_input_digest" => "d" * 64
     } ]
     2.times do |index|
       CheckPrintRun.create!(
@@ -129,12 +130,14 @@ RSpec.describe "Check print runs", type: :request do
     end
     allow(PayrollItem).to receive(:where).and_call_original
     allow(NonEmployeeCheck).to receive(:where).and_call_original
+    allow(CheckPrintRenderFingerprint).to receive(:for_record).and_call_original
 
     get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
 
     expect(response).to have_http_status(:ok)
     expect(PayrollItem).to have_received(:where).once
     expect(NonEmployeeCheck).to have_received(:where).once
+    expect(CheckPrintRenderFingerprint).not_to have_received(:for_record)
   end
 
   it "marks legacy packages with missing source references outdated" do
