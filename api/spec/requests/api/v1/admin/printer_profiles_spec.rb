@@ -394,6 +394,15 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       )
       expect(response.parsed_body.dig("printer_profile", "can_edit")).to be(true)
       expect(response.parsed_body.dig("printer_profile", "owned_by_current_user")).to be(true)
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/clone"
+
+      expect(response).to have_http_status(:created)
+      expect(PrinterProfile.order(:revision_number).last).to have_attributes(
+        source_profile_id: profile.id,
+        revision_number: 3,
+        name: "Protected Printer copy 2"
+      )
     end
 
     it "keeps selected calibrations immutable and directs the owner to clone" do

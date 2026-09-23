@@ -2803,6 +2803,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true, where: "(archived_at IS NULL)"
     t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
     t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
+    t.index ["source_profile_id", "revision_number"], name: "idx_printer_profiles_unique_source_revision", unique: true, where: "(source_profile_id IS NOT NULL)"
     t.index ["source_profile_id"], name: "index_printer_profiles_on_source_profile_id"
     t.index ["updated_by_id"], name: "index_printer_profiles_on_updated_by_id"
     t.check_constraint "revision_number >= 1", name: "printer_profiles_revision_number_positive"

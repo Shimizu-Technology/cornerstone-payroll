@@ -108,6 +108,7 @@ export function CheckSettingsPage() {
   const { hasCapability } = useAuth();
   const canManageClientCheckSettings = hasCapability('manage_client_check_settings');
   const skipNextLayoutEffectRef = useRef(false);
+  const newProfileNameInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -621,17 +622,30 @@ export function CheckSettingsPage() {
     }
   };
 
+  const handleOpenAddProfile = () => {
+    setShowAddProfile(true);
+    window.requestAnimationFrame(() => {
+      newProfileNameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      newProfileNameInputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
   const handleCloneProfile = async (profile: PrinterProfile) => {
+    const shouldLoadCalibration = profile.check_stock_type === stockType && confirmDiscardUnsavedChanges(
+      `You have unsaved calibration changes. Copying “${profile.name}” will keep the new profile but replace the draft on screen. Continue?`,
+    );
     setProfileSaving(true);
     setError(null);
     try {
       const response = await printerProfilesApi.clone(profile.id);
       const copy = response.printer_profile;
-      if (copy.check_stock_type === stockType) {
+      if (copy.check_stock_type === stockType && shouldLoadCalibration) {
         setOffsetX(Number(copy.check_offset_x).toFixed(3));
         setOffsetY(Number(copy.check_offset_y).toFixed(3));
         setLayoutOverridesJson(JSON.stringify(copy.check_layout_config || {}, null, 2));
         setSuccess(`Created “${copy.name}” as your editable copy and loaded its calibration into the draft. Preview your changes, then save the draft to that profile before selecting it.`);
+      } else if (copy.check_stock_type === stockType) {
+        setSuccess(`Created “${copy.name}” as your editable copy and kept your unsaved calibration draft unchanged.`);
       } else {
         setSuccess(`Created “${copy.name}” as your editable copy. Its calibration is for ${copy.check_stock_type.replaceAll('_', ' ')} stock, so it was not loaded into this client’s draft.`);
       }
@@ -743,7 +757,7 @@ export function CheckSettingsPage() {
         )}
 
         {!canManageClientCheckSettings && (
-          <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          <div className="flex items-start gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700">
             <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
             <div>
               <p className="font-semibold text-slate-900">Your printer choice is personal</p>
@@ -811,7 +825,7 @@ export function CheckSettingsPage() {
               <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
                 Reset Calibration Draft
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
+              <Button variant="outline" size="sm" onClick={() => showAddProfile ? setShowAddProfile(false) : handleOpenAddProfile()}>
                 {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
               </Button>
             </div>
@@ -824,6 +838,7 @@ export function CheckSettingsPage() {
                   <div>
                     <Label className="text-xs">Profile Name *</Label>
                     <Input
+                      ref={newProfileNameInputRef}
                       value={newProfileName}
                       onChange={(e) => setNewProfileName(e.target.value)}
                       placeholder="e.g., Office HP LaserJet"
@@ -1228,7 +1243,7 @@ export function CheckSettingsPage() {
                   {saving ? 'Saving…' : 'Save Client Check Settings'}
                 </Button>
               ) : (
-                <Button variant="outline" onClick={() => setShowAddProfile(true)}>
+                <Button variant="outline" onClick={handleOpenAddProfile}>
                   Save Calibration as New Profile
                 </Button>
               )}

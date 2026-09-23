@@ -3372,7 +3372,7 @@ export const printerProfilesApi = {
     api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
   update: (id: number, data: Partial<PrinterProfile>) =>
     api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
-  clone: (id: number, name?: string) =>
+  clone: (id: number, name?: string): Promise<{ printer_profile: PrinterProfile }> =>
     api.post<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}/clone`, name ? { name } : undefined),
   delete: (id: number) =>
     api.delete<void>(`/admin/printer_profiles/${id}`),

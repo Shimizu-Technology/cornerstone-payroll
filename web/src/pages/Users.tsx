@@ -413,14 +413,14 @@ export function Users() {
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Role guide */}
         <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 bg-slate-950 px-5 py-4 text-white">
+          <div className="border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
             <h2 className="font-semibold">Choose the narrowest role that fits</h2>
             <p className="mt-1 text-sm leading-5 text-slate-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
           </div>
           <div className="divide-y divide-slate-200 sm:hidden">
             {roleGuideOptions.map((role) => (
-              <details key={role.value} className="group bg-white px-4 py-3">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+              <details key={role.value} className="group bg-white px-4 py-4">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
                   <span>
                     <span className="block font-semibold text-slate-950">{role.label}</span>
                     <span className="mt-0.5 block text-xs text-slate-500">{role.scope}</span>
@@ -428,7 +428,7 @@ export function Users() {
                   <span className="text-xs font-semibold text-primary-700 group-open:hidden">View</span>
                   <span className="hidden text-xs font-semibold text-primary-700 group-open:inline">Close</span>
                 </summary>
-                <dl className="space-y-3 pb-2 pt-3 text-xs leading-5">
+                <dl className="space-y-4 pb-2 pt-4 text-xs leading-5">
                   <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
                   <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
                   <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
@@ -439,11 +439,11 @@ export function Users() {
           <div className="hidden gap-px bg-slate-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
             {roleGuideOptions.map((role) => (
               <article key={role.value} className="bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-4">
                   <h3 className="font-semibold text-slate-950">{role.label}</h3>
                   {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">Exceptional</span>}
                 </div>
-                <dl className="mt-3 space-y-3 text-xs leading-5">
+                <dl className="mt-4 space-y-4 text-xs leading-5">
                   <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Scope</dt><dd className="text-slate-700">{role.scope}</dd></div>
                   <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
                   <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>

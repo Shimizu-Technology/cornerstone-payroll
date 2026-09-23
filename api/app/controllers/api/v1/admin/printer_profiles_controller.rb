@@ -84,25 +84,27 @@ module Api
 
         def clone
           source = @profile.source_profile || @profile
-          next_revision = current_organization.printer_profiles
-            .where("id = :source_id OR source_profile_id = :source_id", source_id: source.id)
-            .maximum(:revision_number).to_i + 1
-          copy = current_organization.printer_profiles.build(
-            name: params[:name].presence || @profile.next_available_copy_name,
-            description: @profile.description,
-            notes: @profile.notes,
-            check_stock_type: @profile.check_stock_type,
-            check_offset_x: @profile.check_offset_x,
-            check_offset_y: @profile.check_offset_y,
-            check_layout_config: @profile.check_layout_config.deep_dup,
-            is_default: false,
-            source_profile: source,
-            revision_number: next_revision,
-            created_by: current_user,
-            updated_by: current_user
-          )
+          copy = source.with_lock do
+            next_revision = current_organization.printer_profiles
+              .where("id = :source_id OR source_profile_id = :source_id", source_id: source.id)
+              .maximum(:revision_number).to_i + 1
+            current_organization.printer_profiles.create(
+              name: params[:name].presence || @profile.next_available_copy_name,
+              description: @profile.description,
+              notes: @profile.notes,
+              check_stock_type: @profile.check_stock_type,
+              check_offset_x: @profile.check_offset_x,
+              check_offset_y: @profile.check_offset_y,
+              check_layout_config: @profile.check_layout_config.deep_dup,
+              is_default: false,
+              source_profile: source,
+              revision_number: next_revision,
+              created_by: current_user,
+              updated_by: current_user
+            )
+          end
 
-          if copy.save
+          if copy.persisted?
             render json: { printer_profile: profile_json(copy, selected_ids: selected_profile_ids) }, status: :created
           else
             render json: { errors: copy.errors.full_messages }, status: :unprocessable_entity

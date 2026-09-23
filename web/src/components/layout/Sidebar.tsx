@@ -222,6 +222,16 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
   );
 }
 
+function formatRoleLabel(role?: string): string {
+  if (!role) return 'User';
+  if (role === 'org_admin' || role === 'admin') return 'Organization Admin';
+
+  return role
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const { user, isAccountant, hasCapability, signOut } = useAuth();
   const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
@@ -489,7 +499,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               <div className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
                 <p className="truncate text-xs text-neutral-500">
-                  {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}
+                  {formatRoleLabel(user?.role)}
                 </p>
               </div>
             )}
