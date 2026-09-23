@@ -81,7 +81,7 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isManager, isAccountant, isClient } = useAuth();
+  const { isAdmin, isSuperAdmin, isManager, isAccountant, isClient, hasCapability } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const activeCompanyId = activeCompany?.id;
   const [query, setQuery] = useState('');
@@ -233,6 +233,19 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         });
       }
 
+      if (hasCapability('use_printer_profiles')) {
+        add({
+          id: 'check-settings',
+          label: 'My Printer & Checks',
+          description: 'Choose your printer profile and calibrate check alignment.',
+          group: 'Settings',
+          keywords: ['printer', 'checks', 'layout', 'calibration'],
+          icon: <Printer className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/check-settings',
+        });
+      }
+
       if (isManager) {
         add({
           id: 'pay-schedule-settings',
@@ -243,17 +256,6 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
           icon: <CalendarDays className="h-4 w-4" />,
           kind: 'navigation',
           href: '/pay-schedule-settings',
-        });
-
-        add({
-          id: 'check-settings',
-          label: 'Check Settings',
-          description: 'Adjust check stock, printer profiles, and check layout.',
-          group: 'Settings',
-          keywords: ['printer', 'checks', 'layout'],
-          icon: <Printer className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/check-settings',
         });
 
         add({
@@ -440,7 +442,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

@@ -6,7 +6,11 @@ module Api
       # Organization profiles are shared calibration definitions. Selecting a
       # profile is a separate, user-scoped operation and never mutates a client.
       class PrinterProfilesController < BaseController
-        before_action :set_profile, only: [ :show, :update, :destroy, :apply, :apply_to_all_companies ]
+        CALIBRATION_ATTRIBUTES = %w[
+          check_stock_type check_offset_x check_offset_y check_layout_config
+        ].freeze
+
+        before_action :set_profile, only: [ :show, :update, :destroy, :apply, :clone, :apply_to_all_companies ]
 
         def index
           profiles = current_organization.printer_profiles.ordered.includes(
@@ -39,8 +43,21 @@ module Api
         end
 
         def update
+          unless can_edit_profile?(@profile)
+            return render json: {
+              error: "You can edit profiles you created. Clone this profile to make your own version."
+            }, status: :forbidden
+          end
+
+          @profile.assign_attributes(profile_params)
+          if @profile.calibration_locked? && (@profile.changes.keys & CALIBRATION_ATTRIBUTES).any?
+            return render json: {
+              error: "This calibration is already selected or has been used for printing. Clone it to create a safe new version."
+            }, status: :unprocessable_entity
+          end
+
           @profile.updated_by = current_user
-          if @profile.update(profile_params)
+          if @profile.save
             render json: { printer_profile: profile_json(@profile, selected_ids: selected_profile_ids) }
           else
             render json: { errors: @profile.errors.full_messages }, status: :unprocessable_entity
@@ -52,11 +69,46 @@ module Api
         end
 
         def destroy
+          unless can_archive_profile?(@profile)
+            return render json: {
+              error: "Only a manager or organization admin can archive a profile used by other operators."
+            }, status: :forbidden
+          end
+
           @profile.with_lock do
             @profile.user_printer_profile_selections.delete_all
             @profile.update!(archived_at: Time.current, is_default: false, updated_by: current_user)
           end
           head :no_content
+        end
+
+        def clone
+          source = @profile.source_profile || @profile
+          copy = source.with_lock do
+            next_revision = current_organization.printer_profiles
+              .where("id = :source_id OR source_profile_id = :source_id", source_id: source.id)
+              .maximum(:revision_number).to_i + 1
+            current_organization.printer_profiles.create(
+              name: params[:name].presence || @profile.next_available_copy_name,
+              description: @profile.description,
+              notes: @profile.notes,
+              check_stock_type: @profile.check_stock_type,
+              check_offset_x: @profile.check_offset_x,
+              check_offset_y: @profile.check_offset_y,
+              check_layout_config: @profile.check_layout_config.deep_dup,
+              is_default: false,
+              source_profile: source,
+              revision_number: next_revision,
+              created_by: current_user,
+              updated_by: current_user
+            )
+          end
+
+          if copy.persisted?
+            render json: { printer_profile: profile_json(copy, selected_ids: selected_profile_ids) }, status: :created
+          else
+            render json: { errors: copy.errors.full_messages }, status: :unprocessable_entity
+          end
         end
 
         # Backward-compatible endpoint for a frontend/backend rolling deploy.
@@ -112,8 +164,26 @@ module Api
             :is_default, :lock_version,
             check_layout_config: {}
           )
-          permitted.delete(:is_default) unless StaffRolePolicy.allowed?(current_user, :manage_client_configuration)
+          permitted.delete(:is_default) unless StaffRolePolicy.allowed?(current_user, :manage_printer_profile_library)
           permitted
+        end
+
+        def can_manage_profile_library?
+          StaffRolePolicy.allowed?(current_user, :manage_printer_profile_library)
+        end
+
+        def owns_profile?(profile)
+          profile.created_by_id == current_user.id
+        end
+
+        def can_edit_profile?(profile)
+          can_manage_profile_library? || owns_profile?(profile)
+        end
+
+        def can_archive_profile?(profile)
+          return true if can_manage_profile_library?
+
+          owns_profile?(profile) && !profile.calibration_locked?
         end
 
         def selections_by_stock
@@ -185,6 +255,13 @@ module Api
             updated_by_name: profile.updated_by&.name,
             selection_count: profile.user_printer_profile_selections.size,
             selected_for_current_user: selected_ids[profile.check_stock_type] == profile.id,
+            owned_by_current_user: owns_profile?(profile),
+            can_edit: can_edit_profile?(profile),
+            can_update_calibration: can_edit_profile?(profile) && !profile.calibration_locked?,
+            can_archive: can_archive_profile?(profile),
+            calibration_locked: profile.calibration_locked?,
+            source_profile_id: profile.source_profile_id,
+            revision_number: profile.revision_number,
             lock_version: profile.lock_version,
             created_at: profile.created_at,
             updated_at: profile.updated_at

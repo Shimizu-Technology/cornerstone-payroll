@@ -152,7 +152,7 @@ export function PrinterProfileManagerDialog({
               )}
             </div>
             <Link to="/check-settings" className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:underline">
-              Managers: open advanced check settings <ExternalLink className="h-3.5 w-3.5" />
+              Open printer calibration and profile library <ExternalLink className="h-3.5 w-3.5" />
             </Link>
           </section>
 
@@ -167,7 +167,7 @@ export function PrinterProfileManagerDialog({
                 <Input label="Horizontal offset" type="number" step="0.001" min="-2" max="2" value={offsetX} onChange={(event) => setOffsetX(event.target.value)} disabled={!creating || saving} />
                 <Input label="Vertical offset" type="number" step="0.001" min="-2" max="2" value={offsetY} onChange={(event) => setOffsetY(event.target.value)} disabled={!creating || saving} />
               </div>
-              <p className="text-xs text-slate-500">Offsets are measured in inches. Existing profiles can only be edited or archived by a manager or admin.</p>
+              <p className="text-xs text-slate-500">Offsets are measured in inches. You can manage profiles you create and copy a teammate’s profile when you need your own calibration.</p>
               <Button className="w-full" loading={saving} loadingLabel="Creating and selecting…" disabled={!creating || !name.trim()} onClick={() => void createProfile()}>
                 Create and use profile
               </Button>
