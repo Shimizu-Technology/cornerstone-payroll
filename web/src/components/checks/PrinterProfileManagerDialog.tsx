@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, Printer, Plus } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
@@ -39,11 +39,14 @@ export function PrinterProfileManagerDialog({
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
-    setCreating(profiles.length === 0);
-    setError(null);
+    if (open && !wasOpenRef.current) {
+      setCreating(profiles.length === 0);
+      setError(null);
+    }
+    wasOpenRef.current = open;
   }, [open, profiles.length]);
 
   const resetForm = (): void => {
@@ -79,9 +82,16 @@ export function PrinterProfileManagerDialog({
         check_offset_x: Number(offsetX),
         check_offset_y: Number(offsetY),
       });
-      await onCreated(response.printer_profile);
       resetForm();
-      onOpenChange(false);
+      setCreating(false);
+      try {
+        await onCreated(response.printer_profile);
+        onOpenChange(false);
+      } catch (selectError) {
+        setError(selectError instanceof Error
+          ? `The profile was created but could not be selected. Choose “Use profile” to retry. ${selectError.message}`
+          : 'The profile was created but could not be selected. Choose “Use profile” to retry.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the printer profile.');
     } finally {

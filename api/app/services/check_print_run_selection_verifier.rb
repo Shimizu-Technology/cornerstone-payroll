@@ -3,10 +3,11 @@
 class CheckPrintRunSelectionVerifier
   class StaleSelectionError < StandardError; end
 
-  def initialize(run:, lock: false, current_records: nil)
+  def initialize(run:, lock: false, current_records: nil, verify_render_inputs: true)
     @run = run
     @lock = lock
     @current_records = current_records
+    @verify_render_inputs = verify_render_inputs
   end
 
   def call
@@ -48,7 +49,7 @@ class CheckPrintRunSelectionVerifier
 
   private
 
-  attr_reader :run, :lock, :current_records
+  attr_reader :run, :lock, :current_records, :verify_render_inputs
 
   def load_current_records
     self.class.load_current_records(runs: [ run ], lock: lock)
@@ -74,7 +75,7 @@ class CheckPrintRunSelectionVerifier
       raise_stale!(entry, "changed after this package was generated") unless record.updated_at.iso8601(6) == entry.fetch("source_updated_at")
       raise_stale!(entry, "has new print activity") unless current_print_count(record) == entry.fetch("print_count").to_i
       raise_stale!(entry, "has new print activity") unless current_printed_at(record) == entry["printed_at"]
-      verify_render_input!(entry, record, render_company)
+      verify_render_input!(entry, record, render_company) if verify_render_inputs
     end
   end
 

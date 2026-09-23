@@ -2,7 +2,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export function CheckPrintWorkspaceSkeleton() {
   return (
-    <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_380px]" aria-label="Loading check print workspace" aria-busy="true">
+    <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_380px]" role="status" aria-label="Loading check print workspace" aria-busy="true">
       <section className="border-r border-slate-200 p-5">
         <div className="mb-5 flex gap-2">
           <Skeleton className="h-9 w-24" />

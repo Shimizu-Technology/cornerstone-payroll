@@ -44,7 +44,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading && <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />}
-        <span>{loading && loadingLabel ? loadingLabel : children}</span>
+        {loading && loadingLabel ? <span>{loadingLabel}</span> : children}
       </button>
     );
   }

@@ -42,7 +42,7 @@ module Api
           ).call
 
           render json: { check_print_run: run_payload(run) }, status: :created
-        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+        rescue ArgumentError, CheckPrintRunGenerationService::InvalidSelectionError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue StandardError => e
           Rails.logger.error(

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class CheckPrintGeneration < ApplicationRecord
+  class WorkerLeaseLostError < StandardError; end
+
   STATUSES = %w[queued processing ready failed].freeze
   PHASES = %w[queued validating rendering assembling uploading verifying ready failed].freeze
   ACTIVE_STATUSES = %w[queued processing].freeze
@@ -12,7 +14,6 @@ class CheckPrintGeneration < ApplicationRecord
   belongs_to :check_print_run, optional: true
 
   validates :idempotency_key, :request_digest, presence: true
-  validates :idempotency_key, uniqueness: { scope: %i[company_id requested_by_id] }
   validates :status, inclusion: { in: STATUSES }
   validates :phase, inclusion: { in: PHASES }
   validates :starting_slot, inclusion: { in: 1..4 }
@@ -56,18 +57,20 @@ class CheckPrintGeneration < ApplicationRecord
     end
   end
 
-  def advance!(next_phase, completed_items: self.completed_items)
+  def advance!(next_phase, completed_items: self.completed_items, job_id:)
     raise ArgumentError, "Unsupported generation phase" unless PHASES.include?(next_phase.to_s)
-    return if !active? || next_phase.to_s.in?(%w[queued ready failed])
+    return false if next_phase.to_s.in?(%w[queued ready failed])
 
-    update_columns(
+    updated = self.class.where(id: id, status: "processing", worker_job_id: job_id.to_s).update_all(
       phase: next_phase.to_s,
       completed_items: completed_items.to_i.clamp(0, total_items),
       updated_at: Time.current
     )
+    updated == 1
   end
 
-  def complete_with!(run)
+  def complete_with!(run, job_id:)
+    assert_worker_lease!(job_id:)
     update!(
       check_print_run: run,
       status: "ready",
@@ -80,8 +83,10 @@ class CheckPrintGeneration < ApplicationRecord
     )
   end
 
-  def fail_safely!(code:, message:)
-    update_columns(
+  def fail_safely!(code:, message:, job_id: nil)
+    scope = self.class.where(id: id)
+    scope = scope.where(status: "processing", worker_job_id: job_id.to_s) if job_id.present?
+    updated = scope.update_all(
       status: "failed",
       phase: "failed",
       error_code: code.to_s.first(80),
@@ -89,6 +94,47 @@ class CheckPrintGeneration < ApplicationRecord
       failed_at: Time.current,
       updated_at: Time.current
     )
+    updated == 1
+  end
+
+  def retry_queue_failure!
+    with_lock do
+      return false unless failed? && error_code == "queue_unavailable"
+
+      update!(
+        status: "queued",
+        phase: "queued",
+        completed_items: 0,
+        worker_job_id: nil,
+        started_at: nil,
+        completed_at: nil,
+        failed_at: nil,
+        error_code: nil,
+        error_message: nil
+      )
+      true
+    end
+  end
+
+  def recover_if_abandoned!(cutoff:)
+    with_lock do
+      return false unless active? && updated_at < cutoff
+
+      update!(
+        status: "failed",
+        phase: "failed",
+        error_code: "generation_abandoned",
+        error_message: "Generation stopped before it finished. No checks were marked printed. Try again with the same selection.",
+        failed_at: Time.current
+      )
+      true
+    end
+  end
+
+  def assert_worker_lease!(job_id:)
+    return true if status == "processing" && worker_job_id == job_id.to_s
+
+    raise WorkerLeaseLostError, "The generation worker no longer owns this request"
   end
 
   private

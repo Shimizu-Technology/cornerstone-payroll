@@ -48,7 +48,7 @@ export function OperationStatusPanel({ generation, showLongRunningHint, onRetry 
           </p>
           {!failed && !ready && (
             <>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={generation.phase === 'rendering' ? progress : undefined}>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-label="Package generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={generation.phase === 'rendering' ? progress : undefined}>
                 <div
                   className={`${generation.phase === 'rendering' ? '' : 'animate-pulse motion-reduce:animate-none'} h-full rounded-full bg-blue-700 transition-[width] duration-300`}
                   style={{ width: generation.phase === 'rendering' ? `${Math.max(4, progress)}%` : '45%' }}

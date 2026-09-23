@@ -19,14 +19,27 @@ class CheckPrintGenerationJob < ApplicationJob
       printer_profile_lock_version: generation.printer_profile_lock_version,
       ip_address: generation.request_ip,
       generation: generation,
+      generation_worker_job_id: job_id,
       progress: ->(phase, completed_items = nil) do
-        generation.advance!(phase, completed_items: completed_items || generation.completed_items)
+        advanced = generation.advance!(
+          phase,
+          completed_items: completed_items || generation.completed_items,
+          job_id: job_id
+        )
+        raise CheckPrintGeneration::WorkerLeaseLostError unless advanced
       end
     ).call
-  rescue CheckPrintRunSelectionVerifier::StaleSelectionError, ArgumentError, ActiveRecord::RecordInvalid => e
+  rescue CheckPrintGeneration::WorkerLeaseLostError
+    Rails.logger.info("[CheckPrintGenerationJob] generation=#{generation_id} worker lease ended before completion")
+  rescue CheckPrintRunSelectionVerifier::StaleSelectionError,
+         CheckPrintRunGenerationService::InvalidSelectionError,
+         CheckRenderSettings::MissingProfileError,
+         CheckRenderSettings::IncompatibleProfileError,
+         CheckRenderSettings::StaleProfileError => e
     generation&.fail_safely!(
       code: "source_changed",
-      message: e.message
+      message: e.message,
+      job_id: job_id
     )
   rescue StandardError => e
     Rails.logger.error(
@@ -34,7 +47,8 @@ class CheckPrintGenerationJob < ApplicationJob
     )
     generation&.fail_safely!(
       code: "generation_failed",
-      message: "The package could not be generated. No checks were marked printed. Review the selection and try again."
+      message: "The package could not be generated. No checks were marked printed. Review the selection and try again.",
+      job_id: job_id
     )
   end
 end

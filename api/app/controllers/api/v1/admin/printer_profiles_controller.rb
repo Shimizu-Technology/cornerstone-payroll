@@ -106,12 +106,14 @@ module Api
         end
 
         def profile_params
-          params.require(:printer_profile).permit(
+          permitted = params.require(:printer_profile).permit(
             :name, :description, :notes,
             :check_stock_type, :check_offset_x, :check_offset_y,
             :is_default, :lock_version,
             check_layout_config: {}
           )
+          permitted.delete(:is_default) unless StaffRolePolicy.allowed?(current_user, :manage_client_configuration)
+          permitted
         end
 
         def selections_by_stock

@@ -73,9 +73,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const previewRequestRef = useRef(0);
   const workspaceRequestRef = useRef(0);
   const generationRequestRef = useRef(false);
+  const pendingGenerationKeyRef = useRef<{ signature: string; key: string } | null>(null);
 
   const generationActive = generation?.status === 'queued' || generation?.status === 'processing';
-  const editingLocked = Boolean(run) || generationActive;
+  const activeGenerationId = generationActive ? generation?.id ?? null : null;
+  const generationInProgress = generationActive || startingGeneration;
+  const editingLocked = Boolean(run) || generationInProgress;
   const compatibleProfiles = useMemo(
     () => printerProfiles.filter((profile) => profile.check_stock_type === queue?.meta.check_stock_type),
     [printerProfiles, queue?.meta.check_stock_type]
@@ -141,6 +144,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const openSavedRun = useCallback(async (printRun: CheckPrintRun) => {
     setRun(printRun);
     setGeneration(null);
+    pendingGenerationKeyRef.current = null;
     setReplacementMode(false);
     setStartingSlot(printRun.starting_slot);
     setSelected(new Set(printRun.manifest.map((entry) => entry.key)));
@@ -230,13 +234,13 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }, [applyQueue, open, openSavedRun, payPeriodId, revokePreview]);
 
   useEffect(() => {
-    if (!open || !generationActive || !generation) return undefined;
+    if (!open || activeGenerationId === null) return undefined;
     let cancelled = false;
     let timer: number | undefined;
 
     const poll = async (): Promise<void> => {
       try {
-        const response = await checksApi.printGeneration(payPeriodId, generation.id);
+        const response = await checksApi.printGeneration(payPeriodId, activeGenerationId);
         if (cancelled) return;
         const next = response.check_print_generation;
         setGeneration(next);
@@ -256,7 +260,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [generation, generationActive, open, payPeriodId, refreshRuns]);
+  }, [activeGenerationId, open, payPeriodId, refreshRuns]);
 
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
@@ -266,6 +270,18 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }), [queue, sourceFilter, statusFilter]);
 
   const selectedItems = useMemo(() => (queue?.items || []).filter((item) => selected.has(item.key)), [queue, selected]);
+  const generationInputSignature = useMemo(() => JSON.stringify({
+    payrollItemIds: selectedItems.filter((item) => item.source_type === 'payroll_item').map((item) => item.source_id),
+    nonEmployeeCheckIds: selectedItems.filter((item) => item.source_type === 'non_employee_check').map((item) => item.source_id),
+    startingSlot,
+    printerProfileId: queue?.meta.printer_profile?.id ?? null,
+    printerProfileLockVersion: queue?.meta.printer_profile?.lock_version ?? null,
+  }), [queue?.meta.printer_profile?.id, queue?.meta.printer_profile?.lock_version, selectedItems, startingSlot]);
+
+  useEffect(() => {
+    pendingGenerationKeyRef.current = null;
+  }, [generationInputSignature]);
+
   const selectedTotal = selectedItems.reduce((sum, item) => sum + Number(item.amount), 0);
   const packageTotal = run ? run.manifest.reduce((sum, item) => sum + Number(item.amount), 0) : selectedTotal;
   const packageRange = run && run.manifest.length > 0
@@ -361,8 +377,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setError(null);
     setGenerationStartedAt(Date.now());
     try {
+      const pendingRequest = pendingGenerationKeyRef.current?.signature === generationInputSignature
+        ? pendingGenerationKeyRef.current
+        : { signature: generationInputSignature, key: newIdempotencyKey() };
+      pendingGenerationKeyRef.current = pendingRequest;
       const response = await checksApi.createPrintGeneration(payPeriodId, {
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey: pendingRequest.key,
         payrollItemIds: selectedItems.filter((item) => item.source_type === 'payroll_item').map((item) => item.source_id),
         nonEmployeeCheckIds: selectedItems.filter((item) => item.source_type === 'non_employee_check').map((item) => item.source_id),
         startingSlot,
@@ -370,9 +390,17 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         printerProfileLockVersion: printerProfile.lock_version,
       });
       setGeneration(response.check_print_generation);
+      pendingGenerationKeyRef.current = null;
     } catch (err) {
-      setGeneration(null);
-      setError(err instanceof Error ? err.message : 'Could not start package generation. Your selection is unchanged.');
+      const active = await checksApi.activePrintGeneration(payPeriodId).catch(() => null);
+      if (active?.check_print_generation) {
+        setGeneration(active.check_print_generation);
+        setGenerationStartedAt(new Date(active.check_print_generation.created_at).getTime());
+        pendingGenerationKeyRef.current = null;
+      } else {
+        setGeneration(null);
+        setError(err instanceof Error ? err.message : 'Could not start package generation. Your selection is unchanged.');
+      }
     } finally {
       generationRequestRef.current = false;
       setStartingGeneration(false);
@@ -512,12 +540,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                   {generation && <OperationStatusPanel generation={generation} showLongRunningHint={showLongRunningHint} onRetry={() => void generate()} />}
 
                   <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex items-center justify-between gap-3"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Printer profile</div>{!run && <Button size="sm" variant="ghost" className="gap-1.5 px-2" onClick={() => setProfileManagerOpen(true)} disabled={!queue || generationActive}><Settings2 className="h-3.5 w-3.5" /> Manage</Button>}</div>
+                    <div className="flex items-center justify-between gap-3"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Printer profile</div>{!run && <Button size="sm" variant="ghost" className="gap-1.5 px-2" onClick={() => setProfileManagerOpen(true)} disabled={!queue || generationInProgress}><Settings2 className="h-3.5 w-3.5" /> Manage</Button>}</div>
                     {run ? (
                       <div className="mt-2"><p className="font-semibold text-slate-950">{run.printer_profile_name || 'Legacy company calibration'}</p><p className="mt-1 text-xs leading-5 text-slate-500">Package snapshot{run.printer_profile_lock_version !== null ? ` · profile version ${run.printer_profile_lock_version}` : ''}. Later profile edits do not change this PDF.</p></div>
                     ) : (
                       <>
-                        <select aria-label="Printer profile" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-900" value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationActive || busyAction === 'profiles'}>
+                        <select aria-label="Printer profile" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-900" value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationInProgress || busyAction === 'profiles'}>
                           <option value="" disabled>Select a calibrated printer…</option>{compatibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
                         </select>
                         <p className="mt-2 text-xs leading-5 text-slate-500">Profiles are shared by the organization. This selection applies only to you.</p>
@@ -531,7 +559,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Package summary</div>
                     <div className="mt-4 grid grid-cols-2 gap-3"><div><div className="text-xs text-slate-500">{run ? 'Checks in package' : 'Selected'}</div><div className="text-2xl font-bold text-slate-950">{run?.selected_count ?? selectedItems.length}</div></div><div><div className="text-xs text-slate-500">Total value</div><div className="text-xl font-bold text-slate-950">{formatCurrency(packageTotal)}</div></div></div>
                     {replacementMode && !run && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">Review the current checks and printer profile. Generating will save a new replacement; the outdated package stays in history.</p>}
-                    {queue?.meta.check_stock_type === 'first_hawaiian_4up' && !run && <div className="mt-5 border-t border-slate-100 pt-4"><div className="mb-2 text-sm font-semibold text-slate-800">First sheet starts at slot</div><div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map((slot) => <button type="button" key={slot} disabled={generationActive} onClick={() => setStartingSlot(slot)} className={`rounded-lg border py-3 font-mono font-bold ${startingSlot === slot ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-200 bg-white text-slate-700'}`}>{slot}</button>)}</div><p className="mt-2 text-xs text-slate-500">Estimated stock: {sheetCount} sheet{sheetCount === 1 ? '' : 's'}.</p></div>}
+                    {queue?.meta.check_stock_type === 'first_hawaiian_4up' && !run && <div className="mt-5 border-t border-slate-100 pt-4"><div className="mb-2 text-sm font-semibold text-slate-800">First sheet starts at slot</div><div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map((slot) => <button type="button" key={slot} disabled={generationInProgress} onClick={() => setStartingSlot(slot)} className={`rounded-lg border py-3 font-mono font-bold ${startingSlot === slot ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-200 bg-white text-slate-700'}`}>{slot}</button>)}</div><p className="mt-2 text-xs text-slate-500">Estimated stock: {sheetCount} sheet{sheetCount === 1 ? '' : 's'}.</p></div>}
                   </section>
 
                   {run && (
