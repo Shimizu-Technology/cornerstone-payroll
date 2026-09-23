@@ -8,6 +8,14 @@ module Api
       class AuditLogsController < BaseController
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
+        LEGACY_DOCUMENT_ACCESS_PATTERN = "(download|export|pdf|csv|xlsx|ascii|print|preview)"
+        DOCUMENT_ACCESS_SQL = <<~SQL.squish.freeze
+          event_category = :document_category
+          OR (
+            event_category = :legacy_category
+            AND (jsonb_exists(metadata, 'access_type') OR regexp_replace(action, '^.*#', '') ~* :legacy_action_pattern)
+          )
+        SQL
 
         before_action :authorize_security_history_access!
         before_action :resolve_access_scope!
@@ -17,10 +25,11 @@ module Api
           total = scope.count
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
-          logs = ordered(scope).includes(:user, :company, :organization).offset((page - 1) * per_page).limit(per_page)
+          logs = ordered(scope).includes(:user, :company, :organization).offset((page - 1) * per_page).limit(per_page).to_a
+          pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
 
           render json: {
-            data: logs.map { |log| AuditLogSerializer.call(log) },
+            data: logs.map { |log| AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects) },
             meta: {
               current_page: page,
               per_page: per_page,
@@ -73,13 +82,35 @@ module Api
             logs = logs.where(user_id: params[:user_id])
           end
           logs = logs.where(action: params[:event_action]) if params[:event_action].present?
-          logs = logs.where(event_category: params[:event_category]) if params[:event_category].present?
+          if params[:event_category].present?
+            logs = if params[:event_category] == "document_access"
+              document_access_scope(logs)
+            else
+              logs.where(event_category: params[:event_category])
+            end
+          end
+          if params[:exclude_event_category].present?
+            logs = if params[:exclude_event_category] == "document_access"
+              logs.where.not(id: document_access_scope(logs).select(:id))
+            else
+              logs.where("event_category IS NULL OR event_category <> ?", params[:exclude_event_category])
+            end
+          end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
           logs = logs.where("created_at >= ?", Time.zone.parse(params[:from])) if params[:from].present?
           logs = logs.where("created_at <= ?", Time.zone.parse(params[:to])) if params[:to].present?
           logs
+        end
+
+        def document_access_scope(scope)
+          scope.where(
+            DOCUMENT_ACCESS_SQL,
+            document_category: "document_access",
+            legacy_category: "export",
+            legacy_action_pattern: LEGACY_DOCUMENT_ACCESS_PATTERN
+          )
         end
 
         def resolve_access_scope!
@@ -123,8 +154,10 @@ module Api
               batch = export_batch(scope, cursor)
               break if batch.empty?
 
+              pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(batch)
+
               batch.each do |log|
-                presenter = AuditLogPresenter.new(log)
+                presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects)
                 stream << CSV.generate_line([
                   log.created_at&.iso8601,
                   log.actor_name.presence || log.user&.name || "System",
