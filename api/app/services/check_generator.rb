@@ -52,7 +52,7 @@ class CheckGenerator
       other_pay_x_offset: 100.0,
       other_pay_y_offset: -10.0,
       memo_y_offset: -36.0,
-      summary_x_offset: -18.0,
+      summary_x_offset: 0.0,
       summary_y_offset: 0.0,
       table_height: 56.0,
       table_padding_y: 1.0,
@@ -365,11 +365,14 @@ class CheckGenerator
     end
 
     # SUMMARY box (bordered)
+    # Keep the summary inside the right column. A negative legacy/profile
+    # offset can otherwise put its border over the Other Pay YTD values.
+    summary_x = [ rx + stub_cfg["summary_x_offset"].to_f, rx ].max
     draw_summary_box(
       pdf,
-      x: rx + stub_cfg["summary_x_offset"].to_f,
+      x: summary_x,
       y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
-      w: right_w,
+      w: right_w - (summary_x - rx),
       stub_cfg: stub_cfg
     )
 
