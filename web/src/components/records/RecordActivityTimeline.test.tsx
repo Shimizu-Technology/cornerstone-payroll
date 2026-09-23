@@ -74,7 +74,7 @@ describe('RecordActivityTimeline', () => {
         meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 2 },
       })
       .mockResolvedValueOnce({
-        data: [{ ...activity, id: 44, display_action: 'Morgan Manager added Ada Payroll' }],
+        data: [activity, { ...activity, id: 44, display_action: 'Morgan Manager added Ada Payroll' }],
         meta: { current_page: 2, per_page: 20, total_count: 2, total_pages: 2 },
       });
 
@@ -82,7 +82,7 @@ describe('RecordActivityTimeline', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Load older activity' }));
 
     expect(await screen.findByText('Morgan Manager added Ada Payroll')).toBeTruthy();
-    expect(screen.getByText('Morgan Manager updated Ada Payroll')).toBeTruthy();
+    expect(screen.getAllByText('Morgan Manager updated Ada Payroll')).toHaveLength(1);
     expect(apiMocks.list).toHaveBeenLastCalledWith('employees', 12, { page: 2, per_page: 20 }, 7);
   });
 

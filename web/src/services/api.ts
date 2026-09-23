@@ -769,7 +769,7 @@ export const recordActivitiesApi = {
     recordId: number,
     params: { page?: number; per_page?: number } = {},
     companyId?: number,
-  ) => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
+  ): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
     `/admin/record_activities/${recordType}/${recordId}`,
     params,
     { companyId },

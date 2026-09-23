@@ -27,7 +27,17 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
       record_type: "Employee",
       record_id: employee.id,
       subject_name: employee.display_name,
-      metadata: { changed_fields: [ "pay_rate" ], before_values: { pay_rate: "18.00" }, after_values: { pay_rate: "20.00" } },
+      metadata: {
+        changed_fields: [ "pay_rate" ],
+        before_values: { pay_rate: "18.00" },
+        after_values: { pay_rate: "20.00" },
+        http_method: "PATCH",
+        path: "/api/v1/admin/employees/#{employee.id}",
+        response_status: 200
+      },
+      ip_address: "192.0.2.10",
+      user_agent: "Example Browser",
+      request_id: "request-activity-1",
       created_at: occurred_at
     )
     second = create(
@@ -39,6 +49,14 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
       record_type: "client_employees",
       record_id: employee.id,
       subject_name: employee.display_name,
+      metadata: {
+        http_method: "PATCH",
+        path: "/api/v1/client/employees/#{employee.id}",
+        response_status: 200
+      },
+      ip_address: "192.0.2.11",
+      user_agent: "Example Client Browser",
+      request_id: "request-activity-2",
       created_at: occurred_at
     )
     third = create(
@@ -68,6 +86,9 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
     )
     expect(body.dig("data", 1, "id")).to be > first.id
     expect(body.dig("data", 0, "display_action")).to eq("Morgan Manager updated Ada Payroll")
+    expect(body.dig("data", 1)).not_to include("actor_email", "ip_address", "request_id", "user_agent")
+    expect(body.dig("data", 1, "metadata")).to include("response_status" => 200)
+    expect(body.dig("data", 1, "metadata")).not_to include("http_method", "path")
   end
 
   it "returns pay-period activity for accountants" do
@@ -81,13 +102,24 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
       company: company,
       action: "pay_periods#approve",
       record_type: "PayPeriod",
-      record_id: pay_period.id
+      record_id: pay_period.id,
+      ip_address: "192.0.2.20",
+      user_agent: "Accountant Browser",
+      request_id: "request-accountant-1",
+      metadata: { http_method: "POST", path: "/api/v1/admin/pay_periods/#{pay_period.id}/approve" }
     )
 
     get "/api/v1/admin/record_activities/pay_periods/#{pay_period.id}"
 
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("data").pluck("id")).to eq([ log.id ])
+    expect(response.parsed_body.dig("data", 0)).to include(
+      "actor_email" => actor.email,
+      "ip_address" => "192.0.2.20",
+      "user_agent" => "Accountant Browser",
+      "request_id" => "request-accountant-1"
+    )
+    expect(response.parsed_body.dig("data", 0, "metadata")).to include("http_method" => "POST")
   end
 
   it "does not reveal records from another company" do

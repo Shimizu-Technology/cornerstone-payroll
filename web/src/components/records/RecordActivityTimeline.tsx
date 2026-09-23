@@ -56,7 +56,12 @@ export function RecordActivityTimeline({
       }, companyId);
       if (requestId !== requestIdRef.current) return;
 
-      setLogs((current) => append ? [...current, ...response.data] : response.data);
+      setLogs((current) => {
+        if (!append) return response.data;
+
+        const seen = new Set(current.map((log) => log.id));
+        return [...current, ...response.data.filter((log) => !seen.has(log.id))];
+      });
       setPage(response.meta.current_page);
       setTotalPages(response.meta.total_pages || 1);
     } catch (loadError) {
