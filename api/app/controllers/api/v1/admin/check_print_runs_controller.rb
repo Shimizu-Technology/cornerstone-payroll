@@ -145,7 +145,7 @@ module Api
           CheckPrintRunSelectionVerifier.new(run: run).call
           [ "ready", nil ]
         rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
-          [ "stale", e.message ]
+          [ "outdated", e.message ]
         end
       end
     end

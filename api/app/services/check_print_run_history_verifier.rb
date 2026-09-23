@@ -14,7 +14,7 @@ class CheckPrintRunHistoryVerifier
       CheckPrintRunSelectionVerifier.new(run: run, current_records: current_records).call
       [ "ready", nil ]
     rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
-      [ "stale", e.message ]
+      [ "outdated", e.message ]
     end.transform_keys(&:id)
   end
 

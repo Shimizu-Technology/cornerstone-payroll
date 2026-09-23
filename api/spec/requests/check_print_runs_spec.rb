@@ -137,17 +137,17 @@ RSpec.describe "Check print runs", type: :request do
     expect(NonEmployeeCheck).to have_received(:where).once
   end
 
-  it "marks legacy packages with missing source references stale" do
+  it "marks legacy packages with missing source references outdated" do
     print_run.update_column(:manifest, [ { "source_id" => 123 } ])
 
     get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
 
     payload = response.parsed_body.fetch("check_print_runs").sole
-    expect(payload).to include("confirmation_state" => "stale")
+    expect(payload).to include("confirmation_state" => "outdated")
     expect(payload.fetch("confirmation_issue")).to include("invalid check reference")
   end
 
-  it "marks an unconfirmed saved package stale when its check data changed" do
+  it "marks an unconfirmed saved package outdated when its check data changed" do
     employee = create(:employee, company: company)
     item = create(
       :payroll_item,
@@ -189,7 +189,7 @@ RSpec.describe "Check print runs", type: :request do
     get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
 
     payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
-    expect(payload).to include("confirmation_state" => "stale")
+    expect(payload).to include("confirmation_state" => "outdated")
     expect(payload.fetch("confirmation_issue")).to include("different amount")
   end
 

@@ -353,6 +353,7 @@ import type {
   User,
   CheckListResponse,
   CheckPrintQueueResponse,
+  CheckPrintGeneration,
   CheckPrintRun,
   CheckItem,
   CheckLayoutResponse,
@@ -3141,6 +3142,16 @@ export const checksApi = {
   printRuns: (payPeriodId: number) =>
     api.get<{ check_print_runs: CheckPrintRun[] }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`),
 
+  activePrintGeneration: (payPeriodId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration | null }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/active`
+    ),
+
+  printGeneration: (payPeriodId: number, generationId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/${generationId}`
+    ),
+
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
       starting_slot: startingSlot,
@@ -3155,16 +3166,18 @@ export const checksApi = {
     { changes, reason }
   ),
 
-  createPrintRun: (
+  createPrintGeneration: (
     payPeriodId: number,
     data: {
+      idempotencyKey: string;
       payrollItemIds: number[];
       nonEmployeeCheckIds: number[];
       startingSlot: number;
       printerProfileId: number;
       printerProfileLockVersion: number;
     }
-  ) => api.post<{ check_print_run: CheckPrintRun }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`, {
+  ) => api.post<{ check_print_generation: CheckPrintGeneration }>(`/admin/pay_periods/${payPeriodId}/check_print_generations`, {
+    idempotency_key: data.idempotencyKey,
     payroll_item_ids: data.payrollItemIds,
     non_employee_check_ids: data.nonEmployeeCheckIds,
     starting_slot: data.startingSlot,

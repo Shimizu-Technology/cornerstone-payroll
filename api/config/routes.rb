@@ -325,6 +325,9 @@ Rails.application.routes.draw do
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
           get  "check_print_queue",          to: "check_print_runs#queue"
           get  "check_print_runs",           to: "check_print_runs#index"
+          get  "check_print_generations/active", to: "check_print_generations#active"
+          post "check_print_generations",     to: "check_print_generations#create"
+          get  "check_print_generations/:id", to: "check_print_generations#show"
           patch "check_numbers",              to: "check_numbers#update"
           post "check_print_runs",           to: "check_print_runs#create"
         end

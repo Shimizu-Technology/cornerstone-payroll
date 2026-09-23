@@ -35,6 +35,8 @@ class FirstHawaiianFourUpCheckGenerator
   }.freeze
 
   Entry = Struct.new(
+    :source_type,
+    :source_id,
     :check_number,
     :payee,
     :amount,
@@ -120,6 +122,23 @@ class FirstHawaiianFourUpCheckGenerator
       end
       draw_one_inch_scale_reference(pdf)
     end.render
+  end
+
+  def render_input_payloads
+    entries.each_with_object({}) do |entry, payloads|
+      key = "#{entry.source_type}:#{entry.source_id}"
+      payloads[key] = {
+        "source_type" => entry.source_type,
+        "source_id" => entry.source_id,
+        "check_stock_type" => company.check_stock_type,
+        "check_number" => entry.check_number.to_s,
+        "payee" => entry.payee.to_s,
+        "amount" => format("%.2f", entry.amount.to_d),
+        "date" => entry.date&.iso8601,
+        "memo" => entry.memo.to_s,
+        "voided" => entry.voided
+      }
+    end
   end
 
   private
@@ -214,6 +233,8 @@ class FirstHawaiianFourUpCheckGenerator
 
   def entry_from_payroll_item(item)
     Entry.new(
+      source_type: "payroll_item",
+      source_id: item.id,
       check_number: item.check_number,
       payee: item.employee.full_name,
       amount: item.net_pay,
@@ -225,6 +246,8 @@ class FirstHawaiianFourUpCheckGenerator
 
   def entry_from_non_employee_check(check)
     Entry.new(
+      source_type: "non_employee_check",
+      source_id: check.id,
       check_number: check.check_number,
       payee: check.payable_to,
       amount: check.amount,

@@ -33,6 +33,7 @@ RSpec.describe "Unified check printing workflow" do
   let(:storage) do
     instance_double(R2StorageService).tap do |service|
       allow(service).to receive(:upload) { |key, io, **| stored[key] = io.read }
+      allow(service).to receive(:download) { |key| stored[key] }
       allow(service).to receive(:delete) { |key| stored.delete(key) }
     end
   end
