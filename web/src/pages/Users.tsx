@@ -25,13 +25,25 @@ import {
   needsClientAssignment,
 } from '@/lib/user-company-access';
 
-const allRoleOptions: { value: UserRole; label: string; description: string }[] = [
-  { value: 'super_admin', label: 'Super Admin', description: 'Platform-wide access across every organization and client' },
-  { value: 'admin', label: 'Admin', description: 'Full access to all payroll clients, user management, tax config, and audit logs' },
-  { value: 'manager', label: 'Manager', description: 'Can run payroll and manage employees for assigned clients' },
-  { value: 'accountant', label: 'Accountant', description: 'Can manage employees and payroll operations for assigned clients' },
-  { value: 'client', label: 'Client Portal User', description: 'Can access the client portal for assigned clients, manage employee records, upload documents, and review reports' },
-  { value: 'employee', label: 'Employee', description: 'View-only access (future: self-service portal)' },
+interface RoleOption {
+  value: UserRole;
+  label: string;
+  scope: string;
+  can: string;
+  cannot: string;
+  assignment: string;
+  legacy?: boolean;
+  exceptional?: boolean;
+}
+
+const allRoleOptions: RoleOption[] = [
+  { value: 'super_admin', label: 'Super Admin', scope: 'Every organization and client', can: 'Manage platform organizations, recover access, and perform every organization-admin action.', cannot: 'This is an exceptional platform role and should not be used for normal payroll work.', assignment: 'No client assignment required.', exceptional: true },
+  { value: 'org_admin', label: 'Organization Admin', scope: 'Every client in their organization', can: 'Manage users, clients, tax configuration, audit history, client check controls, and payroll operations.', cannot: 'Cannot manage other organizations or platform-wide settings.', assignment: 'Automatically receives all organization clients.' },
+  { value: 'admin', label: 'Organization Admin (legacy)', scope: 'Every client in their organization', can: 'Same access as Organization Admin.', cannot: 'Legacy role name retained for existing accounts; use Organization Admin for new invitations.', assignment: 'Automatically receives all organization clients.', legacy: true },
+  { value: 'manager', label: 'Manager', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, configure client settings, and manage the shared printer-profile library.', cannot: 'Cannot manage users, organization tax configuration, or organization-wide audit history.', assignment: 'At least one payroll client should be assigned.' },
+  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Cannot change client-wide settings, manage users, or edit another person’s printer profile.', assignment: 'At least one payroll client should be assigned.' },
+  { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'Maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
+  { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
 
 export function Users() {
@@ -39,6 +51,9 @@ export function Users() {
   const roleOptions = currentUser?.role === 'super_admin'
     ? allRoleOptions
     : allRoleOptions.filter((role) => role.value !== 'super_admin');
+  const invitationRoleOptions = roleOptions.filter((role) => !role.legacy);
+  const roleGuideOptions = roleOptions.filter((role) => !role.legacy);
+  const roleLabel = (role: UserRole) => allRoleOptions.find((option) => option.value === role)?.label || role;
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,6 +80,7 @@ export function Users() {
   const [editClientIds, setEditClientIds] = useState<number[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const editRoleOptions = roleOptions.filter((role) => !role.legacy || editRole === role.value);
 
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -395,24 +411,48 @@ export function Users() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        {/* Role Descriptions */}
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h4 className="text-sm font-semibold text-blue-900 mb-2">Role Permissions</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {roleOptions.map(role => (
-              <div key={role.value} className="flex items-start gap-2">
-                <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded mt-0.5 shrink-0 w-24 text-center">
-                  {role.label}
-                </span>
-                <span className="text-xs text-blue-800">{role.description}</span>
-              </div>
+        {/* Role guide */}
+        <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+            <h2 className="font-semibold">Choose the narrowest role that fits</h2>
+            <p className="mt-1 text-sm leading-5 text-slate-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
+          </div>
+          <div className="divide-y divide-slate-200 sm:hidden">
+            {roleGuideOptions.map((role) => (
+              <details key={role.value} className="group bg-white px-4 py-4">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+                  <span>
+                    <span className="block font-semibold text-slate-950">{role.label}</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">{role.scope}</span>
+                  </span>
+                  <span className="text-xs font-semibold text-primary-700 group-open:hidden">View</span>
+                  <span className="hidden text-xs font-semibold text-primary-700 group-open:inline">Close</span>
+                </summary>
+                <dl className="space-y-4 pb-2 pt-4 text-xs leading-5">
+                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                </dl>
+              </details>
             ))}
           </div>
-          <p className="text-xs text-blue-600 mt-2">
-            Managers and accountants must be assigned specific payroll clients.
-            Admins automatically have access to all clients.
-          </p>
-        </div>
+          <div className="hidden gap-px bg-slate-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
+            {roleGuideOptions.map((role) => (
+              <article key={role.value} className="bg-white p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <h3 className="font-semibold text-slate-950">{role.label}</h3>
+                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">Exceptional</span>}
+                </div>
+                <dl className="mt-4 space-y-4 text-xs leading-5">
+                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Scope</dt><dd className="text-slate-700">{role.scope}</dd></div>
+                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </section>
 
         {error && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
@@ -444,7 +484,7 @@ export function Users() {
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
               <Select value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
-                {roleOptions.map((role) => (
+                {invitationRoleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
               </Select>
@@ -497,7 +537,7 @@ export function Users() {
                         <div className="space-y-3">
                           <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
                           <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
-                            {roleOptions.map((role) => (
+                            {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
                           </Select>
@@ -534,7 +574,7 @@ export function Users() {
                             </span>
                           )}
                           <div className="mt-4 grid grid-cols-2 gap-3">
-                            <MobileField label="Role" value={roleOptions.find((role) => role.value === user.role)?.label || user.role} />
+                            <MobileField label="Role" value={roleLabel(user.role)} />
                             <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
@@ -601,14 +641,14 @@ export function Users() {
                       <TableCell>
                         {editingId === user.id ? (
                           <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
-                            {roleOptions.map((role) => (
+                            {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
                           </Select>
                         ) : (
                           <div>
                             <span className="inline-flex items-center gap-1.5">
-                              {roleOptions.find((role) => role.value === user.role)?.label || user.role}
+                              {roleLabel(user.role)}
                             </span>
                             {renderAssignedCompanies(user)}
                           </div>

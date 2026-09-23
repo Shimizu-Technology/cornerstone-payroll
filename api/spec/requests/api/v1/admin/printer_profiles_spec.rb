@@ -50,7 +50,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("active_printer_profile_id")).to be_nil
       profiles = response.parsed_body.fetch("printer_profiles")
-      expect(profiles.map { |profile| profile.fetch("id") }).to eq([shared_profile.id])
+      expect(profiles.map { |profile| profile.fetch("id") }).to eq([ shared_profile.id ])
       expect(profiles.first.fetch("organization_id")).to eq(organization.id)
     end
   end
@@ -177,7 +177,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(response.parsed_body.fetch("error")).to eq("Printer profile library management access required")
       expect(company.reload.check_stock_type).to eq("top_check")
       expect(other_company.reload.active_printer_profile_id).to be_nil
     end
@@ -288,30 +288,153 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-    it "denies every printer-profile mutation without persisting changes" do
+    it "allows an accountant to create a shared profile" do
+      expect {
+        post "/api/v1/admin/printer_profiles", params: {
+          printer_profile: {
+            name: "Accounting Room Printer",
+            check_stock_type: "top_check",
+            check_offset_x: "0.05",
+            check_offset_y: "-0.02"
+          }
+        }
+      }.to change { organization.printer_profiles.count }.by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("printer_profile", "created_by_id")).to eq(accountant.id)
+    end
+
+    it "does not let an accountant replace the organization default while creating a profile" do
+      default_profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Organization Default",
+        check_stock_type: "top_check",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        is_default: true
+      )
+
+      post "/api/v1/admin/printer_profiles", params: {
+        printer_profile: {
+          name: "Accounting Room Printer",
+          check_stock_type: "top_check",
+          check_offset_x: 0,
+          check_offset_y: 0,
+          is_default: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("printer_profile", "is_default")).to be(false)
+      expect(default_profile.reload).to be_is_default
+    end
+
+    it "denies edits and archives of another person's profile" do
       original_profile = profile.attributes.slice("name", "check_offset_x", "check_offset_y")
       original_company = company.attributes.slice(
         "check_stock_type", "check_offset_x", "check_offset_y", "active_printer_profile_id"
       )
 
       requests = [
-        -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
         -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
-        -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" },
-        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" }
+        -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" }
       ]
 
       requests.each do |request|
         request.call
 
         expect(response).to have_http_status(:forbidden)
-        expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
       end
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Printer profile library management access required")
 
       expect(organization.printer_profiles.count).to eq(1)
       expect(profile.reload.attributes.slice(*original_profile.keys)).to eq(original_profile)
       expect(company.reload.attributes.slice(*original_company.keys)).to eq(original_company)
       expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
+
+    it "lets an accountant edit and archive an unused profile they created" do
+      own_profile = PrinterProfile.create!(
+        organization: organization,
+        created_by: accountant,
+        name: "My Printer",
+        check_stock_type: "top_check",
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+
+      patch "/api/v1/admin/printer_profiles/#{own_profile.id}", params: {
+        printer_profile: { name: "My Updated Printer", check_offset_x: 0.125 }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(own_profile.reload).to have_attributes(name: "My Updated Printer", check_offset_x: 0.125)
+
+      delete "/api/v1/admin/printer_profiles/#{own_profile.id}"
+
+      expect(response).to have_http_status(:no_content)
+      expect(own_profile.reload).to be_archived
+    end
+
+    it "lets an accountant clone another profile into an owned, editable revision" do
+      post "/api/v1/admin/printer_profiles/#{profile.id}/clone"
+
+      expect(response).to have_http_status(:created)
+      copy = PrinterProfile.order(:id).last
+      expect(copy).to have_attributes(
+        created_by_id: accountant.id,
+        source_profile_id: profile.id,
+        revision_number: 2,
+        check_offset_x: profile.check_offset_x,
+        check_offset_y: profile.check_offset_y,
+        is_default: false
+      )
+      expect(response.parsed_body.dig("printer_profile", "can_edit")).to be(true)
+      expect(response.parsed_body.dig("printer_profile", "owned_by_current_user")).to be(true)
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/clone"
+
+      expect(response).to have_http_status(:created)
+      expect(PrinterProfile.order(:revision_number).last).to have_attributes(
+        source_profile_id: profile.id,
+        revision_number: 3,
+        name: "Protected Printer copy 2"
+      )
+    end
+
+    it "keeps selected calibrations immutable and directs the owner to clone" do
+      own_profile = PrinterProfile.create!(
+        organization: organization,
+        created_by: accountant,
+        name: "Selected Printer",
+        check_stock_type: "top_check",
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      UserPrinterProfileSelection.create!(
+        user: accountant,
+        organization: organization,
+        check_stock_type: "top_check",
+        printer_profile: own_profile
+      )
+
+      patch "/api/v1/admin/printer_profiles/#{own_profile.id}", params: {
+        printer_profile: { check_offset_x: 0.25 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Clone")
+      expect(own_profile.reload.check_offset_x.to_d).to eq(0.to_d)
+
+      patch "/api/v1/admin/printer_profiles/#{own_profile.id}", params: {
+        printer_profile: { description: "Tray 2" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(own_profile.reload.description).to eq("Tray 2")
     end
 
     it "allows the compatibility endpoints to manage only the accountant's selection" do

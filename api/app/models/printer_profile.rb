@@ -7,6 +7,9 @@ class PrinterProfile < ApplicationRecord
   belongs_to :organization
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :updated_by, class_name: "User", optional: true
+  belongs_to :source_profile, class_name: "PrinterProfile", optional: true
+  has_many :derived_profiles, class_name: "PrinterProfile", foreign_key: :source_profile_id,
+    dependent: :nullify, inverse_of: :source_profile
   has_many :user_printer_profile_selections, dependent: :destroy
   has_many :check_print_runs, dependent: :nullify
 
@@ -15,6 +18,7 @@ class PrinterProfile < ApplicationRecord
   validates :check_stock_type, inclusion: { in: Company::CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
+  validates :revision_number, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
   validate :selected_profile_stock_type_is_stable
 
   scope :active, -> { where(archived_at: nil) }
@@ -22,6 +26,21 @@ class PrinterProfile < ApplicationRecord
 
   def archived?
     archived_at.present?
+  end
+
+  def calibration_locked?
+    user_printer_profile_selections.exists? || check_print_runs.exists?
+  end
+
+  def next_available_copy_name
+    base_name = "#{name} copy"
+    candidate = base_name
+    suffix = 2
+    while organization.printer_profiles.active.where("LOWER(name) = ?", candidate.downcase).exists?
+      candidate = "#{base_name} #{suffix}"
+      suffix += 1
+    end
+    candidate
   end
 
   # Only one default profile per organization — the rest get cleared automatically

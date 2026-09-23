@@ -1,13 +1,16 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'default' | 'destructive';
   size?: 'sm' | 'md' | 'lg';
+  loading?: boolean;
+  loadingLabel?: string;
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'primary', size = 'md', disabled, children, ...props }, ref) => {
+  ({ className, variant = 'primary', size = 'md', disabled, loading = false, loadingLabel, children, ...props }, ref) => {
     const baseStyles =
       'inline-flex items-center justify-center whitespace-nowrap rounded-full font-semibold tracking-[-0.01em] transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.985]';
 
@@ -36,10 +39,12 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={cn(baseStyles, variants[variant], sizes[size], className)}
-        disabled={disabled}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
         {...props}
       >
-        {children}
+        {loading && <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />}
+        {loading && loadingLabel ? <span>{loadingLabel}</span> : children}
       </button>
     );
   }

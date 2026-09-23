@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -236,6 +236,44 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
     t.index ["payroll_item_id", "event_type"], name: "index_check_events_on_payroll_item_id_and_event_type"
     t.index ["payroll_item_id"], name: "index_check_events_on_payroll_item_id"
     t.index ["user_id"], name: "index_check_events_on_user_id"
+  end
+
+  create_table "check_print_generations", force: :cascade do |t|
+    t.bigint "check_print_run_id"
+    t.bigint "company_id", null: false
+    t.datetime "completed_at"
+    t.integer "completed_items", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.string "error_code"
+    t.text "error_message"
+    t.datetime "failed_at"
+    t.string "idempotency_key", null: false
+    t.jsonb "non_employee_check_ids", default: [], null: false
+    t.bigint "pay_period_id", null: false
+    t.jsonb "payroll_item_ids", default: [], null: false
+    t.string "phase", default: "queued", null: false
+    t.bigint "printer_profile_id", null: false
+    t.integer "printer_profile_lock_version", null: false
+    t.string "request_digest", null: false
+    t.string "request_ip"
+    t.bigint "requested_by_id", null: false
+    t.datetime "started_at"
+    t.integer "starting_slot", default: 1, null: false
+    t.string "status", default: "queued", null: false
+    t.integer "total_items", null: false
+    t.datetime "updated_at", null: false
+    t.string "worker_job_id"
+    t.index ["check_print_run_id"], name: "index_check_print_generations_on_check_print_run_id"
+    t.index ["company_id", "requested_by_id", "idempotency_key"], name: "idx_check_print_generations_idempotency", unique: true
+    t.index ["company_id"], name: "index_check_print_generations_on_company_id"
+    t.index ["pay_period_id", "requested_by_id", "created_at"], name: "idx_check_print_generations_active_lookup"
+    t.index ["pay_period_id"], name: "index_check_print_generations_on_pay_period_id"
+    t.index ["printer_profile_id"], name: "index_check_print_generations_on_printer_profile_id"
+    t.index ["requested_by_id"], name: "index_check_print_generations_on_requested_by_id"
+    t.check_constraint "completed_items >= 0 AND total_items > 0 AND completed_items <= total_items", name: "check_print_generations_progress_check"
+    t.check_constraint "phase::text = ANY (ARRAY['queued'::character varying::text, 'validating'::character varying::text, 'rendering'::character varying::text, 'assembling'::character varying::text, 'uploading'::character varying::text, 'verifying'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text])", name: "check_print_generations_phase_check"
+    t.check_constraint "starting_slot >= 1 AND starting_slot <= 4", name: "check_print_generations_starting_slot_check"
+    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying::text, 'processing'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text])", name: "check_print_generations_status_check"
   end
 
   create_table "check_print_runs", force: :cascade do |t|
@@ -2778,6 +2816,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
     t.string "name", null: false
     t.text "notes"
     t.bigint "organization_id", null: false
+    t.integer "revision_number", default: 1, null: false
+    t.bigint "source_profile_id"
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
     t.index ["created_by_id"], name: "index_printer_profiles_on_created_by_id"
@@ -2785,7 +2825,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
     t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true, where: "(archived_at IS NULL)"
     t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
     t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
+    t.index ["source_profile_id", "revision_number"], name: "idx_printer_profiles_unique_source_revision", unique: true, where: "(source_profile_id IS NOT NULL)"
+    t.index ["source_profile_id"], name: "index_printer_profiles_on_source_profile_id"
     t.index ["updated_by_id"], name: "index_printer_profiles_on_updated_by_id"
+    t.check_constraint "revision_number >= 1", name: "printer_profiles_revision_number_positive"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -3399,6 +3442,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
   add_foreign_key "cable_connection_tickets", "users"
   add_foreign_key "check_events", "payroll_items"
   add_foreign_key "check_events", "users", on_delete: :restrict
+  add_foreign_key "check_print_generations", "check_print_runs"
+  add_foreign_key "check_print_generations", "companies"
+  add_foreign_key "check_print_generations", "pay_periods"
+  add_foreign_key "check_print_generations", "printer_profiles"
+  add_foreign_key "check_print_generations", "users", column: "requested_by_id"
   add_foreign_key "check_print_runs", "companies"
   add_foreign_key "check_print_runs", "pay_periods"
   add_foreign_key "check_print_runs", "printer_profiles", on_delete: :nullify
@@ -3709,6 +3757,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_220000) do
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
   add_foreign_key "printer_profiles", "organizations"
+  add_foreign_key "printer_profiles", "printer_profiles", column: "source_profile_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "updated_by_id", on_delete: :nullify
   add_foreign_key "punch_entries", "timecards"

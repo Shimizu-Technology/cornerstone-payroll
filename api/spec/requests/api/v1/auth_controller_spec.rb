@@ -54,7 +54,13 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "id" => user.id,
         "role" => "admin",
         "home_company_id" => company.id,
-        "assigned_company_ids" => [ company.id ]
+        "assigned_company_ids" => [ company.id ],
+        "capabilities" => include(
+          "use_printer_profiles",
+          "manage_printer_profile_library",
+          "manage_client_check_settings",
+          "view_record_activity"
+        )
       )
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
     end

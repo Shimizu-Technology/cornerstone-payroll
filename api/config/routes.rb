@@ -102,6 +102,7 @@ Rails.application.routes.draw do
           end
           member do
             post :apply
+            post :clone
             post :apply_to_all_companies
           end
         end
@@ -148,6 +149,7 @@ Rails.application.routes.draw do
             get :export
           end
         end
+        get "record_activities/:record_type/:record_id", to: "record_activities#index"
         resources :historical_imports, only: %i[index show] do
           collection do
             post :preview
@@ -332,6 +334,9 @@ Rails.application.routes.draw do
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
           get  "check_print_queue",          to: "check_print_runs#queue"
           get  "check_print_runs",           to: "check_print_runs#index"
+          get  "check_print_generations/active", to: "check_print_generations#active"
+          post "check_print_generations",     to: "check_print_generations#create"
+          get  "check_print_generations/:id", to: "check_print_generations#show"
           patch "check_numbers",              to: "check_numbers#update"
           post "check_print_runs",           to: "check_print_runs#create"
         end

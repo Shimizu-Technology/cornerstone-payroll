@@ -122,6 +122,8 @@ module Api
 
         # PATCH/PUT /api/v1/admin/pay_periods/:id
         def update
+          @pay_period_audit_before_values = AuditRecordSnapshot.values_for(@pay_period)
+
           unless @pay_period.can_edit?
             message = if @pay_period.voided?
               "Cannot edit a voided pay period"
@@ -457,9 +459,14 @@ module Api
               )
             end
             @pay_period.update!(calculation_attributes)
-            PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
+            @payroll_review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
             @pay_period.invalidate_later_rehearsal_calculations!
           end
+
+          # Preserve the request outcome for the after-action audit hook. The
+          # review revision service reloads the pay period, so saved_changes is
+          # not a reliable description of what this request accomplished.
+          @payroll_audit_results = results
 
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true),
@@ -647,24 +654,35 @@ module Api
               actor:      current_user,
               reason:     reason
             )
+            @pay_period.reload
 
             begin
+              changes = audit_record_changes
               AuditLog.record!(
                 user:        current_user,
                 company_id:  current_company_id,
                 action:      "void_pay_period",
                 record_type: "PayPeriod",
                 record_id:   @pay_period.id,
-                metadata:    { reason: reason, voided_at: event.created_at },
+                subject_name: AuditRecordSnapshot.subject_name(@pay_period),
+                metadata:    {
+                  changed_fields: changes[:changed_fields],
+                  before_values: changes[:before_values].presence,
+                  after_values: changes[:after_values].presence,
+                  redacted_fields: changes[:redacted_fields].presence,
+                  reason: reason,
+                  voided_at: event.created_at,
+                  business_summary: pay_period_business_summary(@pay_period)
+                }.compact,
                 ip_address:  request.remote_ip,
-                user_agent:  request.user_agent
+                user_agent:  request.user_agent,
+                request_id:  request.request_id
               )
               skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
 
-            @pay_period.reload
             render json: {
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)
@@ -895,6 +913,57 @@ module Api
 
         private
 
+        def audit_record
+          @pay_period
+        end
+
+        def audit_record_changes
+          return AuditRecordSnapshot.changes_for(@pay_period) unless @pay_period_audit_before_values
+
+          AuditRecordSnapshot.changes_from(@pay_period, @pay_period_audit_before_values)
+        end
+
+        def audit_record_metadata(record)
+          return {} unless record.is_a?(PayPeriod)
+          return {} unless %w[run_payroll approve unapprove commit void].include?(action_name)
+
+          summary = pay_period_business_summary(record)
+          if action_name == "run_payroll" && defined?(@payroll_audit_results) && @payroll_audit_results
+            summary[:employees_processed] = @payroll_audit_results.fetch(:success, []).size
+            summary[:employees_failed] = @payroll_audit_results.fetch(:errors, []).size
+            summary[:outcome] = summary[:employees_failed].positive? ? "partial" : "completed"
+          end
+
+          metadata = { business_summary: summary }
+          if action_name == "run_payroll" && defined?(@payroll_review_package) && @payroll_review_package
+            metadata[:review_revision] = {
+              id: @payroll_review_package.id,
+              revision: @payroll_review_package.revision,
+              calculation_checksum: @payroll_review_package.calculation_checksum
+            }
+          end
+          metadata
+        end
+
+        def pay_period_business_summary(record)
+          aggregates = record.payroll_items.not_voided.pick(
+            Arel.sql("COUNT(*)"),
+            Arel.sql("COALESCE(SUM(gross_pay), 0)"),
+            Arel.sql("COALESCE(SUM(total_deductions), 0)"),
+            Arel.sql("COALESCE(SUM(employer_social_security_tax), 0)"),
+            Arel.sql("COALESCE(SUM(employer_medicare_tax), 0)"),
+            Arel.sql("COALESCE(SUM(net_pay), 0)")
+          )
+          {
+            status: record.status,
+            employee_count: aggregates[0].to_i,
+            total_gross: aggregates[1].to_d.to_s("F"),
+            total_deductions: aggregates[2].to_d.to_s("F"),
+            employer_payroll_taxes: (aggregates[3].to_d + aggregates[4].to_d).to_s("F"),
+            total_net: aggregates[5].to_d.to_s("F")
+          }
+        end
+
         def with_financial_pay_period_lock
           ApplicationRecord.transaction do
             Company.lock.find(@pay_period.company_id)
@@ -1046,6 +1115,11 @@ module Api
             .includes(:payroll_items, :voided_by, :source_pay_period, :company_workweek,
                       :correction_events, :supplemental_pay_periods)
             .find(params[:id])
+
+          # Capture the business record before custom lifecycle actions run.
+          # Several services reload the model, which clears saved_changes even
+          # though the request made a meaningful state transition.
+          @pay_period_audit_before_values = AuditRecordSnapshot.values_for(@pay_period)
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found

@@ -102,7 +102,25 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
                params: { reason: "Audit dedupe test" }, as: :json
         }.to change(AuditLog, :count).by(1)
 
-        expect(AuditLog.last.action).to eq("void_pay_period")
+        audit = AuditLog.last
+        expect(audit.action).to eq("void_pay_period")
+        expect(audit).to have_attributes(
+          record_id: committed_period.id,
+          subject_name: AuditRecordSnapshot.subject_name(committed_period),
+          request_id: be_present
+        )
+        expect(audit.metadata).to include(
+          "changed_fields" => include("correction_status", "void_reason", "voided_at"),
+          "after_values" => include(
+            "correction_status" => "voided",
+            "void_reason" => "Audit dedupe test"
+          ),
+          "business_summary" => include(
+            "employee_count" => 1,
+            "total_gross" => "1600.0",
+            "total_net" => "1300.0"
+          )
+        )
       end
     end
 
