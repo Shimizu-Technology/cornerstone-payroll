@@ -262,6 +262,35 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(apiMocks.createPrintGeneration.mock.calls[1][1].payrollItemIds).toEqual([7]);
   });
 
+  it('blocks a failed-generation retry while visible check numbers are unsaved', async () => {
+    const user = userEvent.setup();
+    apiMocks.printGeneration.mockResolvedValue({
+      check_print_generation: {
+        ...queuedGeneration,
+        status: 'failed',
+        phase: 'failed',
+        error_code: 'generation_failed',
+        error_message: 'The package could not be generated. Try again.',
+        failed_at: new Date().toISOString(),
+      },
+    });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
+    expect(await screen.findByText('Package not generated', {}, { timeout: 2500 })).toBeTruthy();
+    const numberInput = screen.getByRole('textbox', { name: 'Check number for Ada Trainer' });
+    await user.clear(numberInput);
+    await user.type(numberInput, '4200');
+
+    const retry = screen.getByRole('button', { name: 'Try again with the same selection' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    expect(screen.getByText('Save or discard check-number changes before retrying.')).toBeTruthy();
+    expect(apiMocks.createPrintGeneration).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(retry.disabled).toBe(false);
+  });
+
   it('reuses the pending generation key after a transport failure', async () => {
     const user = userEvent.setup();
     apiMocks.createPrintGeneration

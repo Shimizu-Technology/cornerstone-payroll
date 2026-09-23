@@ -16,9 +16,10 @@ interface OperationStatusPanelProps {
   generation: CheckPrintGeneration;
   showLongRunningHint: boolean;
   onRetry: () => void;
+  retryDisabled?: boolean;
 }
 
-export function OperationStatusPanel({ generation, showLongRunningHint, onRetry }: OperationStatusPanelProps) {
+export function OperationStatusPanel({ generation, showLongRunningHint, onRetry, retryDisabled = false }: OperationStatusPanelProps) {
   const failed = generation.status === 'failed';
   const ready = generation.status === 'ready';
   const progress = generation.total_items > 0
@@ -66,9 +67,12 @@ export function OperationStatusPanel({ generation, showLongRunningHint, onRetry 
             </>
           )}
           {failed && (
-            <button type="button" onClick={onRetry} className="mt-3 text-xs font-semibold text-red-800 underline underline-offset-2">
-              Try again with the same selection
-            </button>
+            <>
+              <button type="button" onClick={onRetry} disabled={retryDisabled} className="mt-3 text-xs font-semibold text-red-800 underline underline-offset-2 disabled:cursor-not-allowed disabled:text-red-400 disabled:no-underline">
+                Try again with the same selection
+              </button>
+              {retryDisabled && <p className="mt-2 text-xs leading-5 text-red-800">Save or discard check-number changes before retrying.</p>}
+            </>
           )}
         </div>
       </div>
