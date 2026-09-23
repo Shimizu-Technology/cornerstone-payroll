@@ -3339,6 +3339,13 @@ export interface PrinterProfile {
   updated_by_name: string | null;
   selection_count: number;
   selected_for_current_user: boolean;
+  owned_by_current_user: boolean;
+  can_edit: boolean;
+  can_update_calibration: boolean;
+  can_archive: boolean;
+  calibration_locked: boolean;
+  source_profile_id: number | null;
+  revision_number: number;
   lock_version: number;
   created_at: string;
   updated_at: string;
@@ -3365,6 +3372,8 @@ export const printerProfilesApi = {
     api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
   update: (id: number, data: Partial<PrinterProfile>) =>
     api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
+  clone: (id: number, name?: string): Promise<{ printer_profile: PrinterProfile }> =>
+    api.post<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}/clone`, name ? { name } : undefined),
   delete: (id: number) =>
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
@@ -3610,6 +3619,7 @@ interface AuthApiUser {
   company_name: string;
   home_company_id: number;
   assigned_company_ids: number[];
+  capabilities: string[];
 }
 
 export const companiesApi = {
