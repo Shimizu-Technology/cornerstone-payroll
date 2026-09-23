@@ -1755,7 +1755,7 @@ export interface CheckPrintRun {
   confirmed_by_name: string | null;
   requires_distinct_confirmer: boolean;
   can_current_user_confirm: boolean;
-  confirmation_state: 'ready' | 'confirmed' | 'outdated';
+  confirmation_state: 'verification_required' | 'ready' | 'confirmed' | 'outdated';
   confirmation_issue: string | null;
 }
 

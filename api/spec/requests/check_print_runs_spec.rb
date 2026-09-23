@@ -135,9 +135,67 @@ RSpec.describe "Check print runs", type: :request do
     get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
 
     expect(response).to have_http_status(:ok)
+    history_packages = response.parsed_body.fetch("check_print_runs").select do |saved|
+      saved.fetch("filename").start_with?("history-package-")
+    end
+    expect(history_packages.pluck("confirmation_state")).to all(eq("verification_required"))
     expect(PayrollItem).to have_received(:where).once
     expect(NonEmployeeCheck).to have_received(:where).once
     expect(CheckPrintRenderFingerprint).not_to have_received(:for_record)
+  end
+
+  it "does not report a digest-bearing package ready before related render inputs are verified" do
+    employee = create(:employee, company: company, address_line1: "1 Original Street")
+    item = create(
+      :payroll_item,
+      company: company,
+      pay_period: pay_period,
+      employee: employee,
+      net_pay: 500,
+      check_number: "4102",
+      check_print_count: 0,
+      check_printed_at: nil
+    )
+    digest = CheckPrintRenderFingerprint.for_record(
+      item,
+      company: company,
+      check_stock_type: company.check_stock_type
+    )
+    run = CheckPrintRun.create!(
+      company: company,
+      pay_period: pay_period,
+      created_by: admin_user,
+      status: "generated",
+      check_stock_type: company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ {
+        "key" => "payroll_item:#{item.id}",
+        "source_type" => "payroll_item",
+        "source_id" => item.id,
+        "check_number" => item.check_number,
+        "payee" => employee.full_name,
+        "amount" => "500.00",
+        "source_updated_at" => item.updated_at.iso8601(6),
+        "printed_at" => nil,
+        "print_count" => 0,
+        "render_input_digest" => digest
+      } ],
+      storage_key: "check-print-runs/render-input-change.pdf",
+      filename: "render-input-change.pdf",
+      sha256: "f" * 64,
+      byte_size: 100,
+      generated_at: Time.current
+    )
+    employee.update!(address_line1: "2 Changed Avenue")
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+
+    payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
+    expect(payload).to include(
+      "confirmation_state" => "verification_required",
+      "confirmation_issue" => "Open this package to verify it against current payroll data."
+    )
   end
 
   it "marks legacy packages with missing source references outdated" do

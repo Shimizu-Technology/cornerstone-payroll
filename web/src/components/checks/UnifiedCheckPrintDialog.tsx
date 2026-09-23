@@ -36,6 +36,7 @@ function statusBadge(item: CheckPrintQueueItem): ReactElement {
 function packageBadge(printRun: CheckPrintRun): ReactElement {
   if (printRun.confirmation_state === 'confirmed') return <Badge variant="success">Confirmed</Badge>;
   if (printRun.confirmation_state === 'outdated') return <Badge variant="danger">Outdated</Badge>;
+  if (printRun.confirmation_state === 'verification_required') return <Badge variant="warning">Verify to use</Badge>;
   return <Badge variant="warning">Ready</Badge>;
 }
 
@@ -91,6 +92,17 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     });
   }, []);
 
+  const markRunVerified = useCallback((printRun: CheckPrintRun) => {
+    if (printRun.confirmation_state !== 'verification_required') return;
+    const verifiedRun: CheckPrintRun = {
+      ...printRun,
+      confirmation_state: 'ready',
+      confirmation_issue: null,
+    };
+    setRun((current) => current?.id === printRun.id ? verifiedRun : current);
+    setRuns((current) => current.map((savedRun) => savedRun.id === printRun.id ? verifiedRun : savedRun));
+  }, []);
+
   const applyQueue = useCallback((data: CheckPrintQueueResponse, options?: { preserveSelection?: boolean; selectKeys?: string[] }) => {
     setQueue(data);
     setDraftNumbers(Object.fromEntries(data.items.map((item) => [item.key, item.check_number || ''])));
@@ -131,6 +143,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       if (requestToken !== previewRequestRef.current) return;
       setPreviewUrl(URL.createObjectURL(pdf.blob));
       setArtifactVerified(true);
+      markRunVerified(printRun);
     } catch (err) {
       if (requestToken !== previewRequestRef.current) return;
       setError(err instanceof Error
@@ -139,7 +152,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     } finally {
       if (requestToken === previewRequestRef.current) setBusyAction(null);
     }
-  }, [revokePreview]);
+  }, [markRunVerified, revokePreview]);
 
   const openSavedRun = useCallback(async (printRun: CheckPrintRun) => {
     setRun(printRun);
@@ -152,8 +165,13 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     await loadPreview(printRun);
   }, [loadPreview]);
 
-  const refreshRuns = useCallback(async (preferredRunId?: number | null, openLatest = false) => {
+  const refreshRuns = useCallback(async (
+    preferredRunId?: number | null,
+    openLatest = false,
+    workspaceToken = workspaceRequestRef.current
+  ) => {
     const response = await checksApi.printRuns(payPeriodId);
+    if (workspaceToken !== workspaceRequestRef.current) return [];
     setRuns(response.check_print_runs);
     const target = preferredRunId
       ? response.check_print_runs.find((savedRun) => savedRun.id === preferredRunId)
@@ -180,6 +198,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   useEffect(() => {
     if (!open) return;
     const requestToken = ++workspaceRequestRef.current;
+    generationRequestRef.current = false;
+    pendingGenerationKeyRef.current = null;
     previewRequestRef.current += 1;
     setInitialLoading(true);
     setError(null);
@@ -187,6 +207,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setRun(null);
     setRuns([]);
     setGeneration(null);
+    setGenerationStartedAt(null);
+    setStartingGeneration(false);
     setReplacementMode(false);
     setPrinterProfiles([]);
     setProfileLoadError(null);
@@ -237,6 +259,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     if (!open || activeGenerationId === null) return undefined;
     let cancelled = false;
     let timer: number | undefined;
+    const workspaceToken = workspaceRequestRef.current;
 
     const poll = async (): Promise<void> => {
       try {
@@ -245,7 +268,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         const next = response.check_print_generation;
         setGeneration(next);
         if (next.status === 'ready' && next.check_print_run_id) {
-          await refreshRuns(next.check_print_run_id);
+          await refreshRuns(next.check_print_run_id, false, workspaceToken);
           return;
         }
         if (next.status === 'failed') return;
@@ -324,6 +347,13 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setError(null);
   };
 
+  const requestOpenSavedRun = (printRun: CheckPrintRun): void => {
+    if (savingNumbers) return;
+    if (hasUnsavedNumbers && !window.confirm('Discard the unsaved check-number changes and open this saved package?')) return;
+    if (hasUnsavedNumbers) discardNumberChanges();
+    void openSavedRun(printRun);
+  };
+
   const saveNumberChanges = async (): Promise<void> => {
     if (!hasUnsavedNumbers || hasNumberErrors) return;
     setSavingNumbers(true);
@@ -334,6 +364,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         source_id: item.source_id,
         check_number: (draftNumbers[item.key] || '').trim() || null,
       })), 'Saved from the unified check-print worksheet');
+      previewRequestRef.current += 1;
+      setRun(null);
+      setGeneration(null);
+      setArtifactVerified(false);
+      setPreviewExpanded(false);
+      revokePreview();
       await loadQueue({ preserveSelection: true });
       onConfirmed();
     } catch (err) {
@@ -372,6 +408,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const generate = async (): Promise<void> => {
     const printerProfile = queue?.meta.printer_profile;
     if (generationRequestRef.current || selectedItems.length === 0 || !printerProfile) return;
+    const workspaceToken = workspaceRequestRef.current;
     generationRequestRef.current = true;
     setStartingGeneration(true);
     setError(null);
@@ -389,10 +426,24 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         printerProfileId: printerProfile.id,
         printerProfileLockVersion: printerProfile.lock_version,
       });
+      if (workspaceToken !== workspaceRequestRef.current) return;
       setGeneration(response.check_print_generation);
       pendingGenerationKeyRef.current = null;
+      if (response.check_print_generation.status === 'ready' && response.check_print_generation.check_print_run_id) {
+        try {
+          await refreshRuns(response.check_print_generation.check_print_run_id, false, workspaceToken);
+        } catch (runError) {
+          if (workspaceToken === workspaceRequestRef.current) {
+            setError(runError instanceof Error
+              ? `The package is ready, but its saved record could not be loaded: ${runError.message}`
+              : 'The package is ready, but its saved record could not be loaded.');
+          }
+        }
+      }
     } catch (err) {
+      if (workspaceToken !== workspaceRequestRef.current) return;
       const active = await checksApi.activePrintGeneration(payPeriodId).catch(() => null);
+      if (workspaceToken !== workspaceRequestRef.current) return;
       if (active?.check_print_generation) {
         setGeneration(active.check_print_generation);
         setGenerationStartedAt(new Date(active.check_print_generation.created_at).getTime());
@@ -402,8 +453,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         setError(err instanceof Error ? err.message : 'Could not start package generation. Your selection is unchanged.');
       }
     } finally {
-      generationRequestRef.current = false;
-      setStartingGeneration(false);
+      if (workspaceToken === workspaceRequestRef.current) {
+        generationRequestRef.current = false;
+        setStartingGeneration(false);
+      }
     }
   };
 
@@ -440,6 +493,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       link.download = result.filename || run.filename;
       link.click();
       setArtifactVerified(true);
+      markRunVerified(run);
       window.setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not download the check package.');
@@ -449,7 +503,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const print = (): void => {
-    if (!run || run.confirmation_state === 'outdated') return;
+    if (!run || !artifactVerified || !['ready', 'confirmed'].includes(run.confirmation_state)) return;
     const frame = previewExpanded ? expandedPreviewRef.current : compactPreviewRef.current;
     frame?.contentWindow?.print();
   };
@@ -570,7 +624,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                       </div>
                       {previewUrl ? <div className="relative"><iframe ref={compactPreviewRef} title="Check package preview" src={previewUrl} className="h-72 w-full bg-slate-900" /><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="absolute right-3 top-3 gap-1.5"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-slate-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
                       <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950"><span className="font-semibold">Printer setup:</span> Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink.</div>
-                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || run.confirmation_state === 'outdated'}>Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
+                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['ready', 'confirmed'].includes(run.confirmation_state)}>Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
                       {run.confirmation_state === 'outdated' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>This package is outdated.</strong> {run.confirmation_issue} It remains available for audit history, but it cannot be printed or confirmed. Generate a replacement from current data.</span></div></div>}
                       <details className="border-t border-slate-100 px-4 py-3 text-xs text-slate-600"><summary className="cursor-pointer font-semibold text-slate-700">Audit details</summary><div className="mt-2 space-y-1 break-all font-mono"><p>File: {run.filename}</p><p>SHA-256: {run.sha256}</p><p>Bytes: {run.byte_size.toLocaleString()}</p></div></details>
                     </section>
@@ -582,7 +636,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                       <div className="border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4" />Saved package history</div><p className="mt-1 text-xs text-slate-500">Every package is retained as an immutable payroll record.</p></div>
-                      <div className="divide-y divide-slate-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => void openSavedRun(savedRun)} disabled={busyAction === 'preview'} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-slate-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-slate-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-slate-500">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
+                      <div className="divide-y divide-slate-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-slate-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-slate-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-slate-500">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
                     </section>
                   )}
                 </aside>
@@ -608,7 +662,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
           <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Integrity verified · Review every check before confirming.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-slate-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
           {previewUrl && <iframe ref={expandedPreviewRef} title="Expanded check package preview" src={previewUrl} className="min-h-0 w-full flex-1 bg-slate-900" />}
-          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || run?.confirmation_state === 'outdated'} className="gap-2"><Printer className="h-4 w-4" />Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['ready', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
