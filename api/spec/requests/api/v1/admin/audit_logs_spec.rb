@@ -63,6 +63,68 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
+  it "filters a user's successful sign-ins by exact security event" do
+    signed_in = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      action: "authentication#signed_in",
+      event_category: "security",
+      record_type: "users",
+      record_id: admin.id,
+      ip_address: "192.0.2.15",
+      user_agent: "Mozilla/5.0 Test Browser"
+    )
+    create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      action: "authentication#signed_in_from_link",
+      event_category: "security",
+      record_type: "users",
+      record_id: admin.id
+    )
+    create(:audit_log, user: admin, organization: organization, action: "users#updated", record_type: "users")
+    create(
+      :audit_log,
+      user: foreign_admin,
+      organization: foreign_organization,
+      action: "authentication#signed_in",
+      event_category: "security",
+      record_type: "users",
+      record_id: foreign_admin.id
+    )
+
+    get "/api/v1/admin/audit_logs", params: {
+      user_id: admin.id,
+      event_action: "authentication#signed_in",
+      event_category: "security"
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("id")).to eq([ signed_in.id ])
+    expect(response.parsed_body.fetch("data").first).to include(
+      "ip_address" => "192.0.2.15",
+      "user_agent" => "Mozilla/5.0 Test Browser",
+      "event_category" => "security"
+    )
+
+    get "/api/v1/admin/audit_logs/export", params: {
+      user_id: admin.id,
+      event_action: "authentication#signed_in",
+      event_category: "security"
+    }
+
+    expect(response).to have_http_status(:ok)
+    exported_rows = CSV.parse(response.body, headers: true)
+    expect(exported_rows.length).to eq(1)
+    expect(exported_rows.first.to_h).to include(
+      "Technical action" => "authentication#signed_in",
+      "Category" => "security",
+      "IP address" => "192.0.2.15"
+    )
+  end
+
   it "filters listing and export by a query-only client selector" do
     second_company = create(:company, organization: organization, name: "Selected Audit Client")
     selected_log = create(
@@ -181,6 +243,43 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     json = JSON.parse(response.body)
     expect(json.fetch("error")).to eq("Not authorized")
     expect(json.fetch("details")).to eq("authorization" => [ "Not authorized" ])
+  end
+
+  it "keeps security history and its technical telemetry restricted to organization admins" do
+    accountant = create(:user, organization: organization, company: company, role: :accountant)
+    create(:company_assignment, user: accountant, company: company)
+    create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      action: "authentication#signed_in",
+      event_category: "security",
+      record_type: "users",
+      record_id: admin.id,
+      ip_address: "192.0.2.15",
+      user_agent: "Sensitive browser signature"
+    )
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
+
+    security_params = {
+      user_id: admin.id,
+      event_action: "authentication#signed_in",
+      event_category: "security"
+    }
+
+    get "/api/v1/admin/audit_logs", params: security_params
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body).to eq(
+      "error" => "Organization admin access required for security history",
+      "details" => { "authorization" => [ "Organization admin access required for security history" ] }
+    )
+
+    get "/api/v1/admin/audit_logs/export", params: security_params
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Organization admin access required for security history")
   end
 
   it "keeps activity history unavailable to managers" do
