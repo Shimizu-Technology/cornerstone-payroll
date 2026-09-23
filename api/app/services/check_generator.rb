@@ -115,6 +115,40 @@ class CheckGenerator
     "check_#{payroll_item.check_number || 'UNASSIGNED'}_#{employee.id}_#{pay_date_token}.pdf"
   end
 
+  # Canonical semantic inputs used by the rendered check and duplicate stubs.
+  # Package verification hashes this payload so related-data changes cannot
+  # leave an unconfirmed package looking current.
+  def render_input_payload
+    {
+      "source_type" => "payroll_item",
+      "source_id" => payroll_item.id,
+      "check_stock_type" => company.check_stock_type,
+      "company_name" => company.name,
+      "check_number" => payroll_item.check_number.to_s,
+      "check_date" => format_date(payroll_item.check_date || pay_period.pay_date),
+      "payee" => employee.full_name,
+      "payee_address" => employee.full_address.to_s,
+      "amount" => fn(payroll_item.net_pay),
+      "amount_words" => NumberToWords.convert(payroll_item.net_pay),
+      "memo" => resolve_memo_text.to_s,
+      "period" => [ format_date(pay_period.start_date), format_date(pay_period.end_date) ],
+      "pay_rows" => pay_rows,
+      "tax_rows" => tax_rows,
+      "other_pay_rows" => other_pay_rows,
+      "deduction_rows" => deduction_rows,
+      "summary" => {
+        "gross" => fn(payroll_item.gross_pay),
+        "ytd_gross" => fn(ytd[:gross]),
+        "taxes" => fn(cur_taxes),
+        "ytd_taxes" => fn(ytd[:taxes]),
+        "deductions" => fn(cur_deds),
+        "ytd_deductions" => fn(ytd_visible_deds),
+        "net_pay" => fn(payroll_item.net_pay),
+        "ytd_net_pay" => fn(ytd[:net])
+      }
+    }
+  end
+
   private
 
   # -----------------------------------------------------------------------

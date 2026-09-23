@@ -99,7 +99,7 @@ class StaffRolePolicy
     "api/v1/admin/payroll_reminder_configs#test" => :manage_client_configuration,
     "api/v1/admin/checks#update_check_settings" => :manage_client_configuration,
     "api/v1/admin/checks#update_next_check_number" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#create" => :manage_client_configuration,
+    "api/v1/admin/printer_profiles#create" => :payroll_operations,
     "api/v1/admin/printer_profiles#update" => :manage_client_configuration,
     "api/v1/admin/printer_profiles#destroy" => :manage_client_configuration,
     "api/v1/admin/printer_profiles#apply" => :payroll_operations,
