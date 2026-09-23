@@ -23,6 +23,7 @@ import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDi
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
+import { RecordActivityTimeline } from '@/components/records/RecordActivityTimeline';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -631,7 +632,17 @@ function PayRunActivity({ companyId, payRun, workspaceReturnTo }: PayRunActivity
     { label: 'Approval rolled back', event: lifecycle.unapproved, icon: RefreshCw },
     { label: 'Committed', event: lifecycle.committed, icon: CalendarCheck2 },
   ].filter((item) => item.event?.timestamp);
-  return <Card><CardHeader><CardTitle>Pay-run activity</CardTitle><p className="mt-2 text-sm text-neutral-500">Authoritative lifecycle evidence for this run.</p></CardHeader><CardContent>{events.length ? <ol className="space-y-4">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="grid gap-4 border-l-2 border-primary-100 pl-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><div><p className="font-semibold text-neutral-950">{label}</p><p className="mt-2 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p></div><p className="text-sm font-medium text-neutral-600 sm:text-right">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <WorkspaceEmptyState icon={Activity} message="No lifecycle activity has been recorded for this run yet." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}</CardContent></Card>;
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+      <RecordActivityTimeline companyId={companyId} recordId={payRun.id} recordType="pay_periods" />
+      <Card>
+        <CardHeader><CardTitle>Payroll milestones</CardTitle><p className="mt-2 text-sm leading-6 text-neutral-500">The run's key processing states, preserved alongside the complete change history.</p></CardHeader>
+        <CardContent>
+          {events.length ? <ol className="space-y-4">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="border-l-2 border-primary-100 pl-4"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><p className="mt-3 font-semibold text-neutral-950">{label}</p><p className="mt-2 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p><p className="mt-2 text-xs font-medium text-neutral-600">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <WorkspaceEmptyState icon={Activity} message="No lifecycle activity has been recorded for this run yet." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 interface WorkspaceEmptyStateProps {
