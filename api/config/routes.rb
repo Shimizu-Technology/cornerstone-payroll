@@ -102,6 +102,7 @@ Rails.application.routes.draw do
           end
           member do
             post :apply
+            post :clone
             post :apply_to_all_companies
           end
         end

@@ -85,7 +85,7 @@ const toolsNavigation: NavItem[] = [
 
 const clientSettingsNavigation: NavItem[] = [
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Check Settings', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time Tracking Sources', href: '/time-tracking-sources', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
@@ -223,7 +223,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 }
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
-  const { user, isAccountant, signOut } = useAuth();
+  const { user, isAccountant, hasCapability, signOut } = useAuth();
   const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
@@ -237,6 +237,13 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const historicalPayrollEnabled = activeCompany?.historical_payroll_enabled === true;
+  const canUsePrinterProfiles = hasCapability('use_printer_profiles');
+  const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
+    if (item.href === '/check-settings') return canUsePrinterProfiles;
+    if (!canManageClientConfiguration) return false;
+    if (item.href === '/time-tracking-sources') return isAdmin;
+    return true;
+  });
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
     if (!activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
@@ -321,12 +328,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </>
         )}
 
-        {canManageClientConfiguration && (
+        {visibleClientSettingsNavigation.length > 0 && (
           <>
             <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={isAdmin ? clientSettingsNavigation : clientSettingsNavigation.filter((item) => item.href !== '/time-tracking-sources')}
+                items={visibleClientSettingsNavigation}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />

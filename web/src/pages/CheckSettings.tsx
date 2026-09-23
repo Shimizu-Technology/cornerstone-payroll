@@ -3,7 +3,7 @@
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Eye } from 'lucide-react';
+import { Copy, Eye, LockKeyhole } from 'lucide-react';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile, PrinterProfileSelection } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 import { selectedPrinterProfileLockVersion } from './checkSettingsPrinterProfile';
+import { useAuth } from '@/contexts/AuthContext';
 
 type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
 
@@ -104,6 +105,8 @@ function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentP
 }
 
 export function CheckSettingsPage() {
+  const { hasCapability } = useAuth();
+  const canManageClientCheckSettings = hasCapability('manage_client_check_settings');
   const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -346,6 +349,10 @@ export function CheckSettingsPage() {
   }, []);
 
   const handleSaveSettings = async () => {
+    if (!canManageClientCheckSettings) {
+      setError('Your role can manage personal printer profiles, but only managers and organization admins can change client check controls.');
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -393,6 +400,10 @@ export function CheckSettingsPage() {
   };
 
   const handleUpdateNextCheckNumber = async () => {
+    if (!canManageClientCheckSettings) {
+      setError('Only managers and organization admins can change the client check-number sequence.');
+      return;
+    }
     const num = parseInt(nextCheckNumber, 10);
     if (!num || num < 1) {
       setError('Next check number must be a positive integer.');
@@ -468,7 +479,7 @@ export function CheckSettingsPage() {
         sample_type: testCheckType,
         check_settings: currentDraftCheckSettings(layoutConfig),
       });
-      setCheckPreview({ blob, filename: filename || `test_check_${testCheckType}.pdf`, title: 'Test check preview', note: 'This uses your current draft settings. Nothing is saved until you click Save Settings.' });
+      setCheckPreview({ blob, filename: filename || `test_check_${testCheckType}.pdf`, title: 'Test check preview', note: 'This uses the draft currently on screen. Previewing never changes saved client settings or printer profiles.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate test check PDF');
     } finally {
@@ -600,13 +611,35 @@ export function CheckSettingsPage() {
   };
 
   const handleDeleteProfile = async (id: number, name: string) => {
-    if (!window.confirm(`Delete printer profile "${name}"?`)) return;
+    if (!window.confirm(`Archive printer profile "${name}"? Anyone using it will need to choose another profile.`)) return;
     try {
       await printerProfilesApi.delete(id);
-      setSuccess('Profile deleted.');
+      setSuccess('Profile archived.');
       loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete profile');
+    }
+  };
+
+  const handleCloneProfile = async (profile: PrinterProfile) => {
+    setProfileSaving(true);
+    setError(null);
+    try {
+      const response = await printerProfilesApi.clone(profile.id);
+      const copy = response.printer_profile;
+      if (copy.check_stock_type === stockType) {
+        setOffsetX(Number(copy.check_offset_x).toFixed(3));
+        setOffsetY(Number(copy.check_offset_y).toFixed(3));
+        setLayoutOverridesJson(JSON.stringify(copy.check_layout_config || {}, null, 2));
+        setSuccess(`Created “${copy.name}” as your editable copy and loaded its calibration into the draft. Preview your changes, then save the draft to that profile before selecting it.`);
+      } else {
+        setSuccess(`Created “${copy.name}” as your editable copy. Its calibration is for ${copy.check_stock_type.replaceAll('_', ' ')} stock, so it was not loaded into this client’s draft.`);
+      }
+      await loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to copy profile');
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -645,7 +678,7 @@ export function CheckSettingsPage() {
     setOffsetX('0.000');
     setOffsetY('0.000');
     setLayoutOverridesJson('{}');
-    setSuccess('Calibration draft reset to defaults. Save to update your selected profile, or save it as a new profile.');
+    setSuccess('Calibration draft reset to defaults. Save it as a new profile when it looks right.');
     setError(null);
   };
 
@@ -685,7 +718,12 @@ export function CheckSettingsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header title="Check Printing Settings" />
+      <Header
+        title="My Printer & Check Settings"
+        description={canManageClientCheckSettings
+          ? 'Choose your personal printer calibration and manage check controls for the active payroll client.'
+          : 'Choose and calibrate the printer profile you use. Client-wide check controls stay protected.'}
+      />
 
       <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
 
@@ -698,7 +736,19 @@ export function CheckSettingsPage() {
         )}
         {hasUnsavedCheckSettings && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            You have unsaved check setting changes. They are only in this browser until you click <strong>Save Settings</strong>.
+            You have unsaved calibration changes. They are only in this browser until you {canManageClientCheckSettings
+              ? <><strong>save the client settings</strong> or <strong>save a new printer profile</strong></>
+              : <strong>save a new printer profile</strong>}.
+          </div>
+        )}
+
+        {!canManageClientCheckSettings && (
+          <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+            <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+            <div>
+              <p className="font-semibold text-slate-900">Your printer choice is personal</p>
+              <p className="mt-1 leading-5">You can use, create, and copy profiles shared by your organization. Managers and organization admins control check stock, bank text, automation, and check numbering for the client.</p>
+            </div>
           </div>
         )}
 
@@ -884,31 +934,40 @@ export function CheckSettingsPage() {
                       >
                         {profileMatchesCurrent ? 'Selected for Me' : profile.check_stock_type === stockType ? 'Use This Profile' : 'Different Stock'}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
-                        Save Draft to Profile
+                      {profile.can_update_calibration && (
+                        <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
+                          Save Draft to Profile
+                        </Button>
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => void handleCloneProfile(profile)} disabled={profileSaving}>
+                        <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy to My Profiles
                       </Button>
                       <div className="grid grid-cols-2 gap-1 sm:flex">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => {
-                            setEditingProfileId(profile.id);
-                            setEditProfileName(profile.name);
-                            setEditProfileDescription(profile.description || '');
-                            setEditProfileNotes(profile.notes || '');
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs text-red-600 hover:text-red-700"
-                          onClick={() => handleDeleteProfile(profile.id, profile.name)}
-                        >
-                          Delete
-                        </Button>
+                        {profile.can_edit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => {
+                              setEditingProfileId(profile.id);
+                              setEditProfileName(profile.name);
+                              setEditProfileDescription(profile.description || '');
+                              setEditProfileNotes(profile.notes || '');
+                            }}
+                          >
+                            Edit details
+                          </Button>
+                        )}
+                        {profile.can_archive && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-red-600 hover:text-red-700"
+                            onClick={() => handleDeleteProfile(profile.id, profile.name)}
+                          >
+                            Archive
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -922,9 +981,11 @@ export function CheckSettingsPage() {
         {/* Check Stock Settings */}
         <Card>
           <div className="p-4 border-b">
-            <h2 className="font-semibold text-gray-900">Check Stock Configuration</h2>
+            <h2 className="font-semibold text-gray-900">{canManageClientCheckSettings ? 'Check Stock Configuration' : 'Printer Calibration'}</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Use the simple controls below to line the PDF up with your check stock. Most people should not need the advanced section.
+              {canManageClientCheckSettings
+                ? 'Use the simple controls below to line the PDF up with your check stock. Most people should not need the advanced section.'
+                : 'Tune the alignment for the active client’s stock, preview it, and save the result as your own printer profile.'}
             </p>
           </div>
           <CardContent className="p-4 space-y-4">
@@ -947,6 +1008,7 @@ export function CheckSettingsPage() {
                 value={stockType}
                 onChange={(e) => handleStockTypeChange(e.target.value as CheckStockType)}
                 className="w-64"
+                disabled={!canManageClientCheckSettings}
               >
                 <option value="top_check">Top Check</option>
                 <option value="bottom_check">Bottom Check</option>
@@ -962,7 +1024,7 @@ export function CheckSettingsPage() {
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">Visual Calibration</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Drag a field or use the nudge buttons. Nothing is saved until you click Save Settings.
+                  Drag a field or use the nudge buttons. Preview first, then save the result to a printer profile.
                 </p>
               </div>
               <CheckLayoutEditor
@@ -1036,8 +1098,8 @@ export function CheckSettingsPage() {
               </div>
             </div>
 
-            {/* Bank info */}
-            <div className="space-y-1">
+            {/* Client-level check text */}
+            {canManageClientCheckSettings && <><div className="space-y-1">
               <Label htmlFor="bank-name">Bank Name (printed on check face)</Label>
               <Input
                 id="bank-name"
@@ -1078,7 +1140,7 @@ export function CheckSettingsPage() {
                 <span className="font-mono">{'{check_number}'}</span>,{' '}
                 <span className="font-mono">{'{company_name}'}</span>
               </p>
-            </div>
+            </div></>}
 
             {/* Alignment test */}
             <div className="pt-2 border-t space-y-3">
@@ -1161,15 +1223,21 @@ export function CheckSettingsPage() {
             </details>
 
             <div className="flex justify-end pt-2">
-              <Button onClick={handleSaveSettings} disabled={saving}>
-                {saving ? 'Saving…' : 'Save Settings'}
-              </Button>
+              {canManageClientCheckSettings ? (
+                <Button onClick={handleSaveSettings} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save Client Check Settings'}
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={() => setShowAddProfile(true)}>
+                  Save Calibration as New Profile
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Payroll Automation */}
-        <Card>
+        {/* Client-wide controls */}
+        {canManageClientCheckSettings && <><Card>
           <div className="p-4 border-b">
             <h2 className="font-semibold text-gray-900">Payroll Automation</h2>
             <p className="text-sm text-gray-500 mt-0.5">
@@ -1273,7 +1341,7 @@ export function CheckSettingsPage() {
               <p>Current next number: <span className="font-mono font-medium">{settings?.next_check_number}</span></p>
             </div>
           </CardContent>
-        </Card>
+        </Card></>}
 
         {/* How it works */}
         <Card>

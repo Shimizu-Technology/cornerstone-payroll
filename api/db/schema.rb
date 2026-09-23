@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2794,6 +2794,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_020000) do
     t.string "name", null: false
     t.text "notes"
     t.bigint "organization_id", null: false
+    t.integer "revision_number", default: 1, null: false
+    t.bigint "source_profile_id"
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
     t.index ["created_by_id"], name: "index_printer_profiles_on_created_by_id"
@@ -2801,7 +2803,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_020000) do
     t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true, where: "(archived_at IS NULL)"
     t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
     t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
+    t.index ["source_profile_id"], name: "index_printer_profiles_on_source_profile_id"
     t.index ["updated_by_id"], name: "index_printer_profiles_on_updated_by_id"
+    t.check_constraint "revision_number >= 1", name: "printer_profiles_revision_number_positive"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -3650,6 +3654,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_020000) do
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
   add_foreign_key "printer_profiles", "organizations"
+  add_foreign_key "printer_profiles", "printer_profiles", column: "source_profile_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "updated_by_id", on_delete: :nullify
   add_foreign_key "punch_entries", "timecards"
