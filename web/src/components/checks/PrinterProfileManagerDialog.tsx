@@ -131,6 +131,7 @@ export function PrinterProfileManagerDialog({
                     <Button
                       size="sm"
                       variant={selectedProfileId === profile.id ? 'secondary' : 'outline'}
+                      aria-label={selectedProfileId === profile.id ? `${profile.name} selected` : `Use ${profile.name}`}
                       loading={busyProfileId === profile.id}
                       loadingLabel="Selecting…"
                       disabled={selectedProfileId === profile.id || busyProfileId !== null || saving}

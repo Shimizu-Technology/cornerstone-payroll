@@ -116,6 +116,16 @@ const savedRun: CheckPrintRun = {
   confirmation_issue: null,
 };
 
+const generatedRun: CheckPrintRun = {
+  ...savedRun,
+  status: 'generated',
+  confirmed_at: null,
+  confirmed_by_id: null,
+  confirmed_by_name: null,
+  confirmation_state: 'verification_required',
+  confirmation_issue: 'Open this package to verify it against current payroll data.',
+};
+
 const queuedGeneration: CheckPrintGeneration = {
   id: 90,
   pay_period_id: 9,
@@ -187,6 +197,30 @@ describe('UnifiedCheckPrintDialog', () => {
     }));
     expect(await screen.findByText('Generating and saving package')).toBeTruthy();
     expect(screen.getByText(/Safe to close/)).toBeTruthy();
+  });
+
+  it('opens a ready generation returned directly by an idempotent create retry', async () => {
+    const user = userEvent.setup();
+    apiMocks.printRuns
+      .mockResolvedValueOnce({ check_print_runs: [] })
+      .mockResolvedValueOnce({ check_print_runs: [generatedRun] });
+    apiMocks.createPrintGeneration.mockResolvedValue({
+      check_print_generation: {
+        ...queuedGeneration,
+        status: 'ready',
+        phase: 'ready',
+        completed_items: 1,
+        check_print_run_id: generatedRun.id,
+        completed_at: new Date().toISOString(),
+      },
+    });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
+
+    expect(await screen.findByText('Package #42')).toBeTruthy();
+    expect(apiMocks.printRunPdf).toHaveBeenCalledWith(42);
+    expect(screen.getByRole('button', { name: 'Confirm printed correctly' })).toBeTruthy();
   });
 
   it('reconnects to an active generation and announces progress', async () => {
@@ -295,11 +329,68 @@ describe('UnifiedCheckPrintDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create and use profile' }));
 
     expect(await screen.findByText(/profile was created but could not be selected/i)).toBeTruthy();
-    const useProfileButtons = screen.getAllByRole('button', { name: 'Use profile' });
-    await user.click(useProfileButtons[useProfileButtons.length - 1]);
+    await user.click(screen.getByRole('button', { name: 'Use Front Office Printer' }));
 
     await waitFor(() => expect(apiMocks.selectPrinterProfile).toHaveBeenCalledTimes(2));
+    expect(apiMocks.selectPrinterProfile.mock.calls[1]).toEqual(['bottom_check', 19]);
     expect(apiMocks.createPrinterProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires unsaved check-number edits to be discarded before opening history', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [savedRun] });
+    renderDialog();
+
+    expect(await screen.findByText('Package #42')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Create another package' }));
+    const numberInput = await screen.findByRole('textbox', { name: 'Check number for Ada Trainer' });
+    await user.clear(numberInput);
+    await user.type(numberInput, '4200');
+    const historyPackage = screen.getByRole('button', { name: /Package #42 · 1 checks/ });
+
+    await user.click(historyPackage);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(apiMocks.printRunPdf).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('1 unsaved check-number change')).toBeTruthy();
+
+    await user.click(historyPackage);
+    await waitFor(() => expect(apiMocks.printRunPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('1 unsaved check-number change')).toBeNull();
+  });
+
+  it('ignores a generation response from a closed or replaced workspace', async () => {
+    const user = userEvent.setup();
+    let resolveGeneration!: (value: { check_print_generation: CheckPrintGeneration }) => void;
+    apiMocks.createPrintGeneration.mockReturnValue(new Promise((resolve) => {
+      resolveGeneration = resolve;
+    }));
+    const onOpenChange = vi.fn();
+    const onConfirmed = vi.fn();
+    const view = render(
+      <MemoryRouter>
+        <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
+    await waitFor(() => expect(apiMocks.createPrintGeneration).toHaveBeenCalledTimes(1));
+    view.rerender(
+      <MemoryRouter>
+        <UnifiedCheckPrintDialog open={false} payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+      </MemoryRouter>
+    );
+    view.rerender(
+      <MemoryRouter>
+        <UnifiedCheckPrintDialog open payPeriodId={10} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+      </MemoryRouter>
+    );
+    resolveGeneration({ check_print_generation: queuedGeneration });
+
+    expect(await screen.findByRole('button', { name: 'Generate and save package' })).toBeTruthy();
+    expect(screen.queryByText('Generating and saving package')).toBeNull();
   });
 
   it('blocks printing and confirmation for an outdated package and offers replacement generation', async () => {

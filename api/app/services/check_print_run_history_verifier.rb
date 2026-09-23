@@ -16,7 +16,11 @@ class CheckPrintRunHistoryVerifier
         current_records: current_records,
         verify_render_inputs: false
       ).call
-      [ "ready", nil ]
+      if run.manifest.any? { |entry| entry["render_input_digest"].present? }
+        [ "verification_required", "Open this package to verify it against current payroll data." ]
+      else
+        [ "ready", nil ]
+      end
     rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
       [ "outdated", e.message ]
     end.transform_keys(&:id)
