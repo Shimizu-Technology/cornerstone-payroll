@@ -30,6 +30,7 @@ class CheckGenerator
   MARGIN         = 0.0
   SECTION_HEIGHT = PAGE_HEIGHT / 3.0  # ~264 pts / 3.667"
   M              = 16.0               # inner margin for all sections
+  MIN_SUMMARY_BOX_WIDTH = 230.0
   DEFAULT_LAYOUT = {
     check_face: {
       date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
@@ -365,9 +366,11 @@ class CheckGenerator
     end
 
     # SUMMARY box (bordered)
-    # Keep the summary inside the right column. A negative legacy/profile
-    # offset can otherwise put its border over the Other Pay YTD values.
-    summary_x = [ rx + stub_cfg["summary_x_offset"].to_f, rx ].max
+    # Keep the summary inside the right column without making its table too
+    # narrow to print monetary values. Legacy offsets may be negative or large.
+    requested_shift = [stub_cfg["summary_x_offset"].to_f, 0.0].max
+    maximum_shift = [right_w - MIN_SUMMARY_BOX_WIDTH, 0.0].max
+    summary_x = rx + [requested_shift, maximum_shift].min
     draw_summary_box(
       pdf,
       x: summary_x,

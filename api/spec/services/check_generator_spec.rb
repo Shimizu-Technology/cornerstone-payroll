@@ -235,6 +235,32 @@ RSpec.describe CheckGenerator do
       end
     end
 
+    [12.0, 1_000.0].each do |offset|
+      it "keeps the summary readable and within the right column with a #{offset} point offset" do
+        company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
+        summary_boxes = []
+        allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+          summary_boxes << { x: point.first, width: width } if height == 48.0
+          method.call(point, width, height)
+        end
+
+        text = PDF::Reader.new(StringIO.new(generator.generate)).pages.first.text
+        stub_layout = CheckGenerator::DEFAULT_LAYOUT.fetch(:stub)
+        right_edge = CheckGenerator::PAGE_WIDTH - stub_layout.fetch(:right)
+        left_edge = stub_layout.fetch(:left) +
+          (right_edge - stub_layout.fetch(:left)) * stub_layout.fetch(:left_ratio)
+
+        expect(summary_boxes.size).to eq(2)
+        summary_boxes.each do |box|
+          expect(box[:x]).to be >= left_edge
+          expect(box[:width]).to be >= CheckGenerator::MIN_SUMMARY_BOX_WIDTH
+          expect(box[:x] + box[:width]).to be_within(0.01).of(right_edge)
+        end
+        expect(text).to include("Total Pay", "Taxes", "Deductions")
+        expect(text).not_to include("[SUMMARY]")
+      end
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,
