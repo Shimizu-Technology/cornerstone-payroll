@@ -60,6 +60,10 @@ module Api
 
         def filtered_scope
           logs = @accessible_audit_logs
+          unless current_user.organization_admin?
+            logs = logs.where("event_category IS NULL OR event_category <> ?", "security")
+              .where("action IS NULL OR action NOT LIKE ?", "authentication#%")
+          end
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)

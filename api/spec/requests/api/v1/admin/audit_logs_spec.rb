@@ -248,10 +248,11 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   it "keeps security history and its technical telemetry restricted to organization admins" do
     accountant = create(:user, organization: organization, company: company, role: :accountant)
     create(:company_assignment, user: accountant, company: company)
-    create(
+    security_log = create(
       :audit_log,
       user: admin,
       organization: organization,
+      company: company,
       action: "authentication#signed_in",
       event_category: "security",
       record_type: "users",
@@ -259,8 +260,42 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
       ip_address: "192.0.2.15",
       user_agent: "Sensitive browser signature"
     )
+    ordinary_log = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "employees#updated",
+      event_category: "data_change",
+      record_type: "employees",
+      subject_name: "Visible employee update"
+    )
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
+
+    get "/api/v1/admin/audit_logs", params: { company_id: company.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("id")).to include(ordinary_log.id)
+    expect(response.parsed_body.fetch("data").pluck("id")).not_to include(security_log.id)
+
+    get "/api/v1/admin/audit_logs", params: { company_id: company.id, action_filter: "authentication#" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data")).to be_empty
+
+    get "/api/v1/admin/audit_logs/export", params: { company_id: company.id }
+
+    expect(response).to have_http_status(:ok)
+    unfiltered_export = CSV.parse(response.body, headers: true)
+    expect(unfiltered_export.map { |row| row.fetch("Technical action") }).to include("employees#updated")
+    expect(unfiltered_export.map { |row| row.fetch("Technical action") }).not_to include("authentication#signed_in")
+    expect(unfiltered_export.map { |row| row.fetch("IP address") }).not_to include("192.0.2.15")
+
+    get "/api/v1/admin/audit_logs/export", params: { company_id: company.id, action_filter: "authentication#" }
+
+    expect(response).to have_http_status(:ok)
+    expect(CSV.parse(response.body, headers: true)).to be_empty
 
     security_params = {
       user_id: admin.id,
