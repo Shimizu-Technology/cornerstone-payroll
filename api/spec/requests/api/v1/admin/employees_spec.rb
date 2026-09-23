@@ -917,6 +917,13 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         "last_worked_on" => "2024-03-14",
         "internal_notes" => "Written notice received by the payroll team."
       )
+
+      audit = AuditLog.where(action: "employees#terminate", record_id: employee.id).last
+      expect(audit.metadata).to include(
+        "changed_fields" => include("status", "termination_date"),
+        "before_values" => include("status" => "active", "termination_date" => nil),
+        "after_values" => include("status" => "terminated", "termination_date" => "2024-03-15")
+      )
     end
 
     it "does not let an accountant perform a status transition" do
