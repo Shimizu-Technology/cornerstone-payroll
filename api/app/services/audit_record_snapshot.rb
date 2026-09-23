@@ -8,7 +8,10 @@ class AuditRecordSnapshot
       retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
       business_name contractor_type contractor_pay_type w9_on_file address_line1 address_line2 city state zip phone status
     ],
-    "PayPeriod" => %w[start_date end_date pay_date pay_frequency status approved_at committed_at],
+    "PayPeriod" => %w[
+      start_date end_date pay_date pay_frequency status approved_at committed_at
+      run_purpose includes_base_salary includes_recurring_items parallel_run notes
+    ],
     "Company" => %w[name legal_name email phone address_line1 address_line2 city state zip status]
   }.freeze
   SENSITIVE_PATTERNS = /(ssn|password|token|secret|cipher|routing|account_number|bank_account|date_of_birth)/i
@@ -36,6 +39,27 @@ class AuditRecordSnapshot
         after_values: after_values,
         changed_fields: (before_values.keys | after_values.keys | redacted_fields).sort,
         redacted_fields: redacted_fields.sort
+      }
+    end
+
+    def values_for(record)
+      safe_fields = SAFE_FIELDS.fetch(record.class.name, [])
+      safe_fields.each_with_object({}) do |field, values|
+        values[field] = serializable(record.public_send(field)) if record.respond_to?(field)
+      end
+    end
+
+    def changes_from(record, before_values)
+      after_snapshot = values_for(record)
+      changed_fields = (before_values.keys | after_snapshot.keys).select do |field|
+        before_values[field] != after_snapshot[field]
+      end.sort
+
+      {
+        before_values: before_values.slice(*changed_fields),
+        after_values: after_snapshot.slice(*changed_fields),
+        changed_fields: changed_fields,
+        redacted_fields: []
       }
     end
 

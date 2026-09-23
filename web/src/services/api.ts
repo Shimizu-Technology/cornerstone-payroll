@@ -763,6 +763,19 @@ export const auditLogsApi = {
   }) => api.getBlobWithParams('/admin/audit_logs/export', params),
 };
 
+export const recordActivitiesApi = {
+  list: (
+    recordType: 'employees' | 'pay_periods',
+    recordId: number,
+    params: { page?: number; per_page?: number } = {},
+    companyId?: number,
+  ) => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
+    `/admin/record_activities/${recordType}/${recordId}`,
+    params,
+    { companyId },
+  ),
+};
+
 // Tax Configs (Admin API)
 export interface TaxConfigBracket {
   id: number;

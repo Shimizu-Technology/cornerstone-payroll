@@ -37,6 +37,7 @@ class StaffRolePolicy
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,
     "api/v1/admin/audit_logs" => :view_audit_history,
+    "api/v1/admin/record_activities" => :view_record_activity,
     "api/v1/admin/historical_imports" => :payroll_operations,
     "api/v1/admin/historical_reports" => :payroll_operations,
     "api/v1/admin/payroll_history" => :payroll_operations,

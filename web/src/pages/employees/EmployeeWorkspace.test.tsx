@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
   employeePayHistory: vi.fn(),
   resolveConfigurationReviewItem: vi.fn(),
+  recordActivities: vi.fn(),
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/services/api', () => ({
     resolveConfigurationReviewItem: apiMocks.resolveConfigurationReviewItem,
   },
   reportsApi: { employeePayHistory: apiMocks.employeePayHistory },
+  recordActivitiesApi: { list: apiMocks.recordActivities },
 }));
 
 vi.mock('@/components/employees/EmployeeRetirementElectionPanel', () => ({
@@ -74,6 +76,10 @@ describe('EmployeeWorkspace imported setup certification', () => {
         configuration_review_status: 'complete',
         configuration_review_items: [],
       },
+    });
+    apiMocks.recordActivities.mockResolvedValue({
+      data: [],
+      meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0 },
     });
   });
 
@@ -152,5 +158,18 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: 'Direct deposit' })).toBeTruthy();
     expect(screen.queryByText('Not assigned')).toBeNull();
+  });
+
+  it('combines complete record activity with employment and classification context', async () => {
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/activity']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Complete activity history')).toBeTruthy();
+    expect(screen.getByText('Employment milestones')).toBeTruthy();
+    expect(screen.getByText('Classification history')).toBeTruthy();
+    expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1);
   });
 });
