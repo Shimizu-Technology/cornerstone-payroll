@@ -201,9 +201,24 @@ module Api
           @employee
         end
 
+        def audit_record_changes
+          saved_changes = AuditRecordSnapshot.changes_for(@employee)
+          return saved_changes unless @employee_audit_before_values
+
+          snapshot_changes = AuditRecordSnapshot.changes_from(@employee, @employee_audit_before_values)
+          redacted_fields = saved_changes[:redacted_fields]
+          snapshot_changes.merge(
+            changed_fields: (snapshot_changes[:changed_fields] | redacted_fields).sort,
+            redacted_fields: redacted_fields
+          )
+        end
+
         def set_employee
           @employee = Employee.find_by(id: params[:id], company_id: current_company_id)
-          return if @employee
+          if @employee
+            @employee_audit_before_values = AuditRecordSnapshot.values_for(@employee)
+            return
+          end
 
           render json: { error: "Employee not found" }, status: :not_found
         end

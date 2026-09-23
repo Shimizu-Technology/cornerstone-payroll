@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
-import { Activity, ChevronDown, Clock3, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Activity, ChevronDown, Clock3, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { displayAuditAction, formatAuditValue, humanizeAuditKey } from '@/lib/audit-display';
+import { AuditEventDetails } from '@/components/audit/AuditEventDetails';
+import {
+  auditBusinessFacts,
+  displayAuditGroupAction,
+  groupAuditEntries,
+  humanizeAuditKey,
+  type AuditEntryGroup,
+} from '@/lib/audit-display';
 import { formatGuamDateTime } from '@/lib/utils';
 import { recordActivitiesApi, type AuditLogEntry } from '@/services/api';
 
@@ -17,16 +24,6 @@ interface RecordActivityTimelineProps {
 }
 
 const PAGE_SIZE = 20;
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function valueMap(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
 
 export function RecordActivityTimeline({
   companyId,
@@ -86,6 +83,8 @@ export function RecordActivityTimeline({
     };
   }, [loadPage]);
 
+  const groups = useMemo(() => groupAuditEntries(logs), [logs]);
+
   return (
     <Card>
       <CardHeader className="border-b border-neutral-100">
@@ -132,7 +131,7 @@ export function RecordActivityTimeline({
         ) : (
           <>
             <ol className="divide-y divide-neutral-100">
-              {logs.map((log) => <ActivityEntry key={log.id} log={log} />)}
+              {groups.map((group) => <ActivityEntry key={group.key} group={group} />)}
             </ol>
             {(page < totalPages || error) && (
               <div className="border-t border-neutral-100 p-4 text-center">
@@ -155,19 +154,16 @@ export function RecordActivityTimeline({
   );
 }
 
-function ActivityEntry({ log }: { log: AuditLogEntry }): ReactElement {
-  const changedFields = stringList(log.metadata?.changed_fields).filter((field) => field !== 'id');
-  const redactedFields = new Set(stringList(log.metadata?.redacted_fields));
-  const beforeValues = valueMap(log.metadata?.before_values);
-  const afterValues = valueMap(log.metadata?.after_values);
-  const hasAdvancedDetails = Boolean(log.action || log.event_category || log.ip_address || log.request_id || log.user_agent);
+function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
+  const log = group.primary;
+  const facts = auditBusinessFacts(log).slice(0, 3);
 
   return (
     <li className="relative px-4 py-5 sm:px-6">
       <div className="grid gap-4 sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-5">
         <span className="mt-1 hidden h-3 w-3 rounded-full border-[3px] border-primary-200 bg-white sm:block" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="font-semibold leading-6 text-neutral-950">{displayAuditAction(log)}</p>
+          <p className="font-semibold leading-6 text-neutral-950">{displayAuditGroupAction(group)}</p>
           <p className="mt-1 text-sm text-neutral-500">
             {log.actor_email || (log.actor_role ? humanizeAuditKey(log.actor_role) : 'Actor details unavailable')}
           </p>
@@ -177,63 +173,13 @@ function ActivityEntry({ log }: { log: AuditLogEntry }): ReactElement {
         </time>
       </div>
 
-      {changedFields.length > 0 && (
-        <div className="mt-5 space-y-3 sm:ml-8">
-          {changedFields.map((field) => (
-            <div className="overflow-hidden rounded-xl border border-neutral-200" key={field}>
-              <div className="border-b border-neutral-100 bg-neutral-50 px-4 py-2.5">
-                <p className="text-xs font-extrabold uppercase tracking-[0.1em] text-neutral-500">{humanizeAuditKey(field)}</p>
-              </div>
-              {redactedFields.has(field) ? (
-                <div className="flex items-start gap-3 px-4 py-4 text-sm leading-6 text-neutral-600">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
-                  This value changed, but its contents are hidden to protect sensitive information.
-                </div>
-              ) : (
-                <div className="grid sm:grid-cols-2">
-                  <ValueCell label="Before" value={beforeValues[field]} />
-                  <ValueCell className="border-t border-neutral-100 sm:border-l sm:border-t-0" label="After" value={afterValues[field]} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+      {facts.length > 0 && (
+        <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm text-neutral-600 sm:ml-8">
+          {facts.map((fact) => <span key={fact.label}>{fact.label}: <strong className="font-semibold text-neutral-800">{fact.value}</strong></span>)}
+        </p>
       )}
 
-      {hasAdvancedDetails && (
-        <details className="group mt-4 sm:ml-8">
-          <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-sm font-semibold text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
-            <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
-            Technical details
-          </summary>
-          <dl className="mt-2 grid gap-x-6 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-2">
-            <TechnicalDetail label="Action" value={log.action} />
-            <TechnicalDetail label="Category" value={humanizeAuditKey(log.event_category)} />
-            <TechnicalDetail label="IP address" value={log.ip_address} />
-            <TechnicalDetail label="Request ID" value={log.request_id} />
-            <TechnicalDetail className="sm:col-span-2" label="Browser or device signature" value={log.user_agent} />
-          </dl>
-        </details>
-      )}
+      <div className="mt-4 sm:ml-8"><AuditEventDetails group={group} /></div>
     </li>
-  );
-}
-
-function ValueCell({ label, value, className = '' }: { label: string; value: unknown; className?: string }): ReactElement {
-  return (
-    <div className={`px-4 py-3 ${className}`}>
-      <p className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-800">{formatAuditValue(value)}</p>
-    </div>
-  );
-}
-
-function TechnicalDetail({ label, value, className = '' }: { label: string; value: string | null; className?: string }): ReactElement | null {
-  if (!value) return null;
-  return (
-    <div className={className}>
-      <dt className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</dt>
-      <dd className="mt-1 break-all text-neutral-700">{value}</dd>
-    </div>
   );
 }

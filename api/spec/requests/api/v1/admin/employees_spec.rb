@@ -671,6 +671,26 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.job_title).to eq("Senior Payroll Specialist")
       end
 
+      it "records an SSN-only update as a redacted audit change" do
+        employee.update!(ssn_encrypted: "123-45-6789")
+
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            ssn: "987-65-4321",
+            ssn_confirmation: "987-65-4321"
+          }
+        }
+
+        expect(response).to have_http_status(:ok)
+        audit = AuditLog.where(action: "employees#update", record_id: employee.id).last
+        expect(audit.metadata).to include(
+          "changed_fields" => [ "ssn" ],
+          "redacted_fields" => [ "ssn" ]
+        )
+        expect(audit.metadata).not_to have_key("before_values")
+        expect(audit.metadata).not_to have_key("after_values")
+      end
+
       it "allows changing between hourly and salary within W-2 treatment" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { employment_type: "salary", salary_type: "annual", pay_rate: 52_000 }
@@ -916,6 +936,13 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         "effective_date" => "2024-03-15",
         "last_worked_on" => "2024-03-14",
         "internal_notes" => "Written notice received by the payroll team."
+      )
+
+      audit = AuditLog.where(action: "employees#terminate", record_id: employee.id).last
+      expect(audit.metadata).to include(
+        "changed_fields" => include("status", "termination_date"),
+        "before_values" => include("status" => "active", "termination_date" => nil),
+        "after_values" => include("status" => "terminated", "termination_date" => "2024-03-15")
       )
     end
 

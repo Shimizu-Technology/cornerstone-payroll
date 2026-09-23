@@ -122,6 +122,37 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
     expect(response.parsed_body.dig("data", 0, "metadata")).to include("http_method" => "POST")
   end
 
+  it "includes only reports explicitly linked to the pay period" do
+    linked = create(
+      :audit_log,
+      user: actor,
+      organization: organization,
+      company: company,
+      action: "reports#payroll_register_pdf",
+      event_category: "export",
+      record_type: "reports",
+      record_id: pay_period.id,
+      metadata: { pay_period_id: pay_period.id }
+    )
+    collision = create(
+      :audit_log,
+      user: actor,
+      organization: organization,
+      company: company,
+      action: "reports#update_quarterly_compliance_packet_task",
+      event_category: "activity",
+      record_type: "reports",
+      record_id: pay_period.id,
+      metadata: {}
+    )
+
+    get "/api/v1/admin/record_activities/pay_periods/#{pay_period.id}"
+
+    ids = response.parsed_body.fetch("data").pluck("id")
+    expect(ids).to include(linked.id)
+    expect(ids).not_to include(collision.id)
+  end
+
   it "does not reveal records from another company" do
     foreign_employee = create(:employee, company: other_company)
 

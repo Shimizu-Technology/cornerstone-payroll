@@ -63,6 +63,128 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
+  it "presents legacy pay-period and report activity without mechanical fallback labels" do
+    pay_period = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 9, 1),
+      end_date: Date.new(2026, 9, 15),
+      pay_date: Date.new(2026, 9, 18)
+    )
+    payroll_log = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "pay_periods#commit",
+      record_type: "pay_periods",
+      record_id: pay_period.id,
+      subject_name: nil
+    )
+    report_log = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "reports#payroll_register_pdf",
+      event_category: "export",
+      record_type: "reports",
+      subject_name: nil
+    )
+
+    expect(AuditLogPresenter.new(payroll_log).headline).to eq(
+      "Audit Admin processed payroll for Sep 1, 2026 – Sep 15, 2026"
+    )
+    expect(AuditLogPresenter.new(report_log).headline).to eq(
+      "Audit Admin downloaded the payroll register"
+    )
+    expect(AuditLogPresenter.new(report_log).subject).to eq("Payroll Register")
+  end
+
+  it "preloads legacy pay-period subjects for a page in one query" do
+    pay_periods = 2.times.map do |index|
+      create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 8, 1) + index.weeks,
+        end_date: Date.new(2026, 8, 7) + index.weeks,
+        pay_date: Date.new(2026, 8, 10) + index.weeks
+      )
+    end
+    pay_periods.each do |pay_period|
+      create(
+        :audit_log,
+        user: admin,
+        organization: organization,
+        company: company,
+        action: "pay_periods#commit",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        subject_name: nil
+      )
+    end
+
+    expect(PayPeriod).to receive(:where).once.and_call_original
+
+    get "/api/v1/admin/audit_logs", params: { action_filter: "pay_periods#commit" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("display_subject")).to match_array(
+      pay_periods.map { |pay_period| AuditRecordSnapshot.subject_name(pay_period) }
+    )
+  end
+
+  it "preloads legacy pay-period subjects once per CSV batch" do
+    pay_periods = 2.times.map do |index|
+      create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 7, 1) + index.weeks,
+        end_date: Date.new(2026, 7, 7) + index.weeks,
+        pay_date: Date.new(2026, 7, 10) + index.weeks
+      )
+    end
+    pay_periods.each do |pay_period|
+      create(
+        :audit_log,
+        user: admin,
+        organization: organization,
+        company: company,
+        action: "pay_periods#commit",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        subject_name: nil
+      )
+    end
+
+    expect(PayPeriod).to receive(:where).once.and_call_original
+
+    get "/api/v1/admin/audit_logs/export", params: { action_filter: "pay_periods#commit" }
+
+    expect(response).to have_http_status(:ok)
+    affected_records = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(affected_records).to match_array(
+      pay_periods.map { |pay_period| AuditRecordSnapshot.subject_name(pay_period) }
+    )
+  end
+
+  it "does not describe report workflow mutations as document access" do
+    workflow_log = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "reports#update_quarterly_compliance_packet_task",
+      event_category: "activity",
+      record_type: "reports",
+      record_id: 123
+    )
+
+    presenter = AuditLogPresenter.new(workflow_log)
+    expect(presenter.headline).to eq("Audit Admin update quarterly compliance packet task report record")
+    expect(presenter.headline).not_to include("accessed")
+  end
+
   it "filters a user's successful sign-ins by exact security event" do
     signed_in = create(
       :audit_log,
@@ -158,6 +280,50 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
     expect(exported_subjects).to include("Selected employee")
     expect(exported_subjects).not_to include("Excluded employee")
+  end
+
+  it "can separate document access from higher-signal activity without deleting evidence" do
+    activity = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "employees#updated",
+      event_category: "activity",
+      record_type: "employees"
+    )
+    document_access = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "reports#payroll_register_pdf",
+      event_category: "export",
+      record_type: "reports"
+    )
+    check_print_generation = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "check_print_runs#generated",
+      event_category: "export",
+      record_type: "check_print_runs"
+    )
+
+    get "/api/v1/admin/audit_logs", params: { exclude_event_category: "document_access" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("id")).to include(activity.id)
+    expect(response.parsed_body.fetch("data").pluck("id")).to include(check_print_generation.id)
+    expect(response.parsed_body.fetch("data").pluck("id")).not_to include(document_access.id)
+
+    get "/api/v1/admin/audit_logs", params: { event_category: "document_access" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("id")).to include(document_access.id)
+    expect(response.parsed_body.fetch("data").pluck("id")).not_to include(activity.id)
+    expect(response.parsed_body.fetch("data").pluck("id")).not_to include(check_print_generation.id)
   end
 
   it "gives accountants history for only the selected client" do

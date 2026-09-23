@@ -11,6 +11,7 @@ class AuditRecordSnapshot
     "PayPeriod" => %w[
       start_date end_date pay_date pay_frequency status approved_at committed_at
       run_purpose includes_base_salary includes_recurring_items parallel_run notes
+      correction_status voided_at void_reason
     ],
     "Company" => %w[name legal_name email phone address_line1 address_line2 city state zip status]
   }.freeze

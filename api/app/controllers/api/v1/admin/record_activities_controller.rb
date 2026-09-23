@@ -22,9 +22,11 @@ module Api
                        .includes(:user, :company, :organization)
                        .offset((page - 1) * per_page)
                        .limit(per_page)
+                       .to_a
+          pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
 
           render json: {
-            data: logs.map { |log| record_activity_json(log) },
+            data: logs.map { |log| record_activity_json(log, pay_period_subjects) },
             meta: {
               current_page: page,
               per_page: per_page,
@@ -38,8 +40,8 @@ module Api
 
         private
 
-        def record_activity_json(log)
-          payload = AuditLogSerializer.call(log)
+        def record_activity_json(log, pay_period_subjects)
+          payload = AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects)
           return payload if StaffRolePolicy.allowed?(current_user, :view_audit_history)
 
           metadata = payload.fetch(:metadata, {}) || {}

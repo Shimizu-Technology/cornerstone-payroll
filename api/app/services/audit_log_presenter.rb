@@ -1,6 +1,26 @@
 # frozen_string_literal: true
 
 class AuditLogPresenter
+  REPORT_FORMAT_SUFFIXES = %w[pdf csv xlsx ascii].freeze
+  REPORT_NAMES = {
+    "payroll_register" => "payroll register",
+    "payroll_summary_by_employee" => "payroll summary by employee",
+    "deductions_contributions" => "deductions and contributions report",
+    "paycheck_history" => "paycheck history",
+    "retirement_plans" => "retirement plans report",
+    "installment_loans" => "installment loans report",
+    "tax_summary" => "tax summary",
+    "ytd_summary" => "year-to-date summary",
+    "annual_payroll_summary" => "annual payroll summary",
+    "employee_pay_history" => "employee pay history",
+    "form_941_gu" => "Form 941 preparation report",
+    "quarterly_compliance_packet" => "quarterly compliance packet",
+    "quarterly_compliance_packet_swica" => "SWICA wage record",
+    "w2_gu" => "W-2GU report",
+    "form_1099_nec" => "1099-NEC report",
+    "full_print_package" => "full payroll print package",
+    "transmittal_log" => "transmittal log"
+  }.freeze
   VERBS = {
     "authentication#signed_in" => "signed in",
     "employees#create" => "added",
@@ -24,7 +44,7 @@ class AuditLogPresenter
     "pay_periods#run_payroll" => "calculated payroll for",
     "pay_periods#approve" => "approved payroll for",
     "pay_periods#unapprove" => "reopened payroll approval for",
-    "pay_periods#commit" => "committed payroll for",
+    "pay_periods#commit" => "processed payroll for",
     "pay_periods#destroy" => "deleted the pay period",
     "pay_periods#update" => "updated the pay period",
     "pay_periods#generate_fit_check" => "generated the FIT check for",
@@ -41,25 +61,57 @@ class AuditLogPresenter
     "void_pay_period" => "voided payroll for"
   }.freeze
 
-  def initialize(log)
+  def self.preload_pay_period_subjects(logs)
+    references = logs.filter_map { |log| pay_period_reference(log) }.uniq
+    return {} if references.empty?
+
+    company_ids = references.map(&:first).uniq
+    pay_period_ids = references.map(&:last).uniq
+    reference_set = references.index_with(true)
+
+    PayPeriod.where(company_id: company_ids, id: pay_period_ids)
+      .pluck(:company_id, :id, :start_date, :end_date)
+      .each_with_object({}) do |(company_id, id, start_date, end_date), subjects|
+        reference = [ company_id, id ]
+        next unless reference_set.key?(reference)
+
+        subjects[reference] = "#{start_date&.strftime('%b %-d, %Y')} – #{end_date&.strftime('%b %-d, %Y')}"
+      end
+  end
+
+  def self.pay_period_reference(log)
+    pay_period_id = if %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
+      log.record_id
+    else
+      log.metadata&.fetch("pay_period_id", nil)
+    end
+    return if pay_period_id.blank? || log.company_id.blank?
+
+    [ log.company_id, pay_period_id.to_i ]
+  end
+
+  def initialize(log, pay_period_subjects: {})
     @log = log
+    @pay_period_subjects = pay_period_subjects
   end
 
   def headline
-    return "#{actor_name} signed in" if log.action == "authentication#signed_in"
-
-    [ actor_name, verb, subject ].compact_blank.join(" ")
+    @headline ||= if log.action == "authentication#signed_in"
+      "#{actor_name} signed in"
+    elsif report_action?
+      report_headline
+    else
+      [ actor_name, verb, subject ].compact_blank.join(" ")
+    end
   end
 
   def summary
     context = log.company&.name.presence || log.organization&.name.presence
-    return headline if context.blank?
-
-    "#{headline} · #{context}"
+    @summary ||= context.blank? ? headline : "#{headline} · #{context}"
   end
 
   def subject
-    log.subject_name.presence || fallback_subject
+    @subject ||= report_action? ? report_subject : record_subject
   end
 
   private
@@ -84,5 +136,97 @@ class AuditLogPresenter
     return type if log.record_id.blank?
 
     "#{type} record"
+  end
+
+  def record_subject
+    log.subject_name.presence || resolved_pay_period_subject || fallback_subject
+  end
+
+  def resolved_pay_period_subject
+    return @resolved_pay_period_subject if defined?(@resolved_pay_period_subject)
+    return unless pay_period_record?
+    return if log.record_id.blank? || log.company_id.blank?
+
+    reference = [ log.company_id, log.record_id.to_i ]
+    return @resolved_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
+
+    pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: log.record_id, company_id: log.company_id)
+    @resolved_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
+  end
+
+  def pay_period_record?
+    %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
+  end
+
+  def report_action?
+    return false unless %w[document_access export].include?(log.event_category)
+
+    normalized_record_type = log.record_type.to_s.sub(/^client_/, "")
+    normalized_record_type == "reports" || log.action.to_s.match?(%r{\A(?:client_)?reports#})
+  end
+
+  def report_headline
+    [ actor_name, report_verb, report_subject_with_period ].compact_blank.join(" ")
+  end
+
+  def report_subject
+    [ display_report_name, report_period_subject ].compact_blank.join(" · ")
+  end
+
+  def report_subject_with_period
+    base = "the #{report_name}"
+    return base if report_period_subject.blank?
+
+    "#{base} for #{report_period_subject}"
+  end
+
+  def report_verb
+    access_type = log.metadata&.fetch("access_type", nil).to_s
+    return "downloaded" if access_type == "download"
+    return "viewed a preview of" if access_type == "preview"
+    return "opened" if access_type == "view"
+
+    action_name = log.action.to_s.split("#").last.to_s
+    return "viewed a preview of" if action_name.include?("preview")
+    return "downloaded" if REPORT_FORMAT_SUFFIXES.any? { |suffix| action_name.end_with?("_#{suffix}") }
+    return "opened" if action_name.include?("print")
+
+    "accessed"
+  end
+
+  def report_name
+    metadata_key = log.metadata&.fetch("report_key", nil).to_s
+    return REPORT_NAMES.fetch(metadata_key, metadata_key.tr("_", " ")) if metadata_key.present?
+
+    metadata_name = log.metadata&.fetch("report_name", nil).to_s
+    return metadata_name.downcase if metadata_name.present?
+
+    action_name = log.action.to_s.split("#").last.to_s
+    normalized = REPORT_FORMAT_SUFFIXES.reduce(action_name) { |name, suffix| name.sub(/_#{suffix}\z/, "") }
+    normalized = normalized.sub(/_preview\z/, "").sub(/_print\z/, "")
+    REPORT_NAMES.fetch(normalized, normalized.tr("_", " ").presence || "report")
+  end
+
+  def display_report_name
+    return report_name if report_name.match?(/[A-Z]/)
+
+    report_name.titleize
+  end
+
+  def report_period_subject
+    log.subject_name.presence || log.metadata&.fetch("report_period_subject", nil).presence || resolved_report_pay_period_subject
+  end
+
+  def resolved_report_pay_period_subject
+    return @resolved_report_pay_period_subject if defined?(@resolved_report_pay_period_subject)
+
+    pay_period_id = log.metadata&.fetch("pay_period_id", nil)
+    return if pay_period_id.blank? || log.company_id.blank?
+
+    reference = [ log.company_id, pay_period_id.to_i ]
+    return @resolved_report_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
+
+    pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id)
+    @resolved_report_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
   end
 end

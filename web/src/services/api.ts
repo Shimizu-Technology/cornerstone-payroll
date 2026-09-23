@@ -742,6 +742,7 @@ export const auditLogsApi = {
     user_id?: number;
     event_action?: string;
     event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -757,6 +758,7 @@ export const auditLogsApi = {
     user_id?: number;
     event_action?: string;
     event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
