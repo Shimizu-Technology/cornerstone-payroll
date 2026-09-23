@@ -55,6 +55,8 @@ class CheckRenderSettings
     relation = relation.lock if lock_profile
     return relation.find_by(id: printer_profile_id) if printer_profile_id.present?
 
+    return unless actor
+
     selection = UserPrinterProfileSelection.find_by(
       user_id: actor.id,
       organization_id: company.organization_id,

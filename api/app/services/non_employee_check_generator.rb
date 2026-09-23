@@ -51,6 +51,24 @@ class NonEmployeeCheckGenerator
     "ne_check_#{check.check_number || check.id}_#{safe_payee}_#{date_token}.pdf"
   end
 
+  def render_input_payload
+    {
+      "source_type" => "non_employee_check",
+      "source_id" => check.id,
+      "check_stock_type" => company.check_stock_type,
+      "check_number" => check.check_number.to_s,
+      "check_date" => check_date_str,
+      "payee" => check.payable_to.to_s,
+      "amount" => fn(check.amount),
+      "amount_words" => NumberToWords.convert(check.amount),
+      "memo" => check.memo.to_s,
+      "payment_detail_rows" => payment_detail_rows,
+      "check_info_rows" => check_info_rows,
+      "memo_rows" => memo_rows,
+      "reference_rows" => reference_rows
+    }
+  end
+
   private
 
   def ox; (company.check_offset_x.to_f * 72).round(1); end

@@ -50,7 +50,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("active_printer_profile_id")).to be_nil
       profiles = response.parsed_body.fetch("printer_profiles")
-      expect(profiles.map { |profile| profile.fetch("id") }).to eq([shared_profile.id])
+      expect(profiles.map { |profile| profile.fetch("id") }).to eq([ shared_profile.id ])
       expect(profiles.first.fetch("organization_id")).to eq(organization.id)
     end
   end
@@ -288,14 +288,54 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-    it "denies every printer-profile mutation without persisting changes" do
+    it "allows an accountant to create a shared profile" do
+      expect {
+        post "/api/v1/admin/printer_profiles", params: {
+          printer_profile: {
+            name: "Accounting Room Printer",
+            check_stock_type: "top_check",
+            check_offset_x: "0.05",
+            check_offset_y: "-0.02"
+          }
+        }
+      }.to change { organization.printer_profiles.count }.by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("printer_profile", "created_by_id")).to eq(accountant.id)
+    end
+
+    it "does not let an accountant replace the organization default while creating a profile" do
+      default_profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Organization Default",
+        check_stock_type: "top_check",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        is_default: true
+      )
+
+      post "/api/v1/admin/printer_profiles", params: {
+        printer_profile: {
+          name: "Accounting Room Printer",
+          check_stock_type: "top_check",
+          check_offset_x: 0,
+          check_offset_y: 0,
+          is_default: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("printer_profile", "is_default")).to be(false)
+      expect(default_profile.reload).to be_is_default
+    end
+
+    it "denies edits, archives, and organization-wide changes without persisting them" do
       original_profile = profile.attributes.slice("name", "check_offset_x", "check_offset_y")
       original_company = company.attributes.slice(
         "check_stock_type", "check_offset_x", "check_offset_y", "active_printer_profile_id"
       )
 
       requests = [
-        -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
         -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
         -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" },
         -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" }
