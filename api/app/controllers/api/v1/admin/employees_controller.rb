@@ -201,9 +201,18 @@ module Api
           @employee
         end
 
+        def audit_record_changes
+          return AuditRecordSnapshot.changes_for(@employee) unless @employee_audit_before_values
+
+          AuditRecordSnapshot.changes_from(@employee, @employee_audit_before_values)
+        end
+
         def set_employee
           @employee = Employee.find_by(id: params[:id], company_id: current_company_id)
-          return if @employee
+          if @employee
+            @employee_audit_before_values = AuditRecordSnapshot.values_for(@employee)
+            return
+          end
 
           render json: { error: "Employee not found" }, status: :not_found
         end

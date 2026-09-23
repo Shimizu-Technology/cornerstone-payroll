@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AuditEventDetails } from '@/components/audit/AuditEventDetails';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import {
@@ -17,12 +18,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Download, RotateCcw, TriangleAlert } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, ClipboardList, Download, RotateCcw, TriangleAlert } from 'lucide-react';
 import {
-  displayAuditAction as displayAction,
-  formatAuditValue as formatValue,
+  displayAuditGroupAction,
+  groupAuditEntries,
   humanizeAuditKey as humanizeKey,
 } from '@/lib/audit-display';
+import { formatGuamDateTime } from '@/lib/utils';
 
 export function AuditLogs(): ReactElement {
   const { activeCompanyId } = useCompany();
@@ -36,7 +38,9 @@ function CompanyActivityHistory(): ReactElement {
   const activeCompanyId = activeCompany?.id ?? null;
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [actionFilter, setActionFilter] = useState('');
   const [recordTypeFilter, setRecordTypeFilter] = useState('');
   const [userFilter, setUserFilter] = useState<string>('');
@@ -50,17 +54,26 @@ function CompanyActivityHistory(): ReactElement {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [activityView, setActivityView] = useState<'important' | 'documents' | 'all'>('important');
   const latestRequestId = useRef(0);
 
   const fetchLogs = useCallback(async () => {
     const requestId = ++latestRequestId.current;
-    let keepLoadingForPageReset = false;
-    setIsLoading(true);
-    setError(null);
+    const append = page > 1;
+    if (append) {
+      setIsLoadingMore(true);
+      setLoadMoreError(null);
+    } else {
+      setIsLoading(true);
+      setError(null);
+      setLoadMoreError(null);
+    }
     try {
       const response = await auditLogsApi.list({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
+        event_category: activityView === 'documents' ? 'export' : undefined,
+        exclude_event_category: activityView === 'important' ? 'export' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
@@ -71,24 +84,30 @@ function CompanyActivityHistory(): ReactElement {
       });
       if (requestId !== latestRequestId.current) return;
 
-      if (response.data.length === 0 && page > 1) {
-        keepLoadingForPageReset = true;
-        setPage(1);
-        return;
-      }
+      setLogs((current) => {
+        if (!append) return response.data;
 
-      setLogs(response.data);
+        const seen = new Set(current.map((log) => log.id));
+        return [...current, ...response.data.filter((log) => !seen.has(log.id))];
+      });
       setTotalPages(response.meta.total_pages || 1);
       setTotal(response.meta.total_count);
-      setSelectedLogId((current) => response.data.find((log) => log.id === current)?.id || response.data[0]?.id || null);
+      if (!append) {
+        setSelectedLogId((current) => response.data.find((log) => log.id === current)?.id || null);
+      }
     } catch (err) {
       if (requestId !== latestRequestId.current) return;
 
-      setError(err instanceof Error ? err.message : 'Failed to load audit logs');
+      const message = err instanceof Error ? err.message : 'Failed to load audit logs';
+      if (append) setLoadMoreError(message);
+      else setError(message);
     } finally {
-      if (requestId === latestRequestId.current && !keepLoadingForPageReset) setIsLoading(false);
+      if (requestId === latestRequestId.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
-  }, [actionFilter, activeCompanyId, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
+  }, [actionFilter, activeCompanyId, activityView, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -97,6 +116,8 @@ function CompanyActivityHistory(): ReactElement {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
+        event_category: activityView === 'documents' ? 'export' : undefined,
+        exclude_event_category: activityView === 'important' ? 'export' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
@@ -140,7 +161,9 @@ function CompanyActivityHistory(): ReactElement {
     void fetchUsers();
   }, [fetchUsers]);
 
-  const hasActiveFilters = Boolean(actionFilter || recordTypeFilter || (isAdmin && userFilter) || fromFilter || toFilter);
+  const hasActiveFilters = Boolean(
+    actionFilter || recordTypeFilter || (isAdmin && userFilter) || fromFilter || toFilter || activityView !== 'important'
+  );
 
   const clearFilters = (): void => {
     setActionFilter('');
@@ -148,26 +171,16 @@ function CompanyActivityHistory(): ReactElement {
     setUserFilter('');
     setFromFilter('');
     setToFilter('');
+    setActivityView('important');
     setPage(1);
   };
 
-  const selectedLog = useMemo(
-    () => logs.find((log) => log.id === selectedLogId) || null,
-    [logs, selectedLogId]
+  const groups = useMemo(() => groupAuditEntries(logs), [logs]);
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group.primary.id === selectedLogId) || null,
+    [groups, selectedLogId]
   );
-
-  const changedFields = Array.isArray(selectedLog?.metadata?.changed_fields)
-    ? selectedLog.metadata.changed_fields.filter((field): field is string => typeof field === 'string' && field !== 'id')
-    : [];
-  const redactedFields = Array.isArray(selectedLog?.metadata?.redacted_fields)
-    ? selectedLog.metadata.redacted_fields.filter((field): field is string => typeof field === 'string')
-    : [];
-
-  const beforeValues = (selectedLog?.metadata?.before_values as Record<string, unknown> | undefined) || {};
-  const afterValues = (selectedLog?.metadata?.after_values as Record<string, unknown> | undefined) || {};
-  const detailEntries = Object.entries(selectedLog?.metadata || {}).filter(
-    ([key]) => !['changed_fields', 'before_values', 'after_values'].includes(key)
-  );
+  const selectedLog = selectedGroup?.primary || null;
 
   return (
     <div>
@@ -182,7 +195,7 @@ function CompanyActivityHistory(): ReactElement {
                 {total.toLocaleString()} recorded actions {isAdmin ? 'across the organization' : `for ${activeCompany?.name || 'the selected client'}`}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -204,8 +217,30 @@ function CompanyActivityHistory(): ReactElement {
               {exportError}
             </p>
           )}
+          <fieldset className="mb-4">
+            <legend className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Activity view</legend>
+            <div className="grid grid-cols-1 gap-2 rounded-xl bg-neutral-100 p-1 sm:grid-cols-3">
+              {([
+                ['important', isAdmin ? 'Changes & sign-ins' : 'Changes'],
+                ['documents', 'Document access'],
+                ['all', 'All records'],
+              ] as const).map(([value, label]) => (
+                <button
+                  className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 ${activityView === value ? 'bg-white text-neutral-950 shadow-sm' : 'text-neutral-600 hover:text-neutral-950'}`}
+                  key={value}
+                  type="button"
+                  aria-pressed={activityView === value}
+                  onClick={() => { setActivityView(value); setPage(1); }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
           <div className={`grid grid-cols-1 gap-4 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             <Input
+              id="audit-action-filter"
+              label="Action"
               placeholder="Search actions"
               value={actionFilter}
               onChange={(e) => {
@@ -214,6 +249,8 @@ function CompanyActivityHistory(): ReactElement {
               }}
             />
             <Input
+              id="audit-record-filter"
+              label="Record"
               placeholder="Search records"
               value={recordTypeFilter}
               onChange={(e) => {
@@ -221,24 +258,29 @@ function CompanyActivityHistory(): ReactElement {
                 setPage(1);
               }}
             />
-            {isAdmin && <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={userFilter}
-              onChange={(e) => {
-                setUserFilter(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All users</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name} ({user.email})
-                </option>
-              ))}
-            </select>}
+            {isAdmin && <label className="space-y-1.5 text-sm font-medium text-neutral-700">
+              <span>Person</span>
+              <select
+                className="min-h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={userFilter}
+                onChange={(e) => {
+                  setUserFilter(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All users</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} ({user.email})
+                  </option>
+                ))}
+              </select>
+            </label>}
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <Input
+              id="audit-from-filter"
+              label="From"
               type="datetime-local"
               value={fromFilter}
               onChange={(e) => {
@@ -247,6 +289,8 @@ function CompanyActivityHistory(): ReactElement {
               }}
             />
             <Input
+              id="audit-to-filter"
+              label="To"
               type="datetime-local"
               value={toFilter}
               onChange={(e) => {
@@ -297,25 +341,38 @@ function CompanyActivityHistory(): ReactElement {
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Card>
-              <div className="space-y-3 p-3 sm:hidden">
-                {logs.map((log) => (
-                  <MobileRecordCard
-                    key={log.id}
-                    tone={selectedLogId === log.id ? 'primary' : 'default'}
-                    onClick={() => setSelectedLogId(log.id)}
-                  >
-                    <p className="font-semibold text-neutral-950">{displayAction(log)}</p>
-                    <p className="mt-1 text-sm text-neutral-500">
-                      {log.user_name || 'System'} • {new Date(log.created_at).toLocaleString()}
-                    </p>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MobileField label="Affected record" value={log.display_subject || log.subject_name || humanizeKey(log.record_type || 'General')} />
-                      <MobileField label="Client" value={log.company_name || 'Organization-wide'} />
-                    </div>
+              <div className="space-y-3 p-3 xl:hidden">
+                {groups.map((group) => (
+                  <MobileRecordCard key={group.key} tone={selectedLogId === group.primary.id ? 'primary' : 'default'}>
+                    <button
+                      className="min-h-11 w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+                      type="button"
+                      aria-expanded={selectedLogId === group.primary.id}
+                      onClick={() => setSelectedLogId((current) => current === group.primary.id ? null : group.primary.id)}
+                    >
+                      <p className="font-semibold text-neutral-950">{displayAuditGroupAction(group)}</p>
+                      <p className="mt-1 text-sm text-neutral-500">
+                        {group.primary.user_name || 'System'} • {formatGuamDateTime(group.primary.created_at)}
+                      </p>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <MobileField label="Affected record" value={group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')} />
+                        <MobileField label="Client" value={group.primary.company_name || 'Organization-wide'} />
+                      </div>
+                      <span className="mt-4 flex items-center justify-between border-t border-neutral-100 pt-3 text-sm font-semibold text-primary-700">
+                        {selectedLogId === group.primary.id ? 'Hide details' : 'View details'}
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${selectedLogId === group.primary.id ? 'rotate-180' : ''}`}
+                          aria-hidden="true"
+                        />
+                      </span>
+                    </button>
+                    {selectedLogId === group.primary.id && (
+                      <div className="mt-4 border-t border-primary-100 pt-4"><AuditEventDetails group={group} /></div>
+                    )}
                   </MobileRecordCard>
                 ))}
               </div>
-              <div className="hidden sm:block">
+              <div className="hidden xl:block">
                 <Table>
                 <TableHeader>
                   <TableRow>
@@ -327,48 +384,57 @@ function CompanyActivityHistory(): ReactElement {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {logs.map((log) => (
+                  {groups.map((group) => (
                     <TableRow
-                      key={log.id}
-                      className={selectedLogId === log.id ? 'bg-primary-50/70' : 'cursor-pointer'}
-                      onClick={() => setSelectedLogId(log.id)}
+                      key={group.key}
+                      className={`${selectedLogId === group.primary.id ? 'bg-primary-50/70' : ''} cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-300`}
+                      aria-selected={selectedLogId === group.primary.id}
+                      tabIndex={0}
+                      onClick={() => setSelectedLogId(group.primary.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedLogId(group.primary.id);
+                        }
+                      }}
                     >
-                      <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
-                      <TableCell>{log.user_name || 'System'}</TableCell>
-                      <TableCell className="font-medium text-neutral-900">{displayAction(log)}</TableCell>
-                      <TableCell>{log.display_subject || log.subject_name || humanizeKey(log.record_type || 'General')}</TableCell>
-                      <TableCell>{log.company_name || 'Organization-wide'}</TableCell>
+                      <TableCell>{formatGuamDateTime(group.primary.created_at)}</TableCell>
+                      <TableCell>{group.primary.user_name || 'System'}</TableCell>
+                      <TableCell className="font-medium text-neutral-900">{displayAuditGroupAction(group)}</TableCell>
+                      <TableCell>{group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')}</TableCell>
+                      <TableCell>{group.primary.company_name || 'Organization-wide'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
                 </Table>
               </div>
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-neutral-200 px-4 py-3">
-                  <p className="text-sm text-neutral-500">Page {page} of {totalPages}</p>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page === 1}>
-                      <ChevronLeft className="mr-1 h-4 w-4" /> Previous
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page === totalPages}>
-                      Next <ChevronRight className="ml-1 h-4 w-4" />
-                    </Button>
-                  </div>
+              {(page < totalPages || loadMoreError) && (
+                <div className="border-t border-neutral-200 px-4 py-4 text-center">
+                  {loadMoreError && <p className="mb-3 text-sm text-danger-700" role="alert">{loadMoreError}</p>}
+                  <Button
+                    className="min-h-11"
+                    variant="outline"
+                    onClick={() => loadMoreError ? void fetchLogs() : setPage((value) => Math.min(totalPages, value + 1))}
+                    disabled={isLoadingMore}
+                  >
+                    <ChevronDown className="mr-2 h-4 w-4" aria-hidden="true" />
+                    {isLoadingMore ? 'Loading more activity…' : loadMoreError ? 'Try loading more activity again' : 'Load more activity'}
+                  </Button>
                 </div>
               )}
             </Card>
 
-            <Card>
+            <Card className="hidden xl:block">
               <CardHeader>
                 <CardTitle>{selectedLog ? 'Selected Activity' : 'Activity Details'}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-5">
-                {selectedLog ? (
+                {selectedGroup && selectedLog ? (
                   <>
                     <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-4">
-                      <p className="text-lg font-semibold text-neutral-900">{displayAction(selectedLog)}</p>
+                      <p className="text-lg font-semibold text-neutral-900">{displayAuditGroupAction(selectedGroup)}</p>
                       <p className="mt-1 text-sm text-neutral-500">
-                        {selectedLog.user_name || 'System'} • {new Date(selectedLog.created_at).toLocaleString()}
+                        {selectedLog.user_name || 'System'} • {formatGuamDateTime(selectedLog.created_at)}
                       </p>
                     </div>
 
@@ -380,59 +446,7 @@ function CompanyActivityHistory(): ReactElement {
                       ]}
                     />
 
-                    {changedFields.length > 0 ? (
-                      <div>
-                        <p className="text-sm font-medium text-neutral-900">What changed</p>
-                        <div className="mt-3 space-y-3">
-                          {changedFields.map((field) => (
-                            <div key={field} className="rounded-2xl border border-neutral-200 bg-white p-4">
-                              <p className="text-sm font-semibold text-neutral-900">{humanizeKey(field)}</p>
-                              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                                {redactedFields.includes(field) ? (
-                                  <p className="col-span-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                                    Sensitive value updated. The original and new values are intentionally never stored in the audit log.
-                                  </p>
-                                ) : (
-                                  <>
-                                    <ValueCard label="Before" value={beforeValues[field]} />
-                                    <ValueCard label="After" value={afterValues[field]} />
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-500">
-                        Detailed before-and-after values were not captured for this historical activity.
-                      </p>
-                    )}
-
-                    <details className="group rounded-2xl border border-neutral-200 bg-white">
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-neutral-700">
-                        Advanced technical details
-                        <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-                      </summary>
-                      <div className="space-y-3 border-t border-neutral-200 p-4">
-                        <DetailList
-                          rows={[
-                            ['Technical action', selectedLog.action],
-                            ['Actor email', selectedLog.actor_email || '—'],
-                            ['Role', selectedLog.actor_role ? humanizeKey(selectedLog.actor_role) : '—'],
-                            ['Record reference', `${selectedLog.record_type || 'general'}${selectedLog.record_id ? ` #${selectedLog.record_id}` : ''}`],
-                            ['IP address', selectedLog.ip_address || '—'],
-                            ['Request ID', selectedLog.request_id || '—'],
-                          ]}
-                        />
-                        {detailEntries.map(([key, value]) => (
-                          <div key={key} className="rounded-xl border border-neutral-200 px-4 py-3">
-                            <p className="text-sm font-medium text-neutral-900">{humanizeKey(key)}</p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-neutral-600">{formatValue(value)}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
+                    <AuditEventDetails group={selectedGroup} />
                   </>
                 ) : (
                   <p className="text-sm text-neutral-500">Select an audit entry to see the full activity details.</p>
@@ -455,15 +469,6 @@ function DetailList({ rows }: { rows: Array<[string, string]> }) {
           <p className="text-right text-sm text-neutral-900">{value}</p>
         </div>
       ))}
-    </div>
-  );
-}
-
-function ValueCard({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">{label}</p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-800">{formatValue(value)}</p>
     </div>
   );
 }

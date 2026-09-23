@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import {
   Activity,
   CheckCircle2,
@@ -17,6 +17,8 @@ import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
 import { formatGuamDateTime } from '@/lib/utils';
 import { presentUserAgent } from '@/lib/user-agent';
+import { AuditEventDetails } from '@/components/audit/AuditEventDetails';
+import { displayAuditGroupAction, groupAuditEntries, type AuditEntryGroup } from '@/lib/audit-display';
 
 interface UserActivityPanelProps {
   user: User;
@@ -98,6 +100,8 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps): Re
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const groupedLogs = useMemo(() => groupAuditEntries(logs), [logs]);
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-neutral-950/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={`Activity for ${user.name}`}>
       <button className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close activity panel" />
@@ -157,9 +161,9 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps): Re
           ) : (
             <>
               <ol className="space-y-4">
-                {logs.map((log) => view === 'sign_ins'
-                  ? <SignInEntry key={log.id} log={log} />
-                  : <ActivityEntry key={log.id} log={log} />)}
+                {view === 'sign_ins'
+                  ? logs.map((log) => <SignInEntry key={log.id} log={log} />)
+                  : groupedLogs.map((group) => <ActivityEntry key={group.key} group={group} />)}
               </ol>
               {(page < totalPages || error) && (
                 <div className="pt-5 text-center">
@@ -245,15 +249,17 @@ function SignInEntry({ log }: { log: AuditLogEntry }): ReactElement {
   );
 }
 
-function ActivityEntry({ log }: { log: AuditLogEntry }): ReactElement {
+function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
+  const log = group.primary;
   return (
     <li className="relative border-l border-neutral-200 pl-5">
       <span className="absolute -left-1.5 top-1 h-3 w-3 rounded-full border-2 border-white bg-primary-600" aria-hidden="true" />
-      <p className="font-medium text-neutral-950">{log.display_action || fallbackAction(log.action)}</p>
+      <p className="font-medium text-neutral-950">{log.display_action ? displayAuditGroupAction(group) : fallbackAction(log.action)}</p>
       <time className="mt-1 block text-sm text-neutral-500" dateTime={log.created_at}>
         {formatGuamDateTime(log.created_at)}{log.company_name ? ` · ${log.company_name}` : ''}
       </time>
       {log.display_subject && <p className="mt-2 text-sm text-neutral-600">Affected record: {log.display_subject}</p>}
+      {group.entries.length > 1 && <div className="mt-3"><AuditEventDetails group={group} /></div>}
     </li>
   );
 }

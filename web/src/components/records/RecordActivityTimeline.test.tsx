@@ -61,10 +61,30 @@ describe('RecordActivityTimeline', () => {
     expect(screen.getByText('20.00')).toBeTruthy();
     expect(screen.getByText(/contents are hidden to protect sensitive information/)).toBeTruthy();
     expect(screen.getByText('Browser or device signature')).toBeTruthy();
-    const technicalSummary = screen.getByText('Technical details');
+    const technicalSummary = screen.getByText('Technical evidence');
     fireEvent.click(technicalSummary);
     expect(technicalSummary.closest('details')?.open).toBe(true);
     expect(apiMocks.list).toHaveBeenCalledWith('employees', 12, { page: 1, per_page: 20 }, 7);
+  });
+
+  it('suppresses request-only employee keys that have no stored values', async () => {
+    apiMocks.list.mockResolvedValue({
+      data: [{
+        ...activity,
+        id: 92,
+        action: 'pay_periods#run_payroll',
+        display_action: 'Morgan Manager processed payroll for Sep 1 – 15, 2026',
+        metadata: { changed_fields: ['hours.104', 'hours.105'] },
+      }],
+      meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1 },
+    });
+
+    render(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText(/processed payroll/)).toBeTruthy();
+    expect(screen.queryByText('Hours 104')).toBeNull();
+    expect(screen.queryByText('Before')).toBeNull();
+    expect(screen.queryByText('After')).toBeNull();
   });
 
   it('loads older activity without replacing the newest entries', async () => {

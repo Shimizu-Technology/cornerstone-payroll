@@ -1,5 +1,25 @@
 import type { AuditLogEntry } from '@/services/api';
 
+export interface AuditChange {
+  field: string;
+  before: unknown;
+  after: unknown;
+  redacted: boolean;
+}
+
+export interface AuditFact {
+  label: string;
+  value: string;
+}
+
+export interface AuditEntryGroup {
+  key: string;
+  primary: AuditLogEntry;
+  entries: AuditLogEntry[];
+}
+
+const ACCESS_GROUP_WINDOW_MS = 10 * 60 * 1_000;
+
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
   pay_rate: 'Pay rate',
@@ -24,7 +44,7 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 export function humanizeAuditKey(value: string): string {
-  return FIELD_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return FIELD_LABELS[value] || value.replace(/[._]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export function formatAuditAction(action: string): string {
@@ -61,4 +81,122 @@ export function formatAuditValue(value: unknown): string {
       .join('\n');
   }
   return String(value);
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function owns(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function valuesDiffer(before: unknown, after: unknown): boolean {
+  return JSON.stringify(before) !== JSON.stringify(after);
+}
+
+export function meaningfulAuditChanges(log: AuditLogEntry): AuditChange[] {
+  const beforeValues = objectValue(log.metadata?.before_values);
+  const afterValues = objectValue(log.metadata?.after_values);
+  const redactedFields = new Set(stringList(log.metadata?.redacted_fields));
+
+  return stringList(log.metadata?.changed_fields)
+    .filter((field) => field !== 'id')
+    .filter((field) => redactedFields.has(field) || (
+      (owns(beforeValues, field) || owns(afterValues, field)) &&
+      valuesDiffer(beforeValues[field], afterValues[field])
+    ))
+    .map((field) => ({
+      field,
+      before: beforeValues[field],
+      after: afterValues[field],
+      redacted: redactedFields.has(field),
+    }));
+}
+
+export function auditBusinessFacts(log: AuditLogEntry): AuditFact[] {
+  const summary = objectValue(log.metadata?.business_summary);
+  const facts: AuditFact[] = [];
+  const add = (key: string, label: string, formatter: (value: unknown) => string = formatAuditValue): void => {
+    if (!owns(summary, key) || summary[key] === null || summary[key] === undefined || summary[key] === '') return;
+    facts.push({ label, value: formatter(summary[key]) });
+  };
+  const currency = (value: unknown): string => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return formatAuditValue(value);
+
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
+  };
+
+  add('employees_processed', 'Processed');
+  if (Number(summary.employees_failed) > 0) add('employees_failed', 'Needs attention');
+  if (!owns(summary, 'employees_processed')) add('employee_count', 'Employees');
+  add('total_gross', 'Gross payroll', currency);
+  add('total_net', 'Net payroll', currency);
+  add('total_deductions', 'Deductions', currency);
+  add('employer_payroll_taxes', 'Employer payroll taxes', currency);
+  add('outcome', 'Outcome', (value) => humanizeAuditKey(String(value)));
+  add('status', 'Result', (value) => humanizeAuditKey(String(value)));
+  return facts;
+}
+
+export function isDocumentAccess(log: AuditLogEntry): boolean {
+  return log.event_category === 'export';
+}
+
+function groupIdentity(log: AuditLogEntry): string {
+  // Older access records did not retain a pay-period target. They can still be
+  // presented as a short burst of similar access activity because every raw
+  // occurrence remains available in the expanded evidence list.
+  const target = log.metadata?.report_target_key ?? log.metadata?.pay_period_id ?? log.record_id ?? 'legacy-unlinked';
+  const report = log.metadata?.report_key ?? log.metadata?.report_name ?? log.action;
+  const format = log.metadata?.report_format ?? '';
+  return [log.user_id ?? log.actor_email ?? log.user_name, log.company_id, report, format, target].join('|');
+}
+
+function guamCalendarDay(timestamp: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Guam',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(timestamp));
+}
+
+function canJoinAccessGroup(group: AuditEntryGroup, log: AuditLogEntry): boolean {
+  if (!isDocumentAccess(group.primary) || !isDocumentAccess(log)) return false;
+  if (groupIdentity(group.primary) !== groupIdentity(log)) return false;
+  if (guamCalendarDay(group.primary.created_at) !== guamCalendarDay(log.created_at)) return false;
+
+  const previous = group.entries.at(-1) ?? group.primary;
+  return Math.abs(new Date(previous.created_at).getTime() - new Date(log.created_at).getTime()) <= ACCESS_GROUP_WINDOW_MS;
+}
+
+export function groupAuditEntries(logs: AuditLogEntry[]): AuditEntryGroup[] {
+  return logs.reduce<AuditEntryGroup[]>((groups, log) => {
+    const current = groups.at(-1);
+    if (current && canJoinAccessGroup(current, log)) {
+      current.entries.push(log);
+      return groups;
+    }
+
+    groups.push({ key: `audit-${log.id}`, primary: log, entries: [log] });
+    return groups;
+  }, []);
+}
+
+export function displayAuditGroupAction(group: AuditEntryGroup): string {
+  const headline = displayAuditAction(group.primary);
+  if (group.entries.length === 1) return headline;
+
+  return `${headline} · ${group.entries.length} access records`;
 }

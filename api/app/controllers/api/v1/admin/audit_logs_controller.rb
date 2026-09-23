@@ -74,6 +74,9 @@ module Api
           end
           logs = logs.where(action: params[:event_action]) if params[:event_action].present?
           logs = logs.where(event_category: params[:event_category]) if params[:event_category].present?
+          if params[:exclude_event_category].present?
+            logs = logs.where("event_category IS NULL OR event_category <> ?", params[:exclude_event_category])
+          end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
