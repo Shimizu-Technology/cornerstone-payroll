@@ -122,6 +122,8 @@ module Api
 
         # PATCH/PUT /api/v1/admin/pay_periods/:id
         def update
+          @pay_period_audit_before_values = AuditRecordSnapshot.values_for(@pay_period)
+
           unless @pay_period.can_edit?
             message = if @pay_period.voided?
               "Cannot edit a voided pay period"
@@ -894,6 +896,16 @@ module Api
         end
 
         private
+
+        def audit_record
+          @pay_period
+        end
+
+        def audit_record_changes
+          return AuditRecordSnapshot.changes_for(@pay_period) unless @pay_period_audit_before_values
+
+          AuditRecordSnapshot.changes_from(@pay_period, @pay_period_audit_before_values)
+        end
 
         def with_financial_pay_period_lock
           ApplicationRecord.transaction do

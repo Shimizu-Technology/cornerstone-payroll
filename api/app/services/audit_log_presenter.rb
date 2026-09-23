@@ -7,6 +7,8 @@ class AuditLogPresenter
     "employees#update" => "updated",
     "employees#destroy" => "terminated",
     "employees#reactivate" => "reactivated",
+    "client_employees#create" => "added",
+    "client_employees#update" => "updated",
     "users#created" => "created the user account for",
     "users#updated" => "updated the user account for",
     "users#activated" => "activated the user account for",

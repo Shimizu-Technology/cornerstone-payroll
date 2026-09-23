@@ -597,6 +597,37 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.notes).to eq("Updated notes")
     end
 
+    it "records safe before-and-after values for pay-period changes" do
+      original_pay_date = pay_period.pay_date
+      updated_pay_date = original_pay_date + 1.day
+
+      expect {
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+          pay_period: { pay_date: updated_pay_date, notes: "Moved for the bank holiday" }
+        }
+      }.to change { AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).count }.by(1)
+
+      expect(response).to have_http_status(:ok)
+      metadata = AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).last.metadata
+      expect(metadata.fetch("changed_fields")).to contain_exactly("notes", "pay_date")
+      expect(metadata.fetch("before_values")).to include("notes" => nil, "pay_date" => original_pay_date.iso8601)
+      expect(metadata.fetch("after_values")).to include("notes" => "Moved for the bank holiday", "pay_date" => updated_pay_date.iso8601)
+    end
+
+    it "records the complete request delta when an edit also invalidates a calculation" do
+      pay_period.update!(status: "calculated", notes: nil)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { notes: "Updated after calculation" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      metadata = AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).last.metadata
+      expect(metadata.fetch("changed_fields")).to contain_exactly("notes", "status")
+      expect(metadata.fetch("before_values")).to include("notes" => nil, "status" => "calculated")
+      expect(metadata.fetch("after_values")).to include("notes" => "Updated after calculation", "status" => "draft")
+    end
+
     it "cannot update a committed pay period" do
       pay_period.update!(status: "committed")
 

@@ -69,7 +69,7 @@ module Auditable
     record = audit_record_for_log
     record_id ||= response_subject&.fetch("id", nil)
     record_id ||= record&.id
-    changes = AuditRecordSnapshot.changes_for(record)
+    changes = audit_changes_for_log(record)
     changed_fields = changes[:changed_fields].presence || safe_changed_fields
 
     AuditLog.record!(
@@ -134,6 +134,12 @@ module Auditable
     return audit_record if respond_to?(:audit_record, true)
 
     nil
+  end
+
+  def audit_changes_for_log(record)
+    return audit_record_changes if respond_to?(:audit_record_changes, true)
+
+    AuditRecordSnapshot.changes_for(record)
   end
 
   def safe_field_names(prefix, value)

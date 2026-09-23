@@ -149,6 +149,7 @@ Rails.application.routes.draw do
             get :export
           end
         end
+        get "record_activities/:record_type/:record_id", to: "record_activities#index"
         resources :historical_imports, only: %i[index show] do
           collection do
             post :preview
