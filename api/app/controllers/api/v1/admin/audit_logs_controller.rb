@@ -9,6 +9,7 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
 
+        before_action :authorize_security_history_access!
         before_action :resolve_access_scope!
 
         def index
@@ -43,8 +44,26 @@ module Api
 
         private
 
+        def authorize_security_history_access!
+          return unless security_history_filters?
+          return if current_user.organization_admin?
+
+          render json: {
+            error: "Organization admin access required for security history",
+            details: { authorization: [ "Organization admin access required for security history" ] }
+          }, status: :forbidden
+        end
+
+        def security_history_filters?
+          params[:event_category] == "security" || params[:event_action].to_s.start_with?("authentication#")
+        end
+
         def filtered_scope
           logs = @accessible_audit_logs
+          unless current_user.organization_admin?
+            logs = logs.where("event_category IS NULL OR event_category <> ?", "security")
+              .where("action IS NULL OR action NOT LIKE ?", "authentication#%")
+          end
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)
@@ -53,6 +72,8 @@ module Api
           if current_user.organization_admin? && params[:user_id].present?
             logs = logs.where(user_id: params[:user_id])
           end
+          logs = logs.where(action: params[:event_action]) if params[:event_action].present?
+          logs = logs.where(event_category: params[:event_category]) if params[:event_category].present?
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?

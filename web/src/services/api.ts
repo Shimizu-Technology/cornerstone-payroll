@@ -740,6 +740,8 @@ export interface AuditLogEntry {
 export const auditLogsApi = {
   list: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -749,10 +751,12 @@ export const auditLogsApi = {
     per_page?: number;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) =>
+  }): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> =>
     api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params),
   exportCsv: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -760,7 +764,7 @@ export const auditLogsApi = {
     to?: string;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) => api.getBlobWithParams('/admin/audit_logs/export', params),
+  }): Promise<BlobDownload> => api.getBlobWithParams('/admin/audit_logs/export', params),
 };
 
 export const recordActivitiesApi = {
