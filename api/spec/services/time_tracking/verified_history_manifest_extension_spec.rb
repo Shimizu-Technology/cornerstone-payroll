@@ -87,6 +87,36 @@ RSpec.describe TimeTracking::VerifiedHistoryManifestExtension do
     expect(manifest.fetch("delivered_checks")).to be_empty
   end
 
+  it "is idempotent when the same verified period is applied again" do
+    first_result = described_class.new(manifest:, extension:).call
+    second_result = described_class.new(manifest: first_result, extension:).call
+
+    expect(second_result).to eq(first_result)
+  end
+
+  it "rejects changed evidence for an existing delivered check" do
+    first_result = described_class.new(manifest:, extension:).call
+    extension.dig("pay_periods", 0, "checks", 0)["check_number"] = "003099"
+
+    expect { described_class.new(manifest: first_result, extension:).call }
+      .to raise_error(described_class::Error, /conflicts with existing evidence/)
+  end
+
+  it "rejects a source entry already assigned to another payroll item" do
+    manifest.fetch("issued_entries") << {
+      "payroll_item_id" => 99,
+      "source_time_entry_id" => "2000",
+      "source_user_uuid" => "aire-uuid",
+      "original_work_date" => "2026-09-15",
+      "regular_hours" => "25.90",
+      "overtime_hours" => "0.00",
+      "category_name" => "Flight Hours"
+    }
+
+    expect { described_class.new(manifest:, extension:).call }
+      .to raise_error(described_class::Error, /conflicts with existing evidence/)
+  end
+
   it "fails closed when AIRE current-period hours differ from the issued check" do
     extension.dig("pay_periods", 0, "checks", 0)["regular_hours"] = "32.10"
 
