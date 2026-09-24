@@ -1,0 +1,34 @@
+:8080 {
+  encode zstd gzip
+
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options SAMEORIGIN
+    Referrer-Policy strict-origin-when-cross-origin
+    X-Robots-Tag "noindex, nofollow, noarchive"
+    -Server
+  }
+
+  handle /api/* {
+    reverse_proxy payroll-api:3000
+  }
+
+  handle /cable* {
+    reverse_proxy payroll-api:3000
+  }
+
+  handle /rails/* {
+    reverse_proxy payroll-api:3000
+  }
+
+  handle /health {
+    rewrite * /up
+    reverse_proxy payroll-api:3000
+  }
+
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}

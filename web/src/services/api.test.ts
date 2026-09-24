@@ -11,7 +11,21 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
+import { apiClient, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, resolveApiUrl, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
+
+describe('API URL resolution', (): void => {
+  it('resolves the staging same-origin API path against the current origin', (): void => {
+    expect(resolveApiUrl('/api/v1', '/auth/me', 'https://payroll-staging.example.com').toString()).toBe(
+      'https://payroll-staging.example.com/api/v1/auth/me',
+    );
+  });
+
+  it('preserves an absolute API base URL', (): void => {
+    expect(resolveApiUrl('https://api.example.com/api/v1', '/auth/me', 'https://payroll.example.com').toString()).toBe(
+      'https://api.example.com/api/v1/auth/me',
+    );
+  });
+});
 
 describe('ApiClient company identity', (): void => {
   afterEach((): void => {
