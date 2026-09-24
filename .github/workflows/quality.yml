@@ -201,7 +201,7 @@ jobs:
       - name: Check deployment scripts
         run: bash -n ops/staging/*.sh
       - name: Validate staging LaunchAgent
-        run: plutil -lint ops/staging/launchd/com.shimizutechnology.aire-payroll-staging.plist
+        run: python3 -c 'import plistlib; plistlib.load(open("ops/staging/launchd/com.shimizutechnology.aire-payroll-staging.plist", "rb"))'
       - name: Build staging API image
         run: docker build --file api/Dockerfile --tag cornerstone-payroll-api:ci api
       - name: Build staging web image
