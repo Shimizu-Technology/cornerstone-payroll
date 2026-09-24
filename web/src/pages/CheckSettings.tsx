@@ -265,7 +265,8 @@ export function CheckSettingsPage() {
       const data = await printerProfilesApi.list();
       setProfiles(data.printer_profiles);
       setProfileSelections(data.selections);
-      setActivePrinterProfileId(data.active_printer_profile_id ?? null);
+      // Settings load and stock changes set the active ID. The list response
+      // resolves its active ID for saved stock, which may differ from the draft.
     } catch {
       // Non-critical — profiles section just stays empty
     }
@@ -517,16 +518,16 @@ export function CheckSettingsPage() {
       setShowAddProfile(false);
       setActivePrinterProfileId(response.printer_profile.id);
       setActivePrinterProfileName(response.printer_profile.name);
-      setSettings((current) => current ? {
-        ...current,
-        check_offset_x: parseOffsetInput(offsetX),
-        check_offset_y: parseOffsetInput(offsetY),
-        check_layout_config: layoutConfig,
-        active_printer_profile_id: response.printer_profile.id,
-        active_printer_profile_name: response.printer_profile.name,
-        active_printer_profile_lock_version: response.printer_profile.lock_version,
-      } : current);
-      if (settings) {
+      if (settings?.check_stock_type === stockType) {
+        setSettings((current) => current ? {
+          ...current,
+          check_offset_x: parseOffsetInput(offsetX),
+          check_offset_y: parseOffsetInput(offsetY),
+          check_layout_config: layoutConfig,
+          active_printer_profile_id: response.printer_profile.id,
+          active_printer_profile_name: response.printer_profile.name,
+          active_printer_profile_lock_version: response.printer_profile.lock_version,
+        } : current);
         setSavedSettingsSnapshot(checkSettingsSnapshot({
           stockType: settings.check_stock_type,
           offsetX,
@@ -539,7 +540,9 @@ export function CheckSettingsPage() {
           requireDistinctCheckPrintConfirmer: settings.require_distinct_check_print_confirmer,
         }));
       }
-      setSuccess(`Saved and selected “${response.printer_profile.name}” for you.`);
+      setSuccess(settings?.check_stock_type === stockType
+        ? `Saved and selected “${response.printer_profile.name}” for you.`
+        : `Saved and selected “${response.printer_profile.name}” for ${stockType.replaceAll('_', ' ')} stock. Save the client settings to use that stock for this client.`);
       await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save profile');
@@ -615,6 +618,10 @@ export function CheckSettingsPage() {
     if (!window.confirm(`Archive printer profile "${name}"? Anyone using it will need to choose another profile.`)) return;
     try {
       await printerProfilesApi.delete(id);
+      if (activePrinterProfileId === id) {
+        setActivePrinterProfileId(null);
+        setActivePrinterProfileName(null);
+      }
       setSuccess('Profile archived.');
       loadProfiles();
     } catch (err) {
