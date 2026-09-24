@@ -118,6 +118,14 @@ RSpec.describe TimeTracking::VerifiedHistoryManifestExtension do
       .to raise_error(described_class::Error, /no delivered check/)
   end
 
+  it "fails closed when the same AIRE employee appears twice in one period" do
+    employee = extension.dig("pay_periods", 0, "aire_employees", 0)
+    extension.dig("pay_periods", 0, "aire_employees") << JSON.parse(JSON.generate(employee))
+
+    expect { described_class.new(manifest:, extension:).call }
+      .to raise_error(described_class::Error, /duplicate employees/)
+  end
+
   it "fails closed when a positive-hour payroll check has no AIRE source entries" do
     extension.dig("pay_periods", 0)["aire_employees"] = []
 
