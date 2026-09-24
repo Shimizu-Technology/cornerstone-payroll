@@ -35,6 +35,8 @@ class FirstHawaiianFourUpCheckGenerator
   }.freeze
 
   Entry = Struct.new(
+    :source_type,
+    :source_id,
     :check_number,
     :payee,
     :amount,
@@ -114,12 +116,46 @@ class FirstHawaiianFourUpCheckGenerator
         end
       end
       pdf.bounding_box([ 0, PAGE_HEIGHT - 4 ], width: PAGE_WIDTH) do
-        pdf.font_size(7) { pdf.text "FIRST HAWAIIAN 4-UP ALIGNMENT TEST - Print on plain paper.", align: :center, color: "CC0000" }
+        pdf.font_size(7) do
+          pdf.text "FIRST HAWAIIAN 4-UP ALIGNMENT TEST - Print at Actual Size / 100% (never Fit or Shrink).", align: :center, color: "CC0000"
+        end
       end
+      draw_one_inch_scale_reference(pdf)
     end.render
   end
 
+  def render_input_payloads
+    entries.each_with_object({}) do |entry, payloads|
+      key = "#{entry.source_type}:#{entry.source_id}"
+      payloads[key] = {
+        "source_type" => entry.source_type,
+        "source_id" => entry.source_id,
+        "check_stock_type" => company.check_stock_type,
+        "check_number" => entry.check_number.to_s,
+        "payee" => entry.payee.to_s,
+        "amount" => format("%.2f", entry.amount.to_d),
+        "date" => entry.date&.iso8601,
+        "memo" => entry.memo.to_s,
+        "voided" => entry.voided
+      }
+    end
+  end
+
   private
+
+  def draw_one_inch_scale_reference(pdf)
+    x = 20
+    y = 14
+    pdf.save_graphics_state do
+      pdf.stroke_color "CC0000"
+      pdf.fill_color "CC0000"
+      pdf.line_width 0.8
+      pdf.stroke_line [ x, y ], [ x + 72, y ]
+      pdf.stroke_line [ x, y - 4 ], [ x, y + 4 ]
+      pdf.stroke_line [ x + 72, y - 4 ], [ x + 72, y + 4 ]
+      pdf.font_size(6) { pdf.draw_text "This line must measure exactly 1 inch", at: [ x + 78, y - 2 ] }
+    end
+  end
 
   def check_number_sort_key(value)
     number = value.to_s
@@ -157,7 +193,6 @@ class FirstHawaiianFourUpCheckGenerator
 
   def draw_entry(pdf, entry, slot_bottom)
     draw_void_watermark(pdf, slot_bottom) if entry.voided || rehearsal_preview
-    draw_rehearsal_label(pdf, slot_bottom) if rehearsal_preview
 
     draw_text_field(pdf, :check_face, :date, slot_bottom, format_date(entry.date), align: :right)
     draw_text_field(pdf, :check_face, :payee, slot_bottom, entry.payee)
@@ -198,6 +233,8 @@ class FirstHawaiianFourUpCheckGenerator
 
   def entry_from_payroll_item(item)
     Entry.new(
+      source_type: "payroll_item",
+      source_id: item.id,
       check_number: item.check_number,
       payee: item.employee.full_name,
       amount: item.net_pay,
@@ -209,6 +246,8 @@ class FirstHawaiianFourUpCheckGenerator
 
   def entry_from_non_employee_check(check)
     Entry.new(
+      source_type: "non_employee_check",
+      source_id: check.id,
       check_number: check.check_number,
       payee: check.payable_to,
       amount: check.amount,
@@ -309,15 +348,6 @@ class FirstHawaiianFourUpCheckGenerator
             pdf.draw_text "VOID", at: [ cx - 78, cy - 20 ], style: :bold
           end
         end
-      end
-    end
-  end
-
-  def draw_rehearsal_label(pdf, slot_bottom)
-    pdf.save_graphics_state do
-      pdf.fill_color "B91C1C"
-      pdf.font_size(9) do
-        pdf.draw_text "TEST ONLY - NOT NEGOTIABLE", at: [ 194, slot_bottom + SLOT_HEIGHT - 13 ], style: :bold
       end
     end
   end

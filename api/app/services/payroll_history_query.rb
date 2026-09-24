@@ -91,7 +91,7 @@ class PayrollHistoryQuery
         (pp.status = 'committed') AS source_locked
       FROM pay_periods pp
       LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND COALESCE(pi.voided, FALSE) = FALSE
-      LEFT JOIN users committed_user ON committed_user.id = pp.committed_by_id AND committed_user.company_id = pp.company_id
+      LEFT JOIN users committed_user ON committed_user.id = pp.committed_by_id
       WHERE pp.company_id = #{company}
         #{client_native_visibility_sql}
       GROUP BY pp.id, committed_user.name
@@ -125,7 +125,6 @@ class PayrollHistoryQuery
         AND historical_batch.status = 'locked'
       LEFT JOIN users locked_user
         ON locked_user.id = historical_batch.locked_by_id
-        AND locked_user.company_id = historical_period.company_id
       WHERE historical_period.company_id = #{company}
         AND historical_period.period_type = 'regular'
     SQL
@@ -245,8 +244,8 @@ class PayrollHistoryQuery
     parallel_run = !imported && native_periods[row.fetch("id").to_i]&.parallel_run?
     status = row.fetch("status")
     correction_status = row["correction_status"]
-    editable = @audience == :staff && !imported && status != "committed" && correction_status != "voided"
     native_period = native_periods[row.fetch("id").to_i] unless imported
+    editable = @audience == :staff && !imported && native_period&.can_edit?
     client_review_ready = !native_period&.company&.client_payroll_approval_required? ||
       native_period.payroll_review_packages.find { |review_package| review_package.superseded_at.nil? }&.approved?
 
@@ -266,6 +265,7 @@ class PayrollHistoryQuery
       notes: row["notes"],
       compliance_warnings: imported ? [] : (native_periods[row.fetch("id").to_i]&.compliance_warnings || []),
       parallel_run: parallel_run,
+      test_workspace_role: native_period&.test_workspace_role,
       employee_count: row.fetch("employee_count").to_i,
       total_gross: row.fetch("total_gross").to_d.to_f,
       total_net: row.fetch("total_net").to_d.to_f,
@@ -281,8 +281,8 @@ class PayrollHistoryQuery
         view: true,
         edit: editable,
         delete: editable,
-        enter_hours: @audience == :staff && !imported && status == "draft" && correction_status != "voided",
-        run: @audience == :staff && !imported && %w[draft calculated].include?(status) && correction_status != "voided",
+        enter_hours: editable && status == "draft",
+        run: editable && %w[draft calculated].include?(status),
         approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided" && client_review_ready,
         commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
       }

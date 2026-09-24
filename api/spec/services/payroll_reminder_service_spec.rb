@@ -216,6 +216,39 @@ RSpec.describe PayrollReminderService do
         described_class.run_all!
       end
     end
+
+    context "with an enabled test workspace config" do
+      let!(:workspace) do
+        create(
+          :company,
+          organization: company.organization,
+          payroll_environment: "migration_rehearsal",
+          test_workspace_purpose: "training_replay",
+          migration_source_company: company,
+          migration_rehearsal_status: "ready"
+        )
+      end
+
+      before do
+        create(:payroll_reminder_config, company: workspace, enabled: true, recipients: [ "boss@test.com" ])
+        create(
+          :pay_period,
+          company: workspace,
+          start_date: Date.current - 14,
+          end_date: Date.current,
+          pay_date: Date.current + 2,
+          status: "draft"
+        )
+      end
+
+      it "never sends production reminders" do
+        expect(Resend::Emails).not_to receive(:send)
+
+        described_class.run_all!
+
+        expect(PayrollReminderLog.where(company: workspace)).to be_empty
+      end
+    end
   end
 
   describe ".calculate_next_period" do

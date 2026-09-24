@@ -28,7 +28,15 @@ test('check settings previews draft test checks and alignment PDFs before option
   page.on('download', () => { downloads += 1; });
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/auth/me')) return route.fulfill({ json: { user: { id: 1, role: 'admin', name: 'Review Admin', company_id: 1, organization_id: 1, assigned_company_ids: [1] } } });
+    if (path.endsWith('/auth/me')) return route.fulfill({ json: { user: {
+      id: 1,
+      role: 'admin',
+      name: 'Review Admin',
+      company_id: 1,
+      organization_id: 1,
+      assigned_company_ids: [1],
+      capabilities: ['use_printer_profiles', 'manage_printer_profile_library', 'manage_client_check_settings'],
+    } } });
     if (path.endsWith('/companies')) return route.fulfill({ json: { companies: [{ id: 1, name: 'Synthetic Review Company', active: true }], can_switch_company: false, current_company_id: 1 } });
     if (path.endsWith('/check_settings')) {
       if (route.request().method() !== 'GET') settingsSaves += 1;
@@ -40,7 +48,7 @@ test('check settings previews draft test checks and alignment PDFs before option
       } } });
     }
     if (path.endsWith('/check_layout')) return route.fulfill({ json: { check_layout: null } });
-    if (path.endsWith('/printer_profiles')) return route.fulfill({ json: { printer_profiles: [], active_printer_profile_id: null } });
+    if (path.endsWith('/printer_profiles')) return route.fulfill({ json: { printer_profiles: [], selections: [], active_printer_profile_id: null } });
     if (path.endsWith('/test_check_pdf') || path.endsWith('/alignment_test_pdf')) {
       requested.push(path);
       if (path.endsWith('/test_check_pdf')) draftRequest = route.request().postDataJSON() as Record<string, unknown>;
@@ -60,7 +68,7 @@ test('check settings previews draft test checks and alignment PDFs before option
   await page.locator('#bank-name').fill('Unsaved Draft Bank');
   await page.getByRole('button', { name: 'Preview Test Check' }).click();
   await expect(page.getByRole('heading', { name: 'Test check preview' })).toBeVisible();
-  await expect(page.getByRole('dialog').getByText('Nothing is saved until you click Save Settings.')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Previewing never changes saved client settings or printer profiles.')).toBeVisible();
   expect(draftRequest).toMatchObject({ sample_type: 'payroll', check_settings: { bank_name: 'Unsaved Draft Bank' } });
   expect(downloads).toBe(0);
   const testCheckDownload = page.waitForEvent('download');

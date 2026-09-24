@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 
 let root: Root | null = null;
@@ -19,12 +20,14 @@ function CheckPrintDialogHarness(): ReactNode {
   const [open, setOpen] = useState(true);
 
   return (
-    <UnifiedCheckPrintDialog
-      open={open}
-      payPeriodId={703}
-      onOpenChange={setOpen}
-      onConfirmed={(): void => undefined}
-    />
+    <MemoryRouter>
+      <UnifiedCheckPrintDialog
+        open={open}
+        payPeriodId={703}
+        onOpenChange={setOpen}
+        onConfirmed={(): void => undefined}
+      />
+    </MemoryRouter>
   );
 }
 

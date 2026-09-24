@@ -18,11 +18,34 @@ class PayPeriod < ApplicationRecord
   CYCLES = %w[regular supplemental].freeze
   RUN_PURPOSES = %w[regular off_cycle_tips bonus commission correction final adjustment].freeze
   RUN_PURPOSE_SOURCES = %w[operator_selected system_correction production_migration legacy_system_default].freeze
+  TEST_WORKSPACE_ROLES = %w[baseline practice].freeze
+  PROMOTION_PAYMENT_DISPOSITIONS = %w[record_only process_in_cornerstone].freeze
 
   belongs_to :company
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
+  belongs_to :test_workspace_source_pay_period,
+             class_name: "PayPeriod",
+             optional: true,
+             inverse_of: :training_replay_copies
+  belongs_to :promotion_source_pay_period,
+             class_name: "PayPeriod",
+             optional: true,
+             inverse_of: :promoted_live_copies
+  belongs_to :promoted_payment_prepared_by,
+             class_name: "User",
+             optional: true
+  has_many :training_replay_copies,
+           class_name: "PayPeriod",
+           foreign_key: :test_workspace_source_pay_period_id,
+           inverse_of: :test_workspace_source_pay_period,
+           dependent: :restrict_with_error
+  has_many :promoted_live_copies,
+           class_name: "PayPeriod",
+           foreign_key: :promotion_source_pay_period_id,
+           inverse_of: :promotion_source_pay_period,
+           dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
@@ -34,6 +57,8 @@ class PayPeriod < ApplicationRecord
   has_many :payroll_review_packages, dependent: :restrict_with_error
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
+  has_many :check_print_generations, dependent: :restrict_with_error
+  has_one :training_replay_benchmark, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :loan_transactions, dependent: :nullify
   has_one :transmittal, dependent: :destroy
@@ -98,6 +123,10 @@ class PayPeriod < ApplicationRecord
   validates :cycle, inclusion: { in: CYCLES }
   validates :run_purpose, inclusion: { in: RUN_PURPOSES }
   validates :run_purpose_source, inclusion: { in: RUN_PURPOSE_SOURCES }
+  validates :test_workspace_role, inclusion: { in: TEST_WORKSPACE_ROLES }, allow_nil: true
+  validates :promotion_payment_disposition,
+            inclusion: { in: PROMOTION_PAYMENT_DISPOSITIONS },
+            allow_nil: true
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
@@ -109,7 +138,11 @@ class PayPeriod < ApplicationRecord
   validate :parallel_run_marker_cannot_be_cleared
   validate :parallel_run_cannot_be_committed
   validate :intake_stale_session_matches_period
-  validate :migration_rehearsal_cannot_be_committed
+  validate :test_workspace_cannot_be_committed
+  validate :training_replay_lineage_is_valid
+  validate :promotion_source_is_valid
+  validate :promotion_payment_disposition_matches_lineage
+  validate :promoted_payment_preparation_is_complete
   validate :published_aire_cutoff_dates_are_immutable,
            on: :update,
            if: -> { will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? }
@@ -128,18 +161,20 @@ class PayPeriod < ApplicationRecord
            }
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
-  before_validation :force_migration_rehearsal_to_parallel
+  before_validation :force_test_workspace_to_parallel
+  before_update :prevent_training_baseline_mutation
+  before_destroy :prevent_training_baseline_mutation
 
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
   scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
-  # A migration rehearsal cannot commit or pay anyone. Its calculated runs are
+  # A test workspace cannot commit or pay anyone. Its calculated runs are
   # provisional inputs for testing reports and cumulative tax math only.
   def self.reportable_for_company(company)
     base = where(company_id: company.id, correction_status: [ nil, "correction" ])
-    company.migration_rehearsal? ? base.where(status: %w[calculated approved]) : base.committed
+    company.test_workspace? ? base.where(status: %w[calculated approved]) : base.committed
   end
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
@@ -186,8 +221,20 @@ class PayPeriod < ApplicationRecord
     company&.migration_rehearsal? || false
   end
 
+  def test_workspace?
+    company&.test_workspace? || false
+  end
+
+  def training_baseline?
+    test_workspace_role == "baseline"
+  end
+
+  def training_practice?
+    test_workspace_role == "practice"
+  end
+
   def can_edit?
-    !committed? && !voided?
+    !committed? && !voided? && !training_baseline?
   end
 
   def intake_stale?
@@ -231,7 +278,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def invalidate_later_rehearsal_calculations!
-    return unless migration_rehearsal?
+    return unless test_workspace?
 
     company.pay_periods
       .where(status: %w[calculated approved])
@@ -406,14 +453,57 @@ class PayPeriod < ApplicationRecord
 
   private
 
-  def force_migration_rehearsal_to_parallel
-    self.parallel_run = true if migration_rehearsal?
+  def training_replay_lineage_is_valid
+    if test_workspace_role.blank? != test_workspace_source_pay_period.blank?
+      errors.add(:test_workspace_role, "and source pay period must be provided together")
+      return
+    end
+    return if test_workspace_role.blank?
+    return if company&.test_workspace? && (company.training_replay? || company.sandbox?) &&
+      test_workspace_source_pay_period&.company_id == company.migration_source_company_id
+
+    errors.add(:test_workspace_source_pay_period, "must belong to the test workspace's production source client")
   end
 
-  def migration_rehearsal_cannot_be_committed
-    return unless migration_rehearsal? && status == "committed"
+  def promotion_source_is_valid
+    return if promotion_source_pay_period.blank?
 
-    errors.add(:status, "cannot be committed in a migration rehearsal")
+    source_company = promotion_source_pay_period.company
+    valid = company&.live_payroll? && source_company&.migration_rehearsal? &&
+      source_company.migration_source_company_id == company_id
+    errors.add(:promotion_source_pay_period, "must belong to this live client's migration rehearsal") unless valid
+  end
+
+  def promotion_payment_disposition_matches_lineage
+    if promotion_source_pay_period.blank? != promotion_payment_disposition.blank?
+      errors.add(:promotion_payment_disposition, "must be recorded for promoted payrolls only")
+    end
+  end
+
+  def promoted_payment_preparation_is_complete
+    if promoted_payment_prepared_at.blank? != promoted_payment_prepared_by.blank?
+      errors.add(:promoted_payment_prepared_at, "and preparer must be recorded together")
+    end
+    return if promoted_payment_prepared_at.blank? || promotion_payment_disposition == "process_in_cornerstone"
+
+    errors.add(:promoted_payment_prepared_at, "requires an unpaid Cornerstone payment disposition")
+  end
+
+  def prevent_training_baseline_mutation
+    return unless training_baseline?
+
+    errors.add(:base, "Copied payroll history is locked reference evidence")
+    throw :abort
+  end
+
+  def force_test_workspace_to_parallel
+    self.parallel_run = true if test_workspace?
+  end
+
+  def test_workspace_cannot_be_committed
+    return unless test_workspace? && status == "committed"
+
+    errors.add(:status, "cannot be committed in a test workspace")
   end
 
   def parallel_run_marker_cannot_be_cleared
@@ -463,7 +553,7 @@ class PayPeriod < ApplicationRecord
 
   def starts_after_historical_ytd_boundary
     return if company_id.blank?
-    return if migration_rehearsal? && validation_context != :payroll_calculation && draft?
+    return if test_workspace? && validation_context != :payroll_calculation && draft?
 
     batches = HistoricalImportBatch.where(
       company_id: company_id,
@@ -476,7 +566,7 @@ class PayPeriod < ApplicationRecord
 
     bridges = batches.filter_map(&:latest_applied_historical_ytd_bridge)
     unbridged_batch = batches.any? { |batch| batch.latest_applied_historical_ytd_bridge.nil? }
-    if migration_rehearsal? && validation_context == :payroll_calculation && unbridged_batch
+    if test_workspace? && validation_context == :payroll_calculation && unbridged_batch
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end

@@ -33,3 +33,8 @@ production:
     class: HistoricalClientBootstrapDispatchJob
     queue: default
     schedule: every 5 minutes
+
+  recover_abandoned_check_print_generations:
+    class: CheckPrintGenerationRecoveryJob
+    queue: default
+    schedule: every 5 minutes

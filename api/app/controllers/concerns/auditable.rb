@@ -69,8 +69,24 @@ module Auditable
     record = audit_record_for_log
     record_id ||= response_subject&.fetch("id", nil)
     record_id ||= record&.id
-    changes = AuditRecordSnapshot.changes_for(record)
-    changed_fields = changes[:changed_fields].presence || safe_changed_fields
+    changes = audit_changes_for_log(record)
+    changed_fields = if changes[:changed_fields].present?
+      changes[:changed_fields]
+    elsif record.present? || SAFE_METHODS.include?(request.request_method)
+      []
+    else
+      safe_changed_fields
+    end
+
+    base_metadata = {
+      http_method: request.request_method,
+      path: request.path,
+      changed_fields: changed_fields,
+      before_values: changes[:before_values].presence,
+      after_values: changes[:after_values].presence,
+      redacted_fields: changes[:redacted_fields].presence,
+      response_status: response.status
+    }.compact
 
     AuditLog.record!(
       user: current_user,
@@ -80,15 +96,7 @@ module Auditable
       record_type: record_type,
       record_id: record_id,
       subject_name: AuditRecordSnapshot.subject_name(record).presence || subject_name_from(response_subject),
-      metadata: {
-        http_method: request.request_method,
-        path: request.path,
-        changed_fields: changed_fields,
-        before_values: changes[:before_values].presence,
-        after_values: changes[:after_values].presence,
-        redacted_fields: changes[:redacted_fields].presence,
-        response_status: response.status
-      }.compact,
+      metadata: base_metadata.merge(audit_metadata_for_log(record)),
       ip_address: request.remote_ip,
       user_agent: request.user_agent,
       request_id: request.request_id,
@@ -101,6 +109,7 @@ module Auditable
   def audit_worthy_request?
     return true unless SAFE_METHODS.include?(request.request_method)
     return true if _extra_audit_actions.include?(action_name)
+    return true if document_response?
 
     action_name.match?(SENSITIVE_READ_PATTERN)
   end
@@ -116,7 +125,10 @@ module Auditable
   end
 
   def audit_event_category
-    return "export" if action_name.match?(SENSITIVE_READ_PATTERN)
+    if SAFE_METHODS.include?(request.request_method) && (document_response? || action_name.match?(SENSITIVE_READ_PATTERN))
+      return "document_access"
+    end
+    return "export" if document_response? || action_name.match?(SENSITIVE_READ_PATTERN)
     return "security" if controller_path.match?(/users|organizations|company_assignments|invitations/)
 
     "activity"
@@ -136,18 +148,39 @@ module Auditable
     nil
   end
 
+  def audit_changes_for_log(record)
+    return audit_record_changes if respond_to?(:audit_record_changes, true)
+
+    AuditRecordSnapshot.changes_for(record)
+  end
+
+  def audit_metadata_for_log(record)
+    return audit_record_metadata(record) if respond_to?(:audit_record_metadata, true)
+
+    {}
+  end
+
   def safe_field_names(prefix, value)
     return [] if FILTERED_PARAM_KEYS.any? { |filtered| prefix.to_s.downcase.include?(filtered) }
 
-    if value.is_a?(Hash)
-      value.keys.filter_map do |key|
-        next if FILTERED_PARAM_KEYS.any? { |filtered| key.to_s.downcase.include?(filtered) }
+    return [ prefix.to_s ] unless value.is_a?(Hash)
 
-        "#{prefix}.#{key}"
-      end
-    else
-      [ prefix.to_s ]
+    safe_keys = value.keys.reject do |key|
+      FILTERED_PARAM_KEYS.any? { |filtered| key.to_s.downcase.include?(filtered) }
     end
+    return [ prefix.to_s ] if safe_keys.empty? || safe_keys.all? { |key| dynamic_request_key?(key) }
+
+    safe_keys.flat_map do |key|
+      safe_field_names("#{prefix}.#{key}", value[key])
+    end
+  end
+
+  def dynamic_request_key?(key)
+    key.to_s.match?(/\A(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27,})\z/i)
+  end
+
+  def document_response?
+    response.headers["Content-Disposition"].to_s.match?(/\b(?:attachment|inline)\b/i)
   end
 
   def extract_response_subject

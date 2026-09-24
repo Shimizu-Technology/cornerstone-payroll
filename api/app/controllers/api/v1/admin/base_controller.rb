@@ -8,7 +8,8 @@ module Api
 
         before_action :require_staff_access!
         before_action :enforce_company_access!
-        before_action :enforce_migration_rehearsal_safety!
+        before_action :enforce_test_workspace_access!
+        before_action :enforce_test_workspace_safety!
         before_action :enforce_high_impact_role_policy!
 
         private
@@ -30,18 +31,37 @@ module Api
           require_capability!(capability)
         end
 
-        def enforce_migration_rehearsal_safety!
-          return unless current_company&.migration_rehearsal?
+        def enforce_test_workspace_access!
+          return unless current_company&.test_workspace?
+
+          capability = StaffRolePolicy.capability_for(
+            controller_path: controller_path,
+            action_name: action_name
+          )
+          return if TestWorkspaceAccessPolicy.allowed?(
+            user: current_user,
+            company: current_company,
+            request_method: request.request_method,
+            capability: capability
+          )
+
+          render json: {
+            error: "Your test workspace access does not allow this action"
+          }, status: :forbidden
+        end
+
+        def enforce_test_workspace_safety!
+          return unless current_company&.test_workspace?
 
           unless current_company.migration_rehearsal_status == "ready"
             return render json: {
-              error: "This migration rehearsal is still being prepared. Try again after its verified copy is ready."
+              error: "This test workspace is still being prepared. Try again after its verified copy is ready."
             }, status: :conflict
           end
-          return unless MigrationRehearsalSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
+          return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
 
           render json: {
-            error: "This action is unavailable in a migration rehearsal. Rehearsals cannot issue checks, move money, commit payroll, or produce filing-ready records."
+            error: "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
           }, status: :forbidden
         end
 

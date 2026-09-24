@@ -597,6 +597,37 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.notes).to eq("Updated notes")
     end
 
+    it "records safe before-and-after values for pay-period changes" do
+      original_pay_date = pay_period.pay_date
+      updated_pay_date = original_pay_date + 1.day
+
+      expect {
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+          pay_period: { pay_date: updated_pay_date, notes: "Moved for the bank holiday" }
+        }
+      }.to change { AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).count }.by(1)
+
+      expect(response).to have_http_status(:ok)
+      metadata = AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).last.metadata
+      expect(metadata.fetch("changed_fields")).to contain_exactly("notes", "pay_date")
+      expect(metadata.fetch("before_values")).to include("notes" => nil, "pay_date" => original_pay_date.iso8601)
+      expect(metadata.fetch("after_values")).to include("notes" => "Moved for the bank holiday", "pay_date" => updated_pay_date.iso8601)
+    end
+
+    it "records the complete request delta when an edit also invalidates a calculation" do
+      pay_period.update!(status: "calculated", notes: nil)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { notes: "Updated after calculation" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      metadata = AuditLog.where(action: "pay_periods#update", record_id: pay_period.id).last.metadata
+      expect(metadata.fetch("changed_fields")).to contain_exactly("notes", "status")
+      expect(metadata.fetch("before_values")).to include("notes" => nil, "status" => "calculated")
+      expect(metadata.fetch("after_values")).to include("notes" => "Updated after calculation", "status" => "draft")
+    end
+
     it "cannot update a committed pay period" do
       pay_period.update!(status: "committed")
 
@@ -605,6 +636,31 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_content)
+    end
+
+    it "explains that copied payroll history is locked reference evidence" do
+      source_company = create(:company, organization: organization)
+      source_period = create(:pay_period, :committed, company: source_company)
+      company.update!(
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "training_replay",
+        migration_source_company: source_company,
+        migration_rehearsal_status: "pending"
+      )
+      pay_period.update_columns(
+        status: "approved",
+        parallel_run: true,
+        test_workspace_source_pay_period_id: source_period.id,
+        test_workspace_role: "baseline"
+      )
+      company.update!(migration_rehearsal_status: "ready")
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { notes: "Try to update" }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to eq("Copied payroll history is locked reference evidence")
     end
 
     it "rolls back date changes if reverting a non-draft period to draft fails" do
@@ -1026,6 +1082,24 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["results"]["success"].length).to eq(1)
       expect(json["pay_period"]["status"]).to eq("calculated")
       expect(pay_period.reload.payroll_items.count).to eq(1)
+
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.subject_name).to eq(AuditRecordSnapshot.subject_name(pay_period))
+      expect(audit.metadata.fetch("changed_fields")).to include("status")
+      expect(audit.metadata.fetch("changed_fields")).not_to include(a_string_matching(/\Ahours\./))
+      expect(audit.metadata.fetch("before_values")).to include("status" => "draft")
+      expect(audit.metadata.fetch("after_values")).to include("status" => "calculated")
+      expect(audit.metadata.fetch("business_summary")).to include(
+        "outcome" => "completed",
+        "employees_processed" => 1,
+        "employees_failed" => 0,
+        "employee_count" => 1,
+        "status" => "calculated"
+      )
+      expect(audit.metadata.fetch("review_revision")).to include(
+        "revision" => 1,
+        "calculation_checksum" => a_string_matching(/\A[0-9a-f]{64}\z/)
+      )
     end
 
     it "rejects a post-cutover live calculation without changing payroll state" do
@@ -1581,6 +1655,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload.status).to eq("approved")
+      audit = AuditLog.where(action: "pay_periods#approve", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("before_values")).to include("status" => "calculated")
+      expect(audit.metadata.fetch("after_values")).to include("status" => "approved")
+      expect(audit.metadata.fetch("business_summary")).to include(
+        "status" => "approved",
+        "employee_count" => 0
+      )
     end
 
     it "cannot approve a draft pay period" do
@@ -1722,6 +1803,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event.check_number).to eq(item.reload.check_number)
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
       expect(item.payment_delivery_method).to eq("paper_check")
+
+      audit = AuditLog.where(action: "pay_periods#commit", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("before_values")).to include("status" => "approved")
+      expect(audit.metadata.fetch("after_values")).to include("status" => "committed")
+      expect(audit.metadata.fetch("business_summary")).to include(
+        "status" => "committed",
+        "employee_count" => 1,
+        "total_gross" => "1200.0",
+        "total_net" => "1008.2"
+      )
     end
 
     it "defaults an unreviewed employee to paper check without blocking payroll" do

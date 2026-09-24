@@ -21,7 +21,8 @@ module Api
             company_id: current_company_id,
             company_name: current_company&.name,
             home_company_id: current_user.company_id,
-            assigned_company_ids: current_user.accessible_company_ids
+            assigned_company_ids: current_user.accessible_company_ids,
+            capabilities: StaffRolePolicy.capabilities_for(current_user)
           }
         }
       end

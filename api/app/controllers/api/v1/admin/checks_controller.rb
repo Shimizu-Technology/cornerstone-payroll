@@ -31,6 +31,7 @@ module Api
           check_memo_template
           auto_create_fit_check
           require_distinct_check_print_confirmer
+          printer_profile_lock_version
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
@@ -87,12 +88,12 @@ module Api
           }
         end
 
-        # Read-only, non-negotiable proof for calculated or approved migration
+        # Read-only, VOID-marked proof for calculated or approved migration
         # rehearsals. This deliberately does not allocate check numbers, record
         # a print event, or make a rehearsal eligible for payment/commit.
         def rehearsal_preview_pdf
-          unless @pay_period.company.migration_rehearsal? && %w[calculated approved].include?(@pay_period.status)
-            return render json: { error: "Mock checks are only available for calculated or approved migration rehearsals" }, status: :unprocessable_entity
+          unless @pay_period.company.test_workspace? && %w[calculated approved].include?(@pay_period.status)
+            return render json: { error: "VOID check previews are only available for calculated or approved test payrolls" }, status: :unprocessable_entity
           end
 
           items = @pay_period.payroll_items
@@ -105,19 +106,20 @@ module Api
             return render json: { error: "No positive-net paper checks are available in this rehearsal" }, status: :unprocessable_entity
           end
 
-          pdf_data = if @pay_period.company.first_hawaiian_4up_checks?
+          render_company = render_company_for(@pay_period.company)
+          pdf_data = if render_company.first_hawaiian_4up_checks?
             FirstHawaiianFourUpCheckGenerator.new(
-              company: @pay_period.company, payroll_items: items,
+              company: render_company, payroll_items: items,
               starting_slot: params[:starting_slot], rehearsal_preview: true
             ).generate
           else
-            combine_pdfs(items.map { |item| CheckGenerator.new(item).generate_rehearsal_preview })
+            combine_pdfs(items.map { |item| CheckGenerator.new(item, company: render_company).generate_rehearsal_preview })
           end
 
           response.headers["Cache-Control"] = "private, no-store"
           pay_date_token = @pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           send_data pdf_data, type: "application/pdf", disposition: "attachment",
-            filename: "test_only_rehearsal_checks_#{pay_date_token}.pdf"
+            filename: "void_rehearsal_checks_#{pay_date_token}.pdf"
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue LoadError
@@ -151,17 +153,18 @@ module Api
             return render json: { error: "No checks to print for this pay period (all items have $0 net pay)" }, status: :unprocessable_entity
           end
 
+          render_company = render_company_for(@pay_period.company)
           combined_pdf =
-            if @pay_period.company.first_hawaiian_4up_checks?
+            if render_company.first_hawaiian_4up_checks?
               FirstHawaiianFourUpCheckGenerator.new(
-                company: @pay_period.company,
+                company: render_company,
                 payroll_items: printable_items,
                 starting_slot: params[:starting_slot]
               ).generate
             else
               combine_pdfs(
                 printable_items.map do |item|
-                  generator = CheckGenerator.new(item)
+                  generator = CheckGenerator.new(item, company: render_company)
                   item.voided? ? generator.generate_voided : generator.generate
                 end
               )
@@ -251,16 +254,17 @@ module Api
             return render json: { error: "No check number assigned to this payroll item" }, status: :unprocessable_entity
           end
 
-          if @payroll_item.pay_period.company.first_hawaiian_4up_checks?
+          render_company = render_company_for(@payroll_item.pay_period.company)
+          if render_company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
-              company: @payroll_item.pay_period.company,
+              company: render_company,
               payroll_items: [ @payroll_item ],
               starting_slot: params[:starting_slot]
             )
             pdf_data = generator.generate
             filename = "fhb_check_#{@payroll_item.check_number || 'UNASSIGNED'}_#{@payroll_item.employee_id}.pdf"
           else
-            generator = CheckGenerator.new(@payroll_item)
+            generator = CheckGenerator.new(@payroll_item, company: render_company)
             pdf_data  = @payroll_item.voided? ? generator.generate_voided : generator.generate
             filename = generator.filename
           end
@@ -592,16 +596,42 @@ module Api
             return render json: { errors: [ "#{key} must be a number" ] }, status: :unprocessable_entity
           end
 
-          normalize_and_sanitize_layout_config!(permitted, current_stock_type: @company.check_stock_type)
-          permitted[:active_printer_profile_id] = nil if printer_calibration_settings_changed?(permitted)
+          target_stock_type = permitted[:check_stock_type].presence || @company.check_stock_type
+          normalize_and_sanitize_layout_config!(permitted, current_stock_type: target_stock_type)
 
-          if @company.update(permitted)
-            render json: { check_settings: company_check_settings_json(@company) }
-          else
-            render json: { errors: @company.errors.full_messages }, status: :unprocessable_entity
+          calibration_attributes = permitted.slice(:check_offset_x, :check_offset_y, :check_layout_config)
+          expected_profile_version = permitted[:printer_profile_lock_version]
+          company_attributes = permitted.except(
+            :check_offset_x, :check_offset_y, :check_layout_config, :printer_profile_lock_version
+          )
+          selected_profile = selected_profile_for(@company.organization_id, target_stock_type)
+
+          Company.transaction do
+            if calibration_attributes.present? && selected_profile.present?
+              if expected_profile_version.blank?
+                raise ArgumentError, "Reload the selected printer profile before saving calibration"
+              end
+              if selected_profile.lock_version != expected_profile_version.to_i
+                raise ActiveRecord::StaleObjectError.new(selected_profile, "update")
+              end
+              selected_profile.update!(calibration_attributes.merge(updated_by: current_user))
+            elsif calibration_attributes.present?
+              # Preserve the pre-profile behavior during the additive rollout.
+              # Once a user selects a profile, calibration is saved only there.
+              company_attributes.merge!(calibration_attributes, active_printer_profile_id: nil)
+            end
+            @company.update!(company_attributes) if company_attributes.present?
           end
+
+          render json: { check_settings: company_check_settings_json(@company.reload) }
         rescue ArgumentError => e
           render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::StaleObjectError
+          render json: {
+            error: "The selected printer profile changed while you were editing it. Reload and try again."
+          }, status: :conflict
         end
 
         # -----------------------------------------------------------------------
@@ -628,14 +658,14 @@ module Api
             if preview_company.first_hawaiian_4up_checks?
               FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [ sample_item ]).generate
             else
-              CheckGenerator.new(sample_item).generate
+              CheckGenerator.new(sample_item, company: preview_company).generate
             end
           when "fit", "grt", "vendor"
             sample_check = build_test_non_employee_check(preview_company, sample_type)
             if preview_company.first_hawaiian_4up_checks?
               FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [ sample_check ]).generate
             else
-              NonEmployeeCheckGenerator.new(sample_check, layout_config: preview_company.check_layout_config).generate
+              NonEmployeeCheckGenerator.new(sample_check, company: preview_company).generate
             end
           else
             return render json: { error: "Unknown test check type" }, status: :unprocessable_entity
@@ -690,13 +720,18 @@ module Api
         # GET /api/v1/admin/companies/:company_id/alignment_test_pdf
         # -----------------------------------------------------------------------
         def alignment_test_pdf
+          preview_company = if request.post? && params[:check_settings].present?
+            check_settings_preview_company(@company)
+          else
+            render_company_for(@company)
+          end
           pdf_data =
-            if @company.first_hawaiian_4up_checks?
-              FirstHawaiianFourUpCheckGenerator.new(company: @company).alignment_test
+            if preview_company.first_hawaiian_4up_checks?
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company).alignment_test
             else
               # Build a dummy payroll item for the alignment generator
-              stub_item = build_alignment_stub_item(@company)
-              CheckGenerator.new(stub_item).alignment_test
+              stub_item = build_alignment_stub_item(preview_company)
+              CheckGenerator.new(stub_item, company: preview_company).alignment_test
             end
 
           # Log the alignment test event (uses system user — company-level action)
@@ -707,7 +742,10 @@ module Api
             action: "alignment_test_generated",
             record_type: "Company",
             record_id: @company.id,
-            metadata: { company_name: @company.name },
+            metadata: {
+              company_name: @company.name,
+              printer_profile_id: selected_profile_for(@company.organization_id, preview_company.check_stock_type)&.id
+            }.compact,
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )
@@ -861,34 +899,23 @@ module Api
         end
 
         def company_check_settings_json(company)
+          render_settings = CheckRenderSettings.resolve(company: company, actor: current_user)
+          render_company = render_settings.apply_to(company)
           {
             next_check_number: company.next_check_number,
             check_stock_type: company.check_stock_type,
-            check_offset_x: company.check_offset_x,
-            check_offset_y: company.check_offset_y,
+            check_offset_x: render_company.check_offset_x,
+            check_offset_y: render_company.check_offset_y,
             bank_name: company.bank_name,
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
             require_distinct_check_print_confirmer: company.require_distinct_check_print_confirmer,
-            check_layout_config: sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {}),
-            active_printer_profile_id: company.active_printer_profile_id,
-            active_printer_profile_name: company.active_printer_profile&.name
+            check_layout_config: sanitize_check_layout_config(company.check_stock_type, render_company.check_layout_config || {}),
+            active_printer_profile_id: render_settings.printer_profile&.id,
+            active_printer_profile_name: render_settings.printer_profile&.name,
+            active_printer_profile_lock_version: render_settings.printer_profile&.lock_version
           }
-        end
-
-        def printer_calibration_settings_changed?(permitted)
-          return true if permitted.key?(:check_stock_type) && permitted[:check_stock_type].to_s != @company.check_stock_type.to_s
-          return true if permitted.key?(:check_offset_x) && BigDecimal(permitted[:check_offset_x].to_s) != @company.check_offset_x.to_d
-          return true if permitted.key?(:check_offset_y) && BigDecimal(permitted[:check_offset_y].to_s) != @company.check_offset_y.to_d
-
-          if permitted.key?(:check_layout_config)
-            current_layout = JSON.parse((@company.check_layout_config || {}).to_json)
-            next_layout = JSON.parse((permitted[:check_layout_config] || {}).to_json)
-            return true if next_layout != current_layout
-          end
-
-          false
         end
 
         def check_settings_preview_company(company)
@@ -970,13 +997,31 @@ module Api
 
         def layout_preview_company(company)
           requested_stock_type = params[:check_stock_type].presence
-          return company unless requested_stock_type && Company::CHECK_STOCK_TYPES.include?(requested_stock_type)
-
-          company.dup.tap do |preview|
-            preview.id = company.id
-            preview.check_stock_type = requested_stock_type
-            preview.check_layout_config = sanitize_check_layout_config(requested_stock_type, company.check_layout_config || {})
+          preview = company.dup.tap do |copy|
+            copy.id = company.id
+            copy.check_stock_type = requested_stock_type if requested_stock_type && Company::CHECK_STOCK_TYPES.include?(requested_stock_type)
           end
+          render_company_for(preview).tap do |resolved|
+            resolved.check_layout_config = sanitize_check_layout_config(resolved.check_stock_type, resolved.check_layout_config || {})
+          end
+        end
+
+        def selected_profile_for(organization_id, stock_type)
+          selection = current_user.user_printer_profile_selections.find_by(
+            organization_id: organization_id,
+            check_stock_type: stock_type
+          )
+          return unless selection
+
+          PrinterProfile.active.find_by(id: selection.printer_profile_id, organization_id: organization_id)
+        end
+
+        def render_company_for(company, require_profile: false)
+          CheckRenderSettings.resolve(
+            company: company,
+            actor: current_user,
+            require_profile: require_profile
+          ).apply_to(company)
         end
 
         def normalize_and_sanitize_layout_config!(permitted, current_stock_type:)

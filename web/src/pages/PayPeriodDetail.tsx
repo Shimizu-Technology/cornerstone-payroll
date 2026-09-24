@@ -1893,13 +1893,15 @@ export function PayPeriodDetail({
             <CardContent className="space-y-4 py-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900">Previous Pay Period Comparison</h3>
+                  <h3 className="text-base font-semibold text-gray-900">
+                    {comparison?.comparison_kind === 'training_benchmark' ? 'Training Benchmark Comparison' : 'Previous Pay Period Comparison'}
+                  </h3>
                   <p className={`mt-1 text-sm ${comparisonError ? 'text-red-700' : 'text-gray-600'}`}>
                     {comparisonError
                       ? 'Comparison failed to load. Retry before approving this payroll.'
                       : comparison?.previous_pay_period
-                        ? `Compared with ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
-                        : comparisonLoading ? 'Loading previous period comparison…' : 'No previous committed pay period found for this company.'}
+                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
+                        : comparisonLoading ? 'Loading comparison…' : 'No comparison target found for this payroll.'}
                   </p>
                 </div>
                 {comparison && (
@@ -1993,7 +1995,9 @@ export function PayPeriodDetail({
                     </div>
                   ) : (
                     <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                      No material employee-level changes detected against the previous committed period.
+                      {comparison.comparison_kind === 'training_benchmark'
+                        ? 'No material employee-level differences from the training benchmark.'
+                        : 'No material employee-level changes detected against the previous committed period.'}
                     </div>
                   )}
                 </>

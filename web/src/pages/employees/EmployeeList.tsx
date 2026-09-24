@@ -59,7 +59,9 @@ export function EmployeeList() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient, isManager, isSuperAdmin } = useAuth();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
+    || Boolean(activeCompany?.test_workspace_sealed_at);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
@@ -355,18 +357,20 @@ export function EmployeeList() {
         title="Employees"
         description="Manage your company's employees"
         actions={
-          <div className="flex items-center gap-2">
-            {!isClient && (
-              <Button variant="outline" onClick={() => setShowBulkImport(true)}>
-                <Upload className="w-4 h-4 mr-2" />
-                Bulk Import
+          readOnlyWorkspace ? undefined : (
+            <div className="flex items-center gap-2">
+              {!isClient && (
+                <Button variant="outline" onClick={() => setShowBulkImport(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Bulk Import
+                </Button>
+              )}
+              <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Employee
               </Button>
-            )}
-            <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Employee
-            </Button>
-          </div>
+            </div>
+          )
         }
       />
 
@@ -559,9 +563,11 @@ export function EmployeeList() {
             <p className="mt-1 text-sm text-gray-500">
               {hasActiveFilters
                 ? 'Try adjusting your filters.'
+                : readOnlyWorkspace
+                  ? 'No employees were preserved in this backup.'
                 : 'Get started by adding your first employee.'}
             </p>
-            {!hasActiveFilters && (
+            {!hasActiveFilters && !readOnlyWorkspace && (
               <div className="mt-6">
                 <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
                   <Plus className="w-4 h-4 mr-2" />

@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { HelpTip } from '@/components/ui/help-tip';
+import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
@@ -45,6 +47,8 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
 
 interface PayPeriodMobileCardProps {
   period: PayrollHistoryRecord;
+  readOnly: boolean;
+  commitBlocked: boolean;
   actionInFlight: string | null;
   onView: () => void;
   onEdit: () => void;
@@ -57,6 +61,8 @@ interface PayPeriodMobileCardProps {
 
 function PayPeriodMobileCard({
   period,
+  readOnly,
+  commitBlocked,
   actionInFlight,
   onView,
   onEdit,
@@ -69,7 +75,8 @@ function PayPeriodMobileCard({
   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
 
   return (
-    <MobileRecordCard>
+    <div role="group" aria-label={`Pay period ${formatDateRange(period.start_date, period.end_date)}`}>
+      <MobileRecordCard>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
@@ -96,7 +103,9 @@ function PayPeriodMobileCard({
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
           {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
         </Badge>
-        {period.parallel_run && <Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge>}
+        {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
+        {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
+        {!readOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3 w-3" />Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -109,18 +118,20 @@ function PayPeriodMobileCard({
       </div>
       <MobileCardActions>
         <Button variant="outline" size="sm" onClick={onView}>View</Button>
-        {period.capabilities.edit && <Button variant="ghost" size="sm" onClick={onEdit}>Edit</Button>}
-        {period.capabilities.delete && <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>}
-        {period.capabilities.enter_hours && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
-        {period.capabilities.run && period.status === 'calculated' && (
+        {!readOnly && period.capabilities.edit && <Button variant="ghost" size="sm" onClick={onEdit}>Edit</Button>}
+        {!readOnly && period.capabilities.delete && <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>}
+        {!readOnly && period.capabilities.enter_hours && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
+        {!readOnly && period.capabilities.run && period.status === 'calculated' && (
           <>
             <Button variant="outline" size="sm" onClick={onRun} disabled={actionInFlight !== null}>Recalculate</Button>
             {period.capabilities.approve && <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>}
           </>
         )}
-        {period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+        {!readOnly && !commitBlocked && period.capabilities.commit && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+        {readOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
       </MobileCardActions>
-    </MobileRecordCard>
+      </MobileRecordCard>
+    </div>
   );
 }
 
@@ -128,7 +139,10 @@ export function PayPeriods() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const trainingReplayWorkspace = activeCompany?.test_workspace_purpose === 'training_replay';
+  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
+    || Boolean(activeCompany?.test_workspace_sealed_at);
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId
@@ -156,7 +170,12 @@ export function PayPeriods() {
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status' | 'source';
-  const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
+  const requestedDirection = searchParams.get('direction');
+  const sortDirection = requestedDirection === 'asc' || requestedDirection === 'desc'
+    ? requestedDirection
+    : trainingReplayWorkspace
+      ? 'asc'
+      : 'desc';
   const yearFilter = searchParams.get('year') || '';
   const payPeriodViewKey = `${statusFilter ?? ''}\u0000${yearFilter}\u0000${searchTerm}\u0000${sortBy}\u0000${sortDirection}\u0000${sourceFilter}\u0000${page}`;
   const updateViewParam = (key: string, value?: string, replace = false): void => {
@@ -690,13 +709,21 @@ export function PayPeriods() {
         title="Pay Periods"
         description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
         actions={
-          <Button onClick={openCreateModal}>
-            {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
-          </Button>
+          readOnlyWorkspace || trainingReplayWorkspace ? undefined : (
+            <Button onClick={openCreateModal}>
+              {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
+            </Button>
+          )
         }
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        {trainingReplayWorkspace && (
+          <div className="mb-4">
+            <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
+            <TrainingWorkflowGuide />
+          </div>
+        )}
         {goLiveGate?.comparison_only && (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
             <div className="flex items-start gap-3">
@@ -805,8 +832,8 @@ export function PayPeriods() {
               onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"
             >
-              <option value="desc">Newest / High</option>
-              <option value="asc">Oldest / Low</option>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </Select>
           </div>
         </div>
@@ -817,7 +844,11 @@ export function PayPeriods() {
             <div className="p-8 text-center text-gray-500">Loading...</div>
           ) : visiblePayPeriods.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              {searchTerm ? 'No pay periods match the current filters.' : 'No pay periods found. Create your first pay period to get started.'}
+              {searchTerm
+                ? 'No pay periods match the current filters.'
+                : readOnlyWorkspace
+                  ? 'No pay periods were preserved in this backup.'
+                  : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
             <>
@@ -826,6 +857,8 @@ export function PayPeriods() {
                   <PayPeriodMobileCard
                     key={period.key}
                     period={period}
+                    readOnly={readOnlyWorkspace || period.test_workspace_role === 'baseline'}
+                    commitBlocked={trainingReplayWorkspace || Boolean(period.parallel_run)}
                     actionInFlight={actionInFlight}
                     onView={() => navigate(recordDestination(period, 'overview'))}
                     onEnterHours={() => navigate(recordDestination(period, 'work'))}
@@ -856,6 +889,8 @@ export function PayPeriods() {
                 {visiblePayPeriods.map((period, index) => {
                   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
                   const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                  const periodReadOnly = readOnlyWorkspace || period.test_workspace_role === 'baseline';
+                  const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
@@ -881,6 +916,8 @@ export function PayPeriods() {
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
                             {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
                           </Badge>
+                          {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
+                          {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
@@ -939,11 +976,11 @@ export function PayPeriods() {
                             >
                               View
                             </button>
-                            {period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
-                          {period.capabilities.enter_hours && (
+                          {!periodReadOnly && period.capabilities.enter_hours && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -952,7 +989,7 @@ export function PayPeriods() {
                               Enter Hours
                             </Button>
                           )}
-                          {period.capabilities.run && period.status === 'calculated' && (
+                          {!periodReadOnly && period.capabilities.run && period.status === 'calculated' && (
                             <div className="flex items-center gap-1.5">
                               <Button
                                 variant="outline"
@@ -971,8 +1008,8 @@ export function PayPeriods() {
                               </Button>}
                             </div>
                           )}
-                          {period.parallel_run && <Badge variant="info">Parallel · cannot commit</Badge>}
-                          {period.capabilities.commit && (
+                          {!periodReadOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
+                          {!periodReadOnly && !commitBlocked && period.capabilities.commit && (
                             <Button
                               size="sm"
                               variant="primary"
@@ -982,6 +1019,7 @@ export function PayPeriods() {
                               Commit
                             </Button>
                           )}
+                          {periodReadOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1005,7 +1043,7 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        <Card className="mt-8">
+        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-8">
           <div className="p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
@@ -1050,7 +1088,7 @@ export function PayPeriods() {
               </div>
             </div>
           </div>
-        </Card>
+        </Card>}
       </div>
 
       {/* Create Pay Period Modal */}
