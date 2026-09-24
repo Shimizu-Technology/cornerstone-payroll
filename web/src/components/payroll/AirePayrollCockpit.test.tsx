@@ -262,13 +262,28 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+const renderExpanded = (ui: Parameters<typeof render>[0]) => {
+  const result = render(ui);
+  fireEvent.click(screen.getByRole('button', { name: 'Review AIRE details' }));
+  return result;
+};
+
 describe('AirePayrollCockpit', () => {
-  it('shows exact AIRE time, readiness, and mapping in one payroll workspace', async () => {
+  it('starts with a concise AIRE summary and keeps detailed actions behind disclosure', async () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    expect(await screen.findByText('Ready for payroll')).toBeTruthy();
+    expect(screen.getAllByText('Held or unresolved').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Review AIRE details' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+  });
+
+  it('shows exact AIRE time, readiness, and mapping in one payroll workspace', async () => {
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
     expect(await screen.findByText('AIRE payroll workspace')).toBeTruthy();
     expect(screen.getByText('16.08 hrs')).toBeTruthy();
-    expect(screen.getAllByText('8.08 hrs').length).toBe(2);
+    expect(screen.getAllByText('8.08 hrs').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('08:04 AM – 05:09 PM')).toBeTruthy();
     expect(screen.getAllByText('Mapped').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting approval').length).toBeGreaterThan(0);
@@ -277,7 +292,7 @@ describe('AirePayrollCockpit', () => {
 
   it('requires the operator to explain an approval and sends the source version', async () => {
     const user = userEvent.setup();
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: 'Approve time' }));
@@ -318,7 +333,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.entries.mockResolvedValue(data.entries);
     apiMocks.exceptions.mockResolvedValue(data.exceptions);
 
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Overtime approval needed');
 
     expect(screen.getByText('60 min break · clock entry via kiosk')).toBeTruthy();
@@ -354,7 +369,7 @@ describe('AirePayrollCockpit', () => {
     data.entries.time_entries = [reviewedEntry];
     apiMocks.entries.mockResolvedValue(data.entries);
 
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
     expect(await screen.findByText(/Time approved by AIRE Admin/)).toBeTruthy();
     expect(screen.getByText(/Oct 15, 2026, 8:00:00 AM/)).toBeTruthy();
@@ -366,7 +381,7 @@ describe('AirePayrollCockpit', () => {
 
   it('corrects a manual timecard in AIRE and makes the new approval requirement explicit', async () => {
     const user = userEvent.setup();
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: 'Correct' }));
@@ -405,7 +420,7 @@ describe('AirePayrollCockpit', () => {
     };
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
 
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: 'Correct' }));
@@ -429,7 +444,7 @@ describe('AirePayrollCockpit', () => {
         state: { ...timeEntry.state, approval_status: 'approved', overtime_status: 'pending' },
       }],
     });
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
     expect(screen.getByText('Overtime approval needed')).toBeTruthy();
 
@@ -447,7 +462,7 @@ describe('AirePayrollCockpit', () => {
 
   it('shows the held-time evidence and routes it to a published future payroll', async () => {
     const user = userEvent.setup();
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: /Held time 1/i }));
@@ -476,7 +491,7 @@ describe('AirePayrollCockpit', () => {
 
   it('requires an explicit reason before marking held hours not payable', async () => {
     const user = userEvent.setup();
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: /Held time 1/i }));
@@ -500,7 +515,7 @@ describe('AirePayrollCockpit', () => {
 
   it('keeps the workspace readable but disables commands without an AIRE account connection', async () => {
     mockLoads(false);
-    render(
+    renderExpanded(
       <MemoryRouter>
         <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
       </MemoryRouter>
@@ -536,7 +551,7 @@ describe('AirePayrollCockpit', () => {
       .mockImplementationOnce(async () => { await staleGate; return stale.settlements; })
       .mockResolvedValue(current.settlements);
 
-    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    const view = renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(1));
     view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
     expect(await screen.findByText('Current Employee')).toBeTruthy();
@@ -549,7 +564,7 @@ describe('AirePayrollCockpit', () => {
 
   it('closes commands from the prior payroll when the operator navigates to another period', async () => {
     const user = userEvent.setup();
-    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    const view = renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
     await user.click(screen.getByRole('button', { name: 'Correct' }));
     expect(screen.getByRole('heading', { name: 'Correct time in AIRE' })).toBeTruthy();
@@ -563,7 +578,7 @@ describe('AirePayrollCockpit', () => {
   it('locks a due period only after confirmation and refreshes both systems', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: /lock AIRE cutoff/i }));
@@ -580,7 +595,7 @@ describe('AirePayrollCockpit', () => {
   it('keeps a command failure visible after reloading the latest AIRE details', async () => {
     const user = userEvent.setup();
     apiMocks.review.mockRejectedValueOnce(new Error('AIRE could not record this approval'));
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: 'Approve time' }));
@@ -606,7 +621,7 @@ describe('AirePayrollCockpit', () => {
   it('reports a post-lock Cornerstone refresh failure separately from the successful AIRE command', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockRejectedValue(new Error('pay period reload failed'));
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
+    renderExpanded(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
     await user.click(screen.getByRole('button', { name: /lock AIRE cutoff/i }));
@@ -630,7 +645,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
     apiMocks.mapEmployee.mockResolvedValue({ mapping: { employee_id: 7 } });
 
-    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[
+    renderExpanded(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[
       { id: 7, first_name: 'Malia', last_name: 'Cruz', status: 'active' } as import('@/types').Employee,
     ]} onRefresh={vi.fn()} /></MemoryRouter>);
     await screen.findByText('AIRE payroll workspace');
@@ -657,7 +672,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
     apiMocks.mapEmployee.mockResolvedValue({ mapping: { employee_id: 7 } });
 
-    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[]} onRefresh={vi.fn()} /></MemoryRouter>);
+    renderExpanded(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} employees={[]} onRefresh={vi.fn()} /></MemoryRouter>);
     await screen.findByText('AIRE payroll workspace');
     await user.click(screen.getByRole('button', { name: /Team 1/i }));
     expect(screen.getByText('Verify older link')).not.toBeNull();
