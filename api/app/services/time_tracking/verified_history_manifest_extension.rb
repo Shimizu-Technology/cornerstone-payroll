@@ -75,7 +75,10 @@ module TimeTracking
       end
 
       employees_with_entries = employees.each_with_object(Set.new) do |employee, employee_ids|
-        employee_ids << add_employee_entries!(employee, check_by_employee:, start_date:, end_date:)
+        employee_id = add_employee_entries!(employee, check_by_employee:, start_date:, end_date:)
+        raise Error, "AIRE rollout period contains duplicate employees" if employee_ids.include?(employee_id)
+
+        employee_ids << employee_id
       end
 
       checks.each do |check|
