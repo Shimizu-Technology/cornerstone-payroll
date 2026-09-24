@@ -9,9 +9,9 @@ require "json"
 abort "Set AIRE_ROLLOUT_READ_ONLY_EXPORT=yes" unless ENV["AIRE_ROLLOUT_READ_ONLY_EXPORT"] == "yes"
 abort "Usage: rails runner export_aire_rollout_increment.rb PAY_PERIOD_ID=DELIVERED_ON [...]" if ARGV.empty?
 
-company = Company.find(Integer(ENV.fetch("AIRE_ROLLOUT_COMPANY_ID", "2"), 10))
-source = company.time_tracking_sources.find(Integer(ENV.fetch("AIRE_ROLLOUT_SOURCE_ID", "1"), 10))
-actor = User.find(Integer(ENV.fetch("AIRE_ROLLOUT_ACTOR_ID", "1"), 10))
+company = Company.find(Integer(ENV.fetch("AIRE_ROLLOUT_COMPANY_ID"), 10))
+source = company.time_tracking_sources.find(Integer(ENV.fetch("AIRE_ROLLOUT_SOURCE_ID"), 10))
+actor = User.find(Integer(ENV.fetch("AIRE_ROLLOUT_ACTOR_ID"), 10))
 actor_client_supported = TimeTracking::Client.respond_to?(:for_payroll_actor)
 client = if actor_client_supported
   TimeTracking::Client.for_payroll_actor(source, actor: actor)
