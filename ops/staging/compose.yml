@@ -1,0 +1,275 @@
+name: aire-payroll-staging
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-aire-environment: &aire-environment
+  RAILS_ENV: production
+  DEPLOYMENT_ENV: staging
+  STAGING_SEED_ALLOWED: "true"
+  RAILS_LOG_TO_STDOUT: "true"
+  RAILS_LOG_LEVEL: ${RAILS_LOG_LEVEL:-info}
+  RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-8}
+  JOB_CONCURRENCY: "1"
+  HOME: /rails/tmp
+  TMPDIR: /rails/tmp
+  BUNDLE_USER_HOME: /rails/tmp/bundle
+  DATABASE_URL: postgresql://aire_staging:${AIRE_POSTGRES_PASSWORD}@aire-db:5432/aire_services_staging
+  SECRET_KEY_BASE: ${AIRE_SECRET_KEY_BASE}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${AIRE_ENCRYPTION_PRIMARY_KEY}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${AIRE_ENCRYPTION_DETERMINISTIC_KEY}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${AIRE_ENCRYPTION_KEY_DERIVATION_SALT}
+  ACTIVE_STORAGE_SERVICE: local
+  FORCE_SSL: "false"
+  ASSUME_SSL: "false"
+  FRONTEND_URL: ${AIRE_PUBLIC_URL}
+  CLERK_SECRET_KEY: ${AIRE_CLERK_SECRET_KEY}
+  CLERK_JWKS_URL: ${AIRE_CLERK_JWKS_URL}
+  CLERK_ISSUER: ${AIRE_CLERK_ISSUER}
+  REQUIRE_MFA: "false"
+  PAYROLL_SHARED_SECRET: ${PAYROLL_SHARED_SECRET}
+  CORNERSTONE_PAYROLL_EVENTS_URL: http://payroll-api:3000/api/v1/integrations/aire/events
+  ALLOW_PRIVATE_INTEGRATION_HTTP: "true"
+  CORNERSTONE_PRIVATE_INTEGRATION_HOST: payroll-api
+  SOLID_QUEUE_IN_PUMA: "false"
+  AIRE_STAGING_ADMIN_CLERK_ID: ${AIRE_STAGING_ADMIN_CLERK_ID}
+  STAGING_ADMIN_EMAIL: ${STAGING_ADMIN_EMAIL}
+
+x-payroll-environment: &payroll-environment
+  RAILS_ENV: production
+  DEPLOYMENT_ENV: staging
+  STAGING_SEED_ALLOWED: "true"
+  RAILS_LOG_TO_STDOUT: "true"
+  RAILS_LOG_LEVEL: ${RAILS_LOG_LEVEL:-info}
+  RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-8}
+  JOB_CONCURRENCY: "1"
+  HOME: /rails/tmp
+  TMPDIR: /rails/tmp
+  BUNDLE_USER_HOME: /rails/tmp/bundle
+  DATABASE_URL: postgresql://payroll_staging:${PAYROLL_POSTGRES_PASSWORD}@payroll-db:5432/cornerstone_payroll_staging
+  MIGRATION_DATABASE_URL: postgresql://payroll_staging:${PAYROLL_POSTGRES_PASSWORD}@payroll-db:5432/cornerstone_payroll_staging
+  CACHE_DATABASE_URL: postgresql://payroll_staging:${PAYROLL_POSTGRES_PASSWORD}@payroll-db:5432/cornerstone_payroll_staging
+  QUEUE_DATABASE_URL: postgresql://payroll_staging:${PAYROLL_POSTGRES_PASSWORD}@payroll-db:5432/cornerstone_payroll_staging
+  CABLE_DATABASE_URL: postgresql://payroll_staging:${PAYROLL_POSTGRES_PASSWORD}@payroll-db:5432/cornerstone_payroll_staging
+  SECRET_KEY_BASE: ${PAYROLL_SECRET_KEY_BASE}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${PAYROLL_ENCRYPTION_PRIMARY_KEY}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${PAYROLL_ENCRYPTION_DETERMINISTIC_KEY}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${PAYROLL_ENCRYPTION_KEY_DERIVATION_SALT}
+  ACTIVE_STORAGE_SERVICE: local
+  FORCE_SSL: "false"
+  AUTH_ENABLED: "true"
+  FRONTEND_URL: ${PAYROLL_PUBLIC_URL}
+  CORS_ORIGINS: ${PAYROLL_PUBLIC_URL}
+  CLERK_PUBLISHABLE_KEY: ${PAYROLL_CLERK_PUBLISHABLE_KEY}
+  CLERK_SECRET_KEY: ${PAYROLL_CLERK_SECRET_KEY}
+  REQUIRE_MFA: "false"
+  USE_SOLID_CACHE: "true"
+  USE_SOLID_QUEUE: "true"
+  USE_SOLID_CABLE: "true"
+  SOLID_QUEUE_IN_PUMA: "false"
+  TIME_TRACKING_ALLOWED_HOSTS: aire-api
+  AIRE_ACCOUNT_LINK_ALLOWED_HOSTS: ${AIRE_PUBLIC_HOST}
+  ALLOW_PRIVATE_INTEGRATION_HTTP: "true"
+  PAYROLL_SHARED_SECRET: ${PAYROLL_SHARED_SECRET}
+  PAYROLL_STAGING_ADMIN_CLERK_ID: ${PAYROLL_STAGING_ADMIN_CLERK_ID}
+  STAGING_ADMIN_EMAIL: ${STAGING_ADMIN_EMAIL}
+
+x-app-service: &app-service
+  restart: unless-stopped
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /rails/log:uid=1000,gid=1000,mode=0755
+    - /rails/tmp:uid=1000,gid=1000,mode=0755
+  logging: *default-logging
+
+services:
+  aire-db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aire_services_staging
+      POSTGRES_USER: aire_staging
+      POSTGRES_PASSWORD: ${AIRE_POSTGRES_PASSWORD}
+    volumes:
+      - aire_postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aire_staging -d aire_services_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 150
+    logging: *default-logging
+
+  payroll-db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cornerstone_payroll_staging
+      POSTGRES_USER: payroll_staging
+      POSTGRES_PASSWORD: ${PAYROLL_POSTGRES_PASSWORD}
+    volumes:
+      - payroll_postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payroll_staging -d cornerstone_payroll_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 150
+    logging: *default-logging
+
+  aire-api:
+    <<: *app-service
+    image: ghcr.io/shimizu-technology/aire-services-api:${AIRE_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    environment: *aire-environment
+    depends_on:
+      aire-db:
+        condition: service_healthy
+    volumes:
+      - aire_storage:/rails/storage
+    networks: [backend, integration, egress]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 200
+
+  aire-worker:
+    <<: *app-service
+    image: ghcr.io/shimizu-technology/aire-services-api:${AIRE_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    command: ["bundle", "exec", "bin/jobs"]
+    environment: *aire-environment
+    depends_on:
+      aire-db:
+        condition: service_healthy
+      payroll-api:
+        condition: service_healthy
+    volumes:
+      - aire_storage:/rails/storage
+    networks: [backend, integration, egress]
+    mem_limit: 640m
+    cpus: 1.0
+    pids_limit: 180
+
+  payroll-api:
+    <<: *app-service
+    image: ghcr.io/shimizu-technology/cornerstone-payroll-api:${PAYROLL_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    environment: *payroll-environment
+    depends_on:
+      payroll-db:
+        condition: service_healthy
+    volumes:
+      - payroll_storage:/rails/storage
+    networks: [backend, integration, egress]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 896m
+    cpus: 1.5
+    pids_limit: 220
+
+  payroll-worker:
+    <<: *app-service
+    image: ghcr.io/shimizu-technology/cornerstone-payroll-api:${PAYROLL_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    command: ["bundle", "exec", "bin/jobs"]
+    environment: *payroll-environment
+    depends_on:
+      payroll-db:
+        condition: service_healthy
+      aire-api:
+        condition: service_healthy
+    volumes:
+      - payroll_storage:/rails/storage
+    networks: [backend, integration, egress]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 200
+
+  aire-web:
+    image: ghcr.io/shimizu-technology/aire-services-web:${AIRE_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    restart: unless-stopped
+    depends_on:
+      aire-api:
+        condition: service_healthy
+    ports:
+      - "${STAGING_BIND_ADDRESS:-127.0.0.1}:${AIRE_STAGING_PORT:-8789}:8080"
+    networks: [frontend, integration]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    read_only: true
+    tmpfs:
+      - /config:size=4m,uid=1000,gid=1000,mode=0750
+      - /data:size=16m,uid=1000,gid=1000,mode=0750
+      - /tmp:size=16m,uid=1000,gid=1000,mode=0750
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 100
+    logging: *default-logging
+
+  payroll-web:
+    image: ghcr.io/shimizu-technology/cornerstone-payroll-web:${PAYROLL_IMAGE_TAG}
+    pull_policy: ${PULL_POLICY:-always}
+    restart: unless-stopped
+    depends_on:
+      payroll-api:
+        condition: service_healthy
+    ports:
+      - "${STAGING_BIND_ADDRESS:-127.0.0.1}:${PAYROLL_STAGING_PORT:-8790}:8080"
+    networks: [frontend, integration]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    read_only: true
+    tmpfs:
+      - /config:size=4m,uid=1000,gid=1000,mode=0750
+      - /data:size=16m,uid=1000,gid=1000,mode=0750
+      - /tmp:size=16m,uid=1000,gid=1000,mode=0750
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 100
+    logging: *default-logging
+
+volumes:
+  aire_postgres_data:
+  payroll_postgres_data:
+  aire_storage:
+  payroll_storage:
+
+networks:
+  frontend:
+  integration:
+    internal: true
+  backend:
+    internal: true
+  egress:
