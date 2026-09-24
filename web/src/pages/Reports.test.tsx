@@ -3,12 +3,13 @@
 import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import type { YtdSummaryReport } from '@/services/api';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
 
 function renderReportPanel(panel: ReactNode) {
-  return render(<PdfPreviewProvider>{panel}</PdfPreviewProvider>);
+  return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
 }
 
 const apiMocks = vi.hoisted(() => ({
@@ -85,6 +86,7 @@ describe('YtdSummaryPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.ytdSummary.mockResolvedValue({ report });
+    apiMocks.payrollHistoryList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   });
 
   it('renders the new company totals and employee-level report values', async () => {
@@ -92,7 +94,7 @@ describe('YtdSummaryPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
-    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(await screen.findByText('Payroll Summary by Pay Date — 2026')).toBeTruthy();
     expect(screen.getByText('All loan deductions (in deductions)').nextElementSibling?.textContent).toBe('$75.00');
     fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Total Hours').nextElementSibling?.textContent).toBe('82.50');
@@ -139,7 +141,7 @@ describe('YtdSummaryPanel', () => {
     renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
-    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(await screen.findByText('Payroll Summary by Pay Date — 2026')).toBeTruthy();
     expect(screen.getByText('QuickBooks source labels need classification review.')).toBeTruthy();
     fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Historical Loans (type unclassified)').nextElementSibling?.textContent).toBe('$60.06');
@@ -154,17 +156,51 @@ describe('YtdSummaryPanel', () => {
     renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
-    await screen.findByText('Payroll Summary — 2026');
+    await screen.findByText('Payroll Summary by Pay Date — 2026');
     const firstParams = apiMocks.ytdSummary.mock.calls[0][0];
     expect(firstParams.start_date).toMatch(/^\d{4}-01-01$/);
     expect(firstParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Payroll summary period type' }), { target: { value: 'rolling_year' } });
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
-    await screen.findByText('Payroll Summary — 2026');
+    await screen.findByText('Payroll Summary by Pay Date — 2026');
     const rollingParams = apiMocks.ytdSummary.mock.calls.at(-1)?.[0];
     expect(rollingParams.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(rollingParams.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('lets staff select a work period while querying the exact pay date', async () => {
+    apiMocks.payrollHistoryList.mockResolvedValue({
+      data: [{
+        key: 'native:27', status: 'committed', source: { label: 'Cornerstone' },
+        start_date: '2026-04-01', end_date: '2026-04-15', pay_date: '2026-04-30',
+      }],
+      meta: { total_pages: 1 },
+    });
+    renderReportPanel(<YtdSummaryPanel />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payroll summary period type' }), { target: { value: 'pay_run' } });
+    const runOption = await screen.findByRole('option', { name: /2026-04-01 – 2026-04-15 · paid 2026-04-30/ });
+    expect(runOption).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(apiMocks.ytdSummary).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: '2026-04-30', end_date: '2026-04-30', pay_run_key: 'native:27',
+    }));
+    expect(await screen.findByText('Payroll Summary by Pay Date — 2026-04-01 – 2026-04-15 (paid 2026-04-30)')).toBeTruthy();
+  });
+
+  it('shows an actionable empty state instead of a zero-dollar employee grid', async () => {
+    apiMocks.ytdSummary.mockResolvedValue({
+      report: { ...report, company_totals: { ...report.company_totals, payroll_count: 0 }, employees: [] },
+    });
+    renderReportPanel(<YtdSummaryPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    expect(await screen.findByText('No payroll was paid in this date range')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open Payroll Register' }).getAttribute('href')).toBe('/reports?report=payroll-register');
+    expect(screen.queryByText('Employee Detail')).toBeNull();
   });
 
   it('includes active $0-pay employees by default and sends the changed selection to the report', async () => {
@@ -173,14 +209,14 @@ describe('YtdSummaryPanel', () => {
     expect(checkbox.checked).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
-    await screen.findByText('Payroll Summary — 2026');
+    await screen.findByText('Payroll Summary by Pay Date — 2026');
     expect(apiMocks.ytdSummary.mock.calls[0][0].include_zero_pay).toBe(true);
 
     fireEvent.click(checkbox);
     expect(checkbox.checked).toBe(false);
-    expect(screen.queryByText('Payroll Summary — 2026')).toBeNull();
+    expect(screen.queryByText('Payroll Summary by Pay Date — 2026')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
-    await screen.findByText('Payroll Summary — 2026');
+    await screen.findByText('Payroll Summary by Pay Date — 2026');
     expect(apiMocks.ytdSummary.mock.calls.at(-1)?.[0].include_zero_pay).toBe(false);
   });
 
@@ -193,7 +229,7 @@ describe('YtdSummaryPanel', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Include active employees with $0 pay' }));
     await act(async () => { resolveRequest({ report }); });
 
-    expect(screen.queryByText('Payroll Summary — 2026')).toBeNull();
+    expect(screen.queryByText('Payroll Summary by Pay Date — 2026')).toBeNull();
     expect(screen.getByRole('button', { name: 'View Report' })).toBeTruthy();
   });
 
@@ -229,7 +265,7 @@ describe('YtdSummaryPanel', () => {
     renderReportPanel(<YtdSummaryPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
-    expect(await screen.findByText('Payroll Summary — 2026')).toBeTruthy();
+    expect(await screen.findByText('Payroll Summary by Pay Date — 2026')).toBeTruthy();
     fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
     expect(screen.getByText('Payroll Field Additions').nextElementSibling?.textContent).toBe('$15.75');
     expect(screen.getByText('Payroll Field Deductions').nextElementSibling?.textContent).toBe('$5.75');

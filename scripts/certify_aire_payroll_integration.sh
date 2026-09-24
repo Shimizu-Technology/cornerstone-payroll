@@ -137,7 +137,7 @@ AIRE_PID=$!
   cd "$ROOT_DIR/api"
   export PATH="$RBENV_ROOT/shims:$PATH"
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
-  exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+  exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true SOLID_QUEUE_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     CORS_ORIGINS="${CORNERSTONE_WEB_ORIGIN:-http://127.0.0.1:44329}" \
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
 ) >"$CORNERSTONE_LOG" 2>&1 &
@@ -176,7 +176,8 @@ api_call() {
   status="$(curl "${args[@]}" "$url")"
   [[ "$status" == "$expected" ]] || {
     echo "$label returned HTTP $status" >&2
-    ruby -rjson -e 'data=JSON.parse(File.read(ARGV[0])); puts({error: data["error"]}.compact.to_json)' "$output" 2>/dev/null || true
+    ruby -rjson -e 'data=JSON.parse(File.read(ARGV[0])); puts(data.slice("error", "message", "exception").to_json)' "$output" 2>/dev/null || head -c 1000 "$output" || true
+    tail -80 "$CORNERSTONE_LOG" >&2 || true
     fail "$label"
   }
   echo "PASS: $label"
@@ -192,7 +193,7 @@ api_call 201 "publish the next available AIRE payroll period" POST \
   cd "$ROOT_DIR/api"
   export PATH="$RBENV_ROOT/shims:$PATH"
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
-  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true SOLID_QUEUE_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
       publications = AirePayrollCalendarPublication.order(:id).to_a
       abort "missing calendar publications" unless publications.size == 2
@@ -255,6 +256,69 @@ STALE_RESPONSE="$TEMP_DIR/stale-response.json"
 api_call 409 "reject a stale manual-time decision" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit/time_entries/$MANUAL_HOLD_ID/approval" \
   "$STALE_RESPONSE" "$STALE_BODY"
+
+if [[ "${CERTIFICATION_FAST_CUTOFF:-false}" == "true" ]]; then
+  echo "Advancing only the isolated AIRE fixture to its already verified cutoff..."
+  (
+    cd "$AIRE_REPO_PATH/backend"
+    export PATH="$RBENV_ROOT/shims:$PATH"
+    export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+    RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
+      CERTIFICATION_START_DATE="$START_DATE" CERTIFICATION_END_DATE="$END_DATE" bundle exec rails runner '
+        database_name = ActiveRecord::Base.connection_db_config.database.to_s
+        abort "refusing to advance a non-certification database" unless database_name.start_with?("aire_cornerstone_certification_")
+        period = PayrollCalendarPeriod.find_by!(
+          start_date: Date.iso8601(ENV.fetch("CERTIFICATION_START_DATE")),
+          end_date: Date.iso8601(ENV.fetch("CERTIFICATION_END_DATE"))
+        )
+        abort "certification period was not published for 5:00 p.m. Guam" unless period.cutoff_at.in_time_zone("Pacific/Guam").strftime("%H:%M") == "17:00"
+        # Keep the production invariants intact while moving this disposable
+        # fixture to the immediately preceding valid pay-date/cutoff pair.
+        pay_date = period.end_date + 1.day
+        cutoff_date = pay_date + 7.days
+        cutoff_at = ActiveSupport::TimeZone["Pacific/Guam"].local(
+          cutoff_date.year, cutoff_date.month, cutoff_date.day, 17, 0
+        )
+        abort "fast certification cutoff is not yet due" unless cutoff_at.past?
+        period.update_columns(pay_date: pay_date, cutoff_at: cutoff_at, updated_at: Time.current)
+        TimeEntry.where(work_date: period.start_date..period.end_date, approval_status: "approved").find_each do |entry|
+          entry.update_columns(
+            approved_at: cutoff_at - 1.hour,
+            overtime_approved_at: entry.overtime_status == "approved" ? cutoff_at - 30.minutes : nil,
+            updated_at: cutoff_at - 30.minutes
+          )
+        end
+      '
+  )
+  (
+    cd "$ROOT_DIR/api"
+    export PATH="$RBENV_ROOT/shims:$PATH"
+    export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+    RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+      CERTIFICATION_PAY_PERIOD_ID="$PAY_PERIOD_ID" bundle exec rails runner '
+        database_name = ActiveRecord::Base.connection_db_config.database.to_s
+        abort "refusing to advance a non-certification database" unless database_name.start_with?("cornerstone_aire_certification_")
+        pay_period = PayPeriod.find(ENV.fetch("CERTIFICATION_PAY_PERIOD_ID"))
+        publication = pay_period.aire_payroll_calendar_period.publications.where(delivery_status: "delivered").order(:schedule_version).last!
+        pay_date = pay_period.end_date + 1.day
+        cutoff_date = pay_date + 7.days
+        cutoff_at = ActiveSupport::TimeZone["Pacific/Guam"].local(
+          cutoff_date.year, cutoff_date.month, cutoff_date.day, 17, 0
+        )
+        pay_period.update_columns(pay_date: pay_date, updated_at: Time.current)
+        payload = publication.payload.deep_dup.merge(
+          "pay_date" => pay_date.iso8601,
+          "cutoff_at" => cutoff_at.iso8601
+        )
+        publication.update_columns(
+          payload: payload,
+          payload_checksum: TimeTracking::CanonicalPayload.checksum(payload),
+          updated_at: Time.current
+        )
+      '
+  )
+  CUTOFF_AT="$(ruby -rtime -e 'puts Time.now.iso8601')"
+fi
 
 if [[ "$BROWSER_REVIEW_ONLY" == "true" ]]; then
   echo "Synthetic pre-pay browser fixture is ready; no payroll or payment has been recorded."
@@ -342,9 +406,12 @@ ruby -rjson -e '
   data=JSON.parse(File.read(ARGV[0]))
   abort "payroll calculation errors" unless data.dig("results", "errors") == []
   item=data.dig("pay_period", "payroll_items")&.first or abort "missing calculated payroll item"
-  abort "eligible regular hours were not 8.0" unless item.fetch("hours_worked").to_f == 8.0
-  abort "eligible overtime hours were not 6.0" unless item.fetch("overtime_hours").to_f == 6.0
-  abort "gross pay did not preserve the overtime premium" unless item.fetch("gross_pay").to_f == 425.0
+  regular = item.fetch("hours_worked").to_f
+  overtime = item.fetch("overtime_hours").to_f
+  gross = item.fetch("gross_pay").to_f
+  abort "eligible regular hours were #{regular}, expected 8.0" unless regular == 8.0
+  abort "eligible overtime hours were #{overtime}, expected 6.0" unless overtime == 6.0
+  abort "gross pay was #{gross}, expected 425.0 with the overtime premium" unless gross == 425.0
 ' "$RUN_RESPONSE"
 
 APPROVE_RESPONSE="$TEMP_DIR/payroll-approve.json"
@@ -369,12 +436,14 @@ api_call 200 "record synthetic check delivery as the payment event" POST \
   cd "$ROOT_DIR/api"
   export PATH="$RBENV_ROOT/shims:$PATH"
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
-  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true SOLID_QUEUE_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
       AirePayrollAcknowledgement.undelivered.order(:id).find_each { |ack| AirePayrollStatusSyncJob.perform_now(ack.id) }
       AirePayrollEntryAcknowledgement.undelivered.order(:id).find_each { |ack| AirePayrollEntryStatusSyncJob.perform_now(ack.id) }
-      abort "batch acknowledgements remain" if AirePayrollAcknowledgement.undelivered.exists?
-      abort "entry acknowledgements remain" if AirePayrollEntryAcknowledgement.undelivered.exists?
+      batch_remaining = AirePayrollAcknowledgement.undelivered.pluck(:id, :status, :last_error)
+      entry_remaining = AirePayrollEntryAcknowledgement.undelivered.pluck(:id, :status, :last_error)
+      abort "batch acknowledgements remain: #{batch_remaining.inspect}" if batch_remaining.any?
+      abort "entry acknowledgements remain: #{entry_remaining.inspect}" if entry_remaining.any?
       puts "PASS: imported, committed, and paid states reached AIRE"
     '
 )

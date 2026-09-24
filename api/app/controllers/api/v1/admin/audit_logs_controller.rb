@@ -8,7 +8,16 @@ module Api
       class AuditLogsController < BaseController
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
+        LEGACY_DOCUMENT_ACCESS_PATTERN = "(download|export|pdf|csv|xlsx|ascii|print|preview)"
+        DOCUMENT_ACCESS_SQL = <<~SQL.squish.freeze
+          event_category = :document_category
+          OR (
+            event_category = :legacy_category
+            AND (jsonb_exists(metadata, 'access_type') OR regexp_replace(action, '^.*#', '') ~* :legacy_action_pattern)
+          )
+        SQL
 
+        before_action :authorize_security_history_access!
         before_action :resolve_access_scope!
 
         def index
@@ -16,10 +25,11 @@ module Api
           total = scope.count
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
-          logs = ordered(scope).includes(:user, :company, :organization).offset((page - 1) * per_page).limit(per_page)
+          logs = ordered(scope).includes(:user, :company, :organization).offset((page - 1) * per_page).limit(per_page).to_a
+          pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
 
           render json: {
-            data: logs.map { |log| audit_log_json(log) },
+            data: logs.map { |log| AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects) },
             meta: {
               current_page: page,
               per_page: per_page,
@@ -43,8 +53,26 @@ module Api
 
         private
 
+        def authorize_security_history_access!
+          return unless security_history_filters?
+          return if current_user.organization_admin?
+
+          render json: {
+            error: "Organization admin access required for security history",
+            details: { authorization: [ "Organization admin access required for security history" ] }
+          }, status: :forbidden
+        end
+
+        def security_history_filters?
+          params[:event_category] == "security" || params[:event_action].to_s.start_with?("authentication#")
+        end
+
         def filtered_scope
           logs = @accessible_audit_logs
+          unless current_user.organization_admin?
+            logs = logs.where("event_category IS NULL OR event_category <> ?", "security")
+              .where("action IS NULL OR action NOT LIKE ?", "authentication#%")
+          end
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)
@@ -53,12 +81,36 @@ module Api
           if current_user.organization_admin? && params[:user_id].present?
             logs = logs.where(user_id: params[:user_id])
           end
+          logs = logs.where(action: params[:event_action]) if params[:event_action].present?
+          if params[:event_category].present?
+            logs = if params[:event_category] == "document_access"
+              document_access_scope(logs)
+            else
+              logs.where(event_category: params[:event_category])
+            end
+          end
+          if params[:exclude_event_category].present?
+            logs = if params[:exclude_event_category] == "document_access"
+              logs.where.not(id: document_access_scope(logs).select(:id))
+            else
+              logs.where("event_category IS NULL OR event_category <> ?", params[:exclude_event_category])
+            end
+          end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
           logs = logs.where("created_at >= ?", Time.zone.parse(params[:from])) if params[:from].present?
           logs = logs.where("created_at <= ?", Time.zone.parse(params[:to])) if params[:to].present?
           logs
+        end
+
+        def document_access_scope(scope)
+          scope.where(
+            DOCUMENT_ACCESS_SQL,
+            document_category: "document_access",
+            legacy_category: "export",
+            legacy_action_pattern: LEGACY_DOCUMENT_ACCESS_PATTERN
+          )
         end
 
         def resolve_access_scope!
@@ -102,8 +154,10 @@ module Api
               batch = export_batch(scope, cursor)
               break if batch.empty?
 
+              pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(batch)
+
               batch.each do |log|
-                presenter = AuditLogPresenter.new(log)
+                presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects)
                 stream << CSV.generate_line([
                   log.created_at&.iso8601,
                   log.actor_name.presence || log.user&.name || "System",
@@ -141,34 +195,6 @@ module Api
           end
 
           ordered(relation).limit(1_000).to_a
-        end
-
-        def audit_log_json(log)
-          presenter = AuditLogPresenter.new(log)
-          {
-            id: log.id,
-            action: log.action,
-            display_action: presenter.headline,
-            display_subject: presenter.subject,
-            summary: presenter.summary,
-            event_category: log.event_category,
-            record_type: log.record_type,
-            record_id: log.record_id,
-            subject_name: log.subject_name,
-            user_id: log.user_id,
-            user_name: log.actor_name.presence || log.user&.name,
-            actor_email: log.actor_email.presence || log.user&.email,
-            actor_role: log.actor_role.presence || log.user&.role,
-            organization_id: log.organization_id,
-            organization_name: log.organization&.name,
-            company_id: log.company_id,
-            company_name: log.company&.name,
-            metadata: log.metadata,
-            ip_address: log.ip_address,
-            user_agent: log.user_agent,
-            request_id: log.request_id,
-            created_at: log.created_at
-          }
         end
       end
     end

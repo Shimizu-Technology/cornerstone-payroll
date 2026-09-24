@@ -15,6 +15,10 @@ class User < ApplicationRecord
   has_many :company_assignments, dependent: :destroy
   has_many :assigned_companies, through: :company_assignments, source: :company
   has_many :time_tracking_delegations, dependent: :destroy
+  has_many :user_printer_profile_selections, dependent: :destroy
+  has_many :selected_printer_profiles, through: :user_printer_profile_selections, source: :printer_profile
+  has_many :created_printer_profiles, class_name: "PrinterProfile", foreign_key: :created_by_id, dependent: :nullify
+  has_many :updated_printer_profiles, class_name: "PrinterProfile", foreign_key: :updated_by_id, dependent: :nullify
   has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
   has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify
@@ -114,9 +118,24 @@ class User < ApplicationRecord
         organization_company_ids
       else
         assigned_ids = if association(:company_assignments).loaded?
-          company_assignments.map(&:company_id)
+          active_assignments = company_assignments.reject(&:expired?)
+          active_assignment_company_ids = active_assignments.map(&:company_id)
+
+          if active_assignments.all? { |assignment| assignment.association(:company).loaded? }
+            active_assignments.filter_map do |assignment|
+              assignment.company_id unless assignment.company&.test_workspace_archived_at?
+            end
+          else
+            archived_company_ids = Company.where(id: active_assignment_company_ids)
+              .where.not(test_workspace_archived_at: nil)
+              .pluck(:id)
+            active_assignment_company_ids - archived_company_ids
+          end
         else
-          company_assignments.pluck(:company_id)
+          company_assignments.active_access
+            .joins(:company)
+            .where(companies: { test_workspace_archived_at: nil })
+            .pluck(:company_id)
         end
         assigned_ids &= organization_company_ids
 
@@ -179,9 +198,9 @@ class User < ApplicationRecord
   end
 
   def migration_rehearsal_company_requires_staff_role
-    return if company.blank? || !company.migration_rehearsal? || staff_member?
+    return if company.blank? || !company.test_workspace? || staff_member?
 
-    errors.add(:company, "migration rehearsals are available only to payroll staff")
+    errors.add(:company, "test workspaces are available only to payroll staff")
   end
 
   def organization_company_ids

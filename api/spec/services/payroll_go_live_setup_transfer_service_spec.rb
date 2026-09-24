@@ -255,7 +255,7 @@ RSpec.describe PayrollGoLiveSetupTransferService do
       ])
     target = create(:employee, company: company, department: create(:department, company: company), first_name: "Matched", last_name: "Borrower", ssn_encrypted: source.ssn_encrypted)
     field = create(:payroll_field_definition, company: company, name: "Verified repayment", category: "loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount_type: "fixed")
-    loan = EmployeeLoan.create!(company: company, employee: target, name: "Verified successor balance", original_amount: 600, current_balance: 600, payment_amount: 250)
+    loan = EmployeeLoan.create!(company: company, employee: target, name: "Verified successor balance", original_amount: 600, current_balance: 600, balance_as_of: effective_on, payment_amount: 250)
     assignment = target.employee_payroll_fields.create!(payroll_field_definition: field, employee_loan: loan, amount: 250, active: true)
     create(:payroll_field_definition, company: source_company, name: "Verified repayment", category: "loan", kind: "deduction", tax_treatment: "pre_tax_deduction", amount_type: "percentage", active: false)
     target_type = DeductionType.create!(company: company, name: "Separate tracked deduction", category: "post_tax", sub_category: "loan", active: true)

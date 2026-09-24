@@ -233,7 +233,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response).to have_http_status(:ok)
     reader = PDF::Reader.new(StringIO.new(response.body))
     text = reader.pages.map(&:text).join("\n")
-    expect(text).to include("Payroll Summary by Period")
+    expect(text).to include("Payroll Summary by Pay Date")
     expect(text).to include("Ana Perez")
     expect(text).to include("Rent Deduction")
   end

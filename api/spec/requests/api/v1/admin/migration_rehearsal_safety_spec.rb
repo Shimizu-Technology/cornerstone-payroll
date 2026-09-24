@@ -41,7 +41,7 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to include("unavailable in a migration rehearsal")
+    expect(response.parsed_body.fetch("error")).to include("unavailable in a test workspace")
     expect(pay_period.reload.status).to eq("approved")
   end
 

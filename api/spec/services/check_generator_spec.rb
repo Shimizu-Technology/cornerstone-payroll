@@ -4,6 +4,8 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe CheckGenerator do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) do
     create(:company,
       name: "MoSa's Restaurant",
@@ -65,9 +67,10 @@ RSpec.describe CheckGenerator do
       category: "loan", amount: BigDecimal("250"), source: "employee_default")
     payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
 
-    expect(generator.send(:visible_legacy_loan_payment)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:visible_legacy_loan_ytd)).to eq(BigDecimal("428.36"))
-    expect(generator.send(:deduction_rows).find { |row| row.first == "Loan" }.last).to eq(generator.send(:fn, BigDecimal("428.36")))
+    expect(generator.send(:deduction_rows)).to include(
+      [ "Loan", "428.36", "428.36" ],
+      [ "Loan - Madela Severin", "250.00", "250.00" ]
+    )
     expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
   end
 
@@ -157,6 +160,107 @@ RSpec.describe CheckGenerator do
       expect(text).not_to include("[TABLE]")
     end
 
+    it "keeps details and summary below crowded statement tables" do
+      crowded_rows = [
+        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Rent Reimbursement", "150.00", "3,000.00" ],
+        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Loan (Nena Joe)", "0.00", "350.00" ],
+        [ "Loan - Douglas Phill", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+      ]
+      crowded_deduction_rows = [
+        [ "401(k) Pre-Tax", "387.81", "8,177.03" ],
+        [ "Loan", "0.00", "350.00" ],
+        [ "Loan - Madela Severin", "0.00", "2,500.00" ],
+        [ "Health Insurance", "126.00", "2,583.00" ],
+        [ "Remittance ID 2952492", "168.00", "3,192.00" ],
+        [ "Tips Paid Out", "0.00", "1,900.80" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "681.81", font_style: :bold }, { content: "18,702.83", font_style: :bold } ]
+      ]
+      allow(generator).to receive(:other_pay_rows).and_return(crowded_rows)
+      allow(generator).to receive(:deduction_rows).and_return(crowded_deduction_rows)
+
+      page = PDF::Reader.new(StringIO.new(generator.generate)).pages.first
+      stub_bottoms = CheckGenerator.page_layout_metadata(company)
+        .values_at(:stub1_section_bottom, :stub2_section_bottom)
+      stub_bottoms.each do |stub_bottom|
+        stub_runs = page.runs.select { |run| run.y.between?(stub_bottom, stub_bottom + CheckGenerator::SECTION_HEIGHT) }
+        other_pay_bottom = stub_runs.filter_map do |run|
+          run.y if crowded_rows.flatten.include?(run.text)
+        end.min
+        pay_period_top = stub_runs.find { |run| run.text == "Pay Period" }.y
+        deduction_bottom = stub_runs.filter_map do |run|
+          run.y if crowded_deduction_rows.filter_map { |row| row.first if row.first.is_a?(String) }.include?(run.text)
+        end.min
+        summary_top = stub_runs.find { |run| run.text == "SUMMARY" }.y
+
+        expect(pay_period_top).to be < other_pay_bottom - 2.0
+        expect(summary_top).to be < deduction_bottom - 2.0
+      end
+      expect(page.text).to include(
+        "ER 401(k) Pre-Tax", "8,177.03", "Remittance ID 2952492", "18,702.83", "Pay Period", "MEMO:"
+      )
+    end
+
+    it "keeps Sara-shaped Other Pay YTD values clear of the summary box with a legacy offset" do
+      company.update!(check_layout_config: { stub: { summary_x_offset: -18.0 } })
+      allow(generator).to receive(:other_pay_rows).and_return([
+        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Rent Reimbursement", "150.00", "3,000.00" ],
+        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Loan (Nena Joe)", "0.00", "350.00" ],
+        [ "Loan - Douglas Phill", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+      ])
+      allow(generator).to receive(:deduction_rows).and_return([
+        [ "401(k) Pre-Tax", "1,216.35", "24,327.00" ],
+        [ "Loan", "41.50", "2,587.50" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "1,257.85", font_style: :bold }, { content: "26,914.50", font_style: :bold } ]
+      ])
+
+      summary_boxes = []
+      allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+        summary_boxes << { x: point.first, y: point.last, height: height } if height == 48.0
+        method.call(point, width, height)
+      end
+
+      page = PDF::Reader.new(StringIO.new(generator.generate)).pages.first
+      expect(summary_boxes.size).to eq(2)
+      ytd_runs = page.runs.select { |run| run.text == "8,177.03" }
+      expect(ytd_runs.size).to eq(2)
+      ytd_runs.zip(summary_boxes).each do |run, box|
+        expect(run.y).to be_between(box[:y] - box[:height], box[:y])
+        expect(box[:x] - run.endx).to be >= 4.0
+      end
+    end
+
+    [12.0, 1_000.0].each do |offset|
+      it "keeps the summary readable and within the right column with a #{offset} point offset" do
+        company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
+        summary_boxes = []
+        allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+          summary_boxes << { x: point.first, width: width } if height == 48.0
+          method.call(point, width, height)
+        end
+
+        text = PDF::Reader.new(StringIO.new(generator.generate)).pages.first.text
+        stub_layout = CheckGenerator::DEFAULT_LAYOUT.fetch(:stub)
+        right_edge = CheckGenerator::PAGE_WIDTH - stub_layout.fetch(:right)
+        left_edge = stub_layout.fetch(:left) +
+          (right_edge - stub_layout.fetch(:left)) * stub_layout.fetch(:left_ratio)
+
+        expect(summary_boxes.size).to eq(2)
+        summary_boxes.each do |box|
+          expect(box[:x]).to be >= left_edge
+          expect(box[:width]).to be >= CheckGenerator::MIN_SUMMARY_BOX_WIDTH
+          expect(box[:x] + box[:width]).to be_within(0.01).of(right_edge)
+        end
+        expect(text).to include("Total Pay", "Taxes", "Deductions")
+        expect(text).not_to include("[SUMMARY]")
+      end
+    end
+
     it "prints payroll adjustment deduction YTD values on check stubs" do
       earlier_period = create(:pay_period, :committed,
         company: company,
@@ -187,6 +291,57 @@ RSpec.describe CheckGenerator do
       expect(text).to include("15.00")
       expect(text).to include("25.00")
     end
+
+    it "prints earlier additional withholding when the current check has none" do
+      earlier_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 19))
+      create(:payroll_item,
+        pay_period: earlier_period,
+        employee: employee,
+        company: company,
+        additional_withholding: 15)
+
+      expect(generator.send(:tax_rows)).to include([ "Addtl W/H (W-4 4c)", "0.00", "15.00" ])
+    end
+
+    it "renders migrated deduction and employer contribution YTD balances on the check stubs" do
+      apply_historical_ytd_balance(
+        company: company,
+        employee: employee,
+        through_period_end: Date.new(2026, 2, 28),
+        through_pay_date: Date.new(2026, 3, 10),
+        source_breakdown: {
+          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
+          "after_tax_deduction_breakdown" => {
+            "Health Insurance" => "2457.00",
+            "Case No. 2952492" => "3024.00"
+          },
+          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "7646.04" }
+        },
+        tips_paid_out: 1_900.80
+      )
+      create_statement_field_entry(
+        label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
+      create_statement_field_entry(
+        label: "Remittance ID 2952492", amount: 168, treatment: "post_tax_deduction", category: "child_support")
+      payroll_item.update!(retirement_payment: 927.91, employer_retirement_match: 381.08)
+
+      deduction_rows = generator.send(:deduction_rows)
+      other_pay_rows = generator.send(:other_pay_rows)
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(deduction_rows).to include([ "401(k) Pre-Tax", "927.91", "18,558.20" ])
+      expect(deduction_rows).to include([ "Health Insurance", "126.00", "2,583.00" ])
+      expect(deduction_rows).to include([ "Remittance ID 2952492", "168.00", "3,192.00" ])
+      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
+      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "381.08", "8,027.12" ])
+      expect(text).to include("401(k) Pre-Tax", "18,558.20")
+      expect(text).to include("ER 401(k) Pre-Tax", "8,027.12")
+      expect(text).to include("26,234.00")
+    end
   end
 
   describe "#generate_voided" do
@@ -198,6 +353,18 @@ RSpec.describe CheckGenerator do
 
     it "produces a non-empty PDF" do
       expect(pdf.bytesize).to be > 5_000
+    end
+  end
+
+  describe "#generate_rehearsal_preview" do
+    it "marks the check face and both stubs only as VOID" do
+      expect(generator).to receive(:draw_void_watermark).exactly(3).times.and_call_original
+      void_draws = capture_void_draws
+
+      text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
+
+      expect(void_draws).to contain_exactly(*Array.new(3, hash_including(style: :bold)))
+      expect(text).not_to match(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/)
     end
   end
 
@@ -224,6 +391,25 @@ RSpec.describe CheckGenerator do
   end
 
   describe "year-to-date totals" do
+    it "renders source-aware YTD earnings instead of repeating current amounts" do
+      payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
+      payroll_item.payroll_item_earnings.create!(
+        category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, call: [
+        PayrollEarningsYtdBreakdown::Row.new(
+          label: "Joint", source_label: "Joint", category: "regular",
+          hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
+        )
+      ])
+      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item).and_return(breakdown)
+
+      row = generator.send(:pay_rows).find { |candidate| candidate.first == "Joint" }
+
+      expect(row).to eq([ "Joint", "10.70", "11.00", "117.70", "1,032.90" ])
+      expect(PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n"))
+        .to include("1,032.90")
+    end
+
     it "limits payroll field YTD totals to the current calendar year" do
       field = PayrollFieldDefinition.create!(
         company: company,
@@ -262,10 +448,10 @@ RSpec.describe CheckGenerator do
         source: "manual"
       )
 
-      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+      row = generator.send(:statement_deduction_rows).find { |candidate| candidate.label == "Rent Deduction" }
 
-      expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(25.0)
-      expect(generator.send(:ytd_visible_deds)).to eq(generator.send(:ytd)[:deds] + 25.0)
+      expect(row).to have_attributes(current: 25.to_d, ytd: 25.to_d)
+      expect(generator.send(:ytd_visible_deds)).to eq(25.to_d)
     end
 
     it "prints taxable payroll field additions with year-to-date amounts in pay rows" do
@@ -405,7 +591,37 @@ RSpec.describe CheckGenerator do
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row3_y)).to eq(118.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :table_height)).to eq(56.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_box_h)).to eq(48.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(-18.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(0.0)
     end
+  end
+
+  def capture_void_draws
+    void_draws = []
+    allow_any_instance_of(Prawn::Document).to receive(:draw_text).and_wrap_original do |method, text, options|
+      void_draws << options if text == "VOID"
+      method.call(text, options)
+    end
+    void_draws
+  end
+
+  def create_statement_field_entry(label:, amount:, treatment:, category:)
+    definition = create(
+      :payroll_field_definition,
+      company: company,
+      name: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category
+    )
+    create(
+      :payroll_item_field_entry,
+      payroll_item: payroll_item,
+      payroll_field_definition: definition,
+      label: label,
+      kind: "deduction",
+      tax_treatment: treatment,
+      category: category,
+      amount: amount
+    )
   end
 end

@@ -1,6 +1,6 @@
-import type { ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 
 export interface WorkspaceTab {
   id: string;
@@ -16,8 +16,18 @@ interface WorkspaceTabsProps {
 }
 
 export function WorkspaceTabs({ label, tabs }: WorkspaceTabsProps): ReactElement {
+  const navRef = useRef<HTMLElement>(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    const activeTab = navRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (typeof activeTab?.scrollIntoView === 'function') {
+      activeTab.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+  }, [location.pathname]);
+
   return (
-    <nav aria-label={label} className="overflow-x-auto border-b border-neutral-200 bg-white px-4 sm:px-6 lg:px-8">
+    <nav ref={navRef} aria-label={label} className="overflow-x-auto border-b border-neutral-200 bg-white px-4 sm:px-6 lg:px-8">
       <div className="flex min-w-max gap-2">
         {tabs.map(({ id, label: tabLabel, href, icon: Icon, count }): ReactElement => (
           <NavLink

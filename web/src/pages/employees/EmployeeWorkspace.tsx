@@ -19,6 +19,7 @@ import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-r
 import { Header } from '@/components/layout/Header';
 import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
+import { RecordActivityTimeline } from '@/components/records/RecordActivityTimeline';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -699,20 +700,23 @@ function EmployeeActivity({ companyId, employee, returnTo }: EmployeeActivityPro
   const events = employee.status_history || [];
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-      <Card>
-        <CardHeader><CardTitle>Employment activity</CardTitle><p className="mt-2 text-sm text-neutral-500">Authoritative lifecycle events recorded for this employee.</p></CardHeader>
-        <CardContent>
-          {events.length ? <ol className="space-y-4">{events.map((event) => <li key={event.id} className="grid gap-4 border-l-2 border-primary-100 pl-4 sm:grid-cols-[minmax(0,1fr)_auto]"><div><p className="font-semibold capitalize text-neutral-950">{event.event_type.replace('_', ' ')}</p><p className="mt-2 text-sm text-neutral-600">{event.previous_status} to {event.resulting_status}{event.reason_category ? ` · ${event.reason_category.replace('_', ' ')}` : ''}</p>{event.internal_notes && <p className="mt-2 text-sm leading-6 text-neutral-500">{event.internal_notes}</p>}</div><div className="text-sm text-neutral-500 sm:text-right"><p className="font-semibold text-neutral-700">Effective {formatDate(event.effective_date)}</p><p>{formatGuamDateTime(event.created_at)}</p>{event.actor_name && <p>by {event.actor_name}</p>}</div></li>)}</ol> : <p className="text-sm text-neutral-500">No termination or reactivation events have been recorded.</p>}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle>Classification history</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          {employee.classification_history?.previous_employee && <ClassificationLink label="Previous worker record" companyId={companyId} employee={employee.classification_history.previous_employee} returnTo={returnTo} />}
-          {employee.classification_history?.next_employee && <ClassificationLink label="Next worker record" companyId={companyId} employee={employee.classification_history.next_employee} returnTo={returnTo} />}
-          {!employee.classification_history?.previous_employee && !employee.classification_history?.next_employee && <p className="text-sm leading-6 text-neutral-500">No linked worker-classification transition is recorded.</p>}
-        </CardContent>
-      </Card>
+      <RecordActivityTimeline companyId={companyId} recordId={employee.id} recordType="employees" />
+      <div className="space-y-6">
+        <Card>
+          <CardHeader><CardTitle>Employment milestones</CardTitle><p className="mt-2 text-sm leading-6 text-neutral-500">Termination and reactivation events with their effective dates.</p></CardHeader>
+          <CardContent>
+            {events.length ? <ol className="space-y-4">{events.map((event) => <li key={event.id} className="border-l-2 border-primary-100 pl-4"><p className="font-semibold capitalize text-neutral-950">{event.event_type.replace('_', ' ')}</p><p className="mt-2 text-sm text-neutral-600">{event.previous_status} to {event.resulting_status}{event.reason_category ? ` · ${event.reason_category.replace('_', ' ')}` : ''}</p>{event.internal_notes && <p className="mt-2 text-sm leading-6 text-neutral-500">{event.internal_notes}</p>}<div className="mt-3 text-xs leading-5 text-neutral-500"><p className="font-semibold text-neutral-700">Effective {formatDate(event.effective_date)}</p><p>{formatGuamDateTime(event.created_at)}</p>{event.actor_name && <p>by {event.actor_name}</p>}</div></li>)}</ol> : <p className="text-sm leading-6 text-neutral-500">No termination or reactivation events have been recorded.</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Classification history</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {employee.classification_history?.previous_employee && <ClassificationLink label="Previous worker record" companyId={companyId} employee={employee.classification_history.previous_employee} returnTo={returnTo} />}
+            {employee.classification_history?.next_employee && <ClassificationLink label="Next worker record" companyId={companyId} employee={employee.classification_history.next_employee} returnTo={returnTo} />}
+            {!employee.classification_history?.previous_employee && !employee.classification_history?.next_employee && <p className="text-sm leading-6 text-neutral-500">No linked worker-classification transition is recorded.</p>}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -353,6 +353,7 @@ import type {
   User,
   CheckListResponse,
   CheckPrintQueueResponse,
+  CheckPrintGeneration,
   CheckPrintRun,
   CheckItem,
   CheckLayoutResponse,
@@ -752,6 +753,9 @@ export interface AuditLogEntry {
 export const auditLogsApi = {
   list: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -761,10 +765,13 @@ export const auditLogsApi = {
     per_page?: number;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) =>
+  }): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> =>
     api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params),
   exportCsv: (params?: {
     user_id?: number;
+    event_action?: string;
+    event_category?: string;
+    exclude_event_category?: string;
     action_filter?: string;
     record_type?: string;
     record_id?: number;
@@ -772,7 +779,20 @@ export const auditLogsApi = {
     to?: string;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }) => api.getBlobWithParams('/admin/audit_logs/export', params),
+  }): Promise<BlobDownload> => api.getBlobWithParams('/admin/audit_logs/export', params),
+};
+
+export const recordActivitiesApi = {
+  list: (
+    recordType: 'employees' | 'pay_periods',
+    recordId: number,
+    params: { page?: number; per_page?: number } = {},
+    companyId?: number,
+  ): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
+    `/admin/record_activities/${recordType}/${recordId}`,
+    params,
+    { companyId },
+  ),
 };
 
 // Tax Configs (Admin API)
@@ -1235,6 +1255,10 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  promotedPaymentPreview: (id: number) =>
+    api.get<{ promoted_payment: PromotedPaymentPreview }>(`/admin/pay_periods/${id}/promoted_payment_preview`),
+  preparePromotedPayment: (id: number, data: { acknowledgement: string; starting_check_number: string; check_date: string }) =>
+    api.post<{ promoted_payment: PromotedPaymentPreview; pay_period: PayPeriod }>(`/admin/pay_periods/${id}/prepare_promoted_payment`, data),
   correctPayDate: (id: number, data: { pay_date: string; reason: string }) =>
     api.patch<PayPeriodResponse & {
       correction: {
@@ -2205,6 +2229,7 @@ export interface PayrollReportPeriodParams {
   end_date?: string;
   all_time?: boolean;
   include_zero_pay?: boolean;
+  pay_run_key?: string;
 }
 
 export interface TaxSummaryReport {
@@ -2232,6 +2257,14 @@ export interface YtdSummaryReport {
     meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
     period: PayrollReportPeriod;
+    included_payroll_runs?: Array<{
+      key: string;
+      source: string;
+      status: string;
+      work_period_start: string;
+      work_period_end: string;
+      pay_date: string;
+    }>;
     employee_visibility?: { include_zero_pay: boolean; active_zero_pay_count: number; displayed_count: number };
     employees: {
       employee_id: number;
@@ -2317,6 +2350,7 @@ export interface YtdSummaryParams {
   employment_type?: string;
   status?: string;
   include_zero_pay?: boolean;
+  pay_run_key?: string;
   sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'custom_earnings_total' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'total_deductions' | 'custom_deductions_total' | 'net_pay';
   sort_direction?: 'asc' | 'desc';
 }
@@ -3156,6 +3190,19 @@ export const checksApi = {
   printQueue: (payPeriodId: number) =>
     api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
 
+  printRuns: (payPeriodId: number) =>
+    api.get<{ check_print_runs: CheckPrintRun[] }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`),
+
+  activePrintGeneration: (payPeriodId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration | null }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/active`
+    ),
+
+  printGeneration: (payPeriodId: number, generationId: number) =>
+    api.get<{ check_print_generation: CheckPrintGeneration }>(
+      `/admin/pay_periods/${payPeriodId}/check_print_generations/${generationId}`
+    ),
+
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
       starting_slot: startingSlot,
@@ -3170,13 +3217,23 @@ export const checksApi = {
     { changes, reason }
   ),
 
-  createPrintRun: (
+  createPrintGeneration: (
     payPeriodId: number,
-    data: { payrollItemIds: number[]; nonEmployeeCheckIds: number[]; startingSlot: number }
-  ) => api.post<{ check_print_run: CheckPrintRun }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`, {
+    data: {
+      idempotencyKey: string;
+      payrollItemIds: number[];
+      nonEmployeeCheckIds: number[];
+      startingSlot: number;
+      printerProfileId: number;
+      printerProfileLockVersion: number;
+    }
+  ) => api.post<{ check_print_generation: CheckPrintGeneration }>(`/admin/pay_periods/${payPeriodId}/check_print_generations`, {
+    idempotency_key: data.idempotencyKey,
     payroll_item_ids: data.payrollItemIds,
     non_employee_check_ids: data.nonEmployeeCheckIds,
     starting_slot: data.startingSlot,
+    printer_profile_id: data.printerProfileId,
+    printer_profile_lock_version: data.printerProfileLockVersion,
   }),
 
   printRunPdf: (runId: number, disposition: 'inline' | 'attachment' = 'inline') =>
@@ -3277,15 +3334,19 @@ export const checksApi = {
       `/admin/companies/check_layout${checkStockType ? `?check_stock_type=${encodeURIComponent(checkStockType)}` : ''}`
     ),
 
-  updateSettings: (settings: Partial<CheckSettings>) =>
+  updateSettings: (settings: Partial<CheckSettings> & { printer_profile_lock_version?: number | null }) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/check_settings', settings),
 
   updateNextCheckNumber: (next_check_number: number) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/next_check_number', { next_check_number }),
 
   // Download alignment test PDF through authenticated API client
-  alignmentTestPdf: () =>
-    api.getBlob('/admin/companies/alignment_test_pdf'),
+  alignmentTestPdf: (checkSettings: {
+    check_stock_type: CheckStockType;
+    check_offset_x: number;
+    check_offset_y: number;
+    check_layout_config: Record<string, unknown>;
+  }) => api.postBlob('/admin/companies/alignment_test_pdf', { check_settings: checkSettings }),
   testCheckPdf: (data: {
     sample_type: 'payroll' | 'fit' | 'grt' | 'vendor';
     check_settings: {
@@ -3332,19 +3393,47 @@ export interface PrinterProfile {
   check_offset_y: number;
   check_layout_config: Record<string, unknown>;
   is_default: boolean;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  updated_by_id: number | null;
+  updated_by_name: string | null;
+  selection_count: number;
+  selected_for_current_user: boolean;
+  owned_by_current_user: boolean;
+  can_edit: boolean;
+  can_update_calibration: boolean;
+  can_archive: boolean;
+  calibration_locked: boolean;
+  source_profile_id: number | null;
+  revision_number: number;
+  lock_version: number;
   created_at: string;
+  updated_at: string;
+}
+
+export interface PrinterProfileSelection {
+  id: number;
+  check_stock_type: PrinterProfile['check_stock_type'];
+  printer_profile_id: number;
+  printer_profile_name: string;
   updated_at: string;
 }
 
 export const printerProfilesApi = {
   list: () =>
-    api.get<{ printer_profiles: PrinterProfile[]; active_printer_profile_id: number | null }>('/admin/printer_profiles'),
+    api.get<{
+      printer_profiles: PrinterProfile[];
+      selections: PrinterProfileSelection[];
+      active_printer_profile_id: number | null;
+    }>('/admin/printer_profiles'),
   get: (id: number) =>
     api.get<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`),
   create: (data: Partial<PrinterProfile>) =>
     api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
   update: (id: number, data: Partial<PrinterProfile>) =>
     api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
+  clone: (id: number, name?: string): Promise<{ printer_profile: PrinterProfile }> =>
+    api.post<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}/clone`, name ? { name } : undefined),
   delete: (id: number) =>
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
@@ -3353,6 +3442,12 @@ export const printerProfilesApi = {
     api.post<{ printer_profile: PrinterProfile; applied_count: number; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply_to_all_companies`),
   clearActive: () =>
     api.post<{ check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>('/admin/printer_profiles/clear_active'),
+  selectForMe: (checkStockType: PrinterProfile['check_stock_type'], printerProfileId: number) =>
+    api.put<{ selection: PrinterProfileSelection }>(`/admin/printer_profile_selections/${checkStockType}`, {
+      printer_profile_id: printerProfileId,
+    }),
+  clearSelection: (checkStockType: PrinterProfile['check_stock_type']) =>
+    api.delete<void>(`/admin/printer_profile_selections/${checkStockType}`),
 };
 
 // ============================================================
@@ -3368,6 +3463,15 @@ export interface CompanyListItem {
   historical_payroll_enabled: boolean;
   client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
+  test_workspace?: boolean;
+  test_workspace_purpose?: 'sandbox' | 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
+  test_workspace_purpose_label?: string;
+  test_workspace_manifest?: Record<string, unknown>;
+  test_workspace_expires_at?: string | null;
+  test_workspace_archived_at?: string | null;
+  test_workspace_sealed_at?: string | null;
+  test_workspace_expired?: boolean;
+  test_workspace_read_only?: boolean;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;
@@ -3393,6 +3497,123 @@ export interface MigrationRehearsalPreview {
     historical_adjustments?: number;
     ytd_balance_rows?: number;
   };
+}
+
+export interface TrainingReplayPreview {
+  source_company: { id: number; name: string };
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  existing_replay?: { id: number; name: string; status: 'pending' | 'ready' | 'failed' } | null;
+  practice_periods: Array<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: 'calculated' | 'approved' | 'committed';
+    employee_count: number;
+  }>;
+  copy_summary: {
+    employees: number;
+    active_employees: number;
+    baseline_pay_periods: number;
+    practice_pay_periods: number;
+  };
+  assignable_staff: Array<{
+    id: number;
+    name: string;
+    email: string;
+    role: 'manager' | 'accountant';
+  }>;
+}
+
+export type TestWorkspaceCopyMode = 'setup_only' | 'all_committed' | 'exclude_recent' | 'through_pay_period';
+
+export interface TestWorkspacePreview {
+  source_company: { id: number; name: string };
+  ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  copy_mode: TestWorkspaceCopyMode;
+  excluded_payrolls: number;
+  cutoff_pay_period_id: number | null;
+  copy_summary: {
+    employees: number;
+    active_employees: number;
+    committed_payrolls_available: number;
+    payrolls_to_copy: number;
+    recent_payrolls_excluded: number;
+    open_payrolls_not_copied: number;
+    other_open_payrolls_not_copied: number;
+  };
+  recent_payrolls: Array<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: 'draft' | 'calculated' | 'approved' | 'committed';
+    employee_count: number;
+  }>;
+  assignable_staff: Array<{
+    id: number;
+    name: string;
+    email: string;
+    role: 'manager' | 'accountant';
+  }>;
+}
+
+export interface MigrationPromotionPeriod {
+  id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  status: 'draft' | 'calculated' | 'approved' | 'committed';
+  employee_count: number;
+  gross_pay: number | string;
+  net_pay: number | string;
+}
+
+export type PromotionPaymentDisposition = 'record_only' | 'process_in_cornerstone';
+
+export interface MigrationPromotionPreview {
+  rehearsal: { id: number; name: string; status: 'pending' | 'ready' | 'failed'; employee_count: number };
+  target_company: { id: number; name: string; status: 'pending' | 'ready' | 'failed' | null; employee_count: number } | null;
+  ready_to_back_up: boolean;
+  ready_to_apply: boolean;
+  blockers: string[];
+  warnings: string[];
+  employee_mapping: {
+    matched: number;
+    new: number;
+    blockers: string[];
+  };
+  source_periods: MigrationPromotionPeriod[];
+  replaceable_drafts: MigrationPromotionPeriod[];
+  backup: {
+    id: number;
+    name: string;
+    status: 'pending' | 'ready' | 'failed';
+    employee_count: number;
+    current: boolean;
+  } | null;
+}
+
+export interface PromotedPaymentPreview {
+  eligible: boolean;
+  blockers: string[];
+  pay_period_id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  paper_check_count: number;
+  paper_check_total: number | string;
+  direct_deposit_count: number;
+  current_next_check_number: number;
+  suggested_first_check_number: string | null;
+  suggested_last_check_number: string | null;
+  prepared_at: string | null;
+  prepared_by_name: string | null;
+  already_prepared?: boolean;
 }
 
 export interface CompanyDetail extends CompanyListItem {
@@ -3458,6 +3679,7 @@ interface AuthApiUser {
   company_name: string;
   home_company_id: number;
   assigned_company_ids: number[];
+  capabilities: string[];
 }
 
 export const companiesApi = {
@@ -3477,6 +3699,52 @@ export const companiesApi = {
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_rehearsal`, input),
   retryMigrationRehearsal: (id: number) =>
     api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_migration_rehearsal`),
+  trainingReplayPreview: (id: number) =>
+    api.get<{ training_replay: TrainingReplayPreview }>(`/admin/companies/${id}/training_replay_preview`),
+  createTrainingReplay: (id: number, input: {
+    name?: string;
+    acknowledgement: string;
+    assignments: Array<{ user_id: number; workspace_access_level: 'operator' | 'reviewer' | 'workspace_admin' }>;
+  }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/training_replay`, input),
+  retryTrainingReplay: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_training_replay`),
+  testWorkspacePreview: (id: number, input: {
+    copy_mode: TestWorkspaceCopyMode;
+    excluded_payrolls?: number;
+    cutoff_pay_period_id?: number;
+  }) => {
+    const query = new URLSearchParams({ copy_mode: input.copy_mode });
+    if (input.excluded_payrolls !== undefined) query.set('excluded_payrolls', String(input.excluded_payrolls));
+    if (input.cutoff_pay_period_id !== undefined) query.set('cutoff_pay_period_id', String(input.cutoff_pay_period_id));
+    return api.get<{ test_workspace: TestWorkspacePreview }>(`/admin/companies/${id}/test_workspace_preview?${query.toString()}`);
+  },
+  createTestWorkspace: (id: number, input: {
+    name?: string;
+    copy_mode: TestWorkspaceCopyMode;
+    excluded_payrolls?: number;
+    cutoff_pay_period_id?: number;
+    expiration_days: 30 | 60 | 90 | 180;
+    acknowledgement: string;
+    assignments: Array<{ user_id: number; workspace_access_level: 'operator' | 'reviewer' | 'workspace_admin' }>;
+  }) => api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/test_workspace`, input),
+  retryTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/retry_test_workspace`),
+  archiveTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/archive_test_workspace`),
+  restoreTestWorkspace: (id: number) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/restore_test_workspace`),
+  migrationPromotionPreview: (id: number) =>
+    api.get<{ migration_promotion: MigrationPromotionPreview }>(`/admin/companies/${id}/migration_promotion_preview`),
+  createMigrationPromotionBackup: (id: number, acknowledgement: string) =>
+    api.post<{ company: CompanyDetail }>(`/admin/companies/${id}/migration_promotion_backup`, { acknowledgement }),
+  applyMigrationPromotion: (
+    id: number,
+    acknowledgement: string,
+    paymentDispositions: Record<number, PromotionPaymentDisposition>,
+  ) => api.post<{ company: CompanyDetail; promoted_pay_period_ids: number[] }>(`/admin/companies/${id}/migration_promotion`, {
+    acknowledgement,
+    payment_dispositions: paymentDispositions,
+  }),
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));
@@ -3706,13 +3974,18 @@ export interface CompanyAssignment {
   user_email: string;
   company_id: number;
   company_name: string;
+  test_workspace: boolean;
+  workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin' | null;
+  expires_at?: string | null;
+  granted_by_id?: number | null;
+  granted_by_name?: string | null;
   created_at: string;
 }
 
 export const companyAssignmentsApi = {
   list: (userId?: number) =>
     api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
-  create: (data: { user_id: number; company_id: number }) =>
+  create: (data: { user_id: number; company_id: number; workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin'; expires_at?: string }) =>
     api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
   remove: (id: number) =>
     api.delete(`/admin/company_assignments/${id}`),
@@ -5082,6 +5355,7 @@ export interface PayrollHistoryRecord {
   includes_recurring_items: boolean;
   correction_status?: import('@/types').CorrectionStatus | null;
   parallel_run?: boolean;
+  test_workspace_role?: 'baseline' | 'practice' | null;
   notes?: string | null;
   compliance_warnings?: string[];
   employee_count: number;

@@ -1,6 +1,25 @@
 # frozen_string_literal: true
 
 class PayPeriodComparisonBuilder
+  SnapshotItem = Struct.new(
+    :employee_id,
+    :employee_full_name,
+    :employment_type,
+    :gross_pay,
+    :net_pay,
+    :withholding_tax,
+    :social_security_tax,
+    :medicare_tax,
+    :total_deductions,
+    :reported_tips,
+    :tips_paid_out,
+    :loan_deduction,
+    :loan_payment,
+    :hours_worked,
+    :salary_override,
+    :employee,
+    keyword_init: true
+  )
   MONEY_FIELDS = {
     gross_pay: :gross_pay,
     net_pay: :net_pay,
@@ -28,17 +47,23 @@ class PayPeriodComparisonBuilder
     employee_changes = @previous_period ? employee_changes_payload(current_items, previous_items) : []
 
     {
+      comparison_kind: training_benchmark? ? "training_benchmark" : "previous_period",
       current_pay_period: period_payload(@pay_period),
       previous_pay_period: @previous_period ? period_payload(@previous_period) : nil,
       summary: summary_payload(current_items, previous_items),
       employee_changes: employee_changes,
-      review_flags: review_flags_payload(employee_changes)
+      review_flags: review_flags_payload(employee_changes),
+      benchmark: benchmark_payload
     }
   end
 
   private
 
   def previous_period
+    if training_benchmark?
+      return @pay_period.training_replay_benchmark || @pay_period.test_workspace_source_pay_period
+    end
+
     PayPeriod
       .reportable_committed
       .regular_cycle
@@ -50,6 +75,18 @@ class PayPeriodComparisonBuilder
   end
 
   def period_payload(period)
+    if period.is_a?(TrainingReplayBenchmark)
+      snapshot = period.period_snapshot
+      return {
+        id: snapshot.fetch("id"),
+        start_date: snapshot.fetch("start_date"),
+        end_date: snapshot.fetch("end_date"),
+        pay_date: snapshot.fetch("pay_date"),
+        status: snapshot.fetch("status"),
+        period_description: snapshot.fetch("period_description")
+      }
+    end
+
     {
       id: period.id,
       start_date: period.start_date,
@@ -61,6 +98,28 @@ class PayPeriodComparisonBuilder
   end
 
   def comparison_items(period)
+    if period.is_a?(TrainingReplayBenchmark)
+      return period.item_snapshots.map do |item|
+        SnapshotItem.new(
+          employee_id: item.fetch("source_employee_id"),
+          employee_full_name: item.fetch("employee_name"),
+          employment_type: item["employment_type"],
+          gross_pay: item["gross_pay"],
+          net_pay: item["net_pay"],
+          withholding_tax: item["withholding_tax"],
+          social_security_tax: item["social_security_tax"],
+          medicare_tax: item["medicare_tax"],
+          total_deductions: item["total_deductions"],
+          reported_tips: item["reported_tips"],
+          tips_paid_out: item["tips_paid_out"],
+          loan_deduction: item["loan_deduction"],
+          loan_payment: item["loan_payment"],
+          hours_worked: item["hours_worked"],
+          salary_override: item["salary_override"]
+        )
+      end
+    end
+
     period.payroll_items
       .not_voided
       .includes(employee: :department)
@@ -93,14 +152,14 @@ class PayPeriodComparisonBuilder
   end
 
   def employee_changes_payload(current_items, previous_items)
-    current_by_employee = current_items.index_by(&:employee_id)
+    current_by_employee = current_items.index_by { |item| comparison_employee_id(item, current: true) }
     previous_by_employee = previous_items.index_by(&:employee_id)
     employee_ids = (current_by_employee.keys + previous_by_employee.keys).uniq
 
     employee_ids.filter_map do |employee_id|
       current_item = current_by_employee[employee_id]
       previous_item = previous_by_employee[employee_id]
-      employee = current_item&.employee || previous_item&.employee
+      employee = current_item&.employee || training_employee_for(employee_id) || previous_item&.employee
       change_type = if current_item && previous_item
         "changed"
       elsif current_item
@@ -114,7 +173,7 @@ class PayPeriodComparisonBuilder
       next if change_type == "changed" && flags.empty?
 
       {
-        employee_id: employee_id,
+        employee_id: current_item&.employee_id || employee&.id || employee_id,
         employee_name: employee&.full_name || current_item&.employee_full_name || previous_item&.employee_full_name,
         department_name: employee&.department&.name,
         employment_type: current_item&.employment_type || previous_item&.employment_type,
@@ -153,8 +212,18 @@ class PayPeriodComparisonBuilder
 
   def employee_flags(employee, current_item, previous_item, deltas, change_type)
     flags = []
-    flags << flag("new_employee", "Employee is included this period but was not in the previous committed period.", "review") if change_type == "new"
-    flags << flag("missing_employee", "Employee was in the previous committed period but is missing from this period.", "warning") if change_type == "missing"
+    if change_type == "new"
+      message = training_benchmark? ?
+        "Employee is included in this practice payroll but was not in the training benchmark." :
+        "Employee is included this period but was not in the previous committed period."
+      flags << flag("new_employee", message, "review")
+    end
+    if change_type == "missing"
+      message = training_benchmark? ?
+        "Employee is in the training benchmark but is missing from this practice payroll." :
+        "Employee was in the previous committed period but is missing from this period."
+      flags << flag("missing_employee", message, "warning")
+    end
 
     if current_item && previous_item
       [
@@ -173,7 +242,10 @@ class PayPeriodComparisonBuilder
       if decimal(current_item.salary_override) <= 0
         flags << flag("variable_salary_missing", "Variable salary employee has no positive period pay entered.", "warning")
       elsif previous_item && decimal(current_item.salary_override) != decimal(previous_item.salary_override)
-        flags << flag("variable_salary_changed", "Variable salary period pay changed from the previous committed period.", "review")
+        message = training_benchmark? ?
+          "Variable salary period pay differs from the training benchmark." :
+          "Variable salary period pay changed from the previous committed period."
+        flags << flag("variable_salary_changed", message, "review")
       end
     end
 
@@ -200,13 +272,47 @@ class PayPeriodComparisonBuilder
       warning_count: warnings,
       review_count: reviews,
       message: if warnings.positive?
-        "Review required before approval."
-      elsif reviews.positive?
-        "Review recommended before approval."
-      else
-        "No material period-to-period changes detected."
-      end
+                 "Review required before approval."
+               elsif reviews.positive?
+                 "Review recommended before approval."
+               else
+                 "No material period-to-period changes detected."
+               end
     }
+  end
+
+  def training_benchmark?
+    @pay_period.training_practice? && @pay_period.test_workspace_source_pay_period.present?
+  end
+
+  def benchmark_payload
+    return nil unless training_benchmark?
+
+    snapshot = @pay_period.training_replay_benchmark
+    return { mode: "live_legacy", immutable: false } unless snapshot
+
+    {
+      mode: "immutable_snapshot",
+      immutable: true,
+      captured_at: snapshot.captured_at,
+      source_status: snapshot.source_status,
+      sha256: snapshot.sha256
+    }
+  end
+
+  def comparison_employee_id(item, current:)
+    return item.employee_id unless current && training_benchmark?
+
+    item.employee.test_workspace_source_employee_id || item.employee_id
+  end
+
+  def training_employee_for(source_employee_id)
+    return unless training_benchmark?
+
+    @training_employees_by_source ||= @pay_period.company.employees
+      .where.not(test_workspace_source_employee_id: nil)
+      .index_by(&:test_workspace_source_employee_id)
+    @training_employees_by_source[source_employee_id]
   end
 
   def material_delta?(delta_number, previous_number)

@@ -135,6 +135,15 @@ function ManagerOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function CapabilityRoute({ children, capability }: { children: React.ReactNode; capability: string }) {
+  const { hasCapability, isLoading } = useAuth();
+
+  if (isLoading) return <PageLoader />;
+  if (!hasCapability(capability)) return <Navigate to="/app" replace />;
+
+  return <>{children}</>;
+}
+
 function SuperAdminOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isSuperAdmin, isLoading } = useAuth();
 
@@ -347,7 +356,7 @@ function AppRoutes() {
         <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<ManagerOnlyRoute><AdminEmployeeChangeRequestsPage /></ManagerOnlyRoute>} />
-        <Route path="check-settings" element={<ManagerOnlyRoute><CheckSettingsPage /></ManagerOnlyRoute>} />
+        <Route path="check-settings" element={<CapabilityRoute capability="use_printer_profiles"><CheckSettingsPage /></CapabilityRoute>} />
         <Route path="payroll-reminders" element={<ManagerOnlyRoute><PayrollReminders /></ManagerOnlyRoute>} />
         <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
         <Route path="pay-schedule-settings" element={<ManagerOnlyRoute><PayScheduleSettings /></ManagerOnlyRoute>} />

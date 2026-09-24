@@ -16,6 +16,7 @@ module Api
                       :corrective_paychecks, :adopt_confirmed_workweek
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
+          :promoted_payment_preview, :prepare_promoted_payment,
           :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs, :client_review, :record_client_approval
@@ -121,8 +122,16 @@ module Api
 
         # PATCH/PUT /api/v1/admin/pay_periods/:id
         def update
+          @pay_period_audit_before_values = AuditRecordSnapshot.values_for(@pay_period)
+
           unless @pay_period.can_edit?
-            message = @pay_period.voided? ? "Cannot edit a voided pay period" : "Cannot edit a committed pay period"
+            message = if @pay_period.voided?
+              "Cannot edit a voided pay period"
+            elsif @pay_period.training_baseline?
+              "Copied payroll history is locked reference evidence"
+            else
+              "Cannot edit a committed pay period"
+            end
             return render json: { error: message }, status: :unprocessable_entity
           end
 
@@ -450,9 +459,14 @@ module Api
               )
             end
             @pay_period.update!(calculation_attributes)
-            PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
+            @payroll_review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
             @pay_period.invalidate_later_rehearsal_calculations!
           end
+
+          # Preserve the request outcome for the after-action audit hook. The
+          # review revision service reloads the pay period, so saved_changes is
+          # not a reliable description of what this request accomplished.
+          @payroll_audit_results = results
 
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true),
@@ -464,6 +478,12 @@ module Api
 
         # GET /api/v1/admin/pay_periods/:id/comparison
         def comparison
+          if @pay_period.training_practice? && @pay_period.draft?
+            return render json: {
+              error: "Calculate this practice payroll before revealing its training benchmark"
+            }, status: :unprocessable_entity
+          end
+
           render json: PayPeriodComparisonBuilder.new(@pay_period).call
         end
 
@@ -524,6 +544,39 @@ module Api
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue PayPeriodLifecycleService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/pay_periods/:id/promoted_payment_preview
+        # Read-only verification for a promoted payroll that was recorded as
+        # historical but is actually unpaid and must issue paper checks here.
+        def promoted_payment_preview
+          preview = MigrationPromotion::PreparePaymentIssuance.new(
+            pay_period: @pay_period,
+            actor: current_user
+          ).preview
+          render json: { promoted_payment: preview }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/prepare_promoted_payment
+        # Assigns paper-check numbers exactly once without replaying the YTD,
+        # loan, or liability effects already recorded by promotion.
+        def prepare_promoted_payment
+          result = MigrationPromotion::PreparePaymentIssuance.new(
+            pay_period: @pay_period,
+            actor: current_user,
+            acknowledgement: params[:acknowledgement],
+            starting_check_number: params[:starting_check_number],
+            check_date: params[:check_date],
+            ip_address: request.remote_ip
+          ).call
+          render json: {
+            promoted_payment: result,
+            pay_period: pay_period_json(@pay_period.reload, include_items: true)
+          }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -601,24 +654,35 @@ module Api
               actor:      current_user,
               reason:     reason
             )
+            @pay_period.reload
 
             begin
+              changes = audit_record_changes
               AuditLog.record!(
                 user:        current_user,
                 company_id:  current_company_id,
                 action:      "void_pay_period",
                 record_type: "PayPeriod",
                 record_id:   @pay_period.id,
-                metadata:    { reason: reason, voided_at: event.created_at },
+                subject_name: AuditRecordSnapshot.subject_name(@pay_period),
+                metadata:    {
+                  changed_fields: changes[:changed_fields],
+                  before_values: changes[:before_values].presence,
+                  after_values: changes[:after_values].presence,
+                  redacted_fields: changes[:redacted_fields].presence,
+                  reason: reason,
+                  voided_at: event.created_at,
+                  business_summary: pay_period_business_summary(@pay_period)
+                }.compact,
                 ip_address:  request.remote_ip,
-                user_agent:  request.user_agent
+                user_agent:  request.user_agent,
+                request_id:  request.request_id
               )
               skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
 
-            @pay_period.reload
             render json: {
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)
@@ -849,6 +913,57 @@ module Api
 
         private
 
+        def audit_record
+          @pay_period
+        end
+
+        def audit_record_changes
+          return AuditRecordSnapshot.changes_for(@pay_period) unless @pay_period_audit_before_values
+
+          AuditRecordSnapshot.changes_from(@pay_period, @pay_period_audit_before_values)
+        end
+
+        def audit_record_metadata(record)
+          return {} unless record.is_a?(PayPeriod)
+          return {} unless %w[run_payroll approve unapprove commit void].include?(action_name)
+
+          summary = pay_period_business_summary(record)
+          if action_name == "run_payroll" && defined?(@payroll_audit_results) && @payroll_audit_results
+            summary[:employees_processed] = @payroll_audit_results.fetch(:success, []).size
+            summary[:employees_failed] = @payroll_audit_results.fetch(:errors, []).size
+            summary[:outcome] = summary[:employees_failed].positive? ? "partial" : "completed"
+          end
+
+          metadata = { business_summary: summary }
+          if action_name == "run_payroll" && defined?(@payroll_review_package) && @payroll_review_package
+            metadata[:review_revision] = {
+              id: @payroll_review_package.id,
+              revision: @payroll_review_package.revision,
+              calculation_checksum: @payroll_review_package.calculation_checksum
+            }
+          end
+          metadata
+        end
+
+        def pay_period_business_summary(record)
+          aggregates = record.payroll_items.not_voided.pick(
+            Arel.sql("COUNT(*)"),
+            Arel.sql("COALESCE(SUM(gross_pay), 0)"),
+            Arel.sql("COALESCE(SUM(total_deductions), 0)"),
+            Arel.sql("COALESCE(SUM(employer_social_security_tax), 0)"),
+            Arel.sql("COALESCE(SUM(employer_medicare_tax), 0)"),
+            Arel.sql("COALESCE(SUM(net_pay), 0)")
+          )
+          {
+            status: record.status,
+            employee_count: aggregates[0].to_i,
+            total_gross: aggregates[1].to_d.to_s("F"),
+            total_deductions: aggregates[2].to_d.to_s("F"),
+            employer_payroll_taxes: (aggregates[3].to_d + aggregates[4].to_d).to_s("F"),
+            total_net: aggregates[5].to_d.to_s("F")
+          }
+        end
+
         def with_financial_pay_period_lock
           ApplicationRecord.transaction do
             Company.lock.find(@pay_period.company_id)
@@ -1001,6 +1116,11 @@ module Api
                       :correction_events, :supplemental_pay_periods)
             .find(params[:id])
 
+          # Capture the business record before custom lifecycle actions run.
+          # Several services reload the model, which clears saved_changes even
+          # though the request made a meaningful state transition.
+          @pay_period_audit_before_values = AuditRecordSnapshot.values_for(@pay_period)
+
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
           end
@@ -1052,6 +1172,13 @@ module Api
             includes_recurring_items: pay_period.includes_recurring_items,
             run_purpose_source: pay_period.run_purpose_source,
             parallel_run: pay_period.parallel_run,
+            test_workspace_role: pay_period.test_workspace_role,
+            test_workspace_source_pay_period_id: pay_period.test_workspace_source_pay_period_id,
+            promotion_source_pay_period_id: pay_period.promotion_source_pay_period_id,
+            promotion_payment_disposition: pay_period.promotion_payment_disposition,
+            promoted_payment_prepared_at: pay_period.promoted_payment_prepared_at,
+            promoted_payment_prepared_by_id: pay_period.promoted_payment_prepared_by_id,
+            training_baseline_locked: pay_period.training_baseline?,
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,
