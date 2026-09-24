@@ -504,7 +504,7 @@ module TimeTracking
     end
 
     def require_secure_payroll_transport!(uri)
-      return if uri.scheme == "https" || development_loopback?(uri)
+      return if uri.scheme == "https" || development_loopback?(uri) || @destination_policy.staging_private_destination?(uri)
 
       raise Error, "AIRE payroll actions and account linking require HTTPS"
     end

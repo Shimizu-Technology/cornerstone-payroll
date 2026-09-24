@@ -120,6 +120,23 @@ RSpec.describe TimeTracking::Client do
       expect(request).not_to have_been_requested
     end
 
+    it "permits the exact private AIRE service only under the production staging guards" do
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "production",
+        env: {
+          "DEPLOYMENT_ENV" => "staging",
+          "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
+          "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
+        },
+        resolver: ->(_host) { [ "172.24.0.8" ] }
+      )
+      client = client_for(source, policy: policy)
+      private_uri = URI.parse("http://aire-api:3000/api/v1/payroll/cockpit/manual_review")
+
+      expect { client.send(:require_secure_payroll_transport!, private_uri) }.not_to raise_error
+      expect(policy.resolve_public_addresses!(private_uri)).to eq([ "172.24.0.8" ])
+    end
+
     it "reads a period and literal time entries with bounded query parameters" do
       period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
         .with(headers: { "X-Payroll-Shared-Secret" => "secret" })

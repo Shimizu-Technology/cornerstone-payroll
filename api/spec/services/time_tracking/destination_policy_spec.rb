@@ -91,4 +91,46 @@ RSpec.describe TimeTracking::DestinationPolicy do
 
     expect(policy.resolve_public_addresses!(uri("http://localhost:3001/api"))).to eq([ "127.0.0.1" ])
   end
+
+  it "allows only an explicitly named private Docker service in staging" do
+    env = {
+      "DEPLOYMENT_ENV" => "staging",
+      "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
+      "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
+    }
+    policy = described_class.new(
+      environment: "production",
+      env: env,
+      resolver: ->(_host) { [ "172.24.0.8" ] }
+    )
+
+    target = uri("http://aire-api:3000/api/v1/payroll/cockpit/periods/1")
+    expect(policy.validate_configuration!(target)).to eq(target)
+    expect(policy.resolve_public_addresses!(target)).to eq([ "172.24.0.8" ])
+  end
+
+  it "rejects public, loopback, wrong-port, and wrong-host staging HTTP destinations" do
+    env = {
+      "DEPLOYMENT_ENV" => "staging",
+      "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
+      "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
+    }
+
+    expect do
+      described_class.new(environment: "production", env: env)
+        .validate_configuration!(uri("http://other-api:3000"))
+    end.to raise_error(described_class::Error, /HTTPS/)
+    expect do
+      described_class.new(environment: "production", env: env)
+        .validate_configuration!(uri("http://aire-api:3001"))
+    end.to raise_error(described_class::Error, /HTTPS/)
+    expect do
+      described_class.new(environment: "production", env: env, resolver: ->(*) { [ "127.0.0.1" ] })
+        .resolve_public_addresses!(uri("http://aire-api:3000"))
+    end.to raise_error(described_class::Error, /private container address/)
+    expect do
+      described_class.new(environment: "production", env: env, resolver: ->(*) { [ "8.8.8.8" ] })
+        .resolve_public_addresses!(uri("http://aire-api:3000"))
+    end.to raise_error(described_class::Error, /private container address/)
+  end
 end
