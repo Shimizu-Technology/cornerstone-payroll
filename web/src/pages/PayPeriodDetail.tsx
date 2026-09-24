@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
-import { AlertTriangle, ArrowRight, Loader2, LockKeyhole, MailCheck, ShieldCheck, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ChevronDown, Loader2, LockKeyhole, MailCheck, ShieldCheck, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -3415,10 +3415,22 @@ export function PayPeriodDetail({
 
         {/* Timecard OCR Panel — for draft pay periods */}
         {isDraft && (
-          <TimecardOcrPanel
-            payPeriodId={payPeriod.id}
-            onPayrollUpdated={handlePayrollItemApplied}
-          />
+          <details className="group overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 [&::-webkit-details-marker]:hidden">
+              <span>
+                <span className="block font-semibold text-neutral-900">Timecard OCR</span>
+                <span className="mt-1 block text-xs text-neutral-500">Optional image or PDF timecards</span>
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="border-t border-neutral-200">
+              <TimecardOcrPanel
+                payPeriodId={payPeriod.id}
+                onPayrollUpdated={handlePayrollItemApplied}
+                showHeader={false}
+              />
+            </div>
+          </details>
         )}
 
         {/* Non-Employee Checks — for committed pay periods */}

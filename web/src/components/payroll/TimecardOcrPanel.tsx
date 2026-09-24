@@ -1278,9 +1278,10 @@ function Pagination({ page, totalPages, totalCount, onPageChange }: {
 }
 
 // ──── Main Panel ───────────────────────────────────────
-export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
+export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated, showHeader = true }: {
   payPeriodId?: number;
   onPayrollUpdated?: (payrollItem?: PayrollItem) => void;
+  showHeader?: boolean;
 }) {
   const isStandalone = !payPeriodId;
   const [timecards, setTimecards] = useState<TimecardData[]>([]);
@@ -1485,12 +1486,12 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
 
   return (
     <Card>
-      <div className="p-4 border-b bg-indigo-50">
+      {showHeader && <div className="p-4 border-b bg-indigo-50">
         <h3 className="font-semibold text-indigo-900">Timecard OCR</h3>
         <p className="text-sm text-indigo-700 mt-1">
           Upload timecard images or PDFs. GPT will extract punch times for review.
         </p>
-      </div>
+      </div>}
 
       <div className="p-4 space-y-4">
         <UploadSection payPeriodId={payPeriodId} onUploaded={() => { if (isStandalone) setPage(1); loadTimecards(); }} />

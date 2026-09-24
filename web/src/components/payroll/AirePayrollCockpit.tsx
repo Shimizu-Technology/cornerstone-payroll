@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   FilePenLine,
   History,
@@ -303,6 +304,7 @@ export function AirePayrollCockpit({
   const [exceptions, setExceptions] = useState<AirePayrollExceptionsResponse | null>(null);
   const [settlementCases, setSettlementCases] = useState<AirePayrollSettlementCasesResponse | null>(null);
   const [view, setView] = useState<View>('timecards');
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -428,6 +430,16 @@ export function AirePayrollCockpit({
     ? overview.readiness.held_hours ?? Math.max(0, overview.readiness.total_hours - overview.readiness.eligible_hours)
     : 0;
   const canCommand = overview?.command_access.can_command === true;
+  const finalized = calendar.finalized_batch?.verification_status === 'verified';
+  const attention = overview ? [
+    overview.readiness.pending_approvals > 0 ? `${overview.readiness.pending_approvals} time approval${overview.readiness.pending_approvals === 1 ? '' : 's'}` : null,
+    overview.readiness.pending_overtime > 0 ? `${overview.readiness.pending_overtime} overtime approval${overview.readiness.pending_overtime === 1 ? '' : 's'}` : null,
+    overview.readiness.missing_punches > 0 ? `${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}` : null,
+    unmappedCount > 0 ? `${unmappedCount} employee match${unmappedCount === 1 ? '' : 'es'}` : null,
+  ].filter(Boolean) : [];
+  const sourceError = refreshError || calendar.finalized_batch?.last_error
+    || calendar.publication?.last_error || (!calendar.eligible ? calendar.eligibility_error : null);
+  const summaryError = detailsOpen ? null : sourceError;
 
   const submitReview = async () => {
     if (!review || reason.trim().length < 3) return;
@@ -572,6 +584,48 @@ export function AirePayrollCockpit({
 
   return (
     <div className="space-y-4">
+      <Card className="overflow-hidden border-neutral-200">
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-display text-lg font-bold text-neutral-950">AIRE time</h3>
+                <Badge variant={finalized ? 'success' : calendar.cutoff_state === 'batch_rejected' || calendar.cutoff_state === 'publication_failed' ? 'danger' : 'info'}>
+                  {finalized ? 'Final batch verified' : calendar.cutoff_state.replaceAll('_', ' ')}
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm text-neutral-600">
+                {finalized ? 'Review the final cutoff against this payroll and its payment history.' : 'Review live hours before calculating payroll.'}
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="outline" aria-expanded={detailsOpen} aria-controls="aire-payroll-details" onClick={() => setDetailsOpen((open) => !open)}>
+              {detailsOpen ? 'Hide AIRE details' : 'Review AIRE details'}
+              <ChevronDown className={`ml-2 h-4 w-4 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </Button>
+          </div>
+          <div className="grid border-t border-neutral-200 bg-neutral-50/70 sm:grid-cols-3 sm:divide-x sm:divide-neutral-200" aria-live="polite">
+            <div className="px-5 py-4 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE cutoff</p>
+              <p className="mt-1 text-sm font-semibold text-neutral-950">{calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not scheduled'}</p>
+            </div>
+            <div className="border-t border-neutral-200 px-5 py-4 sm:border-t-0 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{finalized ? 'Included at cutoff' : payPeriodStatus === 'committed' ? 'Eligible AIRE time' : 'Ready for payroll'}</p>
+              <p className="mt-1 font-display text-xl font-bold tabular-nums text-neutral-950">{overview ? `${Number(overview.readiness.eligible_hours).toFixed(2)} hrs` : '—'}</p>
+            </div>
+            <div className="border-t border-neutral-200 px-5 py-4 sm:border-t-0 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Held or unresolved</p>
+              <p className="mt-1 font-display text-xl font-bold tabular-nums text-neutral-950">{overview ? `${heldHours.toFixed(2)} hrs` : '—'}</p>
+            </div>
+          </div>
+          {(attention.length > 0 || summaryError) && (
+            <div className="border-t border-warning-200 bg-warning-50 px-5 py-3 text-sm text-warning-950 sm:px-6" role={summaryError ? 'alert' : 'status'}>
+              {summaryError || `Needs review: ${attention.join(' · ')}. Open AIRE details before finalizing or paying these hours.`}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div id="aire-payroll-details" hidden={!detailsOpen} className="space-y-4">
       <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
         await onRefresh();
         await load();
@@ -940,6 +994,7 @@ export function AirePayrollCockpit({
           </CardContent>
         </Card>
       )}
+      </div>
 
       <Dialog
         open={Boolean(review)}
