@@ -4,6 +4,10 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
+export function resolveApiUrl(baseUrl: string, endpoint: string, origin = globalThis.location?.origin || 'http://localhost'): URL {
+  return new URL(`${baseUrl}${endpoint}`, origin);
+}
+
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
   companyId?: number | null;
@@ -76,7 +80,7 @@ class ApiClient {
   }
 
   private buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-    const url = new URL(`${this.baseUrl}${endpoint}`);
+    const url = resolveApiUrl(this.baseUrl, endpoint);
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined) {

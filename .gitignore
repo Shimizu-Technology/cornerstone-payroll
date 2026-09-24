@@ -8,3 +8,6 @@ web/playwright-report/
 web/test-results/
 api/test-results/
 web/.e2e-fixtures/
+ops/staging/runtime.env
+.staging-state/
+backups/

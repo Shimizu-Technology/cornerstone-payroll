@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shimizutechnology.aire-payroll-staging</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/leonshimizu/services/aire-payroll-staging/ops/staging/ensure-runtime.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>180</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/leonshimizu/Library/Logs/aire-payroll-staging.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/leonshimizu/Library/Logs/aire-payroll-staging.error.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/leonshimizu/.docker/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>AIRE_PAYROLL_STAGING_SERVICE_DIR</key>
+    <string>/Users/leonshimizu/services/aire-payroll-staging</string>
+  </dict>
+</dict>
+</plist>
