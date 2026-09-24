@@ -56,7 +56,7 @@ module TimeTracking
       raise Error, "AIRE rollout period dates are reversed" if end_date < start_date
 
       delivery_date = Date.iso8601(period.fetch("delivered_on"))
-      raise Error, "AIRE rollout delivery date precedes the pay period" if delivery_date < start_date
+      raise Error, "AIRE rollout delivery date precedes the pay period end" if delivery_date < end_date
 
       checks = period.fetch("checks")
       employees = period.fetch("aire_employees")

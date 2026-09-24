@@ -124,6 +124,13 @@ RSpec.describe TimeTracking::VerifiedHistoryManifestExtension do
       .to raise_error(described_class::Error, /do not match payroll/)
   end
 
+  it "rejects a check delivery date before the pay period ended" do
+    extension.dig("pay_periods", 0)["delivered_on"] = "2026-09-14"
+
+    expect { described_class.new(manifest:, extension:).call }
+      .to raise_error(described_class::Error, /precedes the pay period end/)
+  end
+
   it "records an equal-total regular/overtime split as a classification case" do
     current_adjustment.merge!("regular_hours" => "24.90", "overtime_hours" => "1.00")
 
