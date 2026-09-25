@@ -35,7 +35,7 @@ module Api
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
-        before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
+        before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed, :mark_selected_issued ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
@@ -331,6 +331,31 @@ module Api
           render json: { error: e.message, details: { base: [ e.message ] } }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           message = "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}"
+          render json: { error: message, details: e.record.errors.messages }, status: :unprocessable_entity
+        end
+
+        # One physical handoff can issue several already-printed payroll checks.
+        # Each selected check keeps its own immutable event and AIRE payment record.
+        def mark_selected_issued
+          items = BulkCheckIssuanceService.new(
+            pay_period: @pay_period,
+            actor: User.find(current_user_id),
+            payroll_item_ids: params[:payroll_item_ids],
+            delivered_on: params.require(:delivered_on),
+            delivery_method: params.require(:delivery_method),
+            attestation: params[:attestation],
+            evidence_reference: params[:evidence_reference],
+            note: params[:note],
+            ip_address: request.remote_ip
+          ).call
+
+          render json: { issued_count: items.length, payroll_item_ids: items.map(&:id) }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found", details: { user: [ "not found" ] } }, status: :unprocessable_entity
+        rescue ActionController::ParameterMissing, BulkCheckIssuanceService::InvalidSelectionError, ArgumentError => e
+          render json: { error: e.message, details: { base: [ e.message ] } }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          message = "Failed to record check issuance: #{e.record.errors.full_messages.join(', ')}"
           render json: { error: message, details: e.record.errors.messages }, status: :unprocessable_entity
         end
 

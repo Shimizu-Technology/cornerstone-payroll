@@ -3278,6 +3278,16 @@ export const checksApi = {
   }): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
     api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`, data),
 
+  markSelectedIssued: (payPeriodId: number, data: {
+    payroll_item_ids: number[];
+    delivered_on: string;
+    delivery_method: 'hand_delivery' | 'mail' | 'courier' | 'other';
+    attestation: boolean;
+    evidence_reference?: string;
+    note?: string;
+  }): Promise<{ issued_count: number; payroll_item_ids: number[] }> =>
+    api.post<{ issued_count: number; payroll_item_ids: number[] }>(`/admin/pay_periods/${payPeriodId}/checks/mark_selected_issued`, data),
+
   confirmDirectDepositPayment: (payrollItemId: number, data: {
     settled_on: string;
     bank_reference: string;

@@ -16,6 +16,7 @@ import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberFie
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
+import { RecordBulkCheckDeliveryDialog } from './RecordBulkCheckDeliveryDialog';
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
 import { formatDate } from '@/lib/utils';
 
@@ -87,6 +88,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
   const [deliveryTarget, setDeliveryTarget] = useState<CheckItem | null>(null);
+  const [bulkDeliveryItems, setBulkDeliveryItems] = useState<CheckItem[] | null>(null);
   const [depositTarget, setDepositTarget] = useState<(typeof directDepositItems)[number] | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
@@ -398,6 +400,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const stubEligibleIds = stubEligibleChecks.map((item) => item.id);
   const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
   const hasPrintableStub = checks.some((item) => !item.voided);
+  const readyToIssue = filteredChecks.filter((item) => !item.voided && item.check_printed_at && item.check_status !== 'delivered' && item.check_number && Number(item.net_pay) > 0);
 
   const toggleStubSelection = (item: CheckItem) => {
     if (item.voided) return;
@@ -444,6 +447,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
         </div>
 
         <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
+          {readyToIssue.length > 0 && (
+            <Button size="sm" onClick={() => setBulkDeliveryItems(readyToIssue)}>
+              Record issued for {readyToIssue.length} printed check{readyToIssue.length === 1 ? '' : 's'}
+            </Button>
+          )}
           {isFirstHawaiian4Up && (
             <label className="flex items-center gap-2 text-sm text-gray-600">
               Start slot
@@ -860,6 +868,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {
             setDeliveryTarget(null);
+            await load();
+          }}
+        />
+      )}
+      {bulkDeliveryItems && (
+        <RecordBulkCheckDeliveryDialog
+          payPeriodId={payPeriod.id}
+          items={bulkDeliveryItems}
+          onClose={() => setBulkDeliveryItems(null)}
+          onComplete={async () => {
+            setBulkDeliveryItems(null);
             await load();
           }}
         />
