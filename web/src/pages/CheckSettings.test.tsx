@@ -84,7 +84,7 @@ describe('CheckSettingsPage', () => {
 
   afterEach(cleanup);
 
-  it('keeps a newly selected draft-stock profile and sends its version when saving the stock change', async () => {
+  it('saves a new profile, its selection, and client settings with one click', async () => {
     render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     await screen.findByText('No printer profile selected');
 
@@ -96,13 +96,30 @@ describe('CheckSettingsPage', () => {
       selections: [{ check_stock_type: 'top_check', printer_profile_id: topProfile.id, printer_profile_name: topProfile.name }],
       active_printer_profile_id: null,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Profile & Settings' }));
 
     expect(await screen.findByRole('heading', { name: topProfile.name })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save Client Check Settings' }));
     await waitFor(() => expect(apiMocks.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       check_stock_type: 'top_check',
       printer_profile_lock_version: 0,
     })));
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(1);
+    expect(apiMocks.selectProfile).toHaveBeenCalledWith('top_check', topProfile.id);
+    expect(await screen.findByText(/saved this client’s check settings/i)).toBeTruthy();
+  });
+
+  it('reports a partial save clearly when the client settings request fails', async () => {
+    apiMocks.updateSettings.mockRejectedValue(new Error('Settings conflict'));
+    render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    await screen.findByText('No printer profile selected');
+
+    fireEvent.change(screen.getByLabelText('Stock Type'), { target: { value: 'top_check' } });
+    fireEvent.click(screen.getByRole('button', { name: '+ Save Current as Profile' }));
+    fireEvent.change(screen.getByPlaceholderText('e.g., Office HP LaserJet'), { target: { value: topProfile.name } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Profile & Settings' }));
+
+    expect(await screen.findByText(/was saved and selected, but the client check settings were not saved/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save Client Check Settings' })).toBeTruthy();
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(1);
   });
 });

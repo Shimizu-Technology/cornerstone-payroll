@@ -350,6 +350,24 @@ export function CheckSettingsPage() {
     setSuccess(null);
   }, []);
 
+  const saveClientSettings = async (layoutConfig: Record<string, unknown>, profileLockVersion: number | null) => {
+    const data = await checksApi.updateSettings({
+      check_stock_type: stockType,
+      check_offset_x: parseOffsetInput(offsetX),
+      check_offset_y: parseOffsetInput(offsetY),
+      bank_name: bankName.trim() || null,
+      bank_address: bankAddress.trim() || null,
+      check_memo_template: memoTemplate.trim() || null,
+      auto_create_fit_check: autoCreateFitCheck,
+      require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
+      printer_profile_lock_version: profileLockVersion,
+      check_layout_config: layoutConfig,
+    });
+    applySettingsToForm(data.check_settings);
+    await loadCheckLayout(data.check_settings.check_stock_type);
+    return data.check_settings;
+  };
+
   const handleSaveSettings = async () => {
     if (!canManageClientCheckSettings) {
       setError('Your role can manage personal printer profiles, but only managers and organization admins can change client check controls.');
@@ -372,27 +390,17 @@ export function CheckSettingsPage() {
         return;
       }
 
-      const data = await checksApi.updateSettings({
-        check_stock_type: stockType,
-        check_offset_x: parseOffsetInput(offsetX),
-        check_offset_y: parseOffsetInput(offsetY),
-        bank_name: bankName.trim() || null,
-        bank_address: bankAddress.trim() || null,
-        check_memo_template: memoTemplate.trim() || null,
-        auto_create_fit_check: autoCreateFitCheck,
-        require_distinct_check_print_confirmer: requireDistinctCheckPrintConfirmer,
-        printer_profile_lock_version: selectedPrinterProfileLockVersion(
+      const saved = await saveClientSettings(
+        parsedLayoutOverrides,
+        selectedPrinterProfileLockVersion(
           settings?.active_printer_profile_id,
           settings?.active_printer_profile_lock_version,
           activePrinterProfileId,
           activeProfile?.lock_version
-        ),
-        check_layout_config: parsedLayoutOverrides,
-      });
-      applySettingsToForm(data.check_settings);
-      await loadCheckLayout(stockType);
-      setSuccess(data.check_settings.active_printer_profile_id
-        ? `Saved calibration to “${data.check_settings.active_printer_profile_name || 'your selected profile'}” and client check settings.`
+        )
+      );
+      setSuccess(saved.active_printer_profile_id
+        ? `Saved calibration to “${saved.active_printer_profile_name || 'your selected profile'}” and client check settings.`
         : 'Client check settings saved. Select a printer profile to keep calibration with your printer.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -493,14 +501,21 @@ export function CheckSettingsPage() {
     if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
     setProfileSaving(true);
     setError(null);
+    setSuccess(null);
     let layoutConfig: Record<string, unknown>;
     try {
-      layoutConfig = JSON.parse(layoutOverridesJson || '{}');
+      const parsed = JSON.parse(layoutOverridesJson || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Advanced layout overrides must be a JSON object.');
+      }
+      layoutConfig = parsed as Record<string, unknown>;
     } catch {
       setError('Invalid JSON in advanced layout overrides. Please fix it before saving.');
       setProfileSaving(false);
       return;
     }
+    let createdProfile: PrinterProfile | null = null;
+    let selected = false;
     try {
       const response = await printerProfilesApi.create({
         name: newProfileName.trim(),
@@ -511,14 +526,19 @@ export function CheckSettingsPage() {
         check_offset_y: parseOffsetInput(offsetY),
         check_layout_config: layoutConfig,
       });
-      await printerProfilesApi.selectForMe(stockType, response.printer_profile.id);
+      createdProfile = response.printer_profile;
       setNewProfileName('');
       setNewProfileDescription('');
       setNewProfileNotes('');
       setShowAddProfile(false);
+      await printerProfilesApi.selectForMe(stockType, response.printer_profile.id);
+      selected = true;
       setActivePrinterProfileId(response.printer_profile.id);
       setActivePrinterProfileName(response.printer_profile.name);
-      if (settings?.check_stock_type === stockType) {
+      if (canManageClientCheckSettings) {
+        await saveClientSettings(layoutConfig, response.printer_profile.lock_version);
+        setSuccess(`Saved and selected “${response.printer_profile.name}” and saved this client’s check settings.`);
+      } else if (settings?.check_stock_type === stockType) {
         setSettings((current) => current ? {
           ...current,
           check_offset_x: parseOffsetInput(offsetX),
@@ -539,14 +559,17 @@ export function CheckSettingsPage() {
           autoCreateFitCheck: settings.auto_create_fit_check,
           requireDistinctCheckPrintConfirmer: settings.require_distinct_check_print_confirmer,
         }));
+        setSuccess(`Saved and selected “${response.printer_profile.name}” for you.`);
       }
-      setSuccess(settings?.check_stock_type === stockType
-        ? `Saved and selected “${response.printer_profile.name}” for you.`
-        : `Saved and selected “${response.printer_profile.name}” for ${stockType.replaceAll('_', ' ')} stock. Save the client settings to use that stock for this client.`);
-      await loadProfiles();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save profile');
+      const detail = err instanceof Error ? err.message : 'Unknown error';
+      setError(createdProfile
+        ? selected
+          ? `“${createdProfile.name}” was saved and selected, but the client check settings were not saved: ${detail}. Use Save Client Check Settings to finish.`
+          : `“${createdProfile.name}” was saved, but could not be selected: ${detail}. Select it from the profile list before printing.`
+        : `Failed to save profile: ${detail}`);
     } finally {
+      if (createdProfile) await loadProfiles();
       setProfileSaving(false);
     }
   };
@@ -871,7 +894,7 @@ export function CheckSettingsPage() {
                 </div>
                 <div className="flex justify-end">
                   <Button size="sm" onClick={handleSaveCurrentAsProfile} disabled={profileSaving}>
-                    {profileSaving ? 'Saving...' : 'Save Profile'}
+                    {profileSaving ? 'Saving...' : canManageClientCheckSettings ? 'Save Profile & Settings' : 'Save Profile'}
                   </Button>
                 </div>
               </div>

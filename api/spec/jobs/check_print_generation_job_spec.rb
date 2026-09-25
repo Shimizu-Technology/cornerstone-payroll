@@ -65,6 +65,31 @@ RSpec.describe CheckPrintGenerationJob do
     expect(CheckPrintRun.where(pay_period:).count).to eq(1)
   end
 
+  it "stores a generated package where a separate staging web process can download it" do
+    root = Pathname(Dir.mktmpdir("staging-check-print-"))
+    stub_const("R2StorageService::STAGING_STORAGE_ROOT", root)
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("DEPLOYMENT_ENV").and_return("staging")
+    allow(ENV).to receive(:[]).with("R2_STORAGE_BACKEND").and_return("local")
+    allow(ENV).to receive(:[]).with("ACTIVE_STORAGE_SERVICE").and_return("local")
+    allow(R2StorageService).to receive(:new).and_call_original
+
+    begin
+      generation = create_generation
+      described_class.perform_now(generation.id)
+
+      run = generation.reload.check_print_run
+      expect(generation.status).to eq("ready")
+      expect(run).to be_present
+      pdf = R2StorageService.new.download(run.storage_key)
+      expect(pdf).to start_with("%PDF")
+      expect(Digest::SHA256.hexdigest(pdf)).to eq(run.sha256)
+      expect(pdf.bytesize).to eq(run.byte_size)
+    ensure
+      FileUtils.remove_entry(root)
+    end
+  end
+
   it "fails safely and removes the artifact if check data changes during generation" do
     generation = create_generation
     allow(storage).to receive(:upload) do |key, io, **|

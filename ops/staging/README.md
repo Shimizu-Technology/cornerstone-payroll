@@ -2,6 +2,8 @@
 
 This stack runs the successful `staging` commits from both repositories on the MacBook Pro. It uses two isolated PostgreSQL databases, persistent local upload volumes, staging-only Clerk instances, and a private Docker integration network.
 
+Cornerstone's staging API and worker store generated check packages and other private artifacts in their shared `payroll_storage` volume. The `R2_STORAGE_BACKEND=local` setting is accepted only for the explicit staging deployment; production still requires R2 credentials. The staging backup includes this volume so saved packages survive redeploys and are recoverable.
+
 The fixture creates two semimonthly payrolls:
 
 - a finalized AIRE period for testing Cornerstone's manual entry and exact-entry reconciliation flow;
@@ -10,6 +12,8 @@ The fixture creates two semimonthly payrolls:
 No production database, employee, key, or hostname is used. The seed scripts refuse to run unless the database name and explicit staging flags match.
 
 The MacBook binds AIRE to `127.0.0.1:8789` and payroll to `127.0.0.1:8790`. Tailscale Serve and the existing Mac mini Cloudflare tunnel provide HTTPS without exposing database or API container ports.
+
+The LaunchAgent checks successful staging workflow runs with the authenticated GitHub CLI. The service account must remain signed in to GitHub; a temporary lookup failure leaves the deployed containers running and does not prevent the scheduled backup.
 
 ## Backups and recovery
 
