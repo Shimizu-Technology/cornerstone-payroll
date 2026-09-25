@@ -89,6 +89,12 @@ const queue: CheckPrintQueueResponse = {
   },
 };
 
+const printedQueue: CheckPrintQueueResponse = {
+  ...queue,
+  items: [{ ...queue.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
+  meta: { ...queue.meta, unprinted: 0, printed: 1 },
+};
+
 const savedRun: CheckPrintRun = {
   id: 42,
   pay_period_id: 9,
@@ -174,6 +180,7 @@ describe('UnifiedCheckPrintDialog', () => {
 
   it('reopens the latest immutable package without generating another PDF', async () => {
     apiMocks.printRuns.mockResolvedValue({ check_print_runs: [savedRun] });
+    apiMocks.printQueue.mockResolvedValue(printedQueue);
     renderDialog();
 
     expect(await screen.findByText('Package #42')).toBeTruthy();
@@ -181,6 +188,38 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(screen.getByText('A generated package is a saved snapshot')).toBeTruthy();
     expect(apiMocks.printRunPdf).toHaveBeenCalledWith(42);
     expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+    expect(screen.getByText('Printed ×1')).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'Check status' }) as HTMLSelectElement).value).toBe('all');
+  });
+
+  it('shows the printed check after confirmation and keeps reprints explicit', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const readyRun: CheckPrintRun = { ...generatedRun, confirmation_state: 'ready', confirmation_issue: null };
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [readyRun] });
+    apiMocks.printQueue.mockResolvedValueOnce(queue).mockResolvedValue(printedQueue);
+    apiMocks.confirmPrintRun.mockResolvedValue({ check_print_run: savedRun });
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: 'Confirm printed correctly' }));
+    expect(await screen.findByText('Printed ×1')).toBeTruthy();
+    expect(screen.getByText(/Package #42 is confirmed/)).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'Check status' }) as HTMLSelectElement).value).toBe('all');
+
+    await user.click(screen.getByRole('button', { name: 'Create another package' }));
+    expect(await screen.findByText(/No unprinted checks remain/)).toBeTruthy();
+    expect(screen.getByText('Printed ×1')).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: 'Select check 4101' }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('button', { name: 'Generate and save package' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select check 4101' }));
+    confirmSpy.mockReturnValueOnce(false);
+    await user.click(screen.getByRole('button', { name: 'Generate and save package' }));
+    expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Reprint 1 previously printed check?'));
+
+    await user.click(screen.getByRole('button', { name: 'Generate and save package' }));
+    await waitFor(() => expect(apiMocks.createPrintGeneration).toHaveBeenCalledWith(9, expect.objectContaining({ payrollItemIds: [7] })));
   });
 
   it('starts a background generation with a unique key and real selection', async () => {
