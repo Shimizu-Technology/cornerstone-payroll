@@ -95,6 +95,7 @@ module AirePayrollCalendar
           source_time_entry_id: allocation.source_time_entry_id.to_s,
           work_date: allocation.original_work_date.iso8601,
           source_kind: final_identity.present? ? "linked_payroll" : "linked_payroll_not_in_final_batch",
+          category_name: final_category_name_for(batch, allocation),
           status: status,
           regular_hours: allocation.regular_hours.to_f,
           overtime_hours: allocation.overtime_hours.to_f,
@@ -164,6 +165,7 @@ module AirePayrollCalendar
           source_time_entry_id: allocation.source_time_entry_id.to_s,
           work_date: allocation.original_work_date.iso8601,
           source_kind: final_identity.present? ? "linked_payroll" : "linked_payroll_not_in_final_batch",
+          category_name: final_category_name_for(batch, allocation),
           status: status,
           regular_hours: lines.sum(&:regular_hours).to_f,
           overtime_hours: lines.sum(&:overtime_hours).to_f,
@@ -183,6 +185,20 @@ module AirePayrollCalendar
       return "Linked to this payroll; no remaining source line in the final AIRE batch" if final_identity.nil?
 
       nil
+    end
+
+    def final_category_name_for(batch, allocation)
+      @final_category_names ||= batch.fetch("employees").each_with_object({}) do |person, names|
+        Array(person.fetch("adjustments")).each do |adjustment|
+          key = [ adjustment.fetch("source_time_entry_id").to_s,
+                  TimeTrackingEmployeeMapping.normalize_uuid(person["source_user_uuid"]),
+                  adjustment.fetch("original_work_date") ]
+          names[key] = adjustment.dig("category", "name")
+        end
+      end
+      @final_category_names[[ allocation.source_time_entry_id.to_s,
+                              TimeTrackingEmployeeMapping.normalize_uuid(allocation.source_user_uuid),
+                              allocation.original_work_date.iso8601 ]]
     end
 
     def payment_reference_for(item)

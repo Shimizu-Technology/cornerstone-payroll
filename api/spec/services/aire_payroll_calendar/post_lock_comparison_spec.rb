@@ -99,7 +99,7 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
 
     expect(result.dig(:summary, "paid")).to include(regular_hours: 8.0, entry_count: 1)
     expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id })
-      .to include(status: "paid", source_time_entry_id: "101", payment_reference: "1001",
+      .to include(status: "paid", source_time_entry_id: "101", category_name: "Flight Hours", payment_reference: "1001",
                   payment_date: "2026-10-25")
     # The immutable AIRE cutoff line remains visible; the UI subtracts this
     # exact paid link when showing the current amount still to pay.
