@@ -584,6 +584,8 @@ export function AirePayrollCockpit({
 
   return (
     <div className="space-y-4">
+      {finalized && <AirePostLockComparison payPeriodId={payPeriodId} />}
+      {!finalized && (
       <Card className="overflow-hidden border-neutral-200">
         <CardContent className="p-0">
           <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -624,8 +626,14 @@ export function AirePayrollCockpit({
           )}
         </CardContent>
       </Card>
+      )}
 
-      <div id="aire-payroll-details" hidden={!detailsOpen} className="space-y-4">
+      {finalized && <Button type="button" size="sm" variant="outline" aria-expanded={detailsOpen} aria-controls="aire-payroll-details" onClick={() => setDetailsOpen((open) => !open)}>
+        {detailsOpen ? 'Hide AIRE tools' : 'Review AIRE timecards and tools'}
+        <ChevronDown className={`ml-2 h-4 w-4 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </Button>}
+
+      {detailsOpen && <div id="aire-payroll-details" className="space-y-4">
       <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
         await onRefresh();
         await load();
@@ -639,10 +647,6 @@ export function AirePayrollCockpit({
         employees={employees}
         aireRecordLinked={aireRecordLinked}
       />
-
-      {calendar.finalized_batch?.verification_status === 'verified' && (
-        <AirePostLockComparison payPeriodId={payPeriodId} />
-      )}
 
       {calendar.external_pay_period_id && cockpitPublished && (
         <Card className="overflow-hidden">
@@ -703,7 +707,7 @@ export function AirePayrollCockpit({
               <>
                 <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5 sm:p-6">
                   <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in AIRE`} />
-                  <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
+                  <Metric label={finalized ? 'Included at cutoff' : 'Ready this payroll'} value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
                   <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecards · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
                   <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
                   <Metric
@@ -994,7 +998,7 @@ export function AirePayrollCockpit({
           </CardContent>
         </Card>
       )}
-      </div>
+      </div>}
 
       <Dialog
         open={Boolean(review)}

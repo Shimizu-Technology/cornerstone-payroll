@@ -946,6 +946,7 @@ export interface AirePostLockComparison {
     source_time_entry_id: string;
     work_date: string;
     source_kind: string;
+    category_name?: string | null;
     status: AirePostLockStatus;
     regular_hours: number;
     overtime_hours: number;
@@ -955,6 +956,7 @@ export interface AirePostLockComparison {
     pay_period_id?: number;
     payment_method?: string;
     payment_reference?: string | null;
+    payment_date?: string | null;
   }>;
 }
 
