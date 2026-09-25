@@ -222,6 +222,21 @@ describe('UnifiedCheckPrintDialog', () => {
     await waitFor(() => expect(apiMocks.createPrintGeneration).toHaveBeenCalledWith(9, expect.objectContaining({ payrollItemIds: [7] })));
   });
 
+  it('warns before packaging a check that was already issued', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    apiMocks.printQueue.mockResolvedValue({
+      ...printedQueue,
+      items: [{ ...printedQueue.items[0], status: 'delivered' }],
+    });
+    renderDialog();
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Select check 4101' }));
+    await user.click(screen.getByRole('button', { name: 'Generate and save package' }));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Reprint 1 previously printed check?'));
+    expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+  });
+
   it('starts a background generation with a unique key and real selection', async () => {
     const user = userEvent.setup();
     renderDialog();
