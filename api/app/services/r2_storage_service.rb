@@ -32,6 +32,7 @@ class R2StorageService
   class DownloadError < StandardError; end
   class InvalidKeyError < StandardError; end
   LOCAL_STORAGE_ROOT = Rails.root.join("tmp", "local_r2_storage", Rails.env)
+  STAGING_STORAGE_ROOT = Rails.root.join("storage", "local_r2_storage")
 
   def initialize
     validate_configuration!
@@ -206,6 +207,8 @@ class R2StorageService
   end
 
   def validate_configuration!
+    return if staging_local_storage?
+
     missing = []
     missing << "R2_ACCOUNT_ID" unless ENV["R2_ACCOUNT_ID"].present?
     missing << "R2_ACCESS_KEY_ID" unless ENV["R2_ACCESS_KEY_ID"].present?
@@ -219,6 +222,7 @@ class R2StorageService
   end
 
   def configured?
+    return false if staging_local_storage?
     return false if Rails.env.test? && ENV["R2_USE_REMOTE_IN_TEST"] != "true"
 
     ENV["R2_ACCOUNT_ID"].present? &&
@@ -227,7 +231,13 @@ class R2StorageService
   end
 
   def local_storage_root
-    LOCAL_STORAGE_ROOT
+    staging_local_storage? ? STAGING_STORAGE_ROOT : LOCAL_STORAGE_ROOT
+  end
+
+  def staging_local_storage?
+    ENV["DEPLOYMENT_ENV"] == "staging" &&
+      ENV["R2_STORAGE_BACKEND"] == "local" &&
+      ENV["ACTIVE_STORAGE_SERVICE"] == "local"
   end
 
   def local_path_for(key)

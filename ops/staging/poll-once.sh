@@ -10,15 +10,19 @@ mkdir -p "${state_dir}"
 
 latest_successful_sha() {
   local repo="$1" workflow="$2"
-  curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
-    -H 'Accept: application/vnd.github+json' \
-    -H 'X-GitHub-Api-Version: 2022-11-28' \
-    "https://api.github.com/repos/Shimizu-Technology/${repo}/actions/workflows/${workflow}/runs?branch=staging&status=success&event=push&per_page=1" |
-    ruby -E UTF-8:UTF-8 -rjson -e 'payload=JSON.parse(STDIN.read); puts(payload.fetch("workflow_runs", []).first&.fetch("head_sha", ""))'
+  gh run list \
+    --repo "Shimizu-Technology/${repo}" \
+    --workflow "${workflow}" \
+    --branch staging \
+    --event push \
+    --status success \
+    --limit 1 \
+    --json headSha \
+    --jq '.[0].headSha // ""'
 }
 
-payroll_sha="$(latest_successful_sha cornerstone-payroll quality.yml)"
-aire_sha="$(latest_successful_sha aire-services staging.yml)"
+payroll_sha="$(latest_successful_sha cornerstone-payroll quality.yml)" || exit 0
+aire_sha="$(latest_successful_sha aire-services staging.yml)" || exit 0
 [[ "${payroll_sha}" =~ ^[0-9a-f]{40}$ && "${aire_sha}" =~ ^[0-9a-f]{40}$ ]] || exit 0
 
 deployed_payroll_sha="$(cat "${state_dir}/deployed-payroll-sha" 2>/dev/null || true)"

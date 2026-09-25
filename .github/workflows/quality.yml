@@ -196,7 +196,9 @@ jobs:
             (.services."aire-web".ports[0].host_ip == "127.0.0.1") and
             (.services."payroll-web".ports[0].host_ip == "127.0.0.1") and
             (.services."aire-api".environment.DEPLOYMENT_ENV == "staging") and
-            (.services."payroll-api".environment.DEPLOYMENT_ENV == "staging")
+            (.services."payroll-api".environment.DEPLOYMENT_ENV == "staging") and
+            (.services."payroll-api".environment.R2_STORAGE_BACKEND == "local") and
+            (.services."payroll-worker".environment.R2_STORAGE_BACKEND == "local")
           '
       - name: Check deployment scripts
         run: bash -n ops/staging/*.sh
