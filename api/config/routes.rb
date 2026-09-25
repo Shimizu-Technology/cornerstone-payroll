@@ -332,6 +332,7 @@ Rails.application.routes.draw do
           get  "checks/rehearsal_preview_pdf", to: "checks#rehearsal_preview_pdf"
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
+          post "checks/mark_selected_issued", to: "checks#mark_selected_issued"
           get  "check_print_queue",          to: "check_print_runs#queue"
           get  "check_print_runs",           to: "check_print_runs#index"
           get  "check_print_generations/active", to: "check_print_generations#active"

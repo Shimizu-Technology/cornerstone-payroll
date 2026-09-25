@@ -449,6 +449,76 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_periods/:pay_period_id/checks/mark_selected_issued" do
+    let(:path) { "/api/v1/admin/pay_periods/#{pay_period.id}/checks/mark_selected_issued" }
+    let(:issue_params) do
+      {
+        payroll_item_ids: [ item_a.id, item_b.id ],
+        delivered_on: Date.current.iso8601,
+        delivery_method: "hand_delivery",
+        evidence_reference: "Client front desk",
+        attestation: true
+      }
+    end
+
+    it "issues the selected printed checks with one handoff and separate check events" do
+      item_a.mark_printed!(user: admin_user)
+      item_b.mark_printed!(user: admin_user)
+
+      post path, params: issue_params
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("issued_count")).to eq(2)
+      expect(item_a.reload.check_status).to eq("delivered")
+      expect(item_b.reload.check_status).to eq("delivered")
+      [ item_a, item_b ].each do |item|
+        expect(item.check_events.deliveries.sole).to have_attributes(
+          evidence_type: "hand_delivery", evidence_reference: "Client front desk"
+        )
+      end
+    end
+
+    it "rejects an unprinted check without issuing any selected check" do
+      item_a.mark_printed!(user: admin_user)
+
+      post path, params: issue_params
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("no longer ready")
+      expect(item_a.reload.check_status).to eq("printed")
+      expect(item_a.check_events.deliveries.count).to eq(0)
+    end
+
+    it "rejects checks from another pay period" do
+      other_period = create(:pay_period, :committed, company: company)
+      other_item = create(:payroll_item, :with_check, pay_period: other_period, employee: employee_a,
+        check_number: "4000", net_pay: 500)
+      item_a.mark_printed!(user: admin_user)
+      other_item.mark_printed!(user: admin_user)
+
+      post path, params: issue_params.merge(payroll_item_ids: [ item_a.id, other_item.id ])
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(item_a.check_events.deliveries.count).to eq(0)
+      expect(other_item.check_events.deliveries.count).to eq(0)
+    end
+
+    it "does not partly issue when a check becomes issued or the attestation is missing" do
+      item_a.mark_printed!(user: admin_user)
+      item_b.mark_printed!(user: admin_user)
+      item_b.mark_delivered!(user: admin_user, delivered_on: Date.current,
+        delivery_method: "hand_delivery", attestation: true)
+
+      post path, params: issue_params
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(item_a.check_events.deliveries.count).to eq(0)
+
+      post path, params: issue_params.merge(payroll_item_ids: [ item_a.id ], attestation: false)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(item_a.check_events.deliveries.count).to eq(0)
+    end
+  end
+
   # -----------------------------------------------------------------------
   # POST /payroll_items/:id/void
   # -----------------------------------------------------------------------

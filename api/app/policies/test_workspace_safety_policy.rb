@@ -6,7 +6,7 @@ class TestWorkspaceSafetyPolicy
       commit void create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
     ],
     "api/v1/admin/check_numbers" => %w[update],
-    "api/v1/admin/checks" => %w[batch_pdf mark_all_printed mark_printed mark_delivered confirm_direct_deposit_payment void reprint update_check_number replace_check],
+    "api/v1/admin/checks" => %w[batch_pdf mark_all_printed mark_printed mark_delivered mark_selected_issued confirm_direct_deposit_payment void reprint update_check_number replace_check],
     "api/v1/admin/check_print_runs" => %w[create pdf confirm],
     "api/v1/admin/check_print_generations" => %w[create],
     "api/v1/admin/check_register" => %w[create_event],

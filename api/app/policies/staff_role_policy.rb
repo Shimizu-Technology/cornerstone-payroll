@@ -111,6 +111,7 @@ class StaffRolePolicy
     "api/v1/admin/checks#update_check_settings" => :manage_client_check_settings,
     "api/v1/admin/checks#update_next_check_number" => :manage_client_check_settings,
     "api/v1/admin/checks#confirm_direct_deposit_payment" => :payroll_operations,
+    "api/v1/admin/checks#mark_selected_issued" => :payroll_operations,
     "api/v1/admin/printer_profiles#create" => :create_printer_profiles,
     "api/v1/admin/printer_profiles#clone" => :create_printer_profiles,
     "api/v1/admin/printer_profiles#apply" => :use_printer_profiles,
