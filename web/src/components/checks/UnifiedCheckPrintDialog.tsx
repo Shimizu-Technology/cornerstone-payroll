@@ -294,7 +294,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }), [queue, sourceFilter, statusFilter]);
 
   const selectedItems = useMemo(() => (queue?.items || []).filter((item) => selected.has(item.key)), [queue, selected]);
-  const selectedPrintedItems = selectedItems.filter((item) => item.status === 'printed');
+  const selectedPrintedItems = selectedItems.filter((item) => item.print_count > 0);
   const generationInputSignature = useMemo(() => JSON.stringify({
     payrollItemIds: selectedItems.filter((item) => item.source_type === 'payroll_item').map((item) => item.source_id),
     nonEmployeeCheckIds: selectedItems.filter((item) => item.source_type === 'non_employee_check').map((item) => item.source_id),
@@ -573,7 +573,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
                   <p className="mb-3 text-xs text-slate-500">Edit check numbers first. The saved package will use exactly the reviewed values shown here.</p>
                   {run?.confirmation_state === 'confirmed' && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">Package #{run.id} is confirmed. Its checks now show as printed in this list. The saved PDF remains available on the right.</div>}
-                  {!run && queue && queue.meta.unprinted === 0 && queue.items.some((item) => item.status === 'printed' && item.eligible) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">No unprinted checks remain. To create another package, select a printed check below. This is a reprint; confirming the new package records another print. To view the existing PDF, open it in Saved package history.</div>}
+                  {!run && queue && queue.meta.unprinted === 0 && queue.items.some((item) => item.print_count > 0 && item.eligible) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">No unprinted checks remain. To create another package, select a previously printed check below. This is a reprint; confirming the new package records another print. To view the existing PDF, open it in Saved package history.</div>}
                   {hasUnsavedNumbers && (
                     <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div><p className="text-sm font-semibold text-amber-950">{numberChanges.length} unsaved check-number change{numberChanges.length === 1 ? '' : 's'}</p><p className="mt-0.5 text-xs text-amber-800">Save these changes before generating the snapshot.</p></div>
