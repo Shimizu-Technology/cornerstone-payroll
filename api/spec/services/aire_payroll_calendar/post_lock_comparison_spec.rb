@@ -69,6 +69,43 @@ RSpec.describe AirePayrollCalendar::PostLockComparison do
     )
   end
 
+  it "includes paid exact-entry links from a connected finalized AIRE import" do
+    payload.fetch("employees").first["source_user_uuid"] = uuid
+    payload.fetch("export")["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    verified_event
+    import = create(:time_tracking_import, :finalized_aire_batch,
+                    pay_period: pay_period, time_tracking_source: source, status: "applied")
+    item = create(:payroll_item, :with_check, company: company, pay_period: pay_period,
+                                            employee: employee, hours_worked: 8)
+    TimeTrackingEntryAllocation.create!(
+      company: company, time_tracking_source: source, time_tracking_import: import,
+      pay_period: pay_period, payroll_item: item, employee: employee,
+      source_user_id: "42", source_user_uuid: uuid, source_time_entry_id: "101",
+      original_work_date: Date.new(2026, 10, 5), line_key: "category:1", source_kind: "current",
+      total_hours: 8, regular_hours: 8, overtime_hours: 0
+    )
+    acknowledgement = AirePayrollEntryAcknowledgement.create!(
+      time_tracking_import: import, payroll_item: item, source_event_key: "test-paid-entry-101",
+      event_id: SecureRandom.uuid, source_time_entry_id: "101", source_user_id: "42",
+      source_user_uuid: uuid, status: "payment_issued", occurred_at: Time.current,
+      payment_method: "paper_check", payment_reference: "1001",
+      payment_effective_on: Date.new(2026, 10, 25)
+    )
+
+    expect(service.call.dig(:summary, "awaiting_payment", :regular_hours)).to eq(8.0)
+    acknowledgement.update!(delivered_at: Time.current)
+
+    result = service.call
+
+    expect(result.dig(:summary, "paid")).to include(regular_hours: 8.0, entry_count: 1)
+    expect(result.fetch(:rows).find { |row| row[:payroll_item_id] == item.id })
+      .to include(status: "paid", source_time_entry_id: "101", payment_reference: "1001",
+                  payment_date: "2026-10-25")
+    # The immutable AIRE cutoff line remains visible; the UI subtracts this
+    # exact paid link when showing the current amount still to pay.
+    expect(result.dig(:summary, "owed", :regular_hours)).to eq(8.0)
+  end
+
   it "does not show an unverified final batch as reconciled" do
     expect { service.call }.to raise_error(described_class::Error, /verified final cutoff/)
     expect(client).not_to have_received(:payroll_batch)

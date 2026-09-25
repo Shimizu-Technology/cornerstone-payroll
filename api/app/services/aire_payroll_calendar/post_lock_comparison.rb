@@ -26,7 +26,7 @@ module AirePayrollCalendar
         raise Error, "AIRE's final hours no longer match the verified cutoff. Do not use this comparison."
       end
 
-      rows = final_rows(batch) + allocation_rows(batch) + held_rows(batch)
+      rows = final_rows(batch) + allocation_rows(batch) + imported_allocation_rows(batch) + held_rows(batch)
       {
         batch_id: event.payroll_batch_id,
         cutoff_at: batch.fetch("cutoff_at"),
@@ -65,16 +65,7 @@ module AirePayrollCalendar
     end
 
     def allocation_rows(batch)
-      payable_entries = batch.fetch("employees").flat_map do |person|
-        Array(person.fetch("adjustments")).map do |adjustment|
-          [ adjustment.fetch("source_time_entry_id").to_s, person["source_user_uuid"], adjustment.fetch("original_work_date") ]
-        end
-      end
-      held_entries = batch.fetch("exclusions").map do |exclusion|
-        [ exclusion.fetch("source_time_entry_id").to_s, exclusion["source_user_uuid"], exclusion.fetch("original_work_date") ]
-      end
-      final_entries = payable_entries + held_entries
-      final_by_id = final_entries.group_by(&:first)
+      final_by_id = final_entries_by_id(batch)
       source_entry_ids = final_by_id.keys
       # A fully allocated entry can disappear from AIRE's residual final batch.
       # Keep links from this payroll, plus exact final-batch entries paid in a
@@ -82,18 +73,14 @@ module AirePayrollCalendar
       scope = TimeTrackingManualAllocation.where(time_tracking_source: source, pay_period: pay_period)
       if source_entry_ids.any?
         scope = scope.or(TimeTrackingManualAllocation.where(time_tracking_source: source,
-                                                            source_time_entry_id: source_entry_ids.uniq))
+                                                            source_time_entry_id: source_entry_ids))
       end
-      scope = scope.distinct
-        .includes(:employee, :payroll_item)
+      scope = scope.distinct.includes(:employee, :payroll_item)
       scope.filter_map do |allocation|
         next if allocation.status == "voided"
 
         final_identity = final_by_id[allocation.source_time_entry_id.to_s]
-        mismatched = final_identity.present? && final_identity.none? do |(_id, uuid, work_date)|
-          TimeTrackingEmployeeMapping.normalize_uuid(uuid) == allocation.source_user_uuid &&
-            work_date == allocation.original_work_date.iso8601
-        end
+        mismatched = identity_mismatch?(final_identity, allocation.source_user_uuid, allocation.original_work_date)
         status = if mismatched
           "mismatch"
         elsif allocation.status == "issued"
@@ -115,7 +102,78 @@ module AirePayrollCalendar
           pay_period_id: allocation.pay_period_id,
           payment_method: allocation.payroll_item.effective_payment_delivery_method,
           payment_reference: (payment_reference_for(allocation.payroll_item) if status == "paid"),
+          payment_date: (payment_date_for(allocation.payroll_item) if status == "paid"),
           reason: allocation_reason(mismatched: mismatched, final_identity: final_identity)
+        }.compact
+      end
+    end
+
+    def final_entries_by_id(batch)
+      payable_entries = batch.fetch("employees").flat_map do |person|
+        Array(person.fetch("adjustments")).map do |adjustment|
+          [ adjustment.fetch("source_time_entry_id").to_s, person["source_user_uuid"], adjustment.fetch("original_work_date") ]
+        end
+      end
+      held_entries = batch.fetch("exclusions").map do |exclusion|
+        [ exclusion.fetch("source_time_entry_id").to_s, exclusion["source_user_uuid"], exclusion.fetch("original_work_date") ]
+      end
+      (payable_entries + held_entries).group_by(&:first)
+    end
+
+    def identity_mismatch?(final_identity, uuid, work_date)
+      final_identity.present? && final_identity.none? do |(_id, source_uuid, source_date)|
+        TimeTrackingEmployeeMapping.normalize_uuid(source_uuid) == TimeTrackingEmployeeMapping.normalize_uuid(uuid) &&
+          source_date == work_date.iso8601
+      end
+    end
+
+    def imported_allocation_rows(batch)
+      final_by_id = final_entries_by_id(batch)
+      source_entry_ids = final_by_id.keys
+      scope = TimeTrackingEntryAllocation.where(time_tracking_source: source, pay_period: pay_period)
+      if source_entry_ids.any?
+        scope = scope.or(TimeTrackingEntryAllocation.where(time_tracking_source: source,
+                                                           source_time_entry_id: source_entry_ids))
+      end
+      allocations = scope.distinct.includes(:employee, :payroll_item, :time_tracking_import)
+        .select { |allocation| allocation.time_tracking_import.status == "applied" && !allocation.payroll_item.voided? }
+      acknowledgements = AirePayrollEntryAcknowledgement.where(
+        time_tracking_import_id: allocations.map(&:time_tracking_import_id).uniq,
+        payroll_item_id: allocations.map(&:payroll_item_id).uniq
+      ).order(:id).group_by { |ack| [ ack.time_tracking_import_id, ack.payroll_item_id, ack.source_time_entry_id ] }
+      allocations.group_by do |allocation|
+        [ allocation.time_tracking_import_id, allocation.payroll_item_id, allocation.source_time_entry_id ]
+      end.map do |key, lines|
+        allocation = lines.first
+        final_identity = final_by_id[allocation.source_time_entry_id.to_s]
+        mismatched = identity_mismatch?(final_identity, allocation.source_user_uuid, allocation.original_work_date)
+        payment_events = Array(acknowledgements[key]).select { |ack| ack.status.in?(%w[payment_issued payment_failed payment_voided]) }
+        latest_payment = payment_events.last
+        status = if mismatched
+          "mismatch"
+        elsif latest_payment&.status == "payment_issued" && latest_payment.delivered_at.present?
+          "paid"
+        else
+          "awaiting_payment"
+        end
+        remote_update_pending = latest_payment&.status == "payment_issued" && latest_payment.delivered_at.blank?
+        {
+          employee_name: allocation.employee.full_name,
+          employee_id: allocation.employee_id,
+          source_user_uuid: allocation.source_user_uuid,
+          source_time_entry_id: allocation.source_time_entry_id.to_s,
+          work_date: allocation.original_work_date.iso8601,
+          source_kind: final_identity.present? ? "linked_payroll" : "linked_payroll_not_in_final_batch",
+          status: status,
+          regular_hours: lines.sum(&:regular_hours).to_f,
+          overtime_hours: lines.sum(&:overtime_hours).to_f,
+          payroll_item_id: allocation.payroll_item_id,
+          pay_period_id: allocation.pay_period_id,
+          payment_method: allocation.payroll_item.effective_payment_delivery_method,
+          payment_reference: (latest_payment&.payment_reference if status == "paid"),
+          payment_date: (latest_payment&.payment_effective_on&.iso8601 if status == "paid"),
+          reason: remote_update_pending ? "Payment recorded in Cornerstone; AIRE update pending" :
+            allocation_reason(mismatched: mismatched, final_identity: final_identity)
         }.compact
       end
     end
@@ -133,6 +191,14 @@ module AirePayrollCalendar
       item.check_number
     end
 
+    def payment_date_for(item)
+      if item.effective_payment_delivery_method == "direct_deposit"
+        return item.direct_deposit_payment_confirmation&.settled_on&.iso8601
+      end
+
+      item.check_events.deliveries.where(check_number: item.check_number).order(:id).last&.effective_on&.iso8601
+    end
+
     def base_row(person, entry, status:, regular:, overtime:, reason: nil)
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(person["source_user_uuid"])
       mapping = mappings_by_uuid[uuid]
@@ -145,6 +211,7 @@ module AirePayrollCalendar
         source_time_entry_id: entry.fetch("source_time_entry_id").to_s,
         work_date: entry.fetch("original_work_date"),
         source_kind: entry["source_kind"] || "held",
+        category_name: entry.dig("category", "name"),
         status: status,
         regular_hours: regular.to_f,
         overtime_hours: overtime.to_f,

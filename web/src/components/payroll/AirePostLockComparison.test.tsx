@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AirePostLockComparison } from './AirePostLockComparison';
+import { summarizeEmployees } from './airePaymentSummary';
 
 const apiMocks = vi.hoisted(() => ({ compare: vi.fn() }));
 
@@ -29,13 +30,16 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-it('shows actual paid evidence separately from AIRE unallocated hours at cutoff', async () => {
+it('shows current employee payment status and keeps cutoff evidence available', async () => {
   render(<AirePostLockComparison payPeriodId={11} />);
 
-  expect(await screen.findByText('Final AIRE cutoff vs. payroll payments')).toBeTruthy();
-  expect(screen.getByText('Linked · payment not confirmed')).toBeTruthy();
-  expect(screen.getAllByText('AIRE unallocated at cutoff')).toHaveLength(2);
-  expect(screen.getByText(/payment 1001/)).toBeTruthy();
+  expect(await screen.findByText('AIRE hours and payments')).toBeTruthy();
+  expect(screen.getByText('Still to pay')).toBeTruthy();
+  expect(screen.getByText('Pay 6.00 hrs · Oct 5, 2026')).toBeTruthy();
+  expect(screen.getByText(/check\/payment 1001/)).toBeTruthy();
+  fireEvent.click(screen.getByText('Cutoff and source details'));
+  expect(screen.getByText(/historical snapshot/)).toBeTruthy();
+  expect(screen.getAllByText(/payment 1001/)).toHaveLength(2);
   expect(apiMocks.compare).toHaveBeenCalledWith(11);
 });
 
@@ -43,6 +47,20 @@ it('withholds a stale comparison when AIRE verification fails', async () => {
   apiMocks.compare.mockRejectedValue(new Error('Final batch checksum changed'));
   render(<AirePostLockComparison payPeriodId={11} />);
 
-  expect((await screen.findByRole('alert')).textContent).toContain('No final comparison is being shown');
-  expect(screen.queryByText('AIRE unallocated at cutoff')).toBeNull();
+  expect((await screen.findByRole('alert')).textContent).toContain('Current AIRE payment status is unavailable');
+  expect(screen.queryByText('Still to pay')).toBeNull();
+});
+
+it('subtracts exact paid and pending links from historical cutoff hours without touching held time', () => {
+  const rows = [
+    { employee_name: 'Ari Manual', source_user_uuid: 'ari', source_time_entry_id: '1', work_date: '2026-09-01', source_kind: 'current', status: 'owed', regular_hours: 8, overtime_hours: 0 },
+    { employee_name: 'Ari Manual', source_user_uuid: 'ari', source_time_entry_id: '2', work_date: '2026-09-01', source_kind: 'current', status: 'owed', regular_hours: 0, overtime_hours: 2 },
+    { employee_name: 'Ari Manual', source_user_uuid: 'ari', source_time_entry_id: '1', work_date: '2026-09-01', source_kind: 'linked_payroll', status: 'paid', regular_hours: 8, overtime_hours: 0 },
+    { employee_name: 'Ari Manual', source_user_uuid: 'ari', source_time_entry_id: '2', work_date: '2026-09-01', source_kind: 'linked_payroll', status: 'paid', regular_hours: 0, overtime_hours: 2 },
+    { employee_name: 'Ari Manual', source_user_uuid: 'ari', source_time_entry_id: '3', work_date: '2026-09-02', source_kind: 'held', status: 'held', regular_hours: 4, overtime_hours: 0 },
+  ] as import('@/types').AirePostLockComparison['rows'];
+  const employee = summarizeEmployees(rows)[0];
+  expect(employee.owed).toEqual({ regular: 0, overtime: 0 });
+  expect(employee.paid).toEqual({ regular: 8, overtime: 2 });
+  expect(employee.held).toEqual({ regular: 4, overtime: 0 });
 });

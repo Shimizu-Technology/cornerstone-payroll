@@ -523,22 +523,15 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </div>
             </div>
 
-            <div className="border-t border-neutral-200 bg-neutral-950 px-6 py-6 text-sm text-neutral-200">
-              <p className="font-semibold text-white">Finish payment tracking</p>
-              <ol className="mt-2 grid gap-2 leading-5 md:grid-cols-4">
-                <li><span className="font-semibold text-white">1.</span> Make every employee match.</li>
-                <li><span className="font-semibold text-white">2.</span> Calculate, approve, then commit.</li>
-                <li><span className="font-semibold text-white">3.</span> For manual hours, review and link exact matches together; resolve any remaining entries individually. Connected imports link automatically.</li>
-                <li><span className="font-semibold text-white">4.</span> Record check delivery or confirmed bank payment. Review the final AIRE lock seven days after the scheduled pay date.</li>
-              </ol>
-              <p className="mt-4 text-xs leading-5 text-neutral-300">
+            {review.employees.some((employee) => employee.adjustments.length > 0) && (
+              <div className="border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-sm text-neutral-600">
                 {isCommitted
                   ? aireRecordLinked
-                    ? 'The finalized AIRE record is linked. Recording payment evidence updates the included AIRE hours.'
-                    : 'For manually entered payroll, link the included AIRE hours above. Connected imports link exact entries at commitment. Check delivery or bank confirmation then marks those hours paid in AIRE.'
-                  : 'For manually entered payroll, commit first, then link each paid time entry to its paycheck. AIRE keeps any unlinked hours owed.'}
-              </p>
-            </div>
+                    ? 'The finalized AIRE record is linked. Payment evidence updates the included AIRE hours.'
+                    : 'Link the included AIRE hours to the correct paycheck above. Once payment is recorded, AIRE marks those hours paid.'
+                  : 'Commit payroll before linking manually entered AIRE hours to their paycheck.'}
+              </div>
+            )}
           </>
         )}
       </CardContent>

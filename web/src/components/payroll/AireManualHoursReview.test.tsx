@@ -114,7 +114,7 @@ describe('AireManualHoursReview', () => {
     expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
     expect(screen.getByText('Test Worker B · 2.50 hrs')).toBeTruthy();
-    expect(screen.getByText(/link each paid time entry to its paycheck/i)).toBeTruthy();
+    expect(screen.getByText(/Commit payroll before linking manually entered AIRE hours/i)).toBeTruthy();
   });
 
   it('updates the match result immediately as Payroll hours change', async () => {
@@ -206,7 +206,7 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/Recording payment evidence updates the included AIRE hours/i);
+    await screen.findByText(/Payment evidence updates the included AIRE hours/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
