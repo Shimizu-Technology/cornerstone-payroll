@@ -170,9 +170,11 @@ RSpec.describe "Unified check printing workflow" do
       printer_profile_lock_version: printer_profile.lock_version,
       storage: storage
     ).call
+    expect(CheckPrintRunHistoryVerifier.new(runs: [ run ]).call.fetch(run.id).first).to eq("prepared")
     employee_check.update!(check_number: "1999")
 
     expect(run.reload.status).to eq("prepared")
+    expect(CheckPrintRunHistoryVerifier.new(runs: [ run ]).call.fetch(run.id).first).to eq("outdated")
     expect(employee_check.reload.check_prepared?).to be(false)
     expect {
       employee_check.mark_delivered!(user: actor, delivered_on: PayrollBusinessClock.today,
@@ -181,7 +183,7 @@ RSpec.describe "Unified check printing workflow" do
   end
 
   it "blocks issuance when the employee name on a prepared check changes" do
-    CheckPrintRunGenerationService.new(
+    run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
       actor: actor,
       payroll_item_ids: [ employee_check.id ],
@@ -194,11 +196,30 @@ RSpec.describe "Unified check printing workflow" do
     expect(employee_check.reload.check_prepared?).to be(true)
 
     employee.update!(first_name: "Changed")
+    expect(CheckPrintRunHistoryVerifier.new(runs: [ run ]).call.fetch(run.id).first).to eq("outdated")
 
     expect {
       employee_check.reload.mark_delivered!(user: actor, delivered_on: PayrollBusinessClock.today,
         delivery_method: "hand_delivery", attestation: true)
     }.to raise_error(ArgumentError, /Generate a current check package/)
+  end
+
+  it "keeps a saved package current after separate physical print tracking" do
+    run = CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [],
+      starting_slot: 1,
+      printer_profile_id: printer_profile.id,
+      printer_profile_lock_version: printer_profile.lock_version,
+      storage: storage
+    ).call
+
+    employee_check.mark_printed!(user: actor)
+
+    expect(employee_check.reload.check_print_count).to eq(1)
+    expect(CheckPrintRunHistoryVerifier.new(runs: [ run ]).call.fetch(run.id).first).to eq("prepared")
   end
 
   it "rejects a package when the reviewed printer calibration changed" do

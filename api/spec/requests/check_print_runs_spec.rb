@@ -84,11 +84,23 @@ RSpec.describe "Check print runs", type: :request do
       byte_size: bytes.bytesize
     )
     allow_any_instance_of(R2StorageService).to receive(:download).and_return(bytes)
+    allow(CheckPackagePreparation).to receive(:current_run?).and_return(true)
 
     get "/api/v1/admin/check_print_runs/#{print_run.id}/pdf"
 
     expect(response).to have_http_status(:ok)
     expect(response.body).to eq(bytes)
+  end
+
+  it "refuses an outdated prepared PDF before downloading it" do
+    print_run.update_column(:status, "prepared")
+    allow(R2StorageService).to receive(:new).and_call_original
+
+    get "/api/v1/admin/check_print_runs/#{print_run.id}/pdf"
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to include("no longer match")
+    expect(R2StorageService).not_to have_received(:new)
   end
 
   it "forbids client-portal users from listing saved packages" do
