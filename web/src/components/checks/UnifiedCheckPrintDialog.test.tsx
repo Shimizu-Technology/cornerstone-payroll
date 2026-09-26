@@ -347,6 +347,34 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(screen.getByRole('button', { name: 'Generating package…' }).getAttribute('aria-busy')).toBe('true');
   });
 
+  it('refreshes prepared checks after polling completes while package history is loading', async () => {
+    const preparedQueue: CheckPrintQueueResponse = {
+      ...queue,
+      items: [{ ...queue.items[0], status: 'prepared', prepared_at: '2026-09-22T01:05:00Z' }],
+      meta: { ...queue.meta, unprinted: 0, prepared: 1 },
+    };
+    let resolveHistory!: (value: { check_print_runs: CheckPrintRun[] }) => void;
+    apiMocks.printQueue.mockResolvedValueOnce(queue).mockResolvedValue(preparedQueue);
+    apiMocks.printRuns
+      .mockResolvedValueOnce({ check_print_runs: [] })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveHistory = resolve; }));
+    apiMocks.activePrintGeneration.mockResolvedValue({
+      check_print_generation: { ...queuedGeneration, status: 'processing', phase: 'rendering' },
+    });
+    apiMocks.printGeneration.mockResolvedValue({
+      check_print_generation: { ...queuedGeneration, status: 'ready', phase: 'ready', check_print_run_id: generatedRun.id },
+    });
+    const onPackageGenerated = vi.fn();
+    renderDialog({ onPackageGenerated });
+
+    await waitFor(() => expect(apiMocks.printGeneration).toHaveBeenCalledTimes(1));
+    await act(async () => { resolveHistory({ check_print_runs: [generatedRun] }); });
+
+    await waitFor(() => expect(onPackageGenerated).toHaveBeenCalledTimes(1));
+    expect(apiMocks.printQueue).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Package #42')).toBeTruthy();
+  });
+
   it('keeps the selection after failure and retries with a new idempotency key', async () => {
     const user = userEvent.setup();
     apiMocks.printGeneration.mockResolvedValue({
