@@ -1698,6 +1698,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     const employeeHistoryUrl = `/companies/${fixture.company_id}/employees/${fixture.employee_id}/pay-history`;
     await page.goto(employeeHistoryUrl);
+    await page.getByRole('button', { name: /View stub for/ }).first().click();
+    await expect(page.getByRole('dialog')).toContainText('Pay stub');
+    await expect(page.getByLabel(/Page 1 preview/)).toBeVisible();
+    await page.getByRole('button', { name: 'Close PDF preview' }).click();
     const historyPayrollItemLink = page.getByRole('link', { name: /Open payroll item for/ }).first();
     const historyPayrollItemHref = await historyPayrollItemLink.getAttribute('href');
     expect(historyPayrollItemHref).toBeTruthy();

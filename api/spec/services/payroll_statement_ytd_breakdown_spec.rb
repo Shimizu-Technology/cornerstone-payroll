@@ -75,6 +75,34 @@ RSpec.describe PayrollStatementYtdBreakdown do
     expect(deductions.values.sum(0.to_d, &:ytd)).to eq(20_459.to_d)
   end
 
+  it "does not display the legacy payout inferred from historical Pay Tip earnings" do
+    balance = apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 9, 6), through_pay_date: Date.new(2026, 9, 10),
+      reported_tips: 1_900.80, tips_paid_out: 1_900.80,
+      source_breakdown: { "earnings_breakdown" => { "Pay Tip" => "1900.80" } }
+    )
+
+    expect(described_class.new(payroll_item).deductions.map(&:semantic)).not_to include(:tips_paid_out)
+    expect(balance.ytd_aggregate_totals.fetch(:tips_paid_out)).to eq(0.to_d)
+    expect(balance.reload.tips_paid_out).to eq(1_900.80.to_d)
+  end
+
+  it "preserves a separately documented historical tip payout once" do
+    balance = apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 9, 6), through_pay_date: Date.new(2026, 9, 10),
+      reported_tips: 100, tips_paid_out: 100,
+      source_breakdown: {
+        "earnings_breakdown" => { "Pay Tip" => "100" },
+        "after_tax_deduction_breakdown" => { "Tip Payout" => "100" }
+      }
+    )
+
+    expect(described_class.new(payroll_item).deductions.select { |row| row.semantic == :tips_paid_out }.sole.ytd).to eq(100.to_d)
+    expect(balance.ytd_aggregate_totals.fetch(:tips_paid_out)).to eq(100.to_d)
+  end
+
   it "matches migrated health and child support to differently worded current fields" do
     verna = create(:employee, company: company, first_name: "Verna", last_name: "John", employment_type: "hourly")
     apply_historical_ytd_balance(

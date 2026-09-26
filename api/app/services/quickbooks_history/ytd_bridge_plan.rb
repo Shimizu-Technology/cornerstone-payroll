@@ -15,6 +15,7 @@ module QuickbooksHistory
     INSURANCE = /insurance|health/i
     LOAN = /loan|advance/i
     TIPS = /\A(?:pay\s*tips?|reported tips?)\z/i
+    TIP_PAYOUT = /\A(?:tips? paid out|tips? payout)\z/i
     def initialize(batch:)
       @batch = batch
     end
@@ -156,7 +157,9 @@ module QuickbooksHistory
         "after_tax_deductions" => sum(rows, :after_tax_deductions),
         "non_taxable_pay" => non_taxable.to_s("F"),
         "reported_tips" => tips.to_s("F"),
-        "tips_paid_out" => tips.to_s("F"),
+        # Pay Tip is an earning in the retained export, not evidence that the
+        # employee received a separate payout outside this paycheck.
+        "tips_paid_out" => component_sum(rows, :after_tax_deduction_breakdown, TIP_PAYOUT),
         "retirement" => component_sum(rows, :pretax_deduction_breakdown, RETIREMENT_PRE_TAX),
         "roth_retirement" => component_sum(rows, :after_tax_deduction_breakdown, RETIREMENT_ROTH),
         "insurance" => component_sum(rows, :after_tax_deduction_breakdown, INSURANCE, exclude: RETIREMENT_ROTH),
@@ -306,7 +309,8 @@ module QuickbooksHistory
         "after_tax_deduction_breakdown" => {
           "Roth retirement" => RETIREMENT_ROTH,
           "insurance" => INSURANCE,
-          "loan or advance" => LOAN
+          "loan or advance" => LOAN,
+          "tips paid out" => TIP_PAYOUT
         }
       }
       warnings = fields.flat_map do |field, buckets|
@@ -321,7 +325,7 @@ module QuickbooksHistory
         end
       end
       if balances.any? { |balance| BigDecimal(balance.fetch("reported_tips").to_s).positive? }
-        warnings << "QuickBooks tip earnings are carried as reported tips, but the historical export does not distinguish tips paid out separately. Confirm the tip treatment before activation."
+        warnings << "QuickBooks tip earnings are carried as reported tips. Tips paid out are carried only when a separate payout appears in the retained deduction detail."
       end
       warnings
     end

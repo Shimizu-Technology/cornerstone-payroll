@@ -42,6 +42,13 @@ class PayrollEarningsYtdBreakdown
     end
   end
 
+  # Historical QuickBooks gross includes non-taxable reimbursements. They are
+  # itemized under OTHER PAY, so subtract only that opening balance from the
+  # displayed PAY total. Live non-taxable additions never enter gross wages.
+  def pay_ytd_total(gross)
+    (gross.to_d - (historical_balance&.non_taxable_pay || 0).to_d).round(2)
+  end
+
   private
 
   attr_reader :payroll_item, :employee, :pay_period, :company
@@ -89,7 +96,8 @@ class PayrollEarningsYtdBreakdown
       value = BigDecimal(amount.to_s, exception: false)
       next if label.to_s.blank? || value.nil? || value.zero?
 
-      Component.new(label: label.to_s, category: nil, hours: nil, rate: nil, amount: value)
+      component = Component.new(label: label.to_s, category: nil, hours: nil, rate: nil, amount: value)
+      component unless non_taxable_component?(component)
     end
   end
 

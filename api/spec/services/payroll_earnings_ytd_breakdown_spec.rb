@@ -39,6 +39,27 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     expect(row).to have_attributes(label: "Joint", current: 117.70.to_d, ytd: 1_032.90.to_d)
   end
 
+  it "keeps historical reimbursements out of PAY while retaining the source gross" do
+    apply_historical_ytd_balance(
+      company: company,
+      employee: employee,
+      through_period_end: Date.new(2026, 9, 6),
+      through_pay_date: Date.new(2026, 9, 10),
+      gross_pay: 100_000.00,
+      non_taxable_pay: 13_721.44,
+      source_breakdown: { "earnings_breakdown" => {
+        "Salary" => "90000.00", "Reimb" => "8677.44", "Rent" => "5044.00"
+      } }
+    )
+    payroll_item.update!(gross_pay: 0)
+
+    breakdown = described_class.new(payroll_item)
+    expect(breakdown.call.map(&:source_label)).to include("Salary")
+    expect(breakdown.call.map(&:source_label)).not_to include("Reimb", "Rent")
+    expect(breakdown.pay_ytd_total(100_000.00)).to eq(90_000.00.to_d)
+    expect(employee.historical_employee_ytd_balances.sole.gross_pay).to eq(100_000.00.to_d)
+  end
+
   it "keeps Monique's salary, bonus, and tips separate while carrying their QuickBooks YTD" do
     monique = create(:employee, company: company, first_name: "Monique", last_name: "Ellis", employment_type: "salary")
     apply_historical_balance(

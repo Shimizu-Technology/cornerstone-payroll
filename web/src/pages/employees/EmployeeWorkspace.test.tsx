@@ -9,6 +9,7 @@ import { EmployeeWorkspace } from './EmployeeWorkspace';
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
   employeePayHistory: vi.fn(),
+  batchPdf: vi.fn(),
   resolveConfigurationReviewItem: vi.fn(),
   recordActivities: vi.fn(),
 }));
@@ -23,11 +24,16 @@ vi.mock('@/services/api', () => ({
     resolveConfigurationReviewItem: apiMocks.resolveConfigurationReviewItem,
   },
   reportsApi: { employeePayHistory: apiMocks.employeePayHistory },
+  payStubsApi: { batchPdf: apiMocks.batchPdf },
   recordActivitiesApi: { list: apiMocks.recordActivities },
 }));
 
 vi.mock('@/components/employees/EmployeeRetirementElectionPanel', () => ({
   EmployeeRetirementElectionPanel: () => null,
+}));
+
+vi.mock('@/components/documents/PdfPreview', () => ({
+  PdfPreview: ({ artifact }: { artifact: { title: string } | null }) => artifact ? <div role="dialog">{artifact.title}</div> : null,
 }));
 
 const employee = {
@@ -158,6 +164,33 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: 'Direct deposit' })).toBeTruthy();
     expect(screen.queryByText('Not assigned')).toBeNull();
+    expect(screen.getByRole('button', { name: 'View stub for Sep 19, 2026' })).toBeTruthy();
+  });
+
+  it('previews a Cornerstone stub from history and offers no stub for imported history', async () => {
+    apiMocks.batchPdf.mockResolvedValue({ blob: new Blob(['%PDF']), filename: 'paystub.pdf' });
+    apiMocks.employeePayHistory.mockResolvedValue({ report: { summary: {}, history: [
+      {
+        key: 'native:4', record_type: 'native', payroll_item_id: 4, pay_period_id: 5,
+        pay_date: '2026-09-19', period_description: 'September payroll',
+        source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+        gross_pay: 900, total_deductions: 100, net_pay: 800, check_number: null,
+      },
+      {
+        key: 'imported:9', record_type: 'imported', payroll_item_id: null, pay_period_id: null,
+        historical_pay_period_id: 9, pay_date: '2025-09-19', period_description: 'Imported payroll',
+        source: { system: 'quickbooks_online', label: 'QuickBooks', locked: true },
+        gross_pay: 900, total_deductions: 100, net_pay: 800, check_number: null,
+      },
+    ] } });
+    render(<MemoryRouter initialEntries={['/companies/1/employees/2/pay-history']}>
+      <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+    </MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View stub for Sep 19, 2026' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(5, [4]));
+    expect(await screen.findByRole('dialog')).toHaveProperty('textContent', 'Pay stub · Sep 19, 2026');
+    expect(screen.queryByRole('button', { name: 'View stub for Sep 19, 2025' })).toBeNull();
   });
 
   it('combines complete record activity with employment and classification context', async () => {

@@ -14,6 +14,20 @@ class HistoricalEmployeeYtdBalance < ApplicationRecord
   before_update :prevent_change
   before_destroy :prevent_change
 
+  # Older bridge plans copied Pay Tip earnings into tips_paid_out without a
+  # separate payout in the QuickBooks source. Correct that derived display/YTD
+  # value at read time while preserving the immutable source and bridge rows.
+  def verified_tips_paid_out
+    tip_earnings = source_breakdown.to_h.fetch("earnings_breakdown", {}).to_h.any? do |label, _amount|
+      label.match?(QuickbooksHistory::YtdBridgePlan::TIPS)
+    end
+    return tips_paid_out unless tip_earnings && tips_paid_out.to_d == reported_tips.to_d
+
+    source_breakdown.to_h.fetch("after_tax_deduction_breakdown", {}).to_h.sum(0.to_d) do |label, amount|
+      label.match?(QuickbooksHistory::YtdBridgePlan::TIP_PAYOUT) ? amount.to_d : 0.to_d
+    end.round(2)
+  end
+
   def ytd_aggregate_totals
     {
       gross_pay: gross_pay,
@@ -26,7 +40,7 @@ class HistoricalEmployeeYtdBalance < ApplicationRecord
       roth_retirement: roth_retirement,
       insurance: insurance,
       loans: loans,
-      tips_paid_out: tips_paid_out,
+      tips_paid_out: verified_tips_paid_out,
       social_security_taxable_total: social_security_taxable_wages + social_security_taxable_tips,
       medicare_taxable_wages: medicare_taxable_wages
     }
