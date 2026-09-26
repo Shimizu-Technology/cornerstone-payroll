@@ -26,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
@@ -47,7 +48,7 @@ import {
   safeInternalReturnPath,
   type EmployeeWorkspaceTab,
 } from '@/lib/routes';
-import { employeesApi, reportsApi } from '@/services/api';
+import { employeesApi, payStubsApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
@@ -589,6 +590,9 @@ interface PayHistoryProps {
 function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
   const [yearFilter, setYearFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'cornerstone' | 'quickbooks'>('all');
+  const [stubLoadingId, setStubLoadingId] = useState<number | null>(null);
+  const [stubError, setStubError] = useState<string | null>(null);
+  const [stubArtifact, setStubArtifact] = useState<PdfArtifact | null>(null);
   const years = useMemo(() => Array.from(new Set((report?.history || []).map((item) => item.pay_date.slice(0, 4)))).sort().reverse(), [report]);
   const visibleHistory = useMemo(() => (report?.history || []).filter((item) => {
     if (yearFilter !== 'all' && !item.pay_date.startsWith(yearFilter)) return false;
@@ -597,8 +601,26 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
     return true;
   }), [report, sourceFilter, yearFilter]);
 
+  const viewStub = async (item: PayHistoryReport['history'][number]): Promise<void> => {
+    if (!item.pay_period_id || !item.payroll_item_id) return;
+    setStubLoadingId(item.payroll_item_id);
+    setStubError(null);
+    try {
+      const result = await payStubsApi.batchPdf(item.pay_period_id, [item.payroll_item_id]);
+      setStubArtifact({
+        blob: result.blob,
+        filename: result.filename || `paystub_${item.pay_date}_${item.payroll_item_id}.pdf`,
+        title: `Pay stub · ${formatDate(item.pay_date)}`,
+      });
+    } catch (error) {
+      setStubError(error instanceof Error ? error.message : 'Could not load this pay stub. Please try again.');
+    } finally {
+      setStubLoadingId(null);
+    }
+  };
+
   return (
-    <Card>
+    <><Card>
       <CardHeader className="gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Every linked QuickBooks record and committed Cornerstone paycheck appears here. Imported records are locked and cannot be edited or recalculated.</p></div>
         {report && report.history.length > 0 && (
@@ -620,6 +642,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
         )}
       </CardHeader>
       <CardContent className="p-0">
+        {stubError && <p role="alert" className="px-6 py-3 text-sm text-danger-700">{stubError}</p>}
         {!report ? (
           <p className="px-6 py-10 text-center text-sm text-amber-800">Pay history could not be loaded. Use Try again above without leaving this employee.</p>
         ) : report.history.length === 0 ? (
@@ -632,21 +655,30 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
             <TableBody striped>
               {visibleHistory.map((item) => (
                 <TableRow key={item.key}>
-                  <TableCell className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</TableCell>
+                  <TableCell className="font-semibold text-neutral-950">
+                    <span className="block whitespace-nowrap">{formatDate(item.pay_date)}</span>
+                    {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
+                      <Button variant="outline" size="sm" className="mt-2 whitespace-nowrap" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
+                        {stubLoadingId === item.payroll_item_id ? 'Loading…' : 'View stub'}
+                      </Button>
+                    )}
+                  </TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
                   <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge></TableCell>
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
                   <TableCell>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
-                  <TableCell className="text-right"><Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell>
+                  <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
+                    <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
+                  </div></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </CardContent>
-    </Card>
+    </Card><PdfPreview artifact={stubArtifact} onClose={() => setStubArtifact(null)} /></>
   );
 }
 

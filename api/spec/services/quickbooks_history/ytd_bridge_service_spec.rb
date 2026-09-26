@@ -300,7 +300,7 @@ RSpec.describe "QuickBooks historical YTD bridge" do
       bridge = prepare_previewed_bridge(
         files: quickbooks_history_uploads_with_tip_label(tip_label) + quickbooks_tax_wage_uploads
       )
-      expect(bridge.warnings.join(" ")).to match(/does not distinguish tips paid out separately/)
+      expect(bridge.warnings.join(" ")).to match(/Tips paid out are carried only when a separate payout appears/)
 
       QuickbooksHistory::YtdBridgeApplyService.new(
         bridge: bridge,
@@ -309,8 +309,30 @@ RSpec.describe "QuickBooks historical YTD bridge" do
       ).call
 
       alice = company.employees.find_by!(first_name: "Alice", last_name: "Worker")
-      expect(alice.historical_employee_ytd_balances.find_by!(tax_year: 2024).reported_tips).to eq(100.to_d)
+      expect(alice.historical_employee_ytd_balances.find_by!(tax_year: 2024)).to have_attributes(
+        reported_tips: 100.to_d,
+        tips_paid_out: 0.to_d
+      )
     end
+  end
+
+  it "carries a separately labeled QuickBooks tip payout into the applied balance" do
+    bridge = prepare_previewed_bridge(
+      files: quickbooks_history_uploads_with_tip_payout + quickbooks_tax_wage_uploads
+    )
+    expect(bridge.warnings.join(" ")).not_to match(/Tip Payout.*not assigned to a specialized YTD bucket/)
+
+    QuickbooksHistory::YtdBridgeApplyService.new(
+      bridge: bridge,
+      actor: actor,
+      acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT
+    ).call
+
+    alice = company.employees.find_by!(first_name: "Alice", last_name: "Worker")
+    expect(alice.historical_employee_ytd_balances.find_by!(tax_year: 2024)).to have_attributes(
+      reported_tips: 100.to_d,
+      tips_paid_out: 100.to_d
+    )
   end
 
   it "carries Roth deductions from after-tax detail without also treating them as loans" do

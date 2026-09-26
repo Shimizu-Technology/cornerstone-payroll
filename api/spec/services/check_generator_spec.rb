@@ -59,6 +59,20 @@ RSpec.describe CheckGenerator do
 
   subject(:generator) { described_class.new(payroll_item) }
 
+  it "prints historical reimbursements only under OTHER PAY and adjusts the visible PAY total" do
+    apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 2, 28), through_pay_date: Date.new(2026, 3, 10),
+      gross_pay: 2_000, non_taxable_pay: 300,
+      source_breakdown: { "earnings_breakdown" => { "Regular Pay" => "1700", "Reimb" => "300" } }
+    )
+
+    expect(generator.send(:pay_rows).flatten.join(" ")).not_to include("Reimb")
+    expect(generator.send(:pay_rows).last.last.fetch(:content)).to eq("2,919.20")
+    expect(generator.send(:other_pay_rows).flatten.join(" ")).to include("Reimb", "300.00")
+    expect(generator.render_input_payload.dig("summary", "ytd_gross")).to eq("2,919.20")
+  end
+
   it "includes both a direct loan and a separate loan field in check deductions" do
     field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
@@ -395,7 +409,7 @@ RSpec.describe CheckGenerator do
       payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
       payroll_item.payroll_item_earnings.create!(
         category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
-      breakdown = instance_double(PayrollEarningsYtdBreakdown, call: [
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, pay_ytd_total: 117.70.to_d, call: [
         PayrollEarningsYtdBreakdown::Row.new(
           label: "Joint", source_label: "Joint", category: "regular",
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d

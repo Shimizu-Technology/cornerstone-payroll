@@ -112,6 +112,22 @@ module QuickbooksHistoryFixtureHelper
     authoritative_quickbooks_files(details: details, history: paycheck_history_rows)
   end
 
+  def quickbooks_history_uploads_with_tip_payout
+    details = payroll_details_rows
+    headers = details.fetch(4)
+    headers[headers.index("Gross pay - Bonus")] = "Gross pay - Pay Tip"
+    payout_column = headers.length
+    headers << "Employee Aftertax deductions - Tip Payout"
+    details.fetch(5)[headers.index("Employee Aftertax deductions - total")] = -125
+    details.fetch(5)[headers.index("Net pay")] = 625
+    details.fetch(5)[payout_column] = -100
+    details.fetch(8)[payout_column] = -100
+    history = paycheck_history_rows
+    history.fetch(5)[history.fetch(4).index("Net pay")] = 625
+
+    authoritative_quickbooks_files(details: details, history: history)
+  end
+
   # Q1 and Q4 are empty and Q2 is fixed at 2,000. Annual FIT and SS wages
   # reconcile only when they equal Q2 plus the matching Q3 value.
   def quickbooks_tax_wage_uploads(
