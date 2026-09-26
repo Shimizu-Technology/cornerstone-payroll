@@ -5,9 +5,13 @@ require "pdf/reader"
 
 RSpec.describe PayStubGenerator do
   include ActiveSupport::Testing::TimeHelpers
+  include HistoricalYtdBridgeFixtureHelper
 
   let(:company) { create(:company, name: "Stub Company") }
-  let(:pay_period) { create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 4, 15)) }
+  let(:pay_period) do
+    create(:pay_period, :committed, company: company,
+      start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 14), pay_date: Date.new(2026, 4, 15))
+  end
   let(:employee) do
     create(
       :employee,
@@ -36,6 +40,22 @@ RSpec.describe PayStubGenerator do
       ytd_gross: 310,
       ytd_net: 250
     )
+  end
+
+  it "shows historical reimbursements in non-taxable additions without inflating displayed gross earnings" do
+    apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+      gross_pay: 2_000, non_taxable_pay: 300,
+      source_breakdown: { "earnings_breakdown" => { "Regular Pay" => "1700", "Reimb" => "300" } }
+    )
+    payroll_item.update!(ytd_gross: 2_310)
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("NON-TAXABLE ADDITIONS", "Reimb", "$2,010.00")
+    expect(text).not_to include("$2,310.00")
+    expect(payroll_item.reload.ytd_gross).to eq(2_310.to_d)
   end
 
   it "does not label missing check numbers as direct deposit" do

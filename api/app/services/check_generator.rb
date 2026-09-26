@@ -139,7 +139,7 @@ class CheckGenerator
       "deduction_rows" => deduction_rows,
       "summary" => {
         "gross" => fn(payroll_item.gross_pay),
-        "ytd_gross" => fn(ytd[:gross]),
+        "ytd_gross" => fn(pay_ytd_total),
         "taxes" => fn(cur_taxes),
         "ytd_taxes" => fn(ytd[:taxes]),
         "deductions" => fn(cur_deds),
@@ -424,7 +424,7 @@ class CheckGenerator
   # Data row builders
   # -----------------------------------------------------------------------
   def pay_rows
-    rows = PayrollEarningsYtdBreakdown.new(payroll_item).call.map do |earning|
+    rows = earnings_ytd_breakdown.call.map do |earning|
       [
         stub_label(earning.label),
         earning.hours.present? ? fh(earning.hours) : "-",
@@ -437,9 +437,17 @@ class CheckGenerator
     rows << [
       { content: "TOTAL", font_style: :bold }, "", "",
       { content: fn(payroll_item.gross_pay), font_style: :bold },
-      { content: fn(ytd[:gross]), font_style: :bold }
+      { content: fn(pay_ytd_total), font_style: :bold }
     ]
     rows
+  end
+
+  def earnings_ytd_breakdown
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+  end
+
+  def pay_ytd_total
+    earnings_ytd_breakdown.pay_ytd_total(ytd[:gross])
   end
 
   def tax_rows
@@ -571,7 +579,7 @@ class CheckGenerator
     ]
 
     data_rows = [
-      ["Total Pay", fd(payroll_item.gross_pay), fd(ytd[:gross])],
+      ["Total Pay", fd(payroll_item.gross_pay), fd(pay_ytd_total)],
       ["Taxes", fd(cur_taxes), fd(ytd[:taxes])],
       ["Deductions", fd(cur_deds), fd(ytd_visible_deds)]
     ]

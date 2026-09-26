@@ -249,7 +249,7 @@ class PayStubGenerator
       "",
       "",
       { content: format_currency(payroll_item.gross_pay), font_style: :bold },
-      { content: format_currency(payroll_item.ytd_gross), font_style: :bold }
+      { content: format_currency(pay_ytd_total), font_style: :bold }
     ]
 
     pdf.font_size(8) do
@@ -425,7 +425,7 @@ class PayStubGenerator
     pdf.move_down 3
 
     ytd_data = [
-      [ "Gross Earnings", format_currency(payroll_item.ytd_gross) ],
+      [ "Gross Earnings", format_currency(pay_ytd_total) ],
       [ "Federal/Guam Tax", format_currency(payroll_item.ytd_withholding_tax) ],
       [ "Social Security", format_currency(payroll_item.ytd_social_security_tax) ],
       [ "Medicare", format_currency(payroll_item.ytd_medicare_tax) ],
@@ -445,6 +445,10 @@ class PayStubGenerator
 
   def guam_generated_timestamp
     Time.current.in_time_zone(GUAM_TIME_ZONE).strftime("%B %d, %Y at %I:%M %p ChST")
+  end
+
+  def pay_ytd_total
+    @pay_ytd_total ||= PayrollEarningsYtdBreakdown.new(payroll_item).pay_ytd_total(payroll_item.ytd_gross)
   end
 
   def payroll_field_entries_for(*treatments)

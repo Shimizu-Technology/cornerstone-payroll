@@ -158,7 +158,7 @@ class PayrollStatementYtdBreakdown
       end
     end
 
-    tips_paid_out = historical_balance.tips_paid_out.to_d
+    tips_paid_out = historical_balance.verified_tips_paid_out.to_d
     unless tips_paid_out.zero? || components.any? { |entry| entry.semantic == :tips_paid_out }
       components << Component.new(label: "Tips Paid Out", amount: tips_paid_out, semantic: :tips_paid_out)
     end
@@ -279,7 +279,7 @@ class PayrollStatementYtdBreakdown
     return :child_support if text.match?(CHILD_SUPPORT)
     return :garnishment if text.match?(GARNISHMENT)
     return :loan if text.match?(QuickbooksHistory::YtdBridgePlan::LOAN)
-    return :tips_paid_out if text.match?(/tips?\s+paid\s+out/i)
+    return :tips_paid_out if label.to_s.match?(QuickbooksHistory::YtdBridgePlan::TIP_PAYOUT)
 
     :other
   end
