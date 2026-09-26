@@ -130,6 +130,8 @@ RSpec.describe "Unified check printing workflow" do
     non_employee_check.mark_paid!(actor: actor, payment_date: PayrollBusinessClock.today)
     expect(CheckReconciliationStatus.for(employee_check.reload)).to eq("issued")
     expect(CheckReconciliationStatus.for(non_employee_check.reload)).to eq("issued")
+    non_employee_check.void!(reason: "Payment was returned before clearing")
+    expect(non_employee_check.reload).to be_voided
   end
 
   it "uses a unique download filename for every generated package" do

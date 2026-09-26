@@ -634,7 +634,7 @@ interface ModeBannerProps {
 }
 
 function ModeBanner({ mode, originalCheckNumber, payrollItem }: ModeBannerProps) {
-  // Until preview returns, infer the mode locally from check_printed_at so
+  // Until preview returns, infer the mode locally from preparation or print status so
   // the operator sees the right context immediately.
   const inferred = mode ?? (payrollItem.check_prepared_at || payrollItem.check_printed_at ? 'void_and_reissue' : 'in_place');
   const isReissue = inferred === 'void_and_reissue';
@@ -645,13 +645,13 @@ function ModeBanner({ mode, originalCheckNumber, payrollItem }: ModeBannerProps)
     >
       <p className="font-semibold">
         {isReissue
-          ? `Mode: void & reissue (check #${originalCheckNumber} was already printed)`
-          : `Mode: in-place edit (check #${originalCheckNumber} not yet printed)`}
+          ? `Mode: void & reissue (check #${originalCheckNumber} was ${payrollItem.check_printed_at ? 'already printed' : 'prepared in a saved package'})`
+          : `Mode: in-place edit (check #${originalCheckNumber} not yet prepared or printed)`}
       </p>
       <p className="mt-1">
         {isReissue
-          ? 'The old check number will be invalidated in the audit trail. A new check number will be assigned and printed for the corrected amount.'
-          : 'Because no physical check has been printed yet, the check number is reused. Just confirm the corrected values.'}
+          ? 'The old check number will be invalidated in the audit trail. A new number will be assigned; generate a new package for the corrected check.'
+          : 'Because this check has not been prepared or printed, its number can be reused. Confirm the corrected values.'}
       </p>
     </div>
   );
