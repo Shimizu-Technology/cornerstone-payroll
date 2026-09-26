@@ -268,9 +268,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
         setGeneration(next);
         if (next.status === 'ready' && next.check_print_run_id) {
           await refreshRuns(next.check_print_run_id, false, workspaceToken);
-          if (cancelled || workspaceToken !== workspaceRequestRef.current) return;
+          if (workspaceToken !== workspaceRequestRef.current) return;
           await loadQueue();
-          if (cancelled || workspaceToken !== workspaceRequestRef.current) return;
+          if (workspaceToken !== workspaceRequestRef.current) return;
           onPackageGenerated();
           return;
         }
