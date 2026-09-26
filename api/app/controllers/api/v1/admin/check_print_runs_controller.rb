@@ -55,7 +55,12 @@ module Api
         end
 
         def pdf
-          CheckPrintRunSelectionVerifier.new(run: @run).call unless @run.confirmed? || @run.prepared?
+          if @run.prepared?
+            state, issue = CheckPrintRunHistoryVerifier.new(runs: [ @run ]).call.fetch(@run.id)
+            return render json: { error: issue }, status: :conflict if state == "outdated"
+          elsif !@run.confirmed?
+            CheckPrintRunSelectionVerifier.new(run: @run).call
+          end
 
           data = R2StorageService.new.download(@run.storage_key)
           return render json: { error: "The generated check package is unavailable" }, status: :not_found unless data

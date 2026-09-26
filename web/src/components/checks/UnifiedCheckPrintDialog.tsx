@@ -76,6 +76,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
   const previewRequestRef = useRef(0);
   const workspaceRequestRef = useRef(0);
+  const queueRef = useRef<CheckPrintQueueResponse | null>(null);
   const generationRequestRef = useRef(false);
   const pendingGenerationKeyRef = useRef<{ signature: string; key: string } | null>(null);
 
@@ -95,20 +96,24 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     });
   }, []);
 
-  const applyQueue = useCallback((data: CheckPrintQueueResponse, options?: { preserveSelection?: boolean; selectKeys?: string[] }) => {
+  const applyQueue = useCallback((data: CheckPrintQueueResponse, options?: { preserveSelection?: boolean }) => {
+    const previousQueue = queueRef.current;
+    queueRef.current = data;
     setQueue(data);
     setDraftNumbers(Object.fromEntries(data.items.map((item) => [item.key, item.check_number || ''])));
     setSelected((current) => {
       const eligible = new Set(data.items.filter((item) => item.eligible).map((item) => item.key));
-      if (options?.selectKeys) return new Set(options.selectKeys.filter((key) => eligible.has(key)));
       if (!options?.preserveSelection) return new Set(data.items.filter((item) => item.eligible && item.status === 'unprinted').map((item) => item.key));
-      return new Set(Array.from(current).filter((key) => eligible.has(key)));
+      return new Set(Array.from(current).filter((key) =>
+        eligible.has(key) && previousQueue?.items.find((item) => item.key === key)?.status === data.items.find((item) => item.key === key)?.status
+      ));
     });
   }, []);
 
-  const loadQueue = useCallback(async (options?: { preserveSelection?: boolean; selectKeys?: string[] }) => {
+  const loadQueue = useCallback(async (options?: { preserveSelection?: boolean }) => {
+    const workspaceToken = workspaceRequestRef.current;
     const data = await checksApi.printQueue(payPeriodId);
-    applyQueue(data, options);
+    if (workspaceToken === workspaceRequestRef.current) applyQueue(data, options);
     return data;
   }, [applyQueue, payPeriodId]);
 
@@ -195,6 +200,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     setInitialLoading(true);
     setError(null);
     setQueue(null);
+    queueRef.current = null;
     setSourceFilter('all');
     setStatusFilter('all');
     setRun(null);
@@ -262,7 +268,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
         setGeneration(next);
         if (next.status === 'ready' && next.check_print_run_id) {
           await refreshRuns(next.check_print_run_id, false, workspaceToken);
+          if (cancelled || workspaceToken !== workspaceRequestRef.current) return;
           await loadQueue();
+          if (cancelled || workspaceToken !== workspaceRequestRef.current) return;
           onPackageGenerated();
           return;
         }
@@ -385,7 +393,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   };
 
   const prepareNewPackage = useCallback(async (replacement: boolean) => {
-    const preferredKeys = replacement && run ? run.manifest.map((entry) => entry.key) : undefined;
+    const workspaceToken = workspaceRequestRef.current;
     previewRequestRef.current += 1;
     setSelected(new Set());
     setRun(null);
@@ -399,11 +407,11 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     setStatusFilter('all');
     setError(null);
     try {
-      await loadQueue({ selectKeys: preferredKeys });
+      await loadQueue();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not refresh the current checks.');
+      if (workspaceToken === workspaceRequestRef.current) setError(err instanceof Error ? err.message : 'Could not refresh the current checks.');
     }
-  }, [loadQueue, revokePreview, run]);
+  }, [loadQueue, revokePreview]);
 
   const generate = async (): Promise<void> => {
     const printerProfile = queue?.meta.printer_profile;
@@ -432,7 +440,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       if (response.check_print_generation.status === 'ready' && response.check_print_generation.check_print_run_id) {
         try {
           await refreshRuns(response.check_print_generation.check_print_run_id, false, workspaceToken);
+          if (workspaceToken !== workspaceRequestRef.current) return;
           await loadQueue();
+          if (workspaceToken !== workspaceRequestRef.current) return;
           onPackageGenerated();
         } catch (runError) {
           if (workspaceToken === workspaceRequestRef.current) {

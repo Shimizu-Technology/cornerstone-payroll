@@ -10,7 +10,11 @@ class CheckPrintRunHistoryVerifier
 
     runs.index_with do |run|
       next [ "confirmed", nil ] if run.confirmed?
-      next [ "prepared", nil ] if run.prepared?
+      if run.prepared?
+        next [ "prepared", nil ] if CheckPackagePreparation.current_run?(run, current_records)
+
+        next [ "outdated", "Checks in this package no longer match the current check details. Generate a replacement package." ]
+      end
 
       CheckPrintRunSelectionVerifier.new(
         run: run,
