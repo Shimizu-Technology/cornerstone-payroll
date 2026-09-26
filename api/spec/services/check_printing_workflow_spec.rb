@@ -74,7 +74,7 @@ RSpec.describe "Unified check printing workflow" do
     )
   end
 
-  it "persists the exact mixed package and marks records only after confirmation" do
+  it "prepares selected checks when the exact mixed package is saved" do
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
       actor: actor,
@@ -86,7 +86,7 @@ RSpec.describe "Unified check printing workflow" do
       storage: storage
     ).call
 
-    expect(run.status).to eq("generated")
+    expect(run.status).to eq("prepared")
     expect(run.manifest.map { |entry| entry.fetch("check_number") }).to eq(%w[1001 1002])
     expect(run).to have_attributes(starting_slot: 3, selected_count: 2)
     expect(run).to have_attributes(printer_profile_id: printer_profile.id)
@@ -98,25 +98,17 @@ RSpec.describe "Unified check printing workflow" do
     expect(stored.fetch(run.storage_key)).to start_with("%PDF")
     expect(employee_check.reload.check_printed_at).to be_nil
     expect(non_employee_check.reload.printed_at).to be_nil
+    expect(employee_check.check_prepared_at).to be_present
+    expect(non_employee_check.prepared_at).to be_present
+    expect(employee_check.check_print_count).to eq(0)
+    expect(non_employee_check.print_count).to eq(0)
+    expect(employee_check.check_events.where(event_type: "prepared").count).to eq(1)
+    expect(employee_check.check_events.where(event_type: "printed")).to be_empty
 
-    result = CheckPrintRunConfirmationService.new(run: run, actor: actor).call
-
-    expect(result.fetch(:marked_printed)).to eq(2)
-    expect(run.reload).to be_confirmed
-    expect(employee_check.reload).to have_attributes(check_print_count: 1)
-    expect(employee_check.check_printed_at).to be_present
-    expect(non_employee_check.reload).to have_attributes(print_count: 1)
-    expect(non_employee_check.printed_at).to be_present
-
-    repeated = CheckPrintRunConfirmationService.new(run: run, actor: actor).call
-    expect(repeated).to include(already_confirmed: true, marked_printed: 0)
-    expect(employee_check.reload.check_print_count).to eq(1)
-    expect(non_employee_check.reload.print_count).to eq(1)
-
-    printed_queue = CheckPrintQueueService.new(pay_period: pay_period, actor: actor).call
-    expect(printed_queue.dig(:meta, :total)).to eq(2)
-    expect(printed_queue.dig(:meta, :unprinted)).to eq(0)
-    expect(printed_queue.fetch(:items)).to all(include(status: "printed", eligible: true))
+    prepared_queue = CheckPrintQueueService.new(pay_period: pay_period, actor: actor).call
+    expect(prepared_queue.dig(:meta, :total)).to eq(2)
+    expect(prepared_queue.dig(:meta, :prepared)).to eq(2)
+    expect(prepared_queue.fetch(:items)).to all(include(status: "prepared", eligible: true))
 
     second_run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
@@ -128,15 +120,16 @@ RSpec.describe "Unified check printing workflow" do
       printer_profile_lock_version: printer_profile.lock_version,
       storage: storage
     ).call
-    expect(second_run).to have_attributes(status: "generated", selected_count: 2)
-    expect(employee_check.reload.check_print_count).to eq(1)
-    expect(non_employee_check.reload.print_count).to eq(1)
+    expect(second_run).to have_attributes(status: "prepared", selected_count: 2)
+    expect(employee_check.reload.check_print_count).to eq(0)
+    expect(non_employee_check.reload.print_count).to eq(0)
+    expect(employee_check.check_events.where(event_type: "prepared").count).to eq(1)
 
-    second_confirmation = CheckPrintRunConfirmationService.new(run: second_run, actor: actor).call
-    expect(second_confirmation).to include(already_confirmed: false, marked_printed: 2)
-    expect(second_run.reload).to be_confirmed
-    expect(employee_check.reload.check_print_count).to eq(2)
-    expect(non_employee_check.reload.print_count).to eq(2)
+    employee_check.mark_delivered!(user: actor, delivered_on: PayrollBusinessClock.today,
+      delivery_method: "hand_delivery", attestation: true)
+    non_employee_check.mark_paid!(actor: actor, payment_date: PayrollBusinessClock.today)
+    expect(CheckReconciliationStatus.for(employee_check.reload)).to eq("issued")
+    expect(CheckReconciliationStatus.for(non_employee_check.reload)).to eq("issued")
   end
 
   it "uses a unique download filename for every generated package" do
@@ -166,7 +159,7 @@ RSpec.describe "Unified check printing workflow" do
     expect(second_run.storage_key).not_to eq(first_run.storage_key)
   end
 
-  it "rejects confirmation if a selected check changes after generation" do
+  it "requires a new package if a prepared check changes" do
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
       actor: actor,
@@ -179,12 +172,33 @@ RSpec.describe "Unified check printing workflow" do
     ).call
     employee_check.update!(check_number: "1999")
 
+    expect(run.reload.status).to eq("prepared")
+    expect(employee_check.reload.check_prepared?).to be(false)
     expect {
-      CheckPrintRunConfirmationService.new(run: run, actor: actor).call
-    }.to raise_error(CheckPrintRunConfirmationService::StaleSelectionError, /different check number/)
+      employee_check.mark_delivered!(user: actor, delivered_on: PayrollBusinessClock.today,
+        delivery_method: "hand_delivery", attestation: true)
+    }.to raise_error(ArgumentError, /Generate a current check package/)
+  end
 
-    expect(run.reload.status).to eq("generated")
-    expect(employee_check.reload.check_printed_at).to be_nil
+  it "blocks issuance when the employee name on a prepared check changes" do
+    CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [],
+      starting_slot: 1,
+      printer_profile_id: printer_profile.id,
+      printer_profile_lock_version: printer_profile.lock_version,
+      storage: storage
+    ).call
+    expect(employee_check.reload.check_prepared?).to be(true)
+
+    employee.update!(first_name: "Changed")
+
+    expect {
+      employee_check.reload.mark_delivered!(user: actor, delivered_on: PayrollBusinessClock.today,
+        delivery_method: "hand_delivery", attestation: true)
+    }.to raise_error(ArgumentError, /Generate a current check package/)
   end
 
   it "rejects a package when the reviewed printer calibration changed" do
@@ -208,27 +222,25 @@ RSpec.describe "Unified check printing workflow" do
     expect(stored).to be_empty
   end
 
-  it "optionally requires a different operator to confirm the print package" do
-    company.update!(require_distinct_check_print_confirmer: true)
-    confirmer = create(:user, company:, organization: company.organization)
-    run = CheckPrintRunGenerationService.new(
-      pay_period: pay_period,
-      actor: actor,
-      payroll_item_ids: [ employee_check.id ],
-      non_employee_check_ids: [],
-      starting_slot: 1,
-      printer_profile_id: printer_profile.id,
-      printer_profile_lock_version: printer_profile.lock_version,
-      storage: storage
-    ).call
+  it "does not prepare checks when the saved artifact fails verification" do
+    allow(storage).to receive(:download).and_return("corrupt bytes")
 
     expect {
-      CheckPrintRunConfirmationService.new(run:, actor: actor).call
-    }.to raise_error(ArgumentError, /different authorized payroll operator/)
-    expect(run.reload.status).to eq("generated")
+      CheckPrintRunGenerationService.new(
+        pay_period: pay_period,
+        actor: actor,
+        payroll_item_ids: [ employee_check.id ],
+        non_employee_check_ids: [ non_employee_check.id ],
+        starting_slot: 1,
+        printer_profile_id: printer_profile.id,
+        printer_profile_lock_version: printer_profile.lock_version,
+        storage: storage
+      ).call
+    }.to raise_error(R2StorageService::UploadError, /integrity check/)
 
-    expect(CheckPrintRunConfirmationService.new(run:, actor: confirmer).call.fetch(:marked_printed)).to eq(1)
-    expect(run.reload).to have_attributes(status: "confirmed", confirmed_by_id: confirmer.id)
+    expect(CheckPrintRun.where(pay_period: pay_period)).to be_empty
+    expect(employee_check.reload.check_prepared_at).to be_nil
+    expect(non_employee_check.reload.prepared_at).to be_nil
   end
 
   it "keeps PDF parser details out of package assembly errors" do

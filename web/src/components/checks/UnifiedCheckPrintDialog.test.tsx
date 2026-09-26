@@ -15,7 +15,6 @@ const apiMocks = vi.hoisted(() => ({
   printRunPdf: vi.fn(),
   createPrintGeneration: vi.fn(),
   updateCheckNumbers: vi.fn(),
-  confirmPrintRun: vi.fn(),
   listPrinterProfiles: vi.fn(),
   selectPrinterProfile: vi.fn(),
   createPrinterProfile: vi.fn(),
@@ -30,7 +29,6 @@ vi.mock('@/services/api', () => ({
     printRunPdf: apiMocks.printRunPdf,
     createPrintGeneration: apiMocks.createPrintGeneration,
     updateCheckNumbers: apiMocks.updateCheckNumbers,
-    confirmPrintRun: apiMocks.confirmPrintRun,
   },
   printerProfilesApi: {
     list: apiMocks.listPrinterProfiles,
@@ -74,6 +72,7 @@ const queue: CheckPrintQueueResponse = {
     status: 'unprinted',
     print_count: 0,
     printed_at: null,
+    prepared_at: null,
     eligible: true,
     disabled_reason: null,
   }],
@@ -81,6 +80,7 @@ const queue: CheckPrintQueueResponse = {
     total: 1,
     eligible: 1,
     unprinted: 1,
+    prepared: 0,
     printed: 0,
     voided: 0,
     check_stock_type: 'bottom_check',
@@ -110,20 +110,18 @@ const savedRun: CheckPrintRun = {
   created_by_name: 'Leon',
   confirmed_by_id: 1,
   confirmed_by_name: 'Leon',
-  requires_distinct_confirmer: false,
-  can_current_user_confirm: true,
   confirmation_state: 'confirmed',
   confirmation_issue: null,
 };
 
 const generatedRun: CheckPrintRun = {
   ...savedRun,
-  status: 'generated',
+  status: 'prepared',
   confirmed_at: null,
   confirmed_by_id: null,
   confirmed_by_name: null,
-  confirmation_state: 'verification_required',
-  confirmation_issue: 'Open this package to verify it against current payroll data.',
+  confirmation_state: 'prepared',
+  confirmation_issue: null,
 };
 
 const queuedGeneration: CheckPrintGeneration = {
@@ -145,7 +143,7 @@ const queuedGeneration: CheckPrintGeneration = {
 function renderDialog(props?: Partial<React.ComponentProps<typeof UnifiedCheckPrintDialog>>) {
   return render(
     <MemoryRouter>
-      <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={vi.fn()} onConfirmed={vi.fn()} {...props} />
+      <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={vi.fn()} onPackageGenerated={vi.fn()} {...props} />
     </MemoryRouter>
   );
 }
@@ -159,7 +157,6 @@ describe('UnifiedCheckPrintDialog', () => {
     apiMocks.printRunPdf.mockReset().mockResolvedValue({ blob: new Blob(['%PDF-1.4']), filename: 'checks.pdf' });
     apiMocks.createPrintGeneration.mockReset().mockResolvedValue({ check_print_generation: queuedGeneration });
     apiMocks.updateCheckNumbers.mockReset();
-    apiMocks.confirmPrintRun.mockReset();
     apiMocks.listPrinterProfiles.mockReset().mockResolvedValue({ printer_profiles: [printerProfile], selections: [], active_printer_profile_id: 8 });
     apiMocks.selectPrinterProfile.mockReset().mockResolvedValue({ selection: { id: 1 } });
     apiMocks.createPrinterProfile.mockReset();
@@ -183,12 +180,12 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
   });
 
-  it('keeps confirmed checks visible and allows an intentional second package', async () => {
+  it('keeps prepared checks visible and allows an intentional second package', async () => {
     const user = userEvent.setup();
     const printedQueue: CheckPrintQueueResponse = {
       ...queue,
-      items: [{ ...queue.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
-      meta: { ...queue.meta, unprinted: 0, printed: 1 },
+      items: [{ ...queue.items[0], status: 'prepared', prepared_at: '2026-09-22T01:05:00Z' }],
+      meta: { ...queue.meta, unprinted: 0, prepared: 1 },
     };
     apiMocks.printQueue.mockResolvedValue(printedQueue);
     apiMocks.printRuns.mockResolvedValue({ check_print_runs: [savedRun] });
@@ -196,7 +193,7 @@ describe('UnifiedCheckPrintDialog', () => {
 
     expect(await screen.findByText('Package #42')).toBeTruthy();
     expect(screen.getByText('Ada Trainer')).toBeTruthy();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprinted');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprepared');
     expect(screen.queryByText('Ada Trainer')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Create another package' }));
 
@@ -207,14 +204,14 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(generateButton.disabled).toBe(true);
 
     await user.click(screen.getByRole('checkbox', { name: 'Select check 4101' }));
-    expect(screen.getByText(/selected check was printed before/)).toBeTruthy();
+    expect(screen.getByText(/selected check was prepared before/)).toBeTruthy();
     expect(generateButton.disabled).toBe(false);
     await user.click(generateButton);
 
     expect(apiMocks.createPrintGeneration).toHaveBeenCalledWith(9, expect.objectContaining({ payrollItemIds: [7] }));
   });
 
-  it('shows delivered and paid checks in the printed filter', async () => {
+  it('shows delivered and paid checks in the prepared filter', async () => {
     const user = userEvent.setup();
     apiMocks.printQueue.mockResolvedValue({
       ...queue,
@@ -225,7 +222,7 @@ describe('UnifiedCheckPrintDialog', () => {
     });
     renderDialog();
 
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Check status' }), 'printed');
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Check status' }), 'prepared');
     expect(screen.getByText('Ada Trainer')).toBeTruthy();
     expect(screen.getByText('Tax Office')).toBeTruthy();
     expect(screen.getByText('Paid')).toBeTruthy();
@@ -239,15 +236,15 @@ describe('UnifiedCheckPrintDialog', () => {
       meta: { ...queue.meta, unprinted: 0, printed: 1 },
     });
     const onOpenChange = vi.fn();
-    const onConfirmed = vi.fn();
+    const onPackageGenerated = vi.fn();
     const dialog = (open: boolean) => (
       <MemoryRouter>
-        <UnifiedCheckPrintDialog open={open} payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+        <UnifiedCheckPrintDialog open={open} payPeriodId={9} onOpenChange={onOpenChange} onPackageGenerated={onPackageGenerated} />
       </MemoryRouter>
     );
     const view = render(dialog(true));
     expect(await screen.findByText('Ada Trainer')).toBeTruthy();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprinted');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprepared');
     expect(screen.queryByText('Ada Trainer')).toBeNull();
 
     view.rerender(dialog(false));
@@ -314,7 +311,7 @@ describe('UnifiedCheckPrintDialog', () => {
 
     expect(await screen.findByText('Package #42')).toBeTruthy();
     expect(apiMocks.printRunPdf).toHaveBeenCalledWith(42);
-    expect(screen.getByRole('button', { name: 'Confirm printed correctly' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm printed correctly' })).toBeNull();
   });
 
   it('reconnects to an active generation and announces progress', async () => {
@@ -491,10 +488,10 @@ describe('UnifiedCheckPrintDialog', () => {
       resolveGeneration = resolve;
     }));
     const onOpenChange = vi.fn();
-    const onConfirmed = vi.fn();
+    const onPackageGenerated = vi.fn();
     const view = render(
       <MemoryRouter>
-        <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+        <UnifiedCheckPrintDialog open payPeriodId={9} onOpenChange={onOpenChange} onPackageGenerated={onPackageGenerated} />
       </MemoryRouter>
     );
 
@@ -502,12 +499,12 @@ describe('UnifiedCheckPrintDialog', () => {
     await waitFor(() => expect(apiMocks.createPrintGeneration).toHaveBeenCalledTimes(1));
     view.rerender(
       <MemoryRouter>
-        <UnifiedCheckPrintDialog open={false} payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+        <UnifiedCheckPrintDialog open={false} payPeriodId={9} onOpenChange={onOpenChange} onPackageGenerated={onPackageGenerated} />
       </MemoryRouter>
     );
     view.rerender(
       <MemoryRouter>
-        <UnifiedCheckPrintDialog open payPeriodId={10} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+        <UnifiedCheckPrintDialog open payPeriodId={10} onOpenChange={onOpenChange} onPackageGenerated={onPackageGenerated} />
       </MemoryRouter>
     );
     resolveGeneration({ check_print_generation: queuedGeneration });

@@ -1347,6 +1347,7 @@ module Api
             effective_payment_delivery_method: item.effective_payment_delivery_method,
             employee_payment_delivery_method: item.employee&.payment_delivery_method,
             check_printed_at: item.check_printed_at,
+            check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
             check_status: item.check_status,
             loan_deduction: item.loan_deduction,

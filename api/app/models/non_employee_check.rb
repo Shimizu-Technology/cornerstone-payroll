@@ -75,6 +75,16 @@ class NonEmployeeCheck < ApplicationRecord
     printed_at.present?
   end
 
+  def prepared?
+    printed? || (prepared_at.present? && prepared_source_updated_at == updated_at)
+  end
+
+  def mark_package_prepared!
+    return if prepared_at.present? && prepared_source_updated_at == updated_at
+
+    update_columns(prepared_at: Time.current, prepared_source_updated_at: updated_at)
+  end
+
   def voided?
     voided
   end
@@ -95,7 +105,9 @@ class NonEmployeeCheck < ApplicationRecord
     with_lock do
       raise ArgumentError, "Cannot mark a voided payment as paid" if voided?
       return false if paid_at.present?
-      raise ArgumentError, "Print the check before marking it paid" if payment_method == "check" && !printed?
+      if payment_method == "check" && !printed? && (!prepared? || !CheckPackagePreparation.current_for?(self))
+        raise ArgumentError, "Generate a current check package before marking it paid"
+      end
       if payment_method.in?(%w[ach eftps wire card]) && confirmation_number.to_s.strip.blank?
         raise ArgumentError, "Confirmation number is required for electronic payments"
       end
@@ -131,6 +143,7 @@ class NonEmployeeCheck < ApplicationRecord
     return "voided" if voided?
     return "paid" if paid_at.present?
     return "printed" if printed?
+    return "prepared" if prepared?
     return "unprinted" if check_number.present?
     "pending"
   end
@@ -244,8 +257,8 @@ class NonEmployeeCheck < ApplicationRecord
     if paid_at.present?
       errors.add(:payment_date, "is required for a paid payment") if payment_date.blank?
       errors.add(:paid_by, "is required for a paid payment") if paid_by.blank?
-      if payment_method == "check" && printed_at.blank?
-        errors.add(:printed_at, "is required before a check can be paid")
+      if payment_method == "check" && !prepared?
+        errors.add(:base, "A generated check package is required before a check can be paid")
       end
       if payment_method.in?(%w[ach eftps wire card]) && confirmation_number.to_s.strip.blank?
         errors.add(:confirmation_number, "is required for a paid electronic payment")

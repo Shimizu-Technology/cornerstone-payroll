@@ -31,8 +31,8 @@ import type {
 // in place and produces ONE corrected replacement check.
 //
 // Mode auto-detection:
-//   - Unprinted item -> in_place: same check #, just update financials.
-//   - Printed item   -> void_and_reissue: old # is voided, a new # is
+//   - Unprepared item -> in_place: same check #, just update financials.
+//   - Prepared or printed item -> void_and_reissue: old # is voided, a new # is
 //     assigned, and the new check becomes the canonical one.
 // ---------------------------------------------------------------------------
 
@@ -636,7 +636,7 @@ interface ModeBannerProps {
 function ModeBanner({ mode, originalCheckNumber, payrollItem }: ModeBannerProps) {
   // Until preview returns, infer the mode locally from check_printed_at so
   // the operator sees the right context immediately.
-  const inferred = mode ?? (payrollItem.check_printed_at ? 'void_and_reissue' : 'in_place');
+  const inferred = mode ?? (payrollItem.check_prepared_at || payrollItem.check_printed_at ? 'void_and_reissue' : 'in_place');
   const isReissue = inferred === 'void_and_reissue';
 
   return (

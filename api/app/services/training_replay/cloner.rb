@@ -14,6 +14,8 @@ module TrainingReplay
       "check_date" => nil,
       "check_printed_at" => nil,
       "check_print_count" => 0,
+      "check_prepared_at" => nil,
+      "check_prepared_source_updated_at" => nil,
       "reprint_of_check_number" => nil,
       "replaced_check_number" => nil,
       "voided" => false,

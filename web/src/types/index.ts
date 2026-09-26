@@ -1359,8 +1359,9 @@ export interface PayrollItem {
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
+  check_prepared_at?: string | null;
   check_print_count?: number;
-  check_status?: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
+  check_status?: 'unprinted' | 'prepared' | 'printed' | 'delivered' | 'voided' | null;
   voided?: boolean;
   voided_at?: string | null;
   void_reason?: string | null;
@@ -1635,7 +1636,7 @@ export interface ApiError {
 
 export interface CheckEvent {
   id: number;
-  event_type: 'assigned' | 'printed' | 'delivered' | 'voided' | 'reprinted' | 'batch_downloaded' | 'replaced' | 'renumbered';
+  event_type: 'assigned' | 'prepared' | 'printed' | 'delivered' | 'voided' | 'reprinted' | 'batch_downloaded' | 'replaced' | 'renumbered';
   check_number: string | null;
   reason: string | null;
   user_id: number | null;
@@ -1659,9 +1660,10 @@ export interface CheckItem {
   check_number: string | null;
   net_pay: number;
   gross_pay: number;
-  check_status: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
+  check_status: 'unprinted' | 'prepared' | 'printed' | 'delivered' | 'voided' | null;
   reconciliation_status: 'unprepared' | 'prepared' | 'issued' | 'cleared' | 'replacement_required' | 'voided';
   check_printed_at: string | null;
+  check_prepared_at: string | null;
   check_print_count: number;
   voided: boolean;
   voided_at: string | null;
@@ -1674,11 +1676,11 @@ export interface CheckListMeta {
   total: number;
   direct_deposit_count: number;
   printed: number;
+  prepared: number;
   delivered: number;
   unprinted: number;
   voided: number;
   check_stock_type: CheckStockType;
-  requires_verified_print_package: boolean;
 }
 
 export interface CheckListResponse {
@@ -1698,9 +1700,10 @@ export interface CheckPrintQueueItem {
   amount: number;
   kind: 'employee' | 'non_employee';
   kind_label: string;
-  status: 'unprinted' | 'printed' | 'delivered' | 'paid' | 'voided' | 'pending';
+  status: 'unprinted' | 'prepared' | 'printed' | 'delivered' | 'paid' | 'voided' | 'pending';
   print_count: number;
   printed_at: string | null;
+  prepared_at: string | null;
   eligible: boolean;
   disabled_reason: string | null;
 }
@@ -1711,6 +1714,7 @@ export interface CheckPrintQueueResponse {
     total: number;
     eligible: number;
     unprinted: number;
+    prepared: number;
     printed: number;
     voided: number;
     check_stock_type: CheckStockType;
@@ -1728,7 +1732,7 @@ export interface CheckPrintQueueResponse {
 export interface CheckPrintRun {
   id: number;
   pay_period_id: number;
-  status: 'generated' | 'confirmed';
+  status: 'generated' | 'prepared' | 'confirmed';
   check_stock_type: CheckStockType;
   printer_profile_id: number | null;
   printer_profile_name: string | null;
@@ -1753,9 +1757,7 @@ export interface CheckPrintRun {
   created_by_name: string | null;
   confirmed_by_id: number | null;
   confirmed_by_name: string | null;
-  requires_distinct_confirmer: boolean;
-  can_current_user_confirm: boolean;
-  confirmation_state: 'verification_required' | 'ready' | 'confirmed' | 'outdated';
+  confirmation_state: 'legacy' | 'prepared' | 'confirmed' | 'outdated';
   confirmation_issue: string | null;
 }
 
@@ -1797,7 +1799,6 @@ export interface CheckSettings {
   bank_address: string | null;
   check_memo_template: string | null;
   auto_create_fit_check: boolean;
-  require_distinct_check_print_confirmer: boolean;
   check_layout_config: Record<string, unknown>;
   active_printer_profile_id: number | null;
   active_printer_profile_name: string | null;
@@ -2194,6 +2195,7 @@ export interface NonEmployeeCheck {
   line_items: NonEmployeeCheckLineItem[];
   print_count: number;
   printed_at?: string;
+  prepared_at?: string | null;
   voided: boolean;
   void_reason?: string;
   voided_at?: string;
@@ -2243,6 +2245,7 @@ export interface PayrollLiabilityCenterPayment {
   check_number?: string | null;
   status: string;
   printed_at?: string | null;
+  prepared_at?: string | null;
   paid_at?: string | null;
   paid_by_name?: string | null;
   created_by_name?: string | null;

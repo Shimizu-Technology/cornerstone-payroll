@@ -243,7 +243,7 @@ class CheckPrintRunGenerationService
         pay_period: locked_period,
         created_by: actor,
         printer_profile: current_settings.printer_profile,
-        status: "generated",
+        status: "prepared",
         check_stock_type: current_settings.check_stock_type,
         starting_slot: effective_starting_slot(current_settings.check_stock_type),
         selected_count: manifest.size,
@@ -260,6 +260,8 @@ class CheckPrintRunGenerationService
         run: run,
         current_records: [ payroll_items.index_by(&:id), non_employee_checks.index_by(&:id) ]
       ).call
+      payroll_items.each { |item| item.mark_package_prepared!(user: actor, ip_address: ip_address) }
+      non_employee_checks.each(&:mark_package_prepared!)
       locked_generation&.complete_with!(run, job_id: generation_worker_job_id)
       record_generation_audit!(run, payroll_items, non_employee_checks)
     end

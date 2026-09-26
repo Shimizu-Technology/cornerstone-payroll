@@ -18,27 +18,29 @@ interface UnifiedCheckPrintDialogProps {
   open: boolean;
   payPeriodId: number;
   onOpenChange: (open: boolean) => void;
-  onConfirmed: () => void;
+  onPackageGenerated: () => void;
 }
 
 type SourceFilter = 'all' | 'employee' | 'non_employee';
-type StatusFilter = 'all' | 'unprinted' | 'printed';
-type BusyAction = 'profiles' | 'preview' | 'download' | 'confirm' | null;
+type StatusFilter = 'all' | 'unprepared' | 'prepared';
+type BusyAction = 'profiles' | 'preview' | 'download' | null;
 
 function statusBadge(item: CheckPrintQueueItem): ReactElement {
   if (item.status === 'delivered') return <Badge variant="success">Delivered</Badge>;
   if (item.status === 'paid') return <Badge variant="success">Paid</Badge>;
   if (item.status === 'voided') return <Badge variant="danger">Voided</Badge>;
   if (item.status === 'printed') return <Badge variant="success">Printed ×{item.print_count}</Badge>;
+  if (item.status === 'prepared') return <Badge variant="success">Prepared</Badge>;
   if (item.status === 'pending') return <Badge variant="warning">Needs number</Badge>;
-  return <Badge variant="warning">Unprinted</Badge>;
+  return <Badge variant="warning">Not prepared</Badge>;
 }
 
 function packageBadge(printRun: CheckPrintRun): ReactElement {
-  if (printRun.confirmation_state === 'confirmed') return <Badge variant="success">Confirmed</Badge>;
+  if (printRun.confirmation_state === 'confirmed') return <Badge variant="success">Previously confirmed</Badge>;
+  if (printRun.confirmation_state === 'prepared') return <Badge variant="success">Prepared</Badge>;
+  if (printRun.confirmation_state === 'legacy') return <Badge variant="warning">Older package</Badge>;
   if (printRun.confirmation_state === 'outdated') return <Badge variant="danger">Outdated</Badge>;
-  if (printRun.confirmation_state === 'verification_required') return <Badge variant="warning">Verify to use</Badge>;
-  return <Badge variant="warning">Ready</Badge>;
+  return <Badge variant="success">Generated</Badge>;
 }
 
 function newIdempotencyKey(): string {
@@ -46,7 +48,7 @@ function newIdempotencyKey(): string {
   return `check-package-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onConfirmed }: UnifiedCheckPrintDialogProps) {
+export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPackageGenerated }: UnifiedCheckPrintDialogProps) {
   const [queue, setQueue] = useState<CheckPrintQueueResponse | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -93,17 +95,6 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     });
   }, []);
 
-  const markRunVerified = useCallback((printRun: CheckPrintRun) => {
-    if (printRun.confirmation_state !== 'verification_required') return;
-    const verifiedRun: CheckPrintRun = {
-      ...printRun,
-      confirmation_state: 'ready',
-      confirmation_issue: null,
-    };
-    setRun((current) => current?.id === printRun.id ? verifiedRun : current);
-    setRuns((current) => current.map((savedRun) => savedRun.id === printRun.id ? verifiedRun : savedRun));
-  }, []);
-
   const applyQueue = useCallback((data: CheckPrintQueueResponse, options?: { preserveSelection?: boolean; selectKeys?: string[] }) => {
     setQueue(data);
     setDraftNumbers(Object.fromEntries(data.items.map((item) => [item.key, item.check_number || ''])));
@@ -144,16 +135,15 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       if (requestToken !== previewRequestRef.current) return;
       setPreviewUrl(URL.createObjectURL(pdf.blob));
       setArtifactVerified(true);
-      markRunVerified(printRun);
     } catch (err) {
       if (requestToken !== previewRequestRef.current) return;
       setError(err instanceof Error
         ? `The package was saved, but its preview could not be loaded: ${err.message}`
-        : 'The package was saved, but its preview could not be loaded. Retry before confirming it as printed.');
+        : 'The package was saved, but its preview could not be loaded. Retry to view or print it.');
     } finally {
       if (requestToken === previewRequestRef.current) setBusyAction(null);
     }
-  }, [markRunVerified, revokePreview]);
+  }, [revokePreview]);
 
   const openSavedRun = useCallback(async (printRun: CheckPrintRun) => {
     setRun(printRun);
@@ -272,6 +262,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         setGeneration(next);
         if (next.status === 'ready' && next.check_print_run_id) {
           await refreshRuns(next.check_print_run_id, false, workspaceToken);
+          await loadQueue();
+          onPackageGenerated();
           return;
         }
         if (next.status === 'failed') return;
@@ -286,15 +278,15 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [activeGenerationId, open, payPeriodId, refreshRuns]);
+  }, [activeGenerationId, loadQueue, onPackageGenerated, open, payPeriodId, refreshRuns]);
 
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
-    if (statusFilter === 'unprinted' && item.status !== 'unprinted' && item.status !== 'pending') return false;
-    if (statusFilter === 'printed' && !['printed', 'delivered', 'paid'].includes(item.status)) return false;
+    if (statusFilter === 'unprepared' && item.status !== 'unprinted' && item.status !== 'pending') return false;
+    if (statusFilter === 'prepared' && !['prepared', 'printed', 'delivered', 'paid'].includes(item.status)) return false;
     return true;
   }), [queue, sourceFilter, statusFilter]);
-  const bulkSelectableItems = visibleItems.filter((item) => item.eligible && (statusFilter === 'printed' || ['unprinted', 'pending'].includes(item.status)));
+  const bulkSelectableItems = visibleItems.filter((item) => item.eligible && (statusFilter === 'prepared' || ['unprinted', 'pending'].includes(item.status)));
 
   const selectedItems = useMemo(() => (queue?.items || []).filter((item) => selected.has(item.key)), [queue, selected]);
   const generationInputSignature = useMemo(() => JSON.stringify({
@@ -310,8 +302,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }, [generationInputSignature]);
 
   const selectedTotal = selectedItems.reduce((sum, item) => sum + Number(item.amount), 0);
-  const previouslyPrintedCount = (queue?.items || []).filter((item) => item.eligible && !['unprinted', 'pending'].includes(item.status)).length;
-  const selectedPreviouslyPrintedCount = selectedItems.filter((item) => !['unprinted', 'pending'].includes(item.status)).length;
+  const previouslyPreparedCount = (queue?.items || []).filter((item) => item.eligible && !['unprinted', 'pending'].includes(item.status)).length;
+  const selectedPreviouslyPreparedCount = selectedItems.filter((item) => !['unprinted', 'pending'].includes(item.status)).length;
   const packageTotal = run ? run.manifest.reduce((sum, item) => sum + Number(item.amount), 0) : selectedTotal;
   const packageRange = run && run.manifest.length > 0
     ? run.manifest.length === 1 ? `#${run.manifest[0].check_number}` : `#${run.manifest[0].check_number}–#${run.manifest.at(-1)?.check_number}`
@@ -377,7 +369,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       setPreviewExpanded(false);
       revokePreview();
       await loadQueue({ preserveSelection: true });
-      onConfirmed();
+      onPackageGenerated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save the check numbers. No changes were applied.');
     } finally {
@@ -440,6 +432,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       if (response.check_print_generation.status === 'ready' && response.check_print_generation.check_print_run_id) {
         try {
           await refreshRuns(response.check_print_generation.check_print_run_id, false, workspaceToken);
+          await loadQueue();
+          onPackageGenerated();
         } catch (runError) {
           if (workspaceToken === workspaceRequestRef.current) {
             setError(runError instanceof Error
@@ -501,7 +495,6 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       link.download = result.filename || run.filename;
       link.click();
       setArtifactVerified(true);
-      markRunVerified(run);
       window.setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not download the check package.');
@@ -511,26 +504,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const print = (): void => {
-    if (!run || !artifactVerified || !['ready', 'confirmed'].includes(run.confirmation_state)) return;
+    if (!run || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)) return;
     const frame = previewExpanded ? expandedPreviewRef.current : compactPreviewRef.current;
     frame?.contentWindow?.print();
-  };
-
-  const confirm = async (): Promise<void> => {
-    if (!run || run.confirmation_state !== 'ready' || !artifactVerified || !window.confirm(`Confirm that all ${run.selected_count} selected checks printed correctly?`)) return;
-    setBusyAction('confirm');
-    setError(null);
-    try {
-      const response = await checksApi.confirmPrintRun(run.id);
-      onConfirmed();
-      await loadQueue();
-      setRun(response.check_print_run);
-      setRuns((current) => current.map((savedRun) => savedRun.id === response.check_print_run.id ? response.check_print_run : savedRun));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm the print run.');
-    } finally {
-      setBusyAction(null);
-    }
   };
 
   return (
@@ -541,7 +517,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
             <div className="flex items-start justify-between gap-5 pr-8">
               <div>
                 <DialogTitle className="text-xl text-white">Print checks</DialogTitle>
-                <DialogDescription className="mt-1 max-w-3xl text-slate-300">Generate and save an exact package, print that saved snapshot, then confirm only after the paper is correct.</DialogDescription>
+                <DialogDescription className="mt-1 max-w-3xl text-slate-300">Generate and save an exact package. That prepares the selected checks; print the saved PDF when ready.</DialogDescription>
               </div>
               {queue && <div className="hidden shrink-0 font-mono text-xs text-slate-400 sm:block">{queue.meta.check_stock_type.replaceAll('_', ' ').toUpperCase()}</div>}
             </div>
@@ -554,7 +530,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                   <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
                     <div className="flex items-start gap-3">
                       <FileLock2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
-                      <div><p className="text-sm font-semibold text-blue-950">A generated package is a saved snapshot</p><p className="mt-1 text-xs leading-5 text-blue-800">It keeps the selected checks, amounts, payee details, and printer calibration from the moment it was generated. If any of those change, the package becomes outdated and you must generate a replacement.</p></div>
+                      <div><p className="text-sm font-semibold text-blue-950">A generated package is a saved snapshot</p><p className="mt-1 text-xs leading-5 text-blue-800">It keeps the selected checks, amounts, payee details, and printer calibration from the moment it was generated. If check details change, generate a new package before recording issuance or payment.</p></div>
                     </div>
                   </div>
 
@@ -563,21 +539,21 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                       {(['all', 'employee', 'non_employee'] as SourceFilter[]).map((value) => (
                         <Button key={value} size="sm" variant={sourceFilter === value ? 'default' : 'outline'} onClick={() => setSourceFilter(value)}>{value === 'all' ? 'All checks' : value === 'employee' ? 'Employees' : 'Non-employees'}</Button>
                       ))}
-                      <select aria-label="Check status" className="min-h-9 rounded-full border border-slate-300 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="unprinted">Unprinted</option><option value="printed">Printed</option><option value="all">All statuses</option></select>
+                      <select aria-label="Check status" className="min-h-9 rounded-full border border-slate-300 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="unprepared">Not prepared</option><option value="prepared">Prepared or later</option><option value="all">All statuses</option></select>
                     </div>
                     <div className="flex gap-2 text-xs">
-                      <button type="button" className="font-semibold text-blue-700 disabled:text-slate-400" disabled={editingLocked || bulkSelectableItems.length === 0} onClick={() => setSelected((current) => { const next = new Set(current); bulkSelectableItems.forEach((item) => next.add(item.key)); return next; })}>{statusFilter === 'all' ? 'Select unprinted' : 'Select visible'}</button>
+                      <button type="button" className="font-semibold text-blue-700 disabled:text-slate-400" disabled={editingLocked || bulkSelectableItems.length === 0} onClick={() => setSelected((current) => { const next = new Set(current); bulkSelectableItems.forEach((item) => next.add(item.key)); return next; })}>{statusFilter === 'all' ? 'Select not prepared' : 'Select visible'}</button>
                       <span className="text-slate-300">/</span>
                       <button type="button" className="font-semibold text-slate-600 disabled:text-slate-400" disabled={editingLocked} onClick={() => setSelected(new Set())}>Clear</button>
                     </div>
                   </div>
 
                   <p className="mb-3 text-xs text-slate-500">Edit check numbers first. The saved package will use exactly the reviewed values shown here.</p>
-                  {!run && previouslyPrintedCount > 0 && (
-                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm leading-5 ${selectedPreviouslyPrintedCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                      {selectedPreviouslyPrintedCount > 0
-                        ? `${selectedPreviouslyPrintedCount} selected check${selectedPreviouslyPrintedCount === 1 ? ' was' : 's were'} printed before. Review the selection before generating another package.`
-                        : `${previouslyPrintedCount} check${previouslyPrintedCount === 1 ? ' was' : 's were'} printed before. They remain available for another package but are not selected automatically. Select them individually, or use the Printed filter to select a group.`}
+                  {!run && previouslyPreparedCount > 0 && (
+                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm leading-5 ${selectedPreviouslyPreparedCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      {selectedPreviouslyPreparedCount > 0
+                        ? `${selectedPreviouslyPreparedCount} selected check${selectedPreviouslyPreparedCount === 1 ? ' was' : 's were'} prepared before. Review the selection before generating another package.`
+                        : `${previouslyPreparedCount} check${previouslyPreparedCount === 1 ? ' was' : 's were'} prepared before. They remain available for another package but are not selected automatically. Select them individually, or use the Prepared filter to select a group.`}
                     </div>
                   )}
                   {hasUnsavedNumbers && (
@@ -639,14 +615,14 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                       </div>
                       {previewUrl ? <div className="relative"><iframe ref={compactPreviewRef} title="Check package preview" src={previewUrl} className="h-72 w-full bg-slate-900" /><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="absolute right-3 top-3 gap-1.5"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-slate-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
                       <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950"><span className="font-semibold">Printer setup:</span> Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink.</div>
-                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['ready', 'confirmed'].includes(run.confirmation_state)}>Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
-                      {run.confirmation_state === 'outdated' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>This package is outdated.</strong> {run.confirmation_issue} It remains available for audit history, but it cannot be printed or confirmed. Generate a replacement from current data.</span></div></div>}
+                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)}>Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
+                      {run.confirmation_state === 'outdated' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>This package is outdated.</strong> {run.confirmation_issue} Generate a replacement from current data.</span></div></div>}
+                      {run.confirmation_state === 'legacy' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">This older package did not prepare its checks. Generate a new package before recording issuance or payment.</div>}
                       <details className="border-t border-slate-100 px-4 py-3 text-xs text-slate-600"><summary className="cursor-pointer font-semibold text-slate-700">Audit details</summary><div className="mt-2 space-y-1 break-all font-mono"><p>File: {run.filename}</p><p>SHA-256: {run.sha256}</p><p>Bytes: {run.byte_size.toLocaleString()}</p></div></details>
                     </section>
                   )}
 
                   {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-                  {run?.requires_distinct_confirmer && !run.can_current_user_confirm && run.confirmation_state === 'ready' && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-5 text-warning-900">This client requires a second person to confirm printing. Ask another authorized payroll operator to open this package.</div>}
 
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -666,7 +642,6 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
             {generationActive && <Button loading loadingLabel="Generating package…">Generating package…</Button>}
             {run && run.confirmation_state !== 'outdated' && <Button variant="outline" onClick={() => void prepareNewPackage(false)} className="gap-2"><Plus className="h-4 w-4" />Create another package</Button>}
             {run?.confirmation_state === 'outdated' && <Button onClick={() => void prepareNewPackage(true)}>Generate replacement package</Button>}
-            {run?.confirmation_state === 'ready' && <Button loading={busyAction === 'confirm'} loadingLabel="Recording confirmation…" onClick={() => void confirm()} disabled={!artifactVerified || !run.can_current_user_confirm}>Confirm printed correctly</Button>}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -675,9 +650,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
       <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded} dismissOnEscape={busyAction !== 'download'}>
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
-          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Integrity verified · Review every check before confirming.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-slate-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
+          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-slate-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
           {previewUrl && <iframe ref={expandedPreviewRef} title="Expanded check package preview" src={previewUrl} className="min-h-0 w-full flex-1 bg-slate-900" />}
-          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['ready', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

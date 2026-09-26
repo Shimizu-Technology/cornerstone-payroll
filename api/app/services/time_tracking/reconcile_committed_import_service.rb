@@ -181,11 +181,15 @@ module TimeTracking
         .includes(:check_events)
         .to_a
       payment_acknowledgements = items.flat_map do |item|
-        status = { "printed" => "payment_prepared", "delivered" => "payment_issued", "voided" => "payment_voided" }[item.check_status]
+        status = { "prepared" => "payment_prepared", "printed" => "payment_prepared", "delivered" => "payment_issued", "voided" => "payment_voided" }[item.check_status]
         item_allocations = allocations_by_item.fetch(item.id, [])
         next [] unless status && item_allocations.any?
 
-        event_type = { "payment_prepared" => "printed", "payment_issued" => "delivered", "payment_voided" => "voided" }.fetch(status)
+        event_type = if status == "payment_prepared" && item.check_status == "prepared"
+          "prepared"
+        else
+          { "payment_prepared" => "printed", "payment_issued" => "delivered", "payment_voided" => "voided" }.fetch(status)
+        end
         event = item.check_events
           .select { |candidate| candidate.event_type == event_type && candidate.check_number == item.check_number }
           .max_by { |candidate| [ candidate.created_at, candidate.id ] }
@@ -218,7 +222,7 @@ module TimeTracking
     end
 
     def payment_state_timestamp(item, status)
-      return item.check_printed_at if status == "payment_prepared" && item.check_printed_at
+      return item.check_prepared_at || item.check_printed_at if status == "payment_prepared" && (item.check_prepared_at || item.check_printed_at)
       return item.voided_at if status == "payment_voided" && item.voided_at
 
       import.reconciled_at
