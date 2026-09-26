@@ -256,6 +256,27 @@ describe('UnifiedCheckPrintDialog', () => {
     expect((screen.getByRole('combobox', { name: 'Check status' }) as HTMLSelectElement).value).toBe('all');
   });
 
+  it('keeps an explicitly selected printed check through a printer-profile refresh', async () => {
+    const user = userEvent.setup();
+    const alternateProfile = { ...printerProfile, id: 19, name: 'Office Printer' };
+    apiMocks.printQueue.mockResolvedValue({
+      ...queue,
+      items: [{ ...queue.items[0], status: 'printed' }],
+      meta: { ...queue.meta, unprinted: 0, printed: 1 },
+    });
+    apiMocks.listPrinterProfiles.mockResolvedValue({ printer_profiles: [printerProfile, alternateProfile], selections: [], active_printer_profile_id: 8 });
+    renderDialog();
+
+    const checkbox = await screen.findByRole('checkbox', { name: 'Select check 4101' }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    await user.click(checkbox);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Printer profile' }), '19');
+
+    await waitFor(() => expect(apiMocks.printQueue).toHaveBeenCalledTimes(2));
+    expect(checkbox.checked).toBe(true);
+    expect(apiMocks.selectPrinterProfile).toHaveBeenCalledWith('bottom_check', 19);
+  });
+
   it('starts a background generation with a unique key and real selection', async () => {
     const user = userEvent.setup();
     renderDialog();
@@ -496,6 +517,7 @@ describe('UnifiedCheckPrintDialog', () => {
   });
 
   it('blocks printing and confirmation for an outdated package and offers replacement generation', async () => {
+    const user = userEvent.setup();
     const outdatedRun: CheckPrintRun = {
       ...savedRun,
       status: 'generated',
@@ -503,6 +525,11 @@ describe('UnifiedCheckPrintDialog', () => {
       confirmation_state: 'outdated',
       confirmation_issue: 'Check #4101 changed after this package was generated.',
     };
+    apiMocks.printQueue.mockResolvedValue({
+      ...queue,
+      items: [{ ...queue.items[0], status: 'printed' }],
+      meta: { ...queue.meta, unprinted: 0, printed: 1 },
+    });
     apiMocks.printRuns.mockResolvedValue({ check_print_runs: [outdatedRun] });
     renderDialog();
 
@@ -510,5 +537,7 @@ describe('UnifiedCheckPrintDialog', () => {
     expect((screen.getByRole('button', { name: 'Print saved PDF' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Confirm printed correctly' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Generate replacement package' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Generate replacement package' }));
+    expect((await screen.findByRole('checkbox', { name: 'Select check 4101' }) as HTMLInputElement).checked).toBe(true);
   });
 });

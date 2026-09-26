@@ -108,9 +108,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setQueue(data);
     setDraftNumbers(Object.fromEntries(data.items.map((item) => [item.key, item.check_number || ''])));
     setSelected((current) => {
-      const eligible = new Set(data.items.filter((item) => item.eligible && item.status === 'unprinted').map((item) => item.key));
+      const eligible = new Set(data.items.filter((item) => item.eligible).map((item) => item.key));
       if (options?.selectKeys) return new Set(options.selectKeys.filter((key) => eligible.has(key)));
-      if (!options?.preserveSelection) return new Set(eligible);
+      if (!options?.preserveSelection) return new Set(data.items.filter((item) => item.eligible && item.status === 'unprinted').map((item) => item.key));
       return new Set(Array.from(current).filter((key) => eligible.has(key)));
     });
   }, []);

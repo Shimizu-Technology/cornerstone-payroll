@@ -95,10 +95,16 @@ test('printer profiles stay usable at laptop height and expose inline creation',
 
 test('previously printed checks remain visible but require explicit selection for another package', async ({ page }): Promise<void> => {
   await routeWorkspace(page);
+  let selectedProfileId = 8;
+  await page.route('**/admin/printer_profiles', (route) => fulfillJson(route, { printer_profiles: [printerProfile, { ...printerProfile, id: 9, name: 'Office Printer' }], selections: [], active_printer_profile_id: 8 }));
+  await page.route('**/admin/printer_profile_selections/bottom_check', (route) => {
+    selectedProfileId = 9;
+    return fulfillJson(route, { selection: { id: 9 } });
+  });
   await page.route(queuePattern, (route) => fulfillJson(route, {
     ...queueResponse,
     items: [{ ...queueResponse.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
-    meta: { ...queueResponse.meta, unprinted: 0, printed: 1 },
+    meta: { ...queueResponse.meta, unprinted: 0, printed: 1, printer_profile: { ...queueResponse.meta.printer_profile, id: selectedProfileId } },
   }));
   await mountHarness(page);
 
@@ -108,6 +114,10 @@ test('previously printed checks remain visible but require explicit selection fo
   await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Select unprinted' })).toBeDisabled();
   await dialog.getByRole('checkbox', { name: 'Select check 1001' }).check();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
+  await dialog.getByRole('combobox', { name: 'Printer profile' }).selectOption('9');
+  await expect(dialog.getByRole('combobox', { name: 'Printer profile' })).toHaveValue('9');
+  await expect(dialog.getByRole('checkbox', { name: 'Select check 1001' })).toBeChecked();
   await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
 });
 
