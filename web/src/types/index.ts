@@ -1698,7 +1698,7 @@ export interface CheckPrintQueueItem {
   amount: number;
   kind: 'employee' | 'non_employee';
   kind_label: string;
-  status: 'unprinted' | 'printed' | 'delivered' | 'voided' | 'pending';
+  status: 'unprinted' | 'printed' | 'delivered' | 'paid' | 'voided' | 'pending';
   print_count: number;
   printed_at: string | null;
   eligible: boolean;

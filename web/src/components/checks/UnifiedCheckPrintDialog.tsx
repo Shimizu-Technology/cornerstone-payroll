@@ -27,6 +27,7 @@ type BusyAction = 'profiles' | 'preview' | 'download' | 'confirm' | null;
 
 function statusBadge(item: CheckPrintQueueItem): ReactElement {
   if (item.status === 'delivered') return <Badge variant="success">Delivered</Badge>;
+  if (item.status === 'paid') return <Badge variant="success">Paid</Badge>;
   if (item.status === 'voided') return <Badge variant="danger">Voided</Badge>;
   if (item.status === 'printed') return <Badge variant="success">Printed ×{item.print_count}</Badge>;
   if (item.status === 'pending') return <Badge variant="warning">Needs number</Badge>;
@@ -49,7 +50,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [queue, setQueue] = useState<CheckPrintQueueResponse | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unprinted');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [startingSlot, setStartingSlot] = useState(1);
   const [run, setRun] = useState<CheckPrintRun | null>(null);
   const [runs, setRuns] = useState<CheckPrintRun[]>([]);
@@ -204,6 +205,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setInitialLoading(true);
     setError(null);
     setQueue(null);
+    setSourceFilter('all');
+    setStatusFilter('all');
     setRun(null);
     setRuns([]);
     setGeneration(null);
@@ -288,9 +291,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
     if (statusFilter === 'unprinted' && item.status !== 'unprinted' && item.status !== 'pending') return false;
-    if (statusFilter === 'printed' && item.status !== 'printed') return false;
+    if (statusFilter === 'printed' && !['printed', 'delivered', 'paid'].includes(item.status)) return false;
     return true;
   }), [queue, sourceFilter, statusFilter]);
+  const bulkSelectableItems = visibleItems.filter((item) => item.eligible && (statusFilter === 'printed' || ['unprinted', 'pending'].includes(item.status)));
 
   const selectedItems = useMemo(() => (queue?.items || []).filter((item) => selected.has(item.key)), [queue, selected]);
   const generationInputSignature = useMemo(() => JSON.stringify({
@@ -306,6 +310,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   }, [generationInputSignature]);
 
   const selectedTotal = selectedItems.reduce((sum, item) => sum + Number(item.amount), 0);
+  const previouslyPrintedCount = (queue?.items || []).filter((item) => item.eligible && !['unprinted', 'pending'].includes(item.status)).length;
+  const selectedPreviouslyPrintedCount = selectedItems.filter((item) => !['unprinted', 'pending'].includes(item.status)).length;
   const packageTotal = run ? run.manifest.reduce((sum, item) => sum + Number(item.amount), 0) : selectedTotal;
   const packageRange = run && run.manifest.length > 0
     ? run.manifest.length === 1 ? `#${run.manifest[0].check_number}` : `#${run.manifest[0].check_number}–#${run.manifest.at(-1)?.check_number}`
@@ -389,6 +395,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const prepareNewPackage = useCallback(async (replacement: boolean) => {
     const preferredKeys = replacement && run ? run.manifest.map((entry) => entry.key) : undefined;
     previewRequestRef.current += 1;
+    setSelected(new Set());
     setRun(null);
     setGeneration(null);
     setGenerationStartedAt(null);
@@ -396,7 +403,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setArtifactVerified(false);
     setPreviewExpanded(false);
     revokePreview();
-    setStatusFilter('unprinted');
+    setSourceFilter('all');
+    setStatusFilter('all');
     setError(null);
     try {
       await loadQueue({ selectKeys: preferredKeys });
@@ -558,13 +566,20 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                       <select aria-label="Check status" className="min-h-9 rounded-full border border-slate-300 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="unprinted">Unprinted</option><option value="printed">Printed</option><option value="all">All statuses</option></select>
                     </div>
                     <div className="flex gap-2 text-xs">
-                      <button type="button" className="font-semibold text-blue-700 disabled:text-slate-400" disabled={editingLocked} onClick={() => setSelected((current) => { const next = new Set(current); visibleItems.filter((item) => item.eligible).forEach((item) => next.add(item.key)); return next; })}>Select visible</button>
+                      <button type="button" className="font-semibold text-blue-700 disabled:text-slate-400" disabled={editingLocked || bulkSelectableItems.length === 0} onClick={() => setSelected((current) => { const next = new Set(current); bulkSelectableItems.forEach((item) => next.add(item.key)); return next; })}>{statusFilter === 'all' ? 'Select unprinted' : 'Select visible'}</button>
                       <span className="text-slate-300">/</span>
                       <button type="button" className="font-semibold text-slate-600 disabled:text-slate-400" disabled={editingLocked} onClick={() => setSelected(new Set())}>Clear</button>
                     </div>
                   </div>
 
                   <p className="mb-3 text-xs text-slate-500">Edit check numbers first. The saved package will use exactly the reviewed values shown here.</p>
+                  {!run && previouslyPrintedCount > 0 && (
+                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm leading-5 ${selectedPreviouslyPrintedCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      {selectedPreviouslyPrintedCount > 0
+                        ? `${selectedPreviouslyPrintedCount} selected check${selectedPreviouslyPrintedCount === 1 ? ' was' : 's were'} printed before. Review the selection before generating another package.`
+                        : `${previouslyPrintedCount} check${previouslyPrintedCount === 1 ? ' was' : 's were'} printed before. They remain available for another package but are not selected automatically. Select them individually, or use the Printed filter to select a group.`}
+                    </div>
+                  )}
                   {hasUnsavedNumbers && (
                     <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div><p className="text-sm font-semibold text-amber-950">{numberChanges.length} unsaved check-number change{numberChanges.length === 1 ? '' : 's'}</p><p className="mt-0.5 text-xs text-amber-800">Save these changes before generating the snapshot.</p></div>
@@ -586,7 +601,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                         ))}
                       </tbody>
                     </table>
-                    {visibleItems.length === 0 && <div className="p-10 text-center text-sm text-slate-500">No checks match these filters.</div>}
+                    {visibleItems.length === 0 && <div className="p-10 text-center text-sm text-slate-500">{queue?.items.length ? 'No checks match these filters.' : 'No checks are available for this pay period.'}{queue?.items.length && (statusFilter !== 'all' || sourceFilter !== 'all') ? <button type="button" className="mt-2 block w-full font-semibold text-blue-700" onClick={() => { setStatusFilter('all'); setSourceFilter('all'); }}>Show all checks</button> : null}</div>}
                   </div>
                 </section>
 
