@@ -108,6 +108,11 @@ RSpec.describe "Unified check printing workflow" do
     expect(non_employee_check.reload).to have_attributes(print_count: 1)
     expect(non_employee_check.printed_at).to be_present
 
+    repeated = CheckPrintRunConfirmationService.new(run: run, actor: actor).call
+    expect(repeated).to include(already_confirmed: true, marked_printed: 0)
+    expect(employee_check.reload.check_print_count).to eq(1)
+    expect(non_employee_check.reload.print_count).to eq(1)
+
     printed_queue = CheckPrintQueueService.new(pay_period: pay_period, actor: actor).call
     expect(printed_queue.dig(:meta, :total)).to eq(2)
     expect(printed_queue.dig(:meta, :unprinted)).to eq(0)
@@ -127,10 +132,11 @@ RSpec.describe "Unified check printing workflow" do
     expect(employee_check.reload.check_print_count).to eq(1)
     expect(non_employee_check.reload.print_count).to eq(1)
 
-    repeated = CheckPrintRunConfirmationService.new(run: run, actor: actor).call
-    expect(repeated).to include(already_confirmed: true, marked_printed: 0)
-    expect(employee_check.reload.check_print_count).to eq(1)
-    expect(non_employee_check.reload.print_count).to eq(1)
+    second_confirmation = CheckPrintRunConfirmationService.new(run: second_run, actor: actor).call
+    expect(second_confirmation).to include(already_confirmed: false, marked_printed: 2)
+    expect(second_run.reload).to be_confirmed
+    expect(employee_check.reload.check_print_count).to eq(2)
+    expect(non_employee_check.reload.print_count).to eq(2)
   end
 
   it "uses a unique download filename for every generated package" do
