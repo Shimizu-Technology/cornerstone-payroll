@@ -23,7 +23,7 @@ interface ChecksPanelProps {
   refreshToken?: number;
 }
 
-type CheckAction = 'preview' | 'markPrinted' | 'stub';
+type CheckAction = 'preview' | 'stub';
 
 function checkStatusBadge(item: CheckItem): ReactElement {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
@@ -34,7 +34,8 @@ function checkStatusBadge(item: CheckItem): ReactElement {
         Printed / ready{item.check_print_count > 1 ? ` (×${item.check_print_count})` : ''}
       </Badge>
     );
-  if (item.check_number) return <Badge variant="warning">Unprinted</Badge>;
+  if (item.check_status === 'prepared') return <Badge variant="info">Package prepared</Badge>;
+  if (item.check_number) return <Badge variant="warning">Not prepared</Badge>;
   return <Badge variant="default">No Check</Badge>;
 }
 
@@ -55,6 +56,7 @@ function formatEventTime(value?: string | null) {
 function eventLabel(eventType: string): string {
   switch (eventType) {
     case 'assigned': return 'Assigned';
+    case 'prepared': return 'Package prepared';
     case 'printed': return 'Printed';
     case 'delivered': return 'Issued';
     case 'voided': return 'Voided';
@@ -325,22 +327,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
-  // ---- Mark single printed ----
-  const handleMarkPrinted = async (item: CheckItem) => {
-    setActionLoading({ id: item.id, action: 'markPrinted' });
-    try {
-      const result = await checksApi.markPrinted(item.id);
-      if (result.already_printed) {
-        alert('This check was already marked as printed. Print count incremented.');
-      }
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark check as printed');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
     setVoidTarget(null);
@@ -424,7 +410,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
             <>
               <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
               {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
-              <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> unprinted</span>
+              <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> not prepared</span>
+              <span><span className="font-medium text-blue-700">{meta.prepared}</span> prepared</span>
               <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
               <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
               {meta.voided > 0 && (
@@ -486,9 +473,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       )}
 
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-        Printing means the check was prepared. Record it as issued only after it was released to the employee.
+        Saving a check package prepares the selected checks. Record a check as issued only after it was released to the employee.
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
-        {meta?.requires_verified_print_package && ' This client requires the verified print package and a different operator’s confirmation.'}
       </div>
 
       {directDepositItems.length > 0 && (
@@ -601,7 +587,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                   )}
 
                   <MobileCardActions className="grid grid-cols-2">
-                    {item.check_number && !meta?.requires_verified_print_package && (
+                    {item.check_number && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -617,12 +603,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         {isActionLoading(item.id, 'stub') ? 'Loading…' : 'Stub'}
                       </Button>
                     )}
-                    {!item.voided && !meta?.requires_verified_print_package && (
-                      <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(item)} disabled={isActionLoading(item.id, 'markPrinted')}>
-                        {isActionLoading(item.id, 'markPrinted') ? 'Loading…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
-                      </Button>
-                    )}
-                    {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
+                    {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
                       <Button size="sm" onClick={() => setDeliveryTarget(item)}>
                         Record Issued
                       </Button>
@@ -738,7 +719,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
                       {/* Preview check PDF */}
-                      {item.check_number && !meta?.requires_verified_print_package && (
+                      {item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -762,26 +743,13 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         </Button>
                       )}
 
-                      {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
+                      {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
                         <Button
                           size="sm"
                           onClick={() => setDeliveryTarget(item)}
                           className="text-xs px-2 py-2"
                         >
                           Record Issued
-                        </Button>
-                      )}
-
-                      {/* Mark printed */}
-                      {!item.voided && !meta?.requires_verified_print_package && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleMarkPrinted(item)}
-                          disabled={isActionLoading(item.id, 'markPrinted')}
-                          className="text-xs px-2 py-1"
-                        >
-                          {isActionLoading(item.id, 'markPrinted') ? '…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
                         </Button>
                       )}
 
@@ -863,7 +831,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                   Check #{previewItem.check_number} — {previewItem.employee_name}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Preview sized for desktop review and printing checks onto stock paper.
+                  Preview sized for desktop review and printing checks onto stock paper. Generate a saved package to mark this check prepared.
                   {isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is also available when needed.'}
                 </p>
               </div>

@@ -337,7 +337,6 @@ Rails.application.routes.draw do
         resources :check_print_runs, only: [] do
           member do
             get :pdf
-            post :confirm
           end
         end
 

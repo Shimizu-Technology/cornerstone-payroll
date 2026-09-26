@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_084500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -291,7 +291,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.check_constraint "byte_size > 0", name: "check_print_runs_byte_size_check"
     t.check_constraint "selected_count > 0", name: "check_print_runs_selected_count_check"
     t.check_constraint "starting_slot >= 1 AND starting_slot <= 4", name: "check_print_runs_starting_slot_check"
-    t.check_constraint "status::text = ANY (ARRAY['generated'::character varying::text, 'confirmed'::character varying::text])", name: "check_print_runs_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['generated'::character varying::text, 'prepared'::character varying::text, 'confirmed'::character varying::text])", name: "check_print_runs_status_check"
   end
 
   create_table "check_reconciliation_events", force: :cascade do |t|
@@ -435,7 +435,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.string "payroll_environment", default: "live", null: false
     t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
-    t.boolean "require_distinct_check_print_confirmer", default: false, null: false
     t.boolean "simple_payroll_register_enabled", default: false, null: false
     t.string "state"
     t.datetime "test_workspace_archived_at"
@@ -1931,6 +1930,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.string "payment_period_type", default: "none", null: false
     t.integer "print_count", default: 0, null: false
     t.datetime "printed_at"
+    t.datetime "prepared_at"
+    t.datetime "prepared_source_updated_at"
     t.string "reference_number"
     t.integer "tax_month"
     t.integer "tax_quarter"
@@ -1953,7 +1954,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.check_constraint "paid_at IS NULL AND paid_by_id IS NULL OR paid_at IS NOT NULL AND paid_by_id IS NOT NULL", name: "non_employee_checks_paid_actor_check"
     t.check_constraint "paid_at IS NULL OR NOT (payment_method::text = ANY (ARRAY['ach'::character varying::text, 'eftps'::character varying::text, 'wire'::character varying::text, 'card'::character varying::text])) OR NULLIF(btrim(confirmation_number::text), ''::text) IS NOT NULL", name: "non_employee_checks_paid_electronic_confirmation_check"
     t.check_constraint "paid_at IS NULL OR payment_date IS NOT NULL", name: "non_employee_checks_paid_date_check"
-    t.check_constraint "paid_at IS NULL OR payment_method::text <> 'check'::text OR printed_at IS NOT NULL", name: "non_employee_checks_paid_paper_printed_check"
+    t.check_constraint "paid_at IS NULL OR payment_method::text <> 'check'::text OR printed_at IS NOT NULL OR prepared_at IS NOT NULL", name: "non_employee_checks_paid_paper_prepared_check"
     t.check_constraint "payment_method::text = ANY (ARRAY['check'::character varying::text, 'ach'::character varying::text, 'eftps'::character varying::text, 'wire'::character varying::text, 'card'::character varying::text, 'cash'::character varying::text, 'other'::character varying::text])", name: "non_employee_checks_payment_method_check"
     t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying::text, 'pay_period'::character varying::text, 'month'::character varying::text, 'quarter'::character varying::text, 'year'::character varying::text])", name: "non_employee_checks_payment_period_type_check"
     t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
@@ -2497,6 +2498,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_030000) do
     t.string "check_number"
     t.integer "check_print_count", default: 0, null: false
     t.datetime "check_printed_at"
+    t.datetime "check_prepared_at"
+    t.datetime "check_prepared_source_updated_at"
     t.bigint "company_id", null: false
     t.bigint "correction_for_payroll_item_id"
     t.text "correction_reason"

@@ -43,14 +43,14 @@ class CheckReconciliationStatus
       events.where(event_type: "delivered", check_number: source.check_number).exists?
     end
     return "issued" if delivered
-    return "prepared" if source.check_printed_at.present?
+    return "prepared" if source.check_prepared?
 
     "unprepared"
   end
 
   def non_employee_base_status
     return "issued" if source.paid_at.present?
-    return "prepared" if source.printed?
+    return "prepared" if source.prepared?
 
     "unprepared"
   end

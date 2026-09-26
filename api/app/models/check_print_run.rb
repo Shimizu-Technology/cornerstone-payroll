@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CheckPrintRun < ApplicationRecord
-  STATUSES = %w[generated confirmed].freeze
+  STATUSES = %w[generated prepared confirmed].freeze
   CONFIRMATION_ATTRIBUTES = %w[status confirmed_at confirmed_by_id updated_at].freeze
 
   belongs_to :company
@@ -26,6 +26,10 @@ class CheckPrintRun < ApplicationRecord
 
   def confirmed?
     status == "confirmed"
+  end
+
+  def prepared?
+    status == "prepared"
   end
 
   private

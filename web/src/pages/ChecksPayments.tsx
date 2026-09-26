@@ -846,7 +846,7 @@ export function ChecksPayments() {
                       <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Voucher
                       </Button>
-                      {!check.voided && check.payment_method === 'check' && !check.printed_at && (
+                      {!check.voided && !check.pay_period_id && check.payment_method === 'check' && !check.printed_at && (
                         <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check)} disabled={busyId === check.id}>
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Printed
                         </Button>
@@ -859,8 +859,8 @@ export function ChecksPayments() {
                             setPaymentDate(check.payment_date || localDateString());
                             setPaymentConfirmation(check.confirmation_number || '');
                           }}
-                          disabled={busyId === check.id || (check.payment_method === 'check' && !check.printed_at)}
-                          title={check.payment_method === 'check' && !check.printed_at ? 'Print the check first' : undefined}
+                          disabled={busyId === check.id || (check.payment_method === 'check' && !['prepared', 'printed'].includes(check.check_status))}
+                          title={check.payment_method === 'check' && !['prepared', 'printed'].includes(check.check_status) ? check.pay_period_id ? 'Generate a current check package first' : 'Record the physical print first' : undefined}
                         >
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Paid
                         </Button>
@@ -878,7 +878,7 @@ export function ChecksPayments() {
                           <Button size="sm" variant="destructive" onClick={() => handleVoid(check)} disabled={busyId === check.id}>Confirm</Button>
                         </>
                       )}
-                      {!check.liability_payment && !check.printed_at && !check.paid_at && !check.voided && (
+                      {!check.liability_payment && !check.printed_at && !check.prepared_at && !check.paid_at && !check.voided && (
                         <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(check)} disabled={busyId === check.id}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

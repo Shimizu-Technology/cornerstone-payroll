@@ -7,7 +7,7 @@ module Api
     module Admin
       class CheckPrintRunsController < BaseController
         before_action :set_pay_period, only: [ :queue, :index, :create ]
-        before_action :set_run, only: [ :pdf, :confirm ]
+        before_action :set_run, only: [ :pdf ]
 
         def queue
           render json: CheckPrintQueueService.new(pay_period: @pay_period, actor: current_user).call
@@ -50,12 +50,12 @@ module Api
             "#{e.class}: #{e.message}"
           )
           render json: {
-            error: "The check package could not be generated. No checks were marked printed. Please try again."
+            error: "The check package could not be generated. No checks were prepared. Please try again."
           }, status: :service_unavailable
         end
 
         def pdf
-          CheckPrintRunSelectionVerifier.new(run: @run).call unless @run.confirmed?
+          CheckPrintRunSelectionVerifier.new(run: @run).call unless @run.confirmed? || @run.prepared?
 
           data = R2StorageService.new.download(@run.storage_key)
           return render json: { error: "The generated check package is unavailable" }, status: :not_found unless data
@@ -76,30 +76,6 @@ module Api
           )
           render json: {
             error: "The generated check package could not be downloaded. Please try again."
-          }, status: :service_unavailable
-        end
-
-        def confirm
-          result = CheckPrintRunConfirmationService.new(
-            run: @run,
-            actor: current_user,
-            ip_address: request.remote_ip
-          ).call
-
-          render json: {
-            check_print_run: run_payload(result.fetch(:run)),
-            already_confirmed: result.fetch(:already_confirmed),
-            marked_printed: result.fetch(:marked_printed)
-          }
-        rescue CheckPrintRunConfirmationService::StaleSelectionError, ArgumentError => e
-          render json: { error: e.message }, status: :conflict
-        rescue StandardError => e
-          Rails.logger.error(
-            "[check_print_runs#confirm] run=#{@run&.id} request_id=#{request.request_id} " \
-            "#{e.class}: #{e.message}"
-          )
-          render json: {
-            error: "Print confirmation could not be recorded. No check print statuses were changed. Please try again."
           }, status: :service_unavailable
         end
 
@@ -136,8 +112,6 @@ module Api
             created_by_name: run.created_by&.name,
             confirmed_by_id: run.confirmed_by_id,
             confirmed_by_name: run.confirmed_by&.name,
-            requires_distinct_confirmer: run.company.require_distinct_check_print_confirmer?,
-            can_current_user_confirm: !run.company.require_distinct_check_print_confirmer? || run.created_by_id != current_user.id,
             confirmation_state: confirmation_state,
             confirmation_issue: confirmation_issue
           }
@@ -145,9 +119,10 @@ module Api
 
         def confirmation_state_for(run)
           return [ "confirmed", nil ] if run.confirmed?
+          return [ "prepared", nil ] if run.prepared?
 
           CheckPrintRunSelectionVerifier.new(run: run).call
-          [ "ready", nil ]
+          [ "legacy", "This package predates automatic preparation. Generate a new package to prepare these checks." ]
         rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
           [ "outdated", e.message ]
         end

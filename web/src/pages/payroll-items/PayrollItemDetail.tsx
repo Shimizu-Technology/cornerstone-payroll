@@ -155,7 +155,7 @@ export function PayrollItemDetail(): ReactElement {
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payrollItem.voided ? 'danger' : payRun.status === 'committed' ? 'success' : 'default'}>{payrollItem.voided ? 'Voided' : payRun.status === 'committed' ? 'Finalized' : 'In progress'}</Badge>
           <Badge variant="default">{payrollItem.employment_type}</Badge>
-          {payrollItem.check_number && <Badge variant={payrollItem.check_printed_at ? 'success' : 'info'}>Check #{payrollItem.check_number}</Badge>}
+          {payrollItem.check_number && <Badge variant={payrollItem.check_prepared_at || payrollItem.check_printed_at ? 'success' : 'info'}>Check #{payrollItem.check_number}</Badge>}
           {isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
         </div>
       </section>
@@ -197,7 +197,7 @@ export function PayrollItemDetail(): ReactElement {
               ) : (
                 <>
                   <ContextRow icon={Printer} label="Check number" value={payrollItem.check_number || 'Not assigned'} />
-                  <ContextRow icon={Printer} label="Check status" value={payrollItem.voided ? 'Voided' : payrollItem.check_printed_at ? 'Printed' : payrollItem.check_number ? 'Assigned' : 'Pending'} />
+                  <ContextRow icon={Printer} label="Check status" value={payrollItem.voided ? 'Voided' : payrollItem.check_status === 'delivered' ? 'Issued' : payrollItem.check_status === 'printed' ? 'Printed' : payrollItem.check_status === 'prepared' ? 'Prepared' : payrollItem.check_number ? 'Assigned' : 'Pending'} />
                   <ContextRow icon={Printer} label="Print count" value={String(payrollItem.check_print_count || 0)} />
                   <ContextRow icon={CalendarDays} label="Printed at" value={payrollItem.check_printed_at ? formatGuamDateTime(payrollItem.check_printed_at) : 'Not printed'} />
                 </>
