@@ -183,6 +183,79 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
   });
 
+  it('keeps confirmed checks visible and allows an intentional second package', async () => {
+    const user = userEvent.setup();
+    const printedQueue: CheckPrintQueueResponse = {
+      ...queue,
+      items: [{ ...queue.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
+      meta: { ...queue.meta, unprinted: 0, printed: 1 },
+    };
+    apiMocks.printQueue.mockResolvedValue(printedQueue);
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [savedRun] });
+    renderDialog();
+
+    expect(await screen.findByText('Package #42')).toBeTruthy();
+    expect(screen.getByText('Ada Trainer')).toBeTruthy();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprinted');
+    expect(screen.queryByText('Ada Trainer')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Create another package' }));
+
+    expect((screen.getByRole('combobox', { name: 'Check status' }) as HTMLSelectElement).value).toBe('all');
+    expect(screen.getByText(/not selected automatically/)).toBeTruthy();
+    expect(screen.getByText('Ada Trainer')).toBeTruthy();
+    const generateButton = screen.getByRole('button', { name: 'Generate and save package' }) as HTMLButtonElement;
+    expect(generateButton.disabled).toBe(true);
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select check 4101' }));
+    expect(screen.getByText(/selected check was printed before/)).toBeTruthy();
+    expect(generateButton.disabled).toBe(false);
+    await user.click(generateButton);
+
+    expect(apiMocks.createPrintGeneration).toHaveBeenCalledWith(9, expect.objectContaining({ payrollItemIds: [7] }));
+  });
+
+  it('shows delivered and paid checks in the printed filter', async () => {
+    const user = userEvent.setup();
+    apiMocks.printQueue.mockResolvedValue({
+      ...queue,
+      items: [
+        { ...queue.items[0], status: 'delivered' },
+        { ...queue.items[0], key: 'non_employee_check:8', source_type: 'non_employee_check', source_id: 8, payee: 'Tax Office', kind: 'non_employee', status: 'paid' },
+      ],
+    });
+    renderDialog();
+
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Check status' }), 'printed');
+    expect(screen.getByText('Ada Trainer')).toBeTruthy();
+    expect(screen.getByText('Tax Office')).toBeTruthy();
+    expect(screen.getByText('Paid')).toBeTruthy();
+  });
+
+  it('resets check filters when the workspace reopens', async () => {
+    const user = userEvent.setup();
+    apiMocks.printQueue.mockResolvedValue({
+      ...queue,
+      items: [{ ...queue.items[0], status: 'printed' }],
+      meta: { ...queue.meta, unprinted: 0, printed: 1 },
+    });
+    const onOpenChange = vi.fn();
+    const onConfirmed = vi.fn();
+    const dialog = (open: boolean) => (
+      <MemoryRouter>
+        <UnifiedCheckPrintDialog open={open} payPeriodId={9} onOpenChange={onOpenChange} onConfirmed={onConfirmed} />
+      </MemoryRouter>
+    );
+    const view = render(dialog(true));
+    expect(await screen.findByText('Ada Trainer')).toBeTruthy();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check status' }), 'unprinted');
+    expect(screen.queryByText('Ada Trainer')).toBeNull();
+
+    view.rerender(dialog(false));
+    view.rerender(dialog(true));
+    expect(await screen.findByText('Ada Trainer')).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'Check status' }) as HTMLSelectElement).value).toBe('all');
+  });
+
   it('starts a background generation with a unique key and real selection', async () => {
     const user = userEvent.setup();
     renderDialog();

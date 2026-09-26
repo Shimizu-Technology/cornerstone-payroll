@@ -80,10 +80,35 @@ test('printer profiles stay usable at laptop height and expose inline creation',
   await workspace.getByRole('button', { name: 'Manage' }).click();
   const manager = page.getByRole('dialog', { name: 'Printer profiles' });
   await expect(manager).toBeVisible();
+  const laptopBounds = await manager.boundingBox();
+  expect(laptopBounds).not.toBeNull();
+  expect(Math.abs(laptopBounds!.x + laptopBounds!.width / 2 - 1366 / 2)).toBeLessThan(2);
   await expect(manager.getByRole('button', { name: 'Done' })).toBeVisible();
   await manager.getByRole('button', { name: 'New profile' }).click();
   await manager.getByRole('textbox', { name: 'Profile name' }).fill('Accounting Office Canon');
   await expect(manager.getByRole('button', { name: 'Create and use profile' })).toBeEnabled();
+  await page.setViewportSize({ width: 2048, height: 1137 });
+  const desktopBounds = await manager.boundingBox();
+  expect(desktopBounds).not.toBeNull();
+  expect(Math.abs(desktopBounds!.x + desktopBounds!.width / 2 - 2048 / 2)).toBeLessThan(2);
+});
+
+test('previously printed checks remain visible but require explicit selection for another package', async ({ page }): Promise<void> => {
+  await routeWorkspace(page);
+  await page.route(queuePattern, (route) => fulfillJson(route, {
+    ...queueResponse,
+    items: [{ ...queueResponse.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
+    meta: { ...queueResponse.meta, unprinted: 0, printed: 1 },
+  }));
+  await mountHarness(page);
+
+  const dialog = page.getByRole('dialog', { name: 'Print checks' });
+  await expect(dialog.getByText('Test Employee')).toBeVisible();
+  await expect(dialog.getByText(/not selected automatically/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Select unprinted' })).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: 'Select check 1001' }).check();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
 });
 
 test('check printing shows a stable starting state and can close without cancelling generation', async ({ page }): Promise<void> => {

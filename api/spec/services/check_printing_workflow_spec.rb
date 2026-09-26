@@ -108,6 +108,25 @@ RSpec.describe "Unified check printing workflow" do
     expect(non_employee_check.reload).to have_attributes(print_count: 1)
     expect(non_employee_check.printed_at).to be_present
 
+    printed_queue = CheckPrintQueueService.new(pay_period: pay_period, actor: actor).call
+    expect(printed_queue.dig(:meta, :total)).to eq(2)
+    expect(printed_queue.dig(:meta, :unprinted)).to eq(0)
+    expect(printed_queue.fetch(:items)).to all(include(status: "printed", eligible: true))
+
+    second_run = CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [ non_employee_check.id ],
+      starting_slot: 1,
+      printer_profile_id: printer_profile.id,
+      printer_profile_lock_version: printer_profile.lock_version,
+      storage: storage
+    ).call
+    expect(second_run).to have_attributes(status: "generated", selected_count: 2)
+    expect(employee_check.reload.check_print_count).to eq(1)
+    expect(non_employee_check.reload.print_count).to eq(1)
+
     repeated = CheckPrintRunConfirmationService.new(run: run, actor: actor).call
     expect(repeated).to include(already_confirmed: true, marked_printed: 0)
     expect(employee_check.reload.check_print_count).to eq(1)
