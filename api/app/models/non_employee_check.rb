@@ -257,7 +257,7 @@ class NonEmployeeCheck < ApplicationRecord
     if paid_at.present?
       errors.add(:payment_date, "is required for a paid payment") if payment_date.blank?
       errors.add(:paid_by, "is required for a paid payment") if paid_by.blank?
-      if payment_method == "check" && !prepared?
+      if payment_method == "check" && printed_at.blank? && prepared_at.blank?
         errors.add(:base, "A generated check package is required before a check can be paid")
       end
       if payment_method.in?(%w[ach eftps wire card]) && confirmation_number.to_s.strip.blank?
