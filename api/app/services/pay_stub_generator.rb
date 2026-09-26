@@ -448,7 +448,15 @@ class PayStubGenerator
   end
 
   def pay_ytd_total
-    @pay_ytd_total ||= PayrollEarningsYtdBreakdown.new(payroll_item).pay_ytd_total(payroll_item.ytd_gross)
+    @pay_ytd_total ||= begin
+      totals = employee.ytd_totals_before(
+        year: pay_period.pay_date.year,
+        pay_date: pay_period.pay_date,
+        pay_period_id: pay_period.id
+      )
+      gross = totals.fetch(:gross_pay).to_d + payroll_item.gross_pay.to_d
+      PayrollEarningsYtdBreakdown.new(payroll_item).pay_ytd_total(gross)
+    end
   end
 
   def payroll_field_entries_for(*treatments)

@@ -309,7 +309,8 @@ module QuickbooksHistory
         "after_tax_deduction_breakdown" => {
           "Roth retirement" => RETIREMENT_ROTH,
           "insurance" => INSURANCE,
-          "loan or advance" => LOAN
+          "loan or advance" => LOAN,
+          "tips paid out" => TIP_PAYOUT
         }
       }
       warnings = fields.flat_map do |field, buckets|

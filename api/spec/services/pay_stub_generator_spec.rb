@@ -58,6 +58,38 @@ RSpec.describe PayStubGenerator do
     expect(payroll_item.reload.ytd_gross).to eq(2_310.to_d)
   end
 
+  it "uses the active bridge revision for both YTD gross and the reimbursement offset" do
+    apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+      gross_pay: 2_000, non_taxable_pay: 300,
+      source_breakdown: { "earnings_breakdown" => { "Regular Pay" => "1700", "Reimb" => "300" } }
+    )
+    payroll_item.update!(ytd_gross: 2_310)
+    apply_historical_ytd_balance(
+      company: company, employee: employee,
+      through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+      gross_pay: 2_200, non_taxable_pay: 400,
+      source_breakdown: { "earnings_breakdown" => { "Regular Pay" => "1800", "Reimb" => "400" } }
+    )
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("$2,110.00")
+    expect(text).not_to include("$2,010.00", "$2,310.00")
+  end
+
+  it "includes the current paycheck in a draft pay stub preview" do
+    draft_period = create(:pay_period, company: company,
+      start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 14), pay_date: Date.new(2026, 4, 15))
+    draft_item = create(:payroll_item, pay_period: draft_period, employee: employee, company: company,
+      employment_type: "hourly", gross_pay: 310, ytd_gross: 310)
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(draft_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("$310.00")
+  end
+
   it "does not label missing check numbers as direct deposit" do
     payroll_item.update!(check_number: nil)
 
