@@ -83,7 +83,7 @@ class QuarterlyCompliancePacketBuilder
     @payroll_items ||= PayrollItem.includes(:payroll_item_earnings, :payroll_item_deductions, :employee, :pay_period)
                                   .joins(:employee, :pay_period)
                                   .merge(pay_periods)
-                                  .not_voided
+                                  .not_voided.reportable
                                   .where.not(employment_type: "contractor")
                                   .order("employees.last_name ASC, employees.first_name ASC, pay_periods.pay_date ASC")
                                   .references(:employees, :pay_periods)
@@ -94,7 +94,7 @@ class QuarterlyCompliancePacketBuilder
     @excluded_contractor_items ||= PayrollItem.includes(:employee, :pay_period)
                                               .joins(:pay_period)
                                               .merge(pay_periods)
-                                              .not_voided
+                                              .not_voided.reportable
                                               .where(employment_type: "contractor")
                                               .order("pay_periods.pay_date ASC", :id)
                                               .references(:pay_periods)
@@ -617,7 +617,7 @@ class QuarterlyCompliancePacketBuilder
 
       PayrollItem.joins(:pay_period)
                  .where(company_id: company.id)
-                 .not_voided
+                 .not_voided.reportable
                  .where.not(employment_type: "contractor")
                  .where(pay_periods: {
                    id: PayPeriod.reportable_committed

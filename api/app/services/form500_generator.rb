@@ -120,7 +120,7 @@ class Form500Generator
 
   def self.default_fields(company:, pay_period: nil)
     fit_total = if pay_period
-      pay_period.payroll_items.not_voided
+      pay_period.payroll_items.not_voided.reportable
         .sum("withholding_tax + COALESCE(additional_withholding, 0)").to_f
     else
       0.0

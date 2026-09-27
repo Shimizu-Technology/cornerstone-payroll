@@ -93,6 +93,6 @@ class PayrollTaxSyncPayloadBuilder
   end
 
   def reportable_items
-    pay_period.payroll_items.not_voided
+    pay_period.payroll_items.not_voided.reportable
   end
 end

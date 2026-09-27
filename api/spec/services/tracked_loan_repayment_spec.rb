@@ -191,7 +191,7 @@ RSpec.describe "Tracked payroll loan repayment" do
   end
 
   it "also blocks committing an older saved direct payment that bypassed the tracked schedule" do
-    item.update!(loan_deduction: 40, loan_payment: 40)
+    item.update!(loan_deduction: 40, loan_payment: 40, gross_pay: 800, net_pay: 760)
     period.update!(status: "approved")
     expect { PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit! }.to raise_error(ArgumentError, /named deduction/)
     expect(period.reload).to be_approved

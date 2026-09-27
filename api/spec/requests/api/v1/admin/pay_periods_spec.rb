@@ -1074,8 +1074,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       end
     end
 
-    it "calculates payroll for all active employees" do
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll"
+    it "calculates payroll for employees with pay activity" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 0 } }
+      }
 
       expect(response).to have_http_status(:ok)
       json = JSON.parse(response.body)
@@ -1100,6 +1102,66 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "revision" => 1,
         "calculation_checksum" => a_string_matching(/\A[0-9a-f]{64}\z/)
       )
+    end
+
+    it "omits an unpaid active employee, removes an emptied draft item, and can add pay later" do
+      unpaid = create(:employee, company: company, department: department, employment_type: "hourly", pay_rate: 15)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 }, unpaid.id.to_s => { regular: 0 } }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "success").pluck("employee_id")).to eq([ employee.id ])
+      expect(response.parsed_body.dig("results", "skipped").pluck("employee_id")).to eq([ unpaid.id ])
+      expect(pay_period.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 0 }, unpaid.id.to_s => { regular: 0 } }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.payroll_items).to be_empty
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("no payroll items")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { unpaid.id.to_s => { regular: 6 } }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.payroll_items.pluck(:employee_id)).to eq([ unpaid.id ])
+    end
+
+    it "keeps earned wages when deductions reduce net pay to zero" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } },
+        custom_deductions: { employee.id.to_s => [ { label: "Full offset", amount: 1000 } ] }
+      }
+
+      expect(response).to have_http_status(:ok)
+      item = pay_period.reload.payroll_items.sole
+      expect(item.gross_pay).to be_positive
+      expect(item.net_pay).to eq(0)
+      expect(response.parsed_body.dig("results", "success").pluck("employee_id")).to eq([ employee.id ])
+    end
+
+    it "skips an unpaid variable-salary employee without blocking another employee's pay" do
+      variable = create(:employee, company: company, department: department,
+        employment_type: "salary", salary_type: "variable", pay_rate: 0)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "success").pluck("employee_id")).to eq([ employee.id ])
+      expect(response.parsed_body.dig("results", "skipped").pluck("employee_id")).to include(variable.id)
+      expect(pay_period.reload.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ variable.id ] }
+      expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ variable.id ])
     end
 
     it "rejects a post-cutover live calculation without changing payroll state" do
@@ -1650,6 +1712,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   describe "POST /api/v1/admin/pay_periods/:id/approve" do
     it "approves a calculated pay period" do
       pay_period.update!(status: "calculated")
+      create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
 
@@ -1660,7 +1723,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(audit.metadata.fetch("after_values")).to include("status" => "approved")
       expect(audit.metadata.fetch("business_summary")).to include(
         "status" => "approved",
-        "employee_count" => 0
+        "employee_count" => 1
       )
     end
 
@@ -1672,7 +1735,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "blocks approval while an included employee has unresolved required documents" do
       pay_period.update!(status: "calculated")
-      create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
       employee.update!(document_readiness_required: true)
       create(:employee_document_requirement, company: company, employee: employee)
 
@@ -1685,7 +1748,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "requires the current client-approved review revision when the client setting is enabled" do
       company.update!(client_payroll_approval_required: true)
-      payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
       pay_period.update!(status: "calculated", calculated_at: Time.current)
       review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
 
