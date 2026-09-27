@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge, PayrollGoLivePayload } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalPaycheck, HistoricalReport, HistoricalReportType, HistoricalYtdBridge, PayrollGoLivePayload } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -1060,7 +1060,7 @@ test('hides the previous batch while a newly selected batch detail is delayed', 
   });
 
   await page.goto('/historical-payroll');
-  await expect(page.getByText('Previous Batch Worker')).toBeVisible();
+  await expect(page.locator('#migration-review table').getByText('Previous Batch Worker')).toBeVisible();
   await page.locator('#historical-batch').selectOption('1');
 
   await expect(page.getByText('Previous Batch Worker')).toHaveCount(0);
@@ -1400,15 +1400,15 @@ test('makes retained source verification and exact download clear to an administ
 
   await page.goto('/historical-payroll');
   await expect(page.locator('#migration-setup').getByText('1/1')).toBeVisible();
-  await expect(page.getByText('Verified', { exact: true })).toBeVisible();
+  await expect(page.locator('#migration-evidence table').getByText('Verified', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Evidence inventory' })).toBeVisible();
-  await expect(page.getByText('Authoritative paycheck values')).toBeVisible();
+  await expect(page.locator('#migration-evidence table').getByText('Authoritative paycheck values')).toBeVisible();
 
   await page.getByRole('button', { name: 'Verify all files' }).click();
   await expect(page.getByText('Every retained QuickBooks source file matches its original SHA-256 fingerprint.')).toBeVisible();
 
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download original' }).click();
+  await page.locator('#migration-evidence table').getByRole('button', { name: 'Download original' }).click();
   await expect((await download).suggestedFilename()).toBe('Payroll Details.xls');
   await expect(page.getByText('Payroll Details.xls passed integrity verification and was downloaded.')).toBeVisible();
 
@@ -1805,7 +1805,7 @@ test('makes accepted QuickBooks history easy to filter, understand, and export',
   await page.goto('/historical-payroll');
   await expect(page.getByRole('heading', { name: 'Historical reports' })).toBeVisible();
   await expect(page.getByText('Authoritative QuickBooks snapshots — never recalculated by Cornerstone Payroll')).toBeVisible();
-  await expect(page.getByText('Opening summary', { exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Opening summary' })).toBeVisible();
   await expect(page.getByText(/not an individual pay period/)).toBeVisible();
   await expect(page.getByText('Evidence: 1 accepted source batch · 5 verified original files')).toBeVisible();
 
@@ -1826,6 +1826,47 @@ test('makes accepted QuickBooks history easy to filter, understand, and export',
   await page.getByRole('menuitem', { name: /Excel workbook/ }).click();
   await expect((await download).suggestedFilename()).toBe('historical-taxes.xlsx');
 });
+
+for (const width of [320, 390]) {
+test(`shows historical report values and evidence actions on a ${width}px phone`, async ({ page }): Promise<void> => {
+  await page.setViewportSize({ width, height: 844 });
+  await mockApplicationShell(page);
+  const openingPaycheck: HistoricalPaycheck = {
+    id: 80, historical_pay_period_id: 10, historical_worker_id: 20,
+    source_employee_name: 'Opening Summary Worker', pay_date: '2024-12-31',
+    period_start: '2024-01-01', period_end: '2024-12-31', period_type: 'opening_summary',
+    source_status: 'active', reconciliation_status: 'opening_summary',
+    hours_total: '0', gross_pay: '2000', adjusted_gross: '2000',
+    pretax_deductions: '0', employee_taxes: '400', federal_income_tax: '200',
+    social_security_tax: '125', medicare_tax: '75', after_tax_deductions: '0',
+    net_pay: '1600', employer_taxes: '200', employer_contributions: '0',
+    total_payroll_cost: '2200', hours_breakdown: [], earnings_breakdown: [],
+    pretax_deduction_breakdown: [], after_tax_deduction_breakdown: [],
+    employee_tax_breakdown: [], employer_tax_breakdown: [], employer_contribution_breakdown: [],
+  };
+  const accepted = { ...detailWithVerifiedSource(1), status: 'locked' as const, paychecks: [openingPaycheck] };
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [accepted],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
+  }));
+  await page.route('**/api/v1/admin/historical_imports/1?**', (route) => fulfillJson(route, {
+    data: accepted,
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
+  }));
+  await page.route('**/api/v1/admin/historical_reports/**', (route) => fulfillJson(route, {
+    data: historicalReport('register'),
+    meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50 },
+  }));
+
+  await page.goto('/historical-payroll');
+
+  await expect(page.getByText('All report values').first()).toBeVisible();
+  await expect(page.getByText('Opening summary · Dec 31, 2024 · Check not provided')).toBeVisible();
+  await expect(page.getByRole('table').filter({ hasText: 'Gross pay' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Download original' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+});
+}
 
 test('guides an administrator through the final no-QuickBooks cutover gate', async ({ page }): Promise<void> => {
   await mockApplicationShell(page);

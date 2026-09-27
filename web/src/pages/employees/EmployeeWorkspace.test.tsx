@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Employee } from '@/types';
@@ -163,8 +163,11 @@ describe('EmployeeWorkspace imported setup certification', () => {
 
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: 'Direct deposit' })).toBeTruthy();
+    const phoneCard = screen.getByRole('group', { name: 'Pay history for Sep 19, 2026' });
+    expect(within(phoneCard).getByText('Direct deposit')).toBeTruthy();
+    expect(within(phoneCard).getByText('$800.00')).toBeTruthy();
     expect(screen.queryByText('Not assigned')).toBeNull();
-    expect(screen.getByRole('button', { name: 'View stub for Sep 19, 2026' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'View stub for Sep 19, 2026' })[0]).toBeTruthy();
   });
 
   it('previews a Cornerstone stub from history and offers no stub for imported history', async () => {
@@ -187,7 +190,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
       <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
     </MemoryRouter>);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'View stub for Sep 19, 2026' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: 'View stub for Sep 19, 2026' }))[0]);
     await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(5, [4]));
     expect(await screen.findByRole('dialog')).toHaveProperty('textContent', 'Pay stub · Sep 19, 2026');
     expect(screen.queryByRole('button', { name: 'View stub for Sep 19, 2025' })).toBeNull();

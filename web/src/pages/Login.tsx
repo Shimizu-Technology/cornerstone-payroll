@@ -55,9 +55,9 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-transparent px-4 py-10 lg:px-8">
-      <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2">
-        <section className="relative overflow-hidden rounded-3xl border border-neutral-200/80 bg-gradient-to-br from-primary-950 via-primary-900 to-primary-700 p-8 text-white shadow-xl shadow-primary-900/20 lg:p-10">
+    <div className="min-h-screen bg-transparent px-3 py-4 sm:px-4 sm:py-10 lg:px-8">
+      <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-2 lg:gap-8">
+        <section className="relative order-2 overflow-hidden rounded-3xl border border-neutral-200/80 bg-gradient-to-br from-primary-950 via-primary-900 to-primary-700 p-5 text-white shadow-xl shadow-primary-900/20 sm:p-8 lg:order-1 lg:p-10">
           <div className="absolute right-0 top-0 h-56 w-56 translate-x-1/3 -translate-y-1/3 rounded-full bg-white/10 blur-2xl" />
           <div className="absolute bottom-0 left-0 h-52 w-52 -translate-x-1/4 translate-y-1/3 rounded-full bg-success-500/20 blur-2xl" />
 
@@ -75,7 +75,7 @@ export function Login() {
               check printing, and year-end reporting.
             </p>
 
-            <div className="mt-10 space-y-4">
+            <div className="mt-8 hidden space-y-4 sm:block lg:mt-10">
               {highlights.map((item) => (
                 <div
                   key={item.title}
@@ -92,11 +92,11 @@ export function Login() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-neutral-200/80 bg-white/90 p-6 shadow-xl shadow-neutral-200/50 backdrop-blur-sm lg:p-8">
+        <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 p-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
           <div className="mb-6">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Welcome back</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
-            <p className="mt-2 text-sm text-neutral-500">Use your staff account to continue.</p>
+            <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
           </div>
 
           <SignIn
@@ -105,8 +105,9 @@ export function Login() {
             fallbackRedirectUrl="/app"
             appearance={{
               elements: {
-                rootBox: 'mx-auto w-full',
-                card: 'shadow-none border border-neutral-200 rounded-2xl',
+                rootBox: 'mx-auto w-full max-w-full',
+                cardBox: 'w-full max-w-full',
+                card: 'w-full max-w-full shadow-none border border-neutral-200 rounded-2xl',
                 headerTitle: 'text-neutral-900',
                 headerSubtitle: 'text-neutral-500',
                 socialButtonsBlockButton:

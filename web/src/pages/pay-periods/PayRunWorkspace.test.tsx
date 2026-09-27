@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -135,7 +135,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
 
     expect(await screen.findByText(/The PDF marks every check VOID/)).toBeTruthy();
     expect(screen.getByText('Rehearsal preview - no check number')).toBeTruthy();
-    expect(screen.getByText('Preview ready')).toBeTruthy();
+    expect(screen.getAllByText('Preview ready')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview rehearsal checks' }));
@@ -302,6 +302,33 @@ describe('PayRunWorkspace rehearsal checks', () => {
 describe('PayRunWorkspace check status refresh', () => {
   afterEach(cleanup);
 
+  it('keeps the phone payment card linked to the same switch workflow', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.getPayPeriod.mockResolvedValue({ pay_period: {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'unprinted' }],
+    } });
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+      <Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes>
+    </MemoryRouter>);
+
+    const phoneCard = await screen.findByRole('group', { name: 'Payment record for Alice Reyes' });
+    const desktopRow = screen.getByRole('row', { name: /Alice Reyes/ });
+    expect(within(phoneCard).getByText('Paper check · 4401')).toBeTruthy();
+    expect(within(phoneCard).getByText('$500.00')).toBeTruthy();
+    expect(within(phoneCard).getByText('Assigned')).toBeTruthy();
+    expect(within(desktopRow).getByText('Assigned')).toBeTruthy();
+    expect(within(desktopRow).getByRole('button', { name: 'Switch for this run' })).toBeTruthy();
+    fireEvent.click(within(phoneCard).getByRole('button', { name: 'Switch for this run' }));
+    expect(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' })).toBeTruthy();
+  });
+
   it('updates the pay-run summary when a check action changes its status', async () => {
     vi.clearAllMocks();
     apiMocks.isAdmin = true;
@@ -331,9 +358,9 @@ describe('PayRunWorkspace check status refresh', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Prepared')).toBeTruthy();
+    expect(await screen.findAllByText('Prepared')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
-    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(await screen.findAllByText('Issued')).toBeTruthy();
     expect(screen.queryByText('Prepared')).toBeNull();
     expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(2);
   });
@@ -368,16 +395,16 @@ describe('PayRunWorkspace check status refresh', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Prepared')).toBeTruthy();
+    expect(await screen.findAllByText('Prepared')).toBeTruthy();
     const changeButton = screen.getByRole('button', { name: 'Simulate check status change' });
     fireEvent.click(changeButton);
     fireEvent.click(changeButton);
     await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
 
     await act(async () => { resolveSecondRefresh({ pay_period: issuedRun }); });
-    expect(screen.getByText('Issued')).toBeTruthy();
+    expect(screen.getAllByText('Issued')).toBeTruthy();
     await act(async () => { resolveFirstRefresh({ pay_period: preparedRun }); });
-    expect(screen.getByText('Issued')).toBeTruthy();
+    expect(screen.getAllByText('Issued')).toBeTruthy();
     expect(screen.queryByText('Prepared')).toBeNull();
   });
 
@@ -412,18 +439,18 @@ describe('PayRunWorkspace check status refresh', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Assigned')).toBeTruthy();
+    expect(await screen.findAllByText('Assigned')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Switch for this run' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Switch for this run' })[0]);
     fireEvent.change(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' }), { target: { value: 'Payment not yet released' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this payment has not been issued/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm switch' }));
     await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
 
     await act(async () => { resolveSwitchRefresh({ pay_period: depositRun }); });
-    expect(screen.getByText('Stub ready')).toBeTruthy();
+    expect(screen.getAllByText('Stub ready')).toBeTruthy();
     await act(async () => { resolveCheckRefresh({ pay_period: checkRun }); });
-    expect(screen.getByText('Stub ready')).toBeTruthy();
+    expect(screen.getAllByText('Stub ready')).toBeTruthy();
     expect(screen.queryByText('Assigned')).toBeNull();
   });
 
@@ -454,9 +481,9 @@ describe('PayRunWorkspace check status refresh', () => {
 
     expect((await screen.findByTestId('mounted-processing-refresh-token')).textContent).toBe('0');
     fireEvent.click(screen.getByRole('link', { name: /Checks & direct deposit/ }));
-    expect(await screen.findByText('Prepared')).toBeTruthy();
+    expect(await screen.findAllByText('Prepared')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
-    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(await screen.findAllByText('Issued')).toHaveLength(2);
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
     fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');

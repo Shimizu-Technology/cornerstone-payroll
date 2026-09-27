@@ -213,7 +213,7 @@ export function PayrollFields() {
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="grid gap-2 sm:flex [&>button]:w-full sm:[&>button]:w-auto">
               <Button onClick={saveField} disabled={saving}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create field'}</Button>
               {editingId && <Button variant="outline" onClick={resetDraft}>Cancel</Button>}
             </div>

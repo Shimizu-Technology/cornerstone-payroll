@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { PayPeriod } from '@/types';
+import type { Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail } from './PayPeriodDetail';
 
 const apiMocks = vi.hoisted(() => ({
@@ -107,4 +107,83 @@ it('finishes loading when a sibling refresh supersedes the initial request', asy
   expect(screen.getByTestId('processing-check-list-refresh-token').textContent).toBe('1');
   await act(async () => { resolveInitialEmployees({ data: [], meta: { total_pages: 1 } }); });
   expect(screen.getByTestId('processing-check-list-refresh-token').textContent).toBe('1');
+});
+
+it('lets a phone user edit payroll hours and bonus in a draft run', async () => {
+  vi.clearAllMocks();
+  const employee = {
+    id: 23,
+    company_id: 7,
+    first_name: 'Ana',
+    last_name: 'Cruz',
+    employment_type: 'hourly',
+    pay_rate: 15,
+    pay_frequency: 'biweekly',
+    status: 'active',
+  } as Employee;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+
+  render(
+    <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <Routes>
+        <Route path="/companies/:companyId/pay-runs/:id/:tab" element={
+          <PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'draft' }} />
+        } />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const regularHours = within(card).getByLabelText('Regular hours') as HTMLInputElement;
+  const bonus = within(card).getByLabelText('Bonus this payroll for Ana Cruz') as HTMLInputElement;
+  fireEvent.change(regularHours, { target: { value: '36' } });
+  fireEvent.change(bonus, { target: { value: '75' } });
+
+  expect(regularHours.value).toBe('36');
+  expect(bonus.value).toBe('75.00');
+});
+
+it('edits the selected active wage rate after an inactive rate', async () => {
+  vi.clearAllMocks();
+  const employee = {
+    id: 24,
+    company_id: 7,
+    first_name: 'Mia',
+    last_name: 'Santos',
+    employment_type: 'hourly',
+    pay_rate: 15,
+    pay_frequency: 'biweekly',
+    status: 'active',
+    wage_rates: [
+      { id: 1, label: 'Retired', rate: 10, is_primary: false, active: false },
+      { id: 2, label: 'Server', rate: 15, is_primary: true, active: true },
+      { id: 3, label: 'Trainer', rate: 20, is_primary: false, active: true },
+    ],
+  } as Employee;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+
+  render(
+    <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <Routes>
+        <Route path="/companies/:companyId/pay-runs/:id/:tab" element={
+          <PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'draft' }} />
+        } />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Mia Santos' });
+  const server = within(card).getByText(/Server ·/).parentElement as HTMLElement;
+  const trainer = within(card).getByText(/Trainer ·/).parentElement as HTMLElement;
+  const serverHours = within(server).getByLabelText('Regular hours') as HTMLInputElement;
+  const trainerHours = within(trainer).getByLabelText('Regular hours') as HTMLInputElement;
+
+  fireEvent.change(trainerHours, { target: { value: '12' } });
+
+  expect(trainerHours.value).toBe('12');
+  expect(serverHours.value).toBe('0');
 });

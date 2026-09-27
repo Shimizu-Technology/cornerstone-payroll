@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, MessageSquare, Paperclip, Send, Wifi } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, MessageSquare, Paperclip, Send, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
   const [connected, setConnected] = useState(false);
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
 
   const documentOptions = useMemo(
     () => documents.map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
@@ -139,6 +140,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
       setThreads((current) => upsertThread(current, response.data));
       setSelectedId(response.data.id);
       setSelectedThread(response.data);
+      setMobileConversationOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start conversation');
     } finally {
@@ -203,7 +205,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
         {error && <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
 
         <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-4">
+          <div className={`${mobileConversationOpen ? 'hidden lg:block' : 'block'} min-w-0 space-y-4`}>
             <form onSubmit={createThread} className="space-y-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
               <Input
                 value={newThread.subject}
@@ -241,7 +243,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
                   <button
                     key={thread.id}
                     type="button"
-                    onClick={() => setSelectedId(thread.id)}
+                    onClick={() => { setSelectedId(thread.id); setMobileConversationOpen(true); }}
                     className={`block w-full border-b border-neutral-100 px-4 py-3 text-left last:border-b-0 hover:bg-neutral-50 ${
                       selectedId === thread.id ? 'bg-primary-50' : 'bg-white'
                     }`}
@@ -260,15 +262,18 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
             </div>
           </div>
 
-          <div className="rounded-lg border border-neutral-200">
+          <div className={`${mobileConversationOpen ? 'block' : 'hidden lg:block'} min-w-0 rounded-lg border border-neutral-200`}>
             {selectedThread ? (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3">
-                  <div>
+                  <div className="flex min-w-0 items-start gap-2">
+                    <button type="button" className="-ml-1 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to conversations"><ArrowLeft className="h-5 w-5" /></button>
+                    <div className="min-w-0 break-words">
                     <p className="font-semibold text-neutral-900">{selectedThread.subject}</p>
                     <p className="text-xs text-neutral-500">
                       {selectedThread.status === 'resolved' ? `Resolved ${formatDateTime(selectedThread.resolved_at)}` : 'Open conversation'}
                     </p>
+                    </div>
                   </div>
                   {canResolve && (
                     <Button

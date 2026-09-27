@@ -131,3 +131,19 @@ test('opens client-specific settings and persists the integration switch in the 
   expect(source.active).toBe(false);
   expect(errors).toEqual([]);
 });
+
+for (const width of [320, 390]) {
+  test(`keeps configured source actions visible on a ${width}px phone`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const { errors } = await mockWorkspace(page, { sources: ['aire_services'] });
+    await page.goto('/time-tracking-sources');
+
+    const card = page.getByTestId('mobile-source-card');
+    await expect(card.getByText('AIRE time clock')).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Edit' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Test connection' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Deactivate' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    expect(errors).toEqual([]);
+  });
+}

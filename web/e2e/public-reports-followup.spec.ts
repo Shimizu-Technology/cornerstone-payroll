@@ -111,6 +111,22 @@ test('preview failure clears prior initialized notes and leaves no fallback inst
   await expectNotes(page, []);
 });
 
+for (const width of [320, 390, 768]) {
+  test(`report editor fits a ${width}px viewport and keeps its actions reachable`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 640 });
+    await mountPanel(page, preview(null));
+    await openEditor(page, false);
+
+    const panel = page.getByRole('heading', { name: 'Edit Full Print Package' }).locator('xpath=../..');
+    const bounds = await panel.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+  });
+}
+
 test.describe('AIRE record timestamps', () => {
   test.use({ timezoneId: 'America/Los_Angeles' });
   test('timestamps use Guam time and missing dates keep their fallback', async ({ page }) => {

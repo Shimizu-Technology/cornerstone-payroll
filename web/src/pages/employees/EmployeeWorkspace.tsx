@@ -650,6 +650,35 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
         ) : visibleHistory.length === 0 ? (
           <p className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records match these filters.</p>
         ) : (
+          <>
+          <div className="divide-y divide-neutral-200 sm:hidden">
+            {visibleHistory.map((item) => (
+              <div key={item.key} className="space-y-3 px-4 py-4" role="group" aria-label={`Pay history for ${formatDate(item.pay_date)}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</p>
+                    <Link className="mt-1 block text-sm font-medium text-primary-700" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link>
+                  </div>
+                  <Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums">{formatCurrency(item.gross_pay)}</p></div>
+                  <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-emerald-700">{formatCurrency(item.net_pay)}</p></div>
+                  <div><p className="text-xs text-neutral-500">Deductions</p><p className="tabular-nums">{formatCurrency(item.total_deductions)}</p></div>
+                  <div><p className="text-xs text-neutral-500">Payment</p><p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</p></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
+                    <Button variant="outline" size="sm" className="min-h-11" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
+                      {stubLoadingId === item.payroll_item_id ? 'Loading…' : 'View stub'}
+                    </Button>
+                  )}
+                  <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open record <ArrowRight className="h-4 w-4" /></Link>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden sm:block">
           <Table>
             <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
             <TableBody striped>
@@ -676,6 +705,8 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
               ))}
             </TableBody>
           </Table>
+          </div>
+          </>
         )}
       </CardContent>
     </Card><PdfPreview artifact={stubArtifact} onClose={() => setStubArtifact(null)} /></>

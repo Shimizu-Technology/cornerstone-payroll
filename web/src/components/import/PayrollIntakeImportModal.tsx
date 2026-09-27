@@ -643,7 +643,37 @@ export function PayrollIntakeImportModal({
               </div>
             )}
 
-            <div className="overflow-x-auto rounded-3xl border border-neutral-200 bg-white shadow-sm">
+            <div className="space-y-3 sm:hidden" aria-label="Payroll intake source rows">
+              {rows.map((row) => (
+                <section key={row.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Source row for ${row.source_employee_name}`}>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{row.source_employee_name}</p>{row.match_confidence != null && <p className="mt-1 text-xs text-neutral-500">Match confidence {Math.round(row.match_confidence * 100)}%</p>}</div>{readinessBadge(row)}</div>
+                  <label className="block text-sm font-medium text-neutral-700">Outcome
+                    <Select className="mt-1 w-full" aria-label={`Outcome for ${row.source_employee_name}`} value={row.disposition} onChange={(event) => {
+                      const disposition = event.target.value as EditableRow['disposition'];
+                      updateRow(row.id, { disposition, include: disposition === 'included', disposition_reason: disposition === 'included' ? null : row.disposition_reason, target_pay_period_id: disposition === 'deferred' ? row.target_pay_period_id : null });
+                    }}>
+                      <option value="pending">Choose outcome</option><option value="included">Include in this payroll</option><option value="excluded">Exclude from payroll</option><option value="deferred">Move to a future payroll</option><option value="informational">Informational only</option>
+                    </Select>
+                  </label>
+                  {row.disposition === 'included' && <div className="grid gap-2"><label className="block text-sm font-medium text-neutral-700">Matched employee
+                    <Select className="mt-1 w-full" value={row.employee_id ? String(row.employee_id) : ''} onChange={(event) => updateRow(row.id, { employee_id: event.target.value ? Number(event.target.value) : null })}>
+                      <option value="">Select employee</option>{employeeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </Select>
+                  </label><Button type="button" variant="outline" size="sm" onClick={() => openCreateEmployee(row)}><UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />New employee</Button></div>}
+                  {['excluded', 'deferred', 'informational'].includes(row.disposition) && <div className="space-y-2"><Input aria-label={`Reason for ${row.source_employee_name}`} value={row.disposition_reason || ''} onChange={(event) => updateRow(row.id, { disposition_reason: event.target.value })} placeholder="Required reason" />{row.disposition === 'deferred' && <Select className="w-full" aria-label={`Future payroll for ${row.source_employee_name}`} value={row.target_pay_period_id ? String(row.target_pay_period_id) : ''} onChange={(event) => updateRow(row.id, { target_pay_period_id: event.target.value ? Number(event.target.value) : null })}><option value="">Choose future payroll</option>{dispositionTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</Select>}</div>}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-xs font-medium text-neutral-600">Week 1 hours<NumericInput className="mt-1 w-full" value={row.week1_hours} onValueChange={(value) => updateWeekHours(row.id, 'week1_hours', value ?? 0)} min={0} /></label>
+                    <label className="text-xs font-medium text-neutral-600">Week 2 hours<NumericInput className="mt-1 w-full" value={row.week2_hours} onValueChange={(value) => updateWeekHours(row.id, 'week2_hours', value ?? 0)} min={0} /></label>
+                    <label className="text-xs font-medium text-neutral-600">Week 1 tips<NumericInput className="mt-1 w-full" value={row.week1_tips} onValueChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                    <label className="text-xs font-medium text-neutral-600">Week 2 tips<NumericInput className="mt-1 w-full" value={row.week2_tips} onValueChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                    <label className="col-span-2 text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                  </div>
+                  <p className="text-xs text-neutral-500">{toNumber(row.regular_hours).toFixed(2)} regular · {toNumber(row.overtime_hours).toFixed(2)} OT</p>
+                  {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} className="mr-1 whitespace-normal text-left">{warning.message}</Badge>)}
+                </section>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto rounded-3xl border border-neutral-200 bg-white shadow-sm sm:block">
               <Table className="min-w-[1380px]">
                 <TableHeader>
                   <TableRow>

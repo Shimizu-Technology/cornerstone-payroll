@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import type { YtdSummaryReport } from '@/services/api';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
-import { PayrollRegisterPanel, YtdSummaryPanel } from './Reports';
+import { PayrollRegisterPanel, Reports, YtdSummaryPanel } from './Reports';
 
 function renderReportPanel(panel: ReactNode) {
   return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
@@ -27,6 +27,36 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompanyId: 42 }),
 }));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, organization_id: 1, company_id: 42 } }),
+}));
+
+describe('Reports library navigation', () => {
+  afterEach(cleanup);
+
+  it('moves focus to the selected report so it is discoverable below the library', async () => {
+    render(<MemoryRouter><Reports /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review checks' }));
+
+    const section = await screen.findByRole('region', { name: 'Checks & Payments Register' });
+    await waitFor(() => expect(document.activeElement).toBe(section));
+    expect(section.querySelector('a[href="/checks-payments"]')).toBeTruthy();
+  });
+
+  it('returns focus to a report when its already selected library card is chosen again', async () => {
+    render(<MemoryRouter><Reports /></MemoryRouter>);
+    const openChecks = screen.getByRole('button', { name: 'Review checks' });
+    fireEvent.click(openChecks);
+    const section = await screen.findByRole('region', { name: 'Checks & Payments Register' });
+    await waitFor(() => expect(document.activeElement).toBe(section));
+
+    openChecks.focus();
+    fireEvent.click(openChecks);
+    await waitFor(() => expect(document.activeElement).toBe(section));
+  });
+});
 
 const report = {
   type: 'ytd_summary',

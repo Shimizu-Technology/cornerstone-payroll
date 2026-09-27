@@ -265,6 +265,7 @@ export function InvoiceMaker() {
   const [showBillingProfileForm, setShowBillingProfileForm] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [chatSessions, setChatSessions] = useState<InvoiceChatSession[]>([]);
   const [activeChatSession, setActiveChatSession] = useState<InvoiceChatSession | null>(null);
@@ -745,6 +746,7 @@ export function InvoiceMaker() {
   const startChatSession = async () => {
     setChatBusy(true);
     setError(null);
+    setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
@@ -802,6 +804,7 @@ export function InvoiceMaker() {
   const loadChatSession = async (sessionId: number) => {
     setChatBusy(true);
     setError(null);
+    setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.get(sessionId);
@@ -874,6 +877,7 @@ export function InvoiceMaker() {
 
     setChatBusy(true);
     setError(null);
+    setChatError(null);
     setSuccess(null);
     setCreatedChatInvoice(null);
     let createdSessionId: number | null = null;
@@ -966,7 +970,7 @@ export function InvoiceMaker() {
       }
       setChatInput(content);
       setChatImages(attachments);
-      setError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
+      setChatError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
     } finally {
       removePendingMessages();
       setChatBusy(false);
@@ -1475,13 +1479,7 @@ export function InvoiceMaker() {
 
       {invoiceMode === 'manual' ? (
         <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
-          <div className="space-y-6">
-            {invoiceHistoryPanel}
-            {billingProfilesPanel}
-            {recipientsPanel}
-          </div>
-
-          <div className="space-y-6">
+          <div className="order-1 min-w-0 space-y-6 lg:order-2">
             {alertBanner}
 
           <Card>
@@ -1735,97 +1733,17 @@ export function InvoiceMaker() {
             </CardContent>
           </Card>
           </div>
-        </div>
-      ) : (
-        <div className="grid gap-6 p-4 sm:p-6 lg:p-8 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_340px]">
-          <div className="space-y-6">
-            {alertBanner}
-            <Card className="overflow-hidden">
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-neutral-900">Assistant Sessions</h2>
-                    <p className="text-sm text-neutral-500">Draft invoices from chat</p>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    New
-                  </Button>
-                </div>
-                <label className="flex items-center gap-2 text-sm text-neutral-600">
-                  <input
-                    type="checkbox"
-                    checked={showArchivedChatSessions}
-                    onChange={(event) => setShowArchivedChatSessions(event.target.checked)}
-                    className="h-4 w-4 rounded border-neutral-300"
-                  />
-                  Show archived sessions
-                </label>
-
-                {loading ? (
-                  <p className="text-sm text-neutral-500">Loading...</p>
-                ) : chatSessions.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
-                    Start a chat to create an AI-assisted invoice draft.
-                  </div>
-                ) : (
-                  <div className="max-h-[calc(100vh-360px)] min-h-[360px] space-y-2 overflow-y-auto pr-1">
-                    {chatSessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className={`rounded-lg border p-3 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
-                          activeChatSession?.id === session.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
-                        }`}
-                      >
-                        <button type="button" onClick={() => loadChatSession(session.id)} className="w-full text-left">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-neutral-900">
-                                {session.invoice_number || session.recipient_name || session.title}
-                              </p>
-                              <p className="truncate text-xs text-neutral-500">
-                                {session.message_count} message{session.message_count === 1 ? '' : 's'}
-                              </p>
-                            </div>
-                            <Badge className={session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
-                              {session.status === 'invoice_created' ? 'created' : session.status}
-                            </Badge>
-                          </div>
-                        </button>
-                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500">
-                          <span>{new Date(session.updated_at).toLocaleDateString()}</span>
-                          {session.archived ? (
-                            <button
-                              type="button"
-                              onClick={() => restoreChatSession(session.id)}
-                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-primary-700 hover:bg-primary-50"
-                            >
-                              <RotateCcw className="h-3 w-3" />
-                              Restore
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => archiveChatSession(session.id)}
-                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
-                            >
-                              <Archive className="h-3 w-3" />
-                              Archive
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <div className="order-2 min-w-0 space-y-6 lg:order-1">
+            {invoiceHistoryPanel}
             {billingProfilesPanel}
             {recipientsPanel}
           </div>
 
+        </div>
+      ) : (
+        <div className="grid gap-6 p-4 sm:p-6 lg:p-8 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_340px]">
           <Card
-            className="flex min-h-[min(760px,calc(100vh-260px))] overflow-hidden"
+            className="order-1 flex min-h-[min(760px,calc(100vh-260px))] min-w-0 overflow-hidden xl:order-2"
             onDrop={handleChatDrop}
             onDragOver={handleChatDragOver}
           >
@@ -1987,6 +1905,7 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
+                {chatError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{chatError}</p>}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
@@ -2033,7 +1952,7 @@ export function InvoiceMaker() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6 xl:col-span-2 2xl:col-span-1">
+          <div className="order-2 min-w-0 space-y-6 xl:order-3 xl:col-span-2 2xl:col-span-1">
             <Card>
               <CardContent className="space-y-4">
                 <div>
@@ -2147,6 +2066,92 @@ export function InvoiceMaker() {
 
             {invoiceHistoryPanel}
           </div>
+          <div className="order-3 min-w-0 space-y-6 xl:order-1">
+            {alertBanner}
+            <Card className="overflow-hidden">
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-neutral-900">Assistant Sessions</h2>
+                    <p className="text-sm text-neutral-500">Draft invoices from chat</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    New
+                  </Button>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-neutral-600">
+                  <input
+                    type="checkbox"
+                    checked={showArchivedChatSessions}
+                    onChange={(event) => setShowArchivedChatSessions(event.target.checked)}
+                    className="h-4 w-4 rounded border-neutral-300"
+                  />
+                  Show archived sessions
+                </label>
+
+                {loading ? (
+                  <p className="text-sm text-neutral-500">Loading...</p>
+                ) : chatSessions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+                    Start a chat to create an AI-assisted invoice draft.
+                  </div>
+                ) : (
+                  <div className="max-h-[calc(100vh-360px)] min-h-[360px] space-y-2 overflow-y-auto pr-1">
+                    {chatSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className={`rounded-lg border p-4 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
+                          activeChatSession?.id === session.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
+                        }`}
+                      >
+                        <button type="button" onClick={() => loadChatSession(session.id)} className="w-full text-left">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-neutral-900">
+                                {session.invoice_number || session.recipient_name || session.title}
+                              </p>
+                              <p className="truncate text-xs text-neutral-500">
+                                {session.message_count} message{session.message_count === 1 ? '' : 's'}
+                              </p>
+                            </div>
+                            <Badge className={session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
+                              {session.status === 'invoice_created' ? 'created' : session.status}
+                            </Badge>
+                          </div>
+                        </button>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500">
+                          <span>{new Date(session.updated_at).toLocaleDateString()}</span>
+                          {session.archived ? (
+                            <button
+                              type="button"
+                              onClick={() => restoreChatSession(session.id)}
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-primary-700 hover:bg-primary-50"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => archiveChatSession(session.id)}
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
+                            >
+                              <Archive className="h-3 w-3" />
+                              Archive
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            {billingProfilesPanel}
+            {recipientsPanel}
+          </div>
+
         </div>
       )}
 

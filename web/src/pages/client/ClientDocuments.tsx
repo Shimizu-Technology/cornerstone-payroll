@@ -318,14 +318,14 @@ export function ClientDocuments() {
                       const fileKey = `${file.name}-${file.size}`;
                       return (
                         <div key={fileKey} className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 py-3 shadow-sm">
-                          <div>
-                            <p className="text-sm font-medium text-neutral-900">{file.name}</p>
+                          <div className="min-w-0">
+                            <p className="break-all text-sm font-medium text-neutral-900">{file.name}</p>
                             <p className="text-xs text-neutral-500">{formatFileSize(file.size)}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => removeSelectedFile(fileKey)}
-                            className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                            className="shrink-0 rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
                             aria-label={`Remove ${file.name}`}
                           >
                             <X className="h-4 w-4" />
@@ -387,7 +387,7 @@ export function ClientDocuments() {
               </div>
             ) : (
               <>
-                <div className="space-y-3 sm:hidden">
+                <div className="space-y-3 lg:hidden">
                   {documents.map((document) => (
                     <MobileRecordCard key={document.id}>
                       <div className="flex items-start gap-3">
@@ -422,7 +422,7 @@ export function ClientDocuments() {
                     </MobileRecordCard>
                   ))}
                 </div>
-                <div className="hidden sm:block">
+                <div className="hidden lg:block">
                   <Table stickyHeader>
                     <TableHeader>
                   <TableRow>

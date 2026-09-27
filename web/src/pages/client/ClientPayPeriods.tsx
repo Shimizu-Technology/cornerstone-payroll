@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi, type PayrollHistoryRecord } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
@@ -77,11 +78,17 @@ export function ClientPayPeriods(): ReactElement {
     );
   }, [payPeriods, search]);
 
+  const openPeriod = (period: PayrollHistoryRecord): void => {
+    void navigate(period.record_type === 'imported'
+      ? importedPayRunPath(companyId, period.id, { returnTo })
+      : payRunPath(companyId, period.id, 'overview', { returnTo }));
+  };
+
   return (
     <div>
       <Header title="Pay Periods" description="Review payroll runs and employee pay information." />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         <div className="rounded-xl border border-primary-200 bg-primary-50/70 px-4 py-3 text-sm text-primary-800">
           Review-ready Cornerstone payrolls appear here before processing when your approval is required. Finalized Cornerstone payrolls and locked imported payrolls remain available as read-only history.
@@ -100,6 +107,32 @@ export function ClientPayPeriods(): ReactElement {
           ) : visiblePayPeriods.length === 0 ? (
             <div className="py-12 text-center text-sm text-gray-500">No pay periods found.</div>
           ) : (
+            <>
+            <div className="space-y-3 p-3 lg:hidden">
+              {visiblePayPeriods.map((period) => (
+                <MobileRecordCard key={period.key}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
+                      <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date, { weekday: 'short', year: undefined })}</p>
+                    </div>
+                    <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
+                      {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MobileField label="Net pay" value={formatCurrency(period.total_net ?? 0)} />
+                    <MobileField label="Gross pay" value={formatCurrency(period.total_gross ?? 0)} />
+                    <MobileField label="Employees" value={period.employee_count} />
+                    <MobileField label="Source" value={period.source.label} />
+                  </div>
+                  <Button className="mt-4 w-full" variant={period.status === 'calculated' ? 'primary' : 'outline'} onClick={() => openPeriod(period)}>
+                    {period.status === 'calculated' ? 'Review & Approve' : 'View Payroll'}
+                  </Button>
+                </MobileRecordCard>
+              ))}
+            </div>
+            <div className="hidden lg:block">
             <Table stickyHeader>
               <TableHeader>
                 <TableRow>
@@ -128,9 +161,7 @@ export function ClientPayPeriods(): ReactElement {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(period.record_type === 'imported'
-                        ? importedPayRunPath(companyId, period.id, { returnTo })
-                        : payRunPath(companyId, period.id, 'overview', { returnTo }))}>
+                      <Button variant="ghost" size="sm" onClick={() => openPeriod(period)}>
                         {period.status === 'calculated' ? 'Review & Approve' : 'View'}
                       </Button>
                     </TableCell>
@@ -138,6 +169,8 @@ export function ClientPayPeriods(): ReactElement {
                 ))}
               </TableBody>
             </Table>
+            </div>
+            </>
           )}
         </Card>}
       </div>

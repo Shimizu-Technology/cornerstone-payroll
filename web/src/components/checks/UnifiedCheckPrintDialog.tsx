@@ -49,6 +49,9 @@ function newIdempotencyKey(): string {
 }
 
 export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPackageGenerated }: UnifiedCheckPrintDialogProps) {
+  const [mobileCheckList, setMobileCheckList] = useState(() => typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 767px)').matches);
   const [queue, setQueue] = useState<CheckPrintQueueResponse | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -79,6 +82,15 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   const queueRef = useRef<CheckPrintQueueResponse | null>(null);
   const generationRequestRef = useRef(false);
   const pendingGenerationKeyRef = useRef<{ signature: string; key: string } | null>(null);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 767px)');
+    const update = () => setMobileCheckList(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   const generationActive = generation?.status === 'queued' || generation?.status === 'processing';
   const activeGenerationId = generationActive ? generation?.id ?? null : null;
@@ -522,8 +534,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   return (
     <>
       <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()} dismissOnEscape={!savingNumbers}>
-        <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
-          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-5 text-white">
+        <DialogContent className="dialog-wide flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden p-0 sm:h-[94vh] sm:max-h-[94vh]">
+          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-4 py-4 text-white sm:px-6 sm:py-5">
             <div className="flex items-start justify-between gap-5 pr-8">
               <div>
                 <DialogTitle className="text-xl text-white">Print checks</DialogTitle>
@@ -535,8 +547,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
 
           {initialLoading ? <CheckPrintWorkspaceSkeleton /> : (
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="grid lg:grid-cols-[minmax(0,1fr)_390px]">
-                <section className="border-r border-slate-200 p-5 lg:p-6">
+              <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_390px]">
+                <section className="min-w-0 border-r border-slate-200 p-4 sm:p-5 lg:p-6">
                   <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
                     <div className="flex items-start gap-3">
                       <FileLock2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
@@ -569,11 +581,33 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                   {hasUnsavedNumbers && (
                     <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div><p className="text-sm font-semibold text-amber-950">{numberChanges.length} unsaved check-number change{numberChanges.length === 1 ? '' : 's'}</p><p className="mt-0.5 text-xs text-amber-800">Save these changes before generating the snapshot.</p></div>
-                      <div className="flex gap-2"><Button size="sm" variant="outline" onClick={discardNumberChanges} disabled={savingNumbers}>Discard</Button><Button size="sm" loading={savingNumbers} loadingLabel="Saving…" onClick={() => void saveNumberChanges()} disabled={hasNumberErrors}>Save check numbers</Button></div>
+                      <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={discardNumberChanges} disabled={savingNumbers}>Discard</Button><Button size="sm" loading={savingNumbers} loadingLabel="Saving…" onClick={() => void saveNumberChanges()} disabled={hasNumberErrors}>Save check numbers</Button></div>
                     </div>
                   )}
 
-                  <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200">
+                    {mobileCheckList && <div className="divide-y divide-slate-100" aria-label="Checks available for this package">
+                      {visibleItems.map((item) => (
+                        <div key={item.key} className={`min-w-0 space-y-3 p-4 ${selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}`}>
+                          <div className="flex min-w-0 items-start gap-3">
+                            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={selected.has(item.key)} disabled={!item.eligible || editingLocked} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                                <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{item.payee}</p>
+                                <p className="shrink-0 font-mono text-sm font-semibold text-slate-950">{formatCurrency(item.amount)}</p>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">{item.kind_label}</p>
+                            </div>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-end justify-between gap-3 pl-8">
+                            <div><p className="mb-1 text-xs font-medium text-slate-600">Check number</p><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></div>
+                            {statusBadge(item)}
+                          </div>
+                          {item.disabled_reason && <p className="pl-8 text-xs text-red-600">{item.disabled_reason}</p>}
+                        </div>
+                      ))}
+                    </div>}
+                    {!mobileCheckList && <div className="min-w-0 overflow-x-auto">
                     <table className="w-full min-w-[680px] text-left text-sm">
                       <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="w-10 p-3"/><th className="p-3">Check</th><th className="p-3">Payee</th><th className="p-3">Type</th><th className="p-3">Status</th><th className="p-3 text-right">Amount</th></tr></thead>
                       <tbody className="divide-y divide-slate-100">
@@ -587,11 +621,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                         ))}
                       </tbody>
                     </table>
+                    </div>}
                     {visibleItems.length === 0 && <div className="p-10 text-center text-sm text-slate-500">{queue?.items.length ? 'No checks match these filters.' : 'No checks are available for this pay period.'}{queue?.items.length && (statusFilter !== 'all' || sourceFilter !== 'all') ? <button type="button" className="mt-2 block w-full font-semibold text-blue-700" onClick={() => { setStatusFilter('all'); setSourceFilter('all'); }}>Show all checks</button> : null}</div>}
                   </div>
                 </section>
 
-                <aside className="space-y-4 bg-slate-50 p-5 lg:sticky lg:top-0 lg:self-start">
+                <aside className="min-w-0 space-y-4 bg-slate-50 p-4 sm:p-5 lg:sticky lg:top-0 lg:self-start">
                   {generation && <OperationStatusPanel generation={generation} showLongRunningHint={showLongRunningHint} onRetry={() => void generate()} retryDisabled={hasUnsavedNumbers || hasNumberErrors || savingNumbers} />}
 
                   <section className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -645,7 +680,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
             </div>
           )}
 
-          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
+          <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
             {generationActive && <p className="mr-auto self-center text-xs text-slate-500">Safe to close — generation will continue in the background.</p>}
             <Button variant="outline" onClick={requestClose}>Close</Button>
             {!run && !generationActive && <Button loading={startingGeneration} loadingLabel="Starting generation…" onClick={() => void generate()} disabled={selectedItems.length === 0 || !queue?.meta.printer_profile || savingNumbers || hasUnsavedNumbers}>{replacementMode ? 'Generate replacement package' : 'Generate and save package'}</Button>}

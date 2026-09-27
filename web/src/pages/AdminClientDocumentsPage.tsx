@@ -300,12 +300,13 @@ export function AdminClientDocumentsPage() {
                 {selectedFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedFiles.map((file) => (
-                      <span key={fileKey(file)} className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700">
-                        {file.name}
+                      <span key={fileKey(file)} className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-xl bg-neutral-100 py-1 pl-3 pr-1 text-xs text-neutral-700">
+                        <span className="min-w-0 break-all">{file.name}</span>
                         <button
                           type="button"
                           onClick={() => setUploadForm((current) => ({ ...current, files: current.files.filter((candidate) => candidate !== file) }))}
                           aria-label={`Remove ${file.name}`}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -360,8 +361,8 @@ export function AdminClientDocumentsPage() {
                           <FileText className="h-5 w-5" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-neutral-950">{document.title}</p>
-                          <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
+                          <p className="break-words font-semibold text-neutral-950">{document.title}</p>
+                          <p className="mt-1 break-all text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
                             <MobileField label="Employee" value={document.employee_name || 'General'} />

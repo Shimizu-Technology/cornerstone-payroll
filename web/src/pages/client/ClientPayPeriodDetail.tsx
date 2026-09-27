@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import type { PayrollItem } from '@/types';
@@ -118,7 +119,7 @@ export function ClientPayPeriodDetail(): ReactElement {
         actions={<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button>}
       />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {resolvedError && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{resolvedError}</div>}
 
         {loading || resolvedRouteKey !== routeKey ? (
@@ -131,6 +132,58 @@ export function ClientPayPeriodDetail(): ReactElement {
               <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
               <SummaryCard label="Status" value={resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
             </div>
+
+
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <CardTitle>Employee Payroll</CardTitle>
+                    <p className="mt-1 text-sm text-gray-500">Hours, earnings, taxes, deductions, and net pay for this exact payroll revision.</p>
+                  </div>
+                  <div className="flex flex-col gap-3 md:flex-row">
+                    <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="w-full md:w-44">
+                      <option value="">All Types</option>
+                      <option value="salary">Salary</option>
+                      <option value="hourly">Hourly</option>
+                      <option value="contractor">Contractor</option>
+                    </Select>
+                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="w-full md:w-72" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="space-y-3 p-3 lg:hidden" aria-label="Employee payroll details">
+                  {visibleItems.map((item) => (
+                    <PayrollItemMobileCard key={item.id} item={item} />
+                  ))}
+                  {visibleItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
+                </div>
+                <div className="hidden lg:block">
+                <Table stickyHeader containerClassName="max-h-[34rem]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead stickyLeft>Employee</TableHead>
+                      <TableHead>Hours</TableHead>
+                      <TableHead>Rate</TableHead>
+                      <TableHead>Gross</TableHead>
+                      <TableHead>Taxes</TableHead>
+                      <TableHead>Retirement</TableHead>
+                      <TableHead>Loans</TableHead>
+                      <TableHead>Insurance</TableHead>
+                      <TableHead>Total Ded.</TableHead>
+                      <TableHead>Net Pay</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody striped>
+                    {visibleItems.map((item) => (
+                      <PayrollItemRow key={item.id} item={item} />
+                    ))}
+                  </TableBody>
+                </Table>
+                </div>
+              </CardContent>
+            </Card>
 
             {resolvedPayPeriod.client_payroll_approval_required && resolvedPayPeriod.payroll_review && (
               <Card className={resolvedPayPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-primary-200 bg-primary-50/70'}>
@@ -153,7 +206,7 @@ export function ClientPayPeriodDetail(): ReactElement {
                           <Textarea value={approvalNotes} onChange={(event) => setApprovalNotes(event.target.value)} placeholder="Optional: add a note for Cornerstone about this payroll." maxLength={2000} />
                           <label className="flex items-start gap-3 rounded-xl border border-primary-200 bg-white p-4 text-sm leading-6 text-neutral-800">
                             <input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300" checked={approvalConfirmed} onChange={(event) => setApprovalConfirmed(event.target.checked)} />
-                            <span>I reviewed the employee payroll details below and confirm: “{resolvedPayPeriod.payroll_review.acknowledgement}”</span>
+                            <span>I reviewed the employee payroll details above and confirm: “{resolvedPayPeriod.payroll_review.acknowledgement}”</span>
                           </label>
                           <div>
                             <Button onClick={() => void approveReview()} disabled={!approvalConfirmed || approving}>
@@ -167,49 +220,6 @@ export function ClientPayPeriodDetail(): ReactElement {
                 </CardContent>
               </Card>
             )}
-
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                  <div>
-                    <CardTitle>Employee Payroll</CardTitle>
-                    <p className="mt-1 text-sm text-gray-500">Hours, earnings, taxes, deductions, and net pay for this exact payroll revision.</p>
-                  </div>
-                  <div className="flex flex-col gap-3 md:flex-row">
-                    <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="w-44">
-                      <option value="">All Types</option>
-                      <option value="salary">Salary</option>
-                      <option value="hourly">Hourly</option>
-                      <option value="contractor">Contractor</option>
-                    </Select>
-                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="w-full md:w-72" />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table stickyHeader containerClassName="max-h-[34rem]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead stickyLeft>Employee</TableHead>
-                      <TableHead>Hours</TableHead>
-                      <TableHead>Rate</TableHead>
-                      <TableHead>Gross</TableHead>
-                      <TableHead>Taxes</TableHead>
-                      <TableHead>Retirement</TableHead>
-                      <TableHead>Loans</TableHead>
-                      <TableHead>Insurance</TableHead>
-                      <TableHead>Total Ded.</TableHead>
-                      <TableHead>Net Pay</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody striped>
-                    {visibleItems.map((item) => (
-                      <PayrollItemRow key={item.id} item={item} />
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
           </>
         ) : null}
       </div>
@@ -237,6 +247,45 @@ interface PayrollItemRowProps {
   item: PayrollItem;
 }
 
+function numericAmount(value: number | string | null | undefined): number {
+  const parsed = Number(value);
+  return value == null || !Number.isFinite(parsed) ? 0 : parsed;
+}
+
+function itemTaxes(item: PayrollItem): number {
+  return numericAmount(item.withholding_tax) + numericAmount(item.social_security_tax)
+    + numericAmount(item.medicare_tax) + numericAmount(item.additional_medicare_tax)
+    + numericAmount(item.state_withheld);
+}
+
+function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
+  const hours = item.total_hours ?? item.hours_worked;
+  return (
+    <MobileRecordCard>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-semibold text-neutral-950">{item.employee_name}</p>
+          <p className="mt-1 text-xs uppercase tracking-wide text-neutral-500">{item.employment_type}</p>
+        </div>
+        <div className="text-left sm:text-right">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Net pay</p>
+          <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(numericAmount(item.net_pay))}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MobileField label="Hours" value={hours ?? '—'} />
+        <MobileField label="Rate" value={item.pay_rate == null ? '—' : `${formatCurrency(numericAmount(item.pay_rate))}${item.employment_type === 'hourly' ? '/hr' : ''}`} />
+        <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
+        <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
+        <MobileField label="Retirement" value={formatCurrency(numericAmount(item.retirement_payment) + numericAmount(item.roth_retirement_payment))} />
+        <MobileField label="Loans" value={formatCurrency(numericAmount(item.loan_payment) || numericAmount(item.loan_deduction))} />
+        <MobileField label="Insurance" value={formatCurrency(numericAmount(item.insurance_payment))} />
+        <MobileField label="Total deductions" value={formatCurrency(numericAmount(item.total_deductions))} />
+      </div>
+    </MobileRecordCard>
+  );
+}
+
 function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
   return (
     <TableRow>
@@ -249,7 +298,7 @@ function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
       <TableCell>{item.total_hours ?? item.hours_worked ?? '—'}</TableCell>
       <TableCell>{formatCurrency(item.pay_rate)}{item.employment_type === 'hourly' ? '/hr' : ''}</TableCell>
       <TableCell>{formatCurrency(item.gross_pay ?? 0)}</TableCell>
-      <TableCell>{formatCurrency((Number(item.withholding_tax) || 0) + (Number(item.social_security_tax) || 0) + (Number(item.medicare_tax) || 0) + (Number(item.additional_medicare_tax) || 0) + (Number(item.state_withheld) || 0))}</TableCell>
+      <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
       <TableCell>{formatCurrency((Number(item.retirement_payment) || 0) + (Number(item.roth_retirement_payment) || 0))}</TableCell>
       <TableCell>{formatCurrency(Number(item.loan_payment) || Number(item.loan_deduction) || 0)}</TableCell>
       <TableCell>{formatCurrency(item.insurance_payment ?? 0)}</TableCell>

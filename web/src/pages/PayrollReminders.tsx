@@ -180,12 +180,12 @@ export default function PayrollReminders() {
         {/* Enable/Disable card */}
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${enabled ? 'bg-blue-100' : 'bg-neutral-100'}`}>
                   <Bell className={`h-5 w-5 ${enabled ? 'text-blue-600' : 'text-neutral-400'}`} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-base font-semibold text-neutral-900">Email Reminders</h3>
                   <p className="text-sm text-neutral-500">
                     {enabled ? 'Active — reminders will be sent automatically' : 'Disabled — no reminders will be sent'}
@@ -197,12 +197,12 @@ export default function PayrollReminders() {
                 role="switch"
                 aria-checked={enabled}
                 onClick={() => setEnabled(!enabled)}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                  enabled ? 'bg-blue-600' : 'bg-neutral-200'
-                }`}
+                aria-label="Email reminders"
+                className="relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
+                <span aria-hidden="true" className={`absolute inset-x-0 h-6 rounded-full transition-colors ${enabled ? 'bg-blue-600' : 'bg-neutral-200'}`} />
                 <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  className={`pointer-events-none relative ml-0.5 inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
                     enabled ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
@@ -228,13 +228,14 @@ export default function PayrollReminders() {
                 {recipients.map((email) => (
                   <span
                     key={email}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
+                    className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
                   >
-                    {email}
+                    <span className="min-w-0 break-all">{email}</span>
                     <button
                       type="button"
                       onClick={() => removeRecipient(email)}
-                      className="rounded-full p-0.5 hover:bg-blue-200/60"
+                      aria-label={`Remove ${email}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full hover:bg-blue-200/60"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -244,14 +245,14 @@ export default function PayrollReminders() {
             )}
 
             {/* Add email input */}
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 type="email"
                 placeholder="name@company.com"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="flex-1"
+                className="min-w-0 flex-1"
               />
               <Button
                 type="button"
@@ -377,7 +378,21 @@ export default function PayrollReminders() {
                   No reminders have been sent yet.
                 </p>
               ) : (
-                <div className="overflow-x-auto">
+                <>
+                <div className="space-y-3 sm:hidden">
+                  {logs.map((log) => (
+                    <div key={log.id} className="rounded-xl border border-neutral-200 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <Badge variant={log.reminder_type === 'overdue' ? 'danger' : log.reminder_type === 'create_payroll' ? 'info' : 'warning'}>{log.reminder_type === 'overdue' ? 'Overdue' : log.reminder_type === 'create_payroll' ? 'Create Payroll' : 'Upcoming'}</Badge>
+                        <span className="text-right text-xs text-neutral-500">{new Date(log.sent_at).toLocaleString()}</span>
+                      </div>
+                      <p className="mt-3 text-sm text-neutral-700">Pay date: {log.pay_period ? new Date(log.pay_period.pay_date).toLocaleDateString() : log.expected_pay_date ? new Date(log.expected_pay_date).toLocaleDateString() : '—'}</p>
+                      <p className="mt-1 text-sm text-neutral-700">Period: {log.pay_period ? `${new Date(log.pay_period.start_date).toLocaleDateString()} – ${new Date(log.pay_period.end_date).toLocaleDateString()}` : 'Not yet created'}</p>
+                      <p className="mt-3 break-all text-xs text-neutral-500">Sent to {log.recipients_snapshot.join(', ')}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -433,6 +448,7 @@ export default function PayrollReminders() {
                     </TableBody>
                   </Table>
                 </div>
+                </>
               )}
             </CardContent>
           </Card>

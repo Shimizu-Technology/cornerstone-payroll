@@ -1217,9 +1217,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(safeDialog.getByText(/Review 2 suggested name matches/)).toBeVisible();
     await expect(safeDialog.getByText(/Petrius, Rosie.*Rosie Petirus/)).toBeVisible();
     await expect(safeDialog.getByText(/Tips were already paid daily and will offset employee checks/)).toBeVisible();
-    await expect(safeDialog.getByText('$19.25')).toBeVisible();
-    await expect(safeDialog.getByText('$123.50', { exact: true })).toBeVisible();
-    await expect(safeDialog.getByText('Matched to Rosie recurring repayment')).toBeVisible();
+    await expect(safeDialog.getByText('$19.25', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(safeDialog.getByText('$123.50', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(safeDialog.getByText('Matched to Rosie recurring repayment').filter({ visible: true })).toBeVisible();
     await expect(safeDialog.getByText('$8,888.88')).toHaveCount(0);
     let applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
     await expect(applySafeImport).toBeDisabled();
@@ -1879,7 +1879,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       window.history.pushState({}, '', path);
       window.dispatchEvent(new PopStateEvent('popstate'));
     }, `/companies/${fixture.company_id}/pay-runs/${currentPayPeriodId}/overview`);
-    await expect(page.getByText('Current Route Employee', { exact: true })).toBeVisible();
+    await expect(page.getByText('Current Route Employee', { exact: true }).filter({ visible: true })).toBeVisible();
 
     const delayedResponseDelivered = page.waitForResponse((response): boolean => (
       new URL(response.url()).pathname === `/api/v1/client/pay_periods/${delayedPayPeriodId}`
@@ -1887,7 +1887,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     releaseDelayedResponse?.();
     await delayedResponseDelivered;
     await waitForUiCommit(page);
-    await expect(page.getByText('Current Route Employee', { exact: true })).toBeVisible();
+    await expect(page.getByText('Current Route Employee', { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(page.getByText('Delayed Route Employee', { exact: true })).toHaveCount(0);
 
     await context.close();
