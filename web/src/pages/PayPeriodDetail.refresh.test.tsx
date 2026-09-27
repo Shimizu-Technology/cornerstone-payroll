@@ -136,6 +136,7 @@ it('lets a phone user edit payroll hours and bonus in a draft run', async () => 
   );
 
   const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(apiMocks.employeesList).toHaveBeenCalledWith(expect.objectContaining({ eligible_pay_period_id: 12, page: 1 }));
   const regularHours = within(card).getByLabelText('Regular hours') as HTMLInputElement;
   const bonus = within(card).getByLabelText('Bonus this payroll for Ana Cruz') as HTMLInputElement;
   fireEvent.change(regularHours, { target: { value: '36' } });
@@ -143,6 +144,38 @@ it('lets a phone user edit payroll hours and bonus in a draft run', async () => 
 
   expect(regularHours.value).toBe('36');
   expect(bonus.value).toBe('75.00');
+});
+
+it('keeps an unpaid active employee out of a calculated run while allowing pay entry', async () => {
+  vi.clearAllMocks();
+  const employee = {
+    id: 29,
+    company_id: 7,
+    first_name: 'Noel',
+    last_name: 'Cruz',
+    employment_type: 'hourly',
+    pay_rate: 15,
+    pay_frequency: 'biweekly',
+    status: 'active',
+  } as Employee;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+
+  render(
+    <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <Routes>
+        <Route path="/companies/:companyId/pay-runs/:id/:tab" element={
+          <PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'calculated' }} />
+        } />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  expect(await screen.findByText('No pay in this period for 1 eligible employee')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Enter pay' }));
+  expect(await screen.findByRole('region', { name: 'Payroll entry for Noel Cruz' })).toBeTruthy();
 });
 
 it('edits the selected active wage rate after an inactive rate', async () => {

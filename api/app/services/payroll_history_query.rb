@@ -91,6 +91,10 @@ class PayrollHistoryQuery
         (pp.status = 'committed') AS source_locked
       FROM pay_periods pp
       LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND COALESCE(pi.voided, FALSE) = FALSE
+        AND NOT EXISTS (
+          SELECT 1 FROM payroll_item_legacy_dispositions disposition
+          WHERE disposition.payroll_item_id = pi.id
+        )
       LEFT JOIN users committed_user ON committed_user.id = pp.committed_by_id
       WHERE pp.company_id = #{company}
         #{client_native_visibility_sql}

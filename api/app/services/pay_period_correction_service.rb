@@ -246,7 +246,7 @@ class PayPeriodCorrectionService
     # check was voided. Check voiding is an issuance/audit concern, not a payroll
     # inclusion flag, and operators need the employee row present so they can
     # recalculate or zero it out explicitly in the correction run.
-    source.payroll_items.find_each(batch_size: 500) do |source_item|
+    source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
       target.payroll_items.create!(
         company_id:               target.company_id,
         employee_id:              source_item.employee_id,

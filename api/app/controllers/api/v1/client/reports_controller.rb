@@ -40,9 +40,9 @@ module Api
             period_description: pp.period_description,
             pay_date: pp.pay_date,
             status: pp.status,
-            employee_count: pp.payroll_items.not_voided.count,
-            total_gross: pp.payroll_items.not_voided.sum(:gross_pay),
-            total_net: pp.payroll_items.not_voided.sum(:net_pay)
+            employee_count: pp.payroll_items.not_voided.reportable.count,
+            total_gross: pp.payroll_items.not_voided.reportable.sum(:gross_pay),
+            total_net: pp.payroll_items.not_voided.reportable.sum(:net_pay)
           }
         end
 
@@ -57,8 +57,8 @@ module Api
               id: pp.id,
               period_description: pp.period_description,
               pay_date: pp.pay_date,
-              employee_count: pp.payroll_items.reject(&:voided?).size,
-              total_net: pp.payroll_items.reject(&:voided?).sum(&:net_pay)
+              employee_count: pp.payroll_items.reportable.reject(&:voided?).size,
+              total_net: pp.payroll_items.reportable.reject(&:voided?).sum(&:net_pay)
             }
           end
         end
@@ -91,7 +91,7 @@ module Api
         end
 
         def payroll_register_report_data(pay_period)
-          items = pay_period.payroll_items.reject(&:voided?)
+          items = pay_period.payroll_items.reportable.reject(&:voided?)
           w2_items = items.reject { |item| item.employment_type == "contractor" }
           contractor_items = items.select { |item| item.employment_type == "contractor" }
 

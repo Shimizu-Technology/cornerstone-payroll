@@ -54,7 +54,7 @@ module Api
         end
 
         def pay_period_summary(pay_period, include_items: false)
-          items = pay_period.payroll_items.reject(&:voided?)
+          items = pay_period.payroll_items.reportable.reject(&:voided?)
           json = {
             id: pay_period.id,
             company_id: pay_period.company_id,

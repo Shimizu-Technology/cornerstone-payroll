@@ -99,7 +99,7 @@ module TrainingReplay
 
     def copy_baseline_period!(source, maps)
       target = create_period!(source, maps, role: "baseline", status: "approved")
-      source.payroll_items.not_voided.order(:id).each do |source_item|
+      source.payroll_items.not_voided.reportable.order(:id).each do |source_item|
         target_item = copy_record!(
           source_item,
           company: company,
@@ -114,7 +114,7 @@ module TrainingReplay
 
     def copy_practice_period!(source, maps)
       target = create_period!(source, maps, role: "practice", status: "draft")
-      source.payroll_items.not_voided.order(:id).each do |source_item|
+      source.payroll_items.not_voided.reportable.order(:id).each do |source_item|
         attributes = source_item.attributes.slice(*PRACTICE_INPUT_COLUMNS)
         target_item = PayrollItem.create!(attributes.merge(
           company: company,
@@ -202,8 +202,8 @@ module TrainingReplay
         employees: [ source_company.employees.count, company.employees.count ],
         baseline_periods: [ baseline_sources.count, company.pay_periods.where(test_workspace_role: "baseline").count ],
         practice_periods: [ practice_sources.count, company.pay_periods.where(test_workspace_role: "practice").count ],
-        baseline_items: [ baseline_sources.sum { |period| period.payroll_items.not_voided.count }, company.pay_periods.where(test_workspace_role: "baseline").joins(:payroll_items).count ],
-        practice_items: [ practice_sources.sum { |period| period.payroll_items.not_voided.count }, company.pay_periods.where(test_workspace_role: "practice").joins(:payroll_items).count ],
+        baseline_items: [ baseline_sources.sum { |period| period.payroll_items.not_voided.reportable.count }, company.pay_periods.where(test_workspace_role: "baseline").joins(:payroll_items).count ],
+        practice_items: [ practice_sources.sum { |period| period.payroll_items.not_voided.reportable.count }, company.pay_periods.where(test_workspace_role: "practice").joins(:payroll_items).count ],
         benchmark_snapshots: [ practice_sources.count, company.training_replay_benchmarks.count ]
       }
       mismatches = checks.select { |_key, values| values.first != values.last }

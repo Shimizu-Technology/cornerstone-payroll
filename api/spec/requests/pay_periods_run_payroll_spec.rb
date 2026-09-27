@@ -24,6 +24,9 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do
     before do
       allow_any_instance_of(PayrollItem).to receive(:calculate!) do |item|
+        additions = Array(item.payroll_adjustments).sum { |entry| entry["amount"].to_d }
+        item.gross_pay = item.hours_worked.to_d * item.pay_rate.to_d + additions
+        item.net_pay = item.gross_pay
         item.save!
       end
     end
@@ -262,6 +265,7 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       employee.update!(status: "terminated", termination_date: Date.new(2024, 1, 5))
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll",
+           params: { hours: { employee.id.to_s => { regular: 8 } } },
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:ok)

@@ -100,7 +100,7 @@ class W2GuAggregator
     PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id)
-      .not_voided
+      .not_voided.reportable
       .where.not(employment_type: "contractor")
       .where(pay_periods: {
         id: PayPeriod.reportable_committed

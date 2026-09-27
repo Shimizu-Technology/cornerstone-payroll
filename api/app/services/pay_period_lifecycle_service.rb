@@ -23,6 +23,7 @@ class PayPeriodLifecycleService
       end
 
       validate_go_live_gate!
+      validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_client_approval!
@@ -70,6 +71,7 @@ class PayPeriodLifecycleService
       end
 
       validate_go_live_gate!
+      validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_client_approval!
@@ -111,6 +113,19 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_payroll_participation!
+    items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    raise EmptyPayPeriodError, "Cannot finalize a pay period with no payroll items" if items.empty?
+
+    invalid = items.reject { |item| PayrollItemActivity.classify(item) == :active }
+    return if invalid.empty?
+
+    names = invalid.map(&:employee_full_name).sort.to_sentence
+    verb = invalid.one? ? "has" : "have"
+    raise InvalidTransitionError,
+          "#{names} #{verb} no confirmed payroll activity. Remove these rows or enter their pay before approval."
+  end
 
   def validate_payment_delivery!
     items = pay_period.payroll_items.includes(:employee).to_a
