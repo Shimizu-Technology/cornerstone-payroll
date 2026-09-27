@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -1053,7 +1053,20 @@ function W2GuPanel() {
             <CardHeader>
               <CardTitle className="text-base">Employee Detail</CardTitle>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
+            <CardContent className="space-y-3 sm:hidden">
+              {report.employees.map((emp: W2GuEmployeeRow) => (
+                <div key={emp.employee_id} className="rounded-xl border border-neutral-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{emp.employee_name}</p><p className="mt-1 font-mono text-xs text-neutral-500">{emp.employee_ssn_last4 ? `***-**-${emp.employee_ssn_last4}` : 'SSN missing'}</p></div>
+                    {emp.has_missing_ssn && <Badge variant="danger">No SSN</Badge>}
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm"><p className="text-neutral-500">Box 1 wages<span className="block font-semibold text-neutral-950">{fmt(emp.box1_wages_tips_other_comp)}</span></p><p className="text-neutral-500">Box 2 withholding<span className="block font-semibold text-neutral-950">{fmt(emp.box2_federal_income_tax_withheld)}</span></p></div>
+                  <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">All W-2GU boxes</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Box 3 SS wages</dt><dd>{fmt(emp.box3_social_security_wages)}</dd></div><div><dt>Box 4 SS withholding</dt><dd>{fmt(emp.box4_social_security_tax_withheld)}</dd></div><div><dt>Box 5 Medicare wages</dt><dd>{fmt(emp.box5_medicare_wages_tips)}</dd></div><div><dt>Box 6 Medicare</dt><dd>{fmt(emp.box6_medicare_tax_withheld)}</dd></div><div><dt>Box 7 SS tips</dt><dd>{fmt(emp.box7_social_security_tips)}{emp.box7_limited_by_wage_base ? ' (capped)' : ''}</dd></div></dl></details>
+                </div>
+              ))}
+              {report.employees.length === 0 && <p className="text-sm text-neutral-500">No committed payroll data found for {report.meta.year}.</p>}
+            </CardContent>
+            <CardContent className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500">
@@ -1308,7 +1321,17 @@ function EmployeePayHistoryPanel() {
               <CardTitle className="text-base">Pay Period History</CardTitle>
               <CardDescription>{report.history.length} period{report.history.length !== 1 ? 's' : ''}</CardDescription>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
+            <CardContent className="space-y-3 sm:hidden">
+              {report.history.map((history) => (
+                <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-500">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Check number</dt><dd>{history.check_number ?? '—'}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
+                  <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div><div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div><div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div><div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div></dl></details>
+                </div>
+              ))}
+              {report.history.length === 0 && <p className="text-sm text-neutral-500">No pay history found.</p>}
+            </CardContent>
+            <CardContent className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500">
@@ -2029,10 +2052,28 @@ function AnnualPayrollSummaryPanel() {
             <CardHeader>
               <CardTitle className="text-base">Annual breakdown</CardTitle>
               <CardDescription>
-                Each row shows the combined ledger for that calendar year and how much came from each source. Scroll horizontally to review every metric.
+                Each year combines its saved payroll sources and shows how they contribute to the totals.
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="space-y-3 sm:hidden">
+                {report.years.map((row) => (
+                  <div key={row.year} className="rounded-xl border border-neutral-200 p-4">
+                    <p className="font-display text-lg font-extrabold text-neutral-950">{row.year}</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-500">{sourceLabel(row)}</p>
+                    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(row.gross_pay)}</dd></div>
+                      <div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(row.net_pay)}</dd></div>
+                      <div><dt className="text-neutral-500">Employees</dt><dd className="font-semibold">{row.employee_count}</dd></div>
+                      <div><dt className="text-neutral-500">Total cost</dt><dd className="font-semibold">{fmt(row.total_payroll_cost)}</dd></div>
+                    </dl>
+                    {row.excluded_unlinked_paycheck_count > 0 && <p className="mt-3 text-xs font-semibold text-amber-700">{row.excluded_unlinked_paycheck_count} unlinked imported paycheck{row.excluded_unlinked_paycheck_count === 1 ? '' : 's'} excluded ({fmt(row.excluded_unlinked_gross_pay)} gross / {fmt(row.excluded_unlinked_net_pay)} net).</p>}
+                    <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">All annual totals</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Hours</dt><dd>{row.hours.toLocaleString('en-US', { maximumFractionDigits: 4 })}</dd></div><div><dt>Non-taxable pay</dt><dd>{fmt(row.non_taxable_pay)}</dd></div><div><dt>Adjusted gross</dt><dd>{fmt(row.adjusted_gross)}</dd></div><div><dt>Pre-tax deductions</dt><dd>{fmt(row.pretax_deductions)}</dd></div><div><dt>Employee taxes</dt><dd>{fmt(row.employee_taxes)}</dd></div><div><dt>After-tax deductions</dt><dd>{fmt(row.after_tax_deductions)}</dd></div><div><dt>Employer taxes</dt><dd>{fmt(row.employer_taxes)}</dd></div><div><dt>Employer contributions</dt><dd>{fmt(row.employer_contributions)}</dd></div></dl></details>
+                  </div>
+                ))}
+                {report.years.length === 0 && <p className="text-sm text-neutral-500">No committed or locked payroll history is available yet.</p>}
+              </div>
+              <div className="hidden sm:block">
               <Table className="min-w-[1520px]">
                 <TableHeader>
                   <TableRow>
@@ -2082,6 +2123,7 @@ function AnnualPayrollSummaryPanel() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </>
@@ -2758,6 +2800,16 @@ function QuarterlyCompliancePacketPanel() {
               <CardDescription>Per-employee totals for SWICA, W-1, and Federal Form 941 tie-out review.</CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="space-y-3 sm:hidden">
+                {report.swica.employees.map((employee) => (
+                  <div key={employee.employee_id} className="rounded-xl border border-neutral-200 p-4">
+                    <p className="break-words font-semibold text-neutral-950">{employee.name}</p>
+                    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross</dt><dd className="font-semibold">{fmt(employee.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net</dt><dd className="font-semibold">{fmt(employee.net_pay)}</dd></div><div><dt className="text-neutral-500">Guam W/H</dt><dd>{fmt(employee.guam_withholding)}</dd></div><div><dt className="text-neutral-500">941 liability</dt><dd>{fmt(employee.federal_941_liability)}</dd></div></dl>
+                    <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">Tax and deduction detail</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Deductions</dt><dd>{fmt(employee.deductions)}</dd></div><div><dt>SS total</dt><dd>{fmt(employee.social_security_tax + employee.employer_social_security_tax)}</dd></div><div><dt>Medicare total</dt><dd>{fmt(employee.medicare_tax + employee.employer_medicare_tax)}</dd></div></dl></details>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden sm:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -2786,6 +2838,7 @@ function QuarterlyCompliancePacketPanel() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </>
@@ -2820,6 +2873,7 @@ function QuarterlyOfficialFormModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewFilename, setPreviewFilename] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState<'fields' | 'preview'>('fields');
 
   useEffect(() => {
     let active = true;
@@ -2885,6 +2939,7 @@ function QuarterlyOfficialFormModal({
       setPreviewUrl(url);
       setPreviewBlob(file.blob);
       setPreviewFilename(file.filename || `${formType}_${year}_q${quarter}.pdf`);
+      setMobileView('preview');
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -2930,9 +2985,13 @@ function QuarterlyOfficialFormModal({
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
 
+          <div className="grid grid-cols-2 gap-2 border-b bg-white px-4 py-3 lg:hidden">
+            <Button variant={mobileView === 'fields' ? 'primary' : 'outline'} onClick={() => setMobileView('fields')}>Form fields</Button>
+            <Button variant={mobileView === 'preview' ? 'primary' : 'outline'} onClick={() => previewUrl ? setMobileView('preview') : void previewPdf()} disabled={working || !fields}>{previewUrl ? 'PDF preview' : 'Generate preview'}</Button>
+          </div>
+          {error ? <div role="alert" className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 lg:mx-5">{error}</div> : null}
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
-            <div className="overflow-y-auto bg-gray-50 p-5">
-              {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+            <div className={`${mobileView === 'fields' ? 'block' : 'hidden'} min-h-0 overflow-y-auto bg-gray-50 p-4 lg:block lg:p-5`}>
               {loading || !fields ? (
                 <div className="rounded-md border bg-white p-4 text-sm text-gray-500 sm:p-6">Loading form values...</div>
               ) : (
@@ -3009,7 +3068,7 @@ function QuarterlyOfficialFormModal({
               )}
             </div>
 
-            <div className="flex min-h-0 flex-col border-l">
+            <div className={`${mobileView === 'preview' ? 'flex' : 'hidden'} min-h-0 flex-col border-l lg:flex`}>
               <div className="flex flex-wrap items-center justify-end gap-3 border-b bg-white px-4 py-3">
                 <Button variant="outline" onClick={previewPdf} disabled={working || !fields}>Preview PDF</Button>
                 <Button variant="outline" onClick={downloadPdf} disabled={working || !fields}>Download PDF</Button>
@@ -3592,7 +3651,17 @@ function Form1099NecPanel() {
             {report.all_contractors.length === 0 ? (
               <p className="text-sm text-gray-500">No contractor payments found for {report.meta.year}.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              <div className="space-y-3 sm:hidden">
+                {report.all_contractors.map((contractor) => (
+                  <div key={contractor.employee_id} className={`rounded-xl border p-4 ${contractor.compliance_issues.length > 0 ? 'border-red-200 bg-red-50/50' : 'border-neutral-200 bg-white'}`}>
+                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{contractor.name}</p>{contractor.business_name && <p className="mt-1 text-xs text-neutral-500">{contractor.business_name}</p>}</div><Badge variant={contractor.requires_filing ? 'success' : 'default'}>{contractor.requires_filing ? 'Reportable' : 'Below threshold'}</Badge></div>
+                    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Box 1 compensation</dt><dd className="font-semibold">{fmt(contractor.total_compensation)}</dd></div><div><dt className="text-neutral-500">Box 4 withheld</dt><dd className="font-semibold">{fmt(contractor.federal_withheld)}</dd></div><div><dt className="text-neutral-500">TIN</dt><dd>{contractor.tin_type}: ***{contractor.tin_last_four || '????'}</dd></div><div><dt className="text-neutral-500">Payments</dt><dd>{contractor.payment_count}</dd></div><div><dt className="text-neutral-500">W-9</dt><dd>{contractor.w9_on_file ? 'On file' : 'Missing'}</dd></div></dl>
+                    {contractor.compliance_issues.length > 0 && <ul className="mt-3 space-y-1 text-xs font-medium text-red-700">{contractor.compliance_issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -3650,6 +3719,7 @@ function Form1099NecPanel() {
                   </TableBody>
                 </Table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -3868,7 +3938,7 @@ function FavoriteButton({ active, onClick }: { active: boolean; onClick: () => v
         event.stopPropagation();
         onClick();
       }}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+      className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors sm:h-8 sm:w-8 ${
         active
           ? 'border-accent-200 bg-accent-50 text-accent-700'
           : 'border-neutral-200 bg-white text-neutral-400 hover:border-accent-200 hover:text-accent-700'
@@ -3913,7 +3983,7 @@ function ReportLibraryRow({
               <FavoriteButton active={favorite} onClick={onToggleFavorite} />
             </div>
             <ReportMetaChips report={report} />
-            <div className="mt-4 flex items-center justify-between gap-3 border-t border-neutral-100 pt-4">
+            <div className="mt-4 flex flex-col items-stretch gap-3 border-t border-neutral-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{reportCategories.find((category) => category.id === report.category)?.label}</span>
               <Button size="sm" variant={active ? 'primary' : 'outline'} onClick={(event) => { event.stopPropagation(); onOpen(); }}>
                 {active ? 'Selected' : report.cta}
@@ -3948,6 +4018,7 @@ function ReportsContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const reportParam = searchParams.get('report');
   const activeReport = reports.some((report) => report.id === reportParam) ? (reportParam as ReportId) : null;
+  const activeReportRef = useRef<HTMLElement>(null);
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<ReportCategory>('all');
   const storageScope = user
@@ -3968,7 +4039,19 @@ function ReportsContent() {
 
   const activeReportDefinition = reports.find((report) => report.id === activeReport) || null;
 
+  const focusActiveReport = useCallback(() => {
+    const section = activeReportRef.current;
+    if (!section) return;
+    section.focus({ preventScroll: true });
+    section.scrollIntoView?.({ block: 'start' });
+  }, []);
+
+  useEffect(() => {
+    if (activeReport) focusActiveReport();
+  }, [activeReport, focusActiveReport]);
+
   const openReport = (reportId: ReportId) => {
+    if (reportId === activeReport) focusActiveReport();
     setSearchParams({ report: reportId });
     setRecentReportsState((current) => {
       const currentIds = current.key === recentsKey ? current.ids : readStoredReportIds(recentsKey);
@@ -4131,7 +4214,7 @@ function ReportsContent() {
         </section>
 
         {activeReportDefinition && (
-          <section aria-labelledby="active-report-heading" className="scroll-mt-6">
+          <section ref={activeReportRef} tabIndex={-1} aria-labelledby="active-report-heading" className="scroll-mt-6 outline-none">
             <div className="mb-4 rounded-[1.35rem] border border-primary-200 bg-white/90 p-5 shadow-sm shadow-primary-100/60">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-start gap-4">

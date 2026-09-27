@@ -170,7 +170,7 @@ export function PayScheduleSettings() {
   return (
     <div>
       <Header title="Pay Schedule & Workweek" description="Define payroll cadence separately from the employer’s legal overtime workweek" />
-      <div className="space-y-6 p-4 pb-28 sm:p-6 sm:pb-32 lg:p-8">
+      <div className="space-y-6 p-4 pb-36 sm:p-6 sm:pb-32 lg:p-8">
         {error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">{error}</div>}
         {success && <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-800">{success}</div>}
 
@@ -235,8 +235,8 @@ export function PayScheduleSettings() {
         </Card>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 px-4 py-3 shadow-[0_-16px_40px_-28px_rgba(15,23,42,0.6)] backdrop-blur sm:left-[var(--sidebar-width,0px)] sm:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto flex gap-2"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-16px_40px_-28px_rgba(15,23,42,0.6)] backdrop-blur sm:left-[var(--sidebar-width,0px)] sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto grid w-full grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button className="min-w-0" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
       </div>
     </div>
   );

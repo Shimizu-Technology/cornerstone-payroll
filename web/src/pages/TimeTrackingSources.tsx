@@ -511,7 +511,36 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                 <p className="mt-1 text-sm text-gray-500">Add the backend URL and shared secret above, test the connection, then import from a draft pay period.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border">
+              <>
+              <div className="space-y-3 sm:hidden">
+                {sources.map((source) => (
+                  <div key={source.id} data-testid="mobile-source-card" className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-semibold text-neutral-950">{source.name}</p>
+                        <p className="mt-1 text-sm text-neutral-600">{sourceTypeOptions.find((option) => option.value === source.source_type)?.label || source.source_type}</p>
+                      </div>
+                      <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
+                    </div>
+                    <p className="mt-3 break-all text-xs text-neutral-600">{source.base_url}</p>
+                    <p className="mt-2 text-xs text-neutral-500">Last sync: {source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
+                      {source.source_type === 'aire_services' && (
+                        <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
+                          {source.id === form.id && accountLink?.connected ? 'My AIRE account connected' : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-4 grid gap-2 [&>button]:w-full">
+                      <Button variant="outline" size="sm" onClick={() => editSource(source)} disabled={saving}>Edit</Button>
+                      {source.active && <Button variant="outline" size="sm" onClick={() => testConnection(source)} disabled={testingId === source.id}><Zap className="mr-1 h-3.5 w-3.5" />{testingId === source.id ? 'Testing' : 'Test connection'}</Button>}
+                      {source.active && <Button variant="outline" size="sm" onClick={() => deactivateSource(source)} disabled={saving}><Trash2 className="mr-1 h-3.5 w-3.5" />Deactivate</Button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto rounded-lg border sm:block">
                 <table className="min-w-[900px] divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -565,6 +594,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>

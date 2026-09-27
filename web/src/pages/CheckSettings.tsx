@@ -1077,7 +1077,7 @@ export function CheckSettingsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
                 <Input
@@ -1086,7 +1086,7 @@ export function CheckSettingsPage() {
                   inputMode="decimal"
                   value={offsetX}
                   onChange={(e) => setOffsetX(e.target.value)}
-                  className="w-32 font-mono"
+                  className="w-full font-mono sm:w-32"
                 />
                 <p className="text-xs text-gray-500">Positive = shift right</p>
               </div>
@@ -1098,7 +1098,7 @@ export function CheckSettingsPage() {
                   inputMode="decimal"
                   value={offsetY}
                   onChange={(e) => setOffsetY(e.target.value)}
-                  className="w-32 font-mono"
+                  className="w-full font-mono sm:w-32"
                 />
                 <p className="text-xs text-gray-500">Positive = shift up</p>
               </div>

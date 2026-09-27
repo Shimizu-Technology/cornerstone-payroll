@@ -666,10 +666,10 @@ interface FieldRowProps {
 
 function FieldRow({ label, original, prefix, children }: FieldRowProps) {
   return (
-    <div className="grid grid-cols-12 items-center gap-2">
-      <Label className="col-span-5 text-sm">{label}</Label>
-      <div className="col-span-4">{children}</div>
-      <div className="col-span-3 text-right text-xs text-gray-500">
+    <div className="grid grid-cols-1 gap-2 rounded-lg border border-neutral-100 p-2 sm:grid-cols-12 sm:items-center sm:border-0 sm:p-0">
+      <Label className="text-sm sm:col-span-5">{label}</Label>
+      <div className="sm:col-span-4">{children}</div>
+      <div className="text-xs text-gray-500 sm:col-span-3 sm:text-right">
         was {prefix === '$' ? formatCurrency(original ?? 0) : (original ?? 0)}
       </div>
     </div>
@@ -689,12 +689,12 @@ function DeltaLine({ label, original, corrected, bold }: DeltaLineProps) {
   const negative = delta < -0.005;
   const deltaClass = positive ? 'text-green-700' : negative ? 'text-red-700' : 'text-gray-500';
   return (
-    <div className={`grid grid-cols-12 ${bold ? 'font-semibold' : ''}`}>
-      <span className="col-span-5">{label}</span>
-      <span className="col-span-3 text-right text-gray-600">{formatCurrency(original)}</span>
-      <span className="col-span-1 text-center text-gray-400">→</span>
-      <span className="col-span-3 text-right">{formatCurrency(corrected)}</span>
-      <span className={`col-span-12 text-right text-xs ${deltaClass}`}>
+    <div className={`grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 sm:grid-cols-12 ${bold ? 'font-semibold' : ''}`}>
+      <span className="col-span-3 sm:col-span-5">{label}</span>
+      <span className="text-right text-gray-600 sm:col-span-3">{formatCurrency(original)}</span>
+      <span className="text-center text-gray-400 sm:col-span-1">→</span>
+      <span className="text-right sm:col-span-3">{formatCurrency(corrected)}</span>
+      <span className={`col-span-3 text-right text-xs sm:col-span-12 ${deltaClass}`}>
         Δ {positive ? '+' : ''}
         {formatCurrency(delta)}
       </span>

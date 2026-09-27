@@ -470,7 +470,33 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
               </div>
             )}
 
-            <div className="overflow-x-auto">
+            <div className="space-y-3 sm:hidden" aria-label="Matched payroll source rows">
+              {matched.map((row) => {
+                const sourceRow = sourceRows.find((candidate) => candidate.id === row.source_row_id);
+                if (!sourceRow) return null;
+                const classifiedLoanAmount = (row.one_payroll_deduction || 0) + (row.recurring_loan_deduction || 0) + (row.installment_payment || 0);
+                const sourceLoanAmount = Math.max(row.loan_deduction || 0, classifiedLoanAmount);
+                return (
+                  <section key={row.source_row_id} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Source row for ${row.employee_name}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0"><p className="font-semibold text-neutral-950">{row.employee_name}</p>{row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && <p className="text-xs text-neutral-500">PDF: {row.pdf_employee_name}</p>}</div>
+                      <Badge variant={row.confidence >= 1 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}% match</Badge>
+                    </div>
+                    <div>{dispositionControls(sourceRow)}</div>
+                    <dl className="grid grid-cols-2 gap-3 text-sm">
+                      <div><dt className="text-xs text-neutral-500">Hours</dt><dd className="font-medium">{row.regular_hours}{row.overtime_hours > 0 ? ` + ${row.overtime_hours} OT` : ''}</dd></div>
+                      <div><dt className="text-xs text-neutral-500">{row.period_pay_required ? 'Pay this person' : 'Profile rate'}</dt><dd className="font-medium">{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</dd></div>
+                      <div><dt className="text-xs text-neutral-500">Tips</dt><dd>{row.total_tips > 0 ? formatCurrency(row.total_tips) : '—'}{row.tip_pool ? ` · ${row.tip_pool.toUpperCase()}` : ''}</dd></div>
+                      <div><dt className="text-xs text-neutral-500">Loan deduction</dt><dd>{sourceLoanAmount > 0 ? formatCurrency(sourceLoanAmount) : '—'}</dd></div>
+                    </dl>
+                    {sourceLoanAmount > 0 && (row.loan_reconciliation_matches || []).length > 0 && <p className="text-xs font-medium text-green-700">Matched loan: {(row.loan_reconciliation_matches || []).map((match) => match.name).join(', ')}</p>}
+                    {(row.payroll_components || []).length > 0 && <div className="border-t border-neutral-100 pt-3 text-xs"><p className="mb-2 font-semibold text-neutral-700">One-time items</p>{(row.payroll_components || []).map((component, index) => <div key={`${component.label}-${index}`} className="py-1"><p className="flex justify-between gap-2"><span>{component.label}</span><span className="font-semibold tabular-nums">{formatCurrency(component.amount)}</span></p><p className="text-neutral-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p></div>)}</div>}
+                    {(row.effective_bonus || 0) > 0 && <p className="text-xs text-neutral-600">Legacy bonus {formatCurrency(row.effective_bonus || 0)}{row.bonus_keeps_manual ? ' · retained manual value' : ''}</p>}
+                  </section>
+                );
+              })}
+            </div>
+            <div className="hidden overflow-x-auto sm:block">
               <Table className="min-w-[1240px]">
                 <TableHeader>
                   <TableRow>

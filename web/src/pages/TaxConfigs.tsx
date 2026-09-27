@@ -467,7 +467,7 @@ export default function TaxConfigs() {
               )}
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-5">
               <div>
                 <label className="block text-xs font-medium text-gray-500 uppercase">
                   SS Wage Base

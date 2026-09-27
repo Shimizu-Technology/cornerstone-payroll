@@ -528,6 +528,35 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         )}
         <CardContent className="p-0">
           {items.length ? (
+            <>
+            <div className="divide-y divide-neutral-200 sm:hidden">
+              {items.map((item) => {
+                const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
+                const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_status === 'printed' ? 'Printed' : item.check_status === 'prepared' ? 'Prepared' : item.check_number ? 'Assigned' : 'Pending';
+                const canSwitch = payRun.status === 'committed' && !item.voided && Number(item.net_pay || 0) > 0 &&
+                  (isDeposit || (!item.check_prepared_at && !item.check_printed_at && !item.check_print_count && item.check_status !== 'printed' && item.check_status !== 'delivered'));
+                return (
+                  <div key={item.id} className="space-y-3 px-4 py-4" role="group" aria-label={`Payment record for ${item.employee_name}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
+                        <p className="mt-1 text-xs text-neutral-500">{isDeposit ? 'Direct deposit · earnings stub' : isRehearsal ? 'Rehearsal preview · no check number' : `Paper check · ${item.check_number || 'number not assigned'}`}</p>
+                      </div>
+                      <Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : ['prepared', 'printed', 'delivered'].includes(item.check_status || '') ? 'success' : 'default'}>{status}</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
+                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {canSwitch && <Button size="sm" variant="outline" onClick={() => { setSwitchItem(item); setSwitchError(null); }}>Switch for this run</Button>}
+                      <Link className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open record <ArrowRight className="h-4 w-4" /></Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block">
             <Table>
               <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Payment method</TableHead><TableHead>Check / stub</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
               <TableBody striped>
@@ -556,6 +585,8 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
                 })}
               </TableBody>
             </Table>
+            </div>
+            </>
           ) : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
         </CardContent>
       </Card>

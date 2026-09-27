@@ -101,17 +101,17 @@ export function PrinterProfileManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!saving && busyProfileId === null}>
-      <DialogContent className="dialog-wide flex max-h-[94vh] max-w-3xl flex-col overflow-hidden p-0" style={{ marginInline: 'auto' }}>
-        <DialogHeader className="shrink-0 border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
+      <DialogContent className="dialog-wide dialog-center-mobile flex w-full max-h-[calc(100dvh-2rem)] max-w-3xl flex-col overflow-hidden p-0 sm:max-h-[94vh]" style={{ marginInline: 'auto' }}>
+        <DialogHeader className="shrink-0 border-b border-slate-200 bg-slate-950 px-4 py-4 text-white sm:px-6 sm:py-5">
           <DialogTitle className="text-xl text-white">Printer profiles</DialogTitle>
           <DialogDescription className="mt-1 text-slate-300">
             Shared calibrations for {stockLabel(stockType)} stock. Your selection is personal; creating a profile makes it available to the payroll team.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto p-6 md:grid-cols-[1fr_0.9fr]">
+        <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto p-4 sm:p-6 md:grid-cols-[1fr_0.9fr]">
           <section>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <h3 className="text-sm font-semibold text-slate-950">Available profiles</h3>
                 <p className="mt-1 text-xs text-slate-500">Choose the physical printer you will use for this package.</p>
@@ -123,7 +123,7 @@ export function PrinterProfileManagerDialog({
             <div className="mt-4 space-y-2">
               {profiles.map((profile) => (
                 <div key={profile.id} className={`rounded-xl border p-3 ${selectedProfileId === profile.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'}`}>
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-950">{profile.name}</p>
                       <p className="mt-1 text-xs text-slate-500">X {Number(profile.check_offset_x).toFixed(3)} in · Y {Number(profile.check_offset_y).toFixed(3)} in · Version {profile.lock_version}</p>
@@ -163,7 +163,7 @@ export function PrinterProfileManagerDialog({
               <Input label="Profile name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Payroll room LaserJet" disabled={!creating || saving} />
               <Input label="Description (optional)" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Tray 2, accounting office" disabled={!creating || saving} />
               <Input label="Check stock" value={stockLabel(stockType)} disabled />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <Input label="Horizontal offset" type="number" step="0.001" min="-2" max="2" value={offsetX} onChange={(event) => setOffsetX(event.target.value)} disabled={!creating || saving} />
                 <Input label="Vertical offset" type="number" step="0.001" min="-2" max="2" value={offsetY} onChange={(event) => setOffsetY(event.target.value)} disabled={!creating || saving} />
               </div>
@@ -176,7 +176,7 @@ export function PrinterProfileManagerDialog({
         </div>
 
         {error && <div role="alert" className="mx-6 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
-        <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+        <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || busyProfileId !== null}>Done</Button>
         </DialogFooter>
       </DialogContent>

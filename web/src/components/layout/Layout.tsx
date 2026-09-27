@@ -149,7 +149,7 @@ export function Layout() {
         </button>
       )}
 
-      <div className="relative flex flex-1 flex-col overflow-hidden">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
           <button
             type="button"
@@ -166,7 +166,7 @@ export function Layout() {
           <div className="h-9 w-9" />
         </div>
 
-        <main className="relative flex-1 overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
+        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
           {activeCompany && (activeCompany.test_workspace ?? activeCompany.payroll_environment === 'migration_rehearsal') && (
             <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 sm:px-6">
               <div className="mx-auto flex max-w-screen-2xl items-start gap-2.5 text-sm">

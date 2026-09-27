@@ -353,7 +353,7 @@ export function Organizations() {
                   This creates the firm workspace, its first company, and a pending org admin.
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={resetNewForm} disabled={isSavingNew}>
+              <Button variant="ghost" size="sm" onClick={resetNewForm} disabled={isSavingNew} aria-label="Close new organization form">
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -366,7 +366,7 @@ export function Organizations() {
               <Input placeholder="Organization name *" value={newName} onChange={(event) => setNewName(event.target.value)} />
               <Input placeholder="Slug (optional)" value={newSlug} onChange={(event) => setNewSlug(event.target.value)} />
               <Input placeholder="Primary company name *" value={newPrimaryCompanyName} onChange={(event) => setNewPrimaryCompanyName(event.target.value)} />
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Input
                   placeholder="Client limit"
                   type="number"
@@ -417,7 +417,7 @@ export function Organizations() {
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
                       </Select>
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                         <Input type="number" min={1} value={editClientLimit} onChange={(event) => setEditClientLimit(event.target.value)} disabled={editUnlimitedClients} />
                         <label className="flex shrink-0 items-center gap-2 text-sm text-neutral-700">
                           <input type="checkbox" className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" checked={editUnlimitedClients} onChange={(event) => setEditUnlimitedClients(event.target.checked)} />
@@ -439,8 +439,8 @@ export function Organizations() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="truncate font-semibold text-neutral-950">{organization.name}</p>
-                              <p className="truncate text-sm text-neutral-500">{organization.slug}</p>
+                              <p className="break-words font-semibold text-neutral-950">{organization.name}</p>
+                              <p className="break-all text-sm text-neutral-500">{organization.slug}</p>
                             </div>
                             <span className={organization.status === 'active' ? 'text-sm font-medium text-green-700' : 'text-sm text-neutral-500'}>
                               {organization.status === 'active' ? 'Active' : 'Inactive'}
@@ -455,15 +455,15 @@ export function Organizations() {
                           {organization.org_admins.length > 0 && (
                             <div className="mt-3 space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                               {organization.org_admins.map((admin) => (
-                                <div key={admin.id} className="flex items-center justify-between gap-2 text-sm">
+                                <div key={admin.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                                   <div className="min-w-0">
-                                    <p className="truncate font-medium text-neutral-800">{admin.name}</p>
-                                    <p className="truncate text-xs text-neutral-500">{admin.email}</p>
+                                    <p className="break-words font-medium text-neutral-800">{admin.name}</p>
+                                    <p className="break-all text-xs text-neutral-500">{admin.email}</p>
                                   </div>
                                   <div className="flex shrink-0 items-center gap-1">
-                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0" onClick={() => handleRenameAdmin(admin)} disabled={adminActionId === admin.id} title="Rename admin"><Pencil className="h-4 w-4" /></Button>
-                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0" onClick={() => handleToggleAdminActive(admin)} disabled={adminActionId === admin.id} title={admin.active === false ? 'Activate admin' : 'Deactivate admin'}>{admin.active === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}</Button>
-                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-danger-600 hover:text-danger-700" onClick={() => handleDeleteAdmin(admin)} disabled={adminActionId === admin.id} title="Delete admin"><Trash2 className="h-4 w-4" /></Button>
+                                    <Button size="sm" variant="ghost" className="h-11 w-11 p-0" onClick={() => handleRenameAdmin(admin)} disabled={adminActionId === admin.id} aria-label={`Rename ${admin.name}`}><Pencil className="h-4 w-4" /></Button>
+                                    <Button size="sm" variant="ghost" className="h-11 w-11 p-0" onClick={() => handleToggleAdminActive(admin)} disabled={adminActionId === admin.id} aria-label={`${admin.active === false ? 'Activate' : 'Deactivate'} ${admin.name}`}>{admin.active === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}</Button>
+                                    <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-danger-600 hover:text-danger-700" onClick={() => handleDeleteAdmin(admin)} disabled={adminActionId === admin.id} aria-label={`Delete ${admin.name}`}><Trash2 className="h-4 w-4" /></Button>
                                   </div>
                                 </div>
                               ))}

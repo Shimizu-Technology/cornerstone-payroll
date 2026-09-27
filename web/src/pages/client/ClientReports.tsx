@@ -5,10 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { clientPayPeriodsApi, clientReportsApi, type PayrollHistoryRecord } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
+
+function finiteAmount(value: number | string | null | undefined): number {
+  const parsed = Number(value);
+  return value == null || !Number.isFinite(parsed) ? 0 : parsed;
+}
 
 export function ClientReports() {
   const currentYear = new Date().getFullYear();
@@ -250,7 +256,7 @@ export function ClientReports() {
     <div>
       <Header title="Reports" description="Read-only payroll reports for finalized payroll periods." />
 
-      <div className="p-6 lg:p-8 space-y-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
 
         {loading ? (
@@ -262,7 +268,7 @@ export function ClientReports() {
               <CardTitle>Payroll Register</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Select value={selectedPayPeriodId} onChange={(e) => setSelectedPayPeriodId(e.target.value)}>
+              <Select className="w-full" value={selectedPayPeriodId} onChange={(e) => setSelectedPayPeriodId(e.target.value)}>
                 <option value="">Select a pay period</option>
                 {payPeriodOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -316,9 +322,27 @@ export function ClientReports() {
                     <div className="grid gap-4 md:grid-cols-4">
                       <Metric label="All-Year Gross Pay" value={formatCurrency(annualSummary.totals.gross_pay)} />
                       <Metric label="All-Year Net Pay" value={formatCurrency(annualSummary.totals.net_pay)} />
-                      <Metric label="Employer Costs" value={formatCurrency(annualSummary.totals.employer_taxes + annualSummary.totals.employer_contributions)} />
+                      <Metric label="Employer Costs" value={formatCurrency(finiteAmount(annualSummary.totals.employer_taxes) + finiteAmount(annualSummary.totals.employer_contributions))} />
                       <Metric label="Total Payroll Cost" value={formatCurrency(annualSummary.totals.total_payroll_cost)} />
                     </div>
+                    <div className="space-y-3 lg:hidden">
+                      {annualSummary.years.map((row) => (
+                        <MobileRecordCard key={row.year}>
+                          <p className="text-lg font-semibold text-neutral-950">{row.year}</p>
+                          <p className="mt-1 text-xs leading-5 text-neutral-600">{annualSourceLabel(row)}</p>
+                          {row.excluded_unlinked_paycheck_count > 0 && <p className="mt-2 text-xs text-amber-800">{row.excluded_unlinked_paycheck_count} unlinked imported paychecks excluded ({formatCurrency(row.excluded_unlinked_gross_pay)} gross / {formatCurrency(row.excluded_unlinked_net_pay)} net)</p>}
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Gross pay" value={formatCurrency(row.gross_pay)} />
+                            <MobileField label="Employee taxes" value={formatCurrency(row.employee_taxes)} />
+                            <MobileField label="Deductions" value={formatCurrency(finiteAmount(row.pretax_deductions) + finiteAmount(row.after_tax_deductions))} />
+                            <MobileField label="Net pay" value={formatCurrency(row.net_pay)} />
+                            <MobileField label="Total cost" value={formatCurrency(row.total_payroll_cost)} />
+                          </div>
+                        </MobileRecordCard>
+                      ))}
+                      {annualSummary.years.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No committed or locked payroll history is available yet.</p>}
+                    </div>
+                    <div className="hidden lg:block">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -344,7 +368,7 @@ export function ClientReports() {
                             </TableCell>
                             <TableCell className="text-right tabular-nums">{formatCurrency(row.gross_pay)}</TableCell>
                             <TableCell className="text-right tabular-nums">{formatCurrency(row.employee_taxes)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatCurrency(row.pretax_deductions + row.after_tax_deductions)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatCurrency(finiteAmount(row.pretax_deductions) + finiteAmount(row.after_tax_deductions))}</TableCell>
                             <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.net_pay)}</TableCell>
                             <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(row.total_payroll_cost)}</TableCell>
                           </TableRow>
@@ -358,6 +382,7 @@ export function ClientReports() {
                         )}
                       </TableBody>
                     </Table>
+                    </div>
                   </>
                 )}
               </CardContent>
@@ -370,9 +395,9 @@ export function ClientReports() {
             <CardContent className="space-y-4 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">Pay dates</span>
-                <input aria-label="Client report start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
+                <input aria-label="Client report start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-11 min-w-0 w-full rounded-md border border-gray-300 px-3 text-sm sm:w-auto" />
                 <span className="text-sm text-gray-500">to</span>
-                <input aria-label="Client report end date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
+                <input aria-label="Client report end date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-11 min-w-0 w-full rounded-md border border-gray-300 px-3 text-sm sm:w-auto" />
                 <label className="flex min-h-12 items-center gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={includeZeroPay} onChange={(e) => setIncludeZeroPay(e.target.checked)} className="h-4 w-4 accent-primary" />
                   Include active employees with $0 pay
@@ -401,6 +426,31 @@ export function ClientReports() {
                   {ytdSummary.employee_visibility.active_zero_pay_count} active $0-pay employee{ytdSummary.employee_visibility.active_zero_pay_count !== 1 ? 's' : ''} hidden from detail. Company totals still include all payroll activity.
                 </p>
               )}
+              <div className="space-y-3 lg:hidden" aria-label="Employee payroll summary">
+                {(ytdSummary?.employees || []).map((employee) => (
+                  <MobileRecordCard key={employee.employee_id}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="min-w-0 font-semibold text-neutral-950">{employee.name}</p>
+                      <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Net pay</p><p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(employee.net_pay)}</p></div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MobileField label="OT hours" value={finiteAmount(employee.total_overtime_hours).toFixed(2)} />
+                      <MobileField label="Gross pay" value={formatCurrency(employee.gross_pay)} />
+                      <MobileField label="Other earnings" value={formatCurrency(employee.custom_earnings_total ?? 0)} />
+                      <MobileField label="Field additions" value={formatCurrency(finiteAmount(employee.payroll_field_taxable_additions_total) + finiteAmount(employee.payroll_field_non_taxable_additions_total))} />
+                      <MobileField label="Other deductions" value={formatCurrency(employee.custom_deductions_total ?? 0)} />
+                      <MobileField label="Field deductions" value={formatCurrency(finiteAmount(employee.payroll_field_pre_tax_deductions_total) + finiteAmount(employee.payroll_field_post_tax_deductions_total))} />
+                      <MobileField label="Health insurance" value={formatCurrency(employee.health_insurance_deductions ?? 0)} />
+                      <MobileField label="Historical loans" value={formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)} />
+                      <MobileField label="Employer contributions" value={formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)} />
+                      <MobileField label="Total deductions" value={formatCurrency(employee.total_deductions ?? 0)} />
+                      <MobileField label="FIT" value={formatCurrency(employee.withholding_tax)} />
+                    </div>
+                  </MobileRecordCard>
+                ))}
+                {(!ytdSummary?.employees || ytdSummary.employees.length === 0) && <p className="py-8 text-center text-sm text-neutral-500">No employee payroll details for these dates.</p>}
+              </div>
+              <div className="hidden lg:block">
               <Table stickyHeader containerClassName="max-h-[26rem]">
                 <TableHeader>
                   <TableRow>
@@ -426,9 +476,9 @@ export function ClientReports() {
                       <TableCell>{(employee.total_overtime_hours ?? 0).toFixed(2)}</TableCell>
                       <TableCell>{formatCurrency(employee.gross_pay)}</TableCell>
                       <TableCell>{formatCurrency(employee.custom_earnings_total ?? 0)}</TableCell>
-                      <TableCell>{formatCurrency((employee.payroll_field_taxable_additions_total ?? 0) + (employee.payroll_field_non_taxable_additions_total ?? 0))}</TableCell>
+                      <TableCell>{formatCurrency(finiteAmount(employee.payroll_field_taxable_additions_total) + finiteAmount(employee.payroll_field_non_taxable_additions_total))}</TableCell>
                       <TableCell>{formatCurrency(employee.custom_deductions_total ?? 0)}</TableCell>
-                      <TableCell>{formatCurrency((employee.payroll_field_pre_tax_deductions_total ?? 0) + (employee.payroll_field_post_tax_deductions_total ?? 0))}</TableCell>
+                      <TableCell>{formatCurrency(finiteAmount(employee.payroll_field_pre_tax_deductions_total) + finiteAmount(employee.payroll_field_post_tax_deductions_total))}</TableCell>
                       <TableCell>{formatCurrency(employee.health_insurance_deductions ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)}</TableCell>
@@ -439,16 +489,35 @@ export function ClientReports() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
               {(ytdSummary?.payroll_fields?.totals.length ?? 0) > 0 && (
                 <div className="space-y-4 rounded-xl border border-gray-200 p-4">
                   <div>
                     <p className="font-semibold text-gray-900">Payroll field reconciliation</p>
                     <p className="text-sm text-gray-500">Field values from finalized Cornerstone payroll snapshots in this period. Imported QuickBooks totals are included above but do not have Cornerstone payroll-field detail.</p>
                   </div>
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
-                    <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3 text-sm"><span><span className="font-medium text-gray-900">{field.label}</span><span className="ml-2 text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'} · {field.employee_count ?? 0} employee{field.employee_count === 1 ? '' : 's'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>
+                    <div className="overflow-hidden rounded-lg border border-gray-200">
+                      <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 text-sm"><span className="min-w-0"><span className="block font-medium text-gray-900">{field.label}</span><span className="mt-1 block text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'} · {field.employee_count ?? 0} employee{field.employee_count === 1 ? '' : 's'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>
                   </div>
                   {(ytdSummary?.payroll_fields?.entries?.length ?? 0) > 0 && (
+                    <>
+                    <div className="space-y-3 lg:hidden" aria-label="Payroll field entries">
+                      {ytdSummary!.payroll_fields.entries!.map((entry, index) => (
+                        <MobileRecordCard key={`${entry.payroll_item_id}-${entry.label}-${index}`}>
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <p className="min-w-0 font-semibold text-neutral-950">{entry.employee_name || '—'}</p>
+                            <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(entry.amount)}</p>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-3">
+                            <MobileField label="Pay date" value={entry.pay_date || '—'} />
+                            <MobileField label="Payroll field" value={entry.label} />
+                            <MobileField label="Treatment" value={entry.tax_treatment.replaceAll('_', ' ')} />
+                            <MobileField label="Source" value={entry.source?.replaceAll('_', ' ') || '—'} />
+                          </div>
+                        </MobileRecordCard>
+                      ))}
+                    </div>
+                    <div className="hidden lg:block">
                     <Table stickyHeader containerClassName="max-h-[22rem] rounded-lg border border-gray-200">
                       <TableHeader>
                         <TableRow>
@@ -473,6 +542,8 @@ export function ClientReports() {
                         ))}
                       </TableBody>
                     </Table>
+                    </div>
+                    </>
                   )}
                 </div>
               )}

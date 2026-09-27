@@ -350,13 +350,13 @@ function CompanyActivityHistory(): ReactElement {
                       aria-expanded={selectedLogId === group.primary.id}
                       onClick={() => setSelectedLogId((current) => current === group.primary.id ? null : group.primary.id)}
                     >
-                      <p className="font-semibold text-neutral-950">{displayAuditGroupAction(group)}</p>
-                      <p className="mt-1 text-sm text-neutral-500">
+                      <p className="break-words font-semibold text-neutral-950">{displayAuditGroupAction(group)}</p>
+                      <p className="mt-1 break-words text-sm text-neutral-500">
                         {group.primary.user_name || 'System'} • {formatGuamDateTime(group.primary.created_at)}
                       </p>
                       <div className="mt-4 grid grid-cols-2 gap-4">
-                        <MobileField label="Affected record" value={group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')} />
-                        <MobileField label="Client" value={group.primary.company_name || 'Organization-wide'} />
+                        <MobileField className="min-w-0 break-all" label="Affected record" value={group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')} />
+                        <MobileField className="min-w-0 break-words" label="Client" value={group.primary.company_name || 'Organization-wide'} />
                       </div>
                       <span className="mt-4 flex items-center justify-between border-t border-neutral-100 pt-3 text-sm font-semibold text-primary-700">
                         {selectedLogId === group.primary.id ? 'Hide details' : 'View details'}

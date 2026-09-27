@@ -93,6 +93,39 @@ test('printer profiles stay usable at laptop height and expose inline creation',
   expect(Math.abs(desktopBounds!.x + desktopBounds!.width / 2 - 2048 / 2)).toBeLessThan(2);
 });
 
+test('phone check list stays visible when the centered printer profile dialog closes', async ({ page }): Promise<void> => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await routeWorkspace(page);
+  await page.route(queuePattern, (route) => fulfillJson(route, queueResponse));
+  await mountHarness(page);
+
+  const workspace = page.getByRole('dialog', { name: 'Print checks' });
+  const mobileList = workspace.getByLabel('Checks available for this package');
+  await expect(mobileList.getByText('Test Employee')).toBeVisible();
+  await expect(mobileList.getByRole('checkbox', { name: 'Select check 1001' })).toBeVisible();
+  await workspace.getByRole('button', { name: 'Manage' }).click();
+
+  const manager = page.getByRole('dialog', { name: 'Printer profiles' });
+  await expect(manager).toBeVisible();
+  const bounds = await manager.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(Math.abs(bounds!.x + bounds!.width / 2 - 195)).toBeLessThan(2);
+  expect(Math.abs(bounds!.y + bounds!.height / 2 - 422)).toBeLessThan(2);
+
+  await manager.getByRole('button', { name: 'Done' }).click();
+  await expect(mobileList.getByText('Test Employee')).toBeVisible();
+  await mobileList.getByRole('checkbox', { name: 'Select check 1001' }).check();
+  await expect(workspace.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  await workspace.getByRole('button', { name: 'Manage' }).click();
+  await expect(manager.getByRole('button', { name: 'Done' })).toBeVisible();
+  const narrowBounds = await manager.boundingBox();
+  expect(narrowBounds).not.toBeNull();
+  expect(narrowBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(narrowBounds!.x + narrowBounds!.width).toBeLessThanOrEqual(320);
+});
+
 test('previously printed checks remain visible but require explicit selection for another package', async ({ page }): Promise<void> => {
   await routeWorkspace(page);
   let selectedProfileId = 8;

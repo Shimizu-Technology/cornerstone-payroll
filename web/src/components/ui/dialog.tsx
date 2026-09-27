@@ -201,7 +201,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
         top of the viewport instead of the vertical midpoint.
       */}
       <div className="relative z-10 h-full overflow-y-auto p-4 sm:p-6">
-        <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
+        <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-center-mobile)]:items-center [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
           <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
         </div>
       </div>
@@ -221,7 +221,8 @@ export function DialogContent({
   ...props
 }: DialogContentProps) {
   const context = React.useContext(DialogContext);
-  const isTopAlignedDialog = typeof className === 'string' && className.includes('dialog-top');
+  const isFullyRoundedDialog = typeof className === 'string'
+    && (className.includes('dialog-top') || className.includes('dialog-center-mobile'));
 
   return (
     <div
@@ -231,7 +232,7 @@ export function DialogContent({
       tabIndex={-1}
       className={cn(
         'mx-0 max-h-[92vh] overflow-y-auto bg-white p-4 shadow-lg sm:mx-4 sm:rounded-lg sm:p-6',
-        isTopAlignedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg',
+        isFullyRoundedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg',
         className
       )}
       {...props}

@@ -1299,8 +1299,8 @@ export function Clients() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-neutral-950">{c.name}</p>
+                        <div className="min-w-0">
+                          <p className="break-words font-semibold text-neutral-950">{c.name}</p>
                           {isTestWorkspace(c) && (
                             <p className="mt-0.5 text-xs font-semibold text-amber-700">{testWorkspaceLabel(c)} · {c.migration_rehearsal_status}</p>
                           )}

@@ -245,6 +245,42 @@ test('client payroll summary shows the source-aware historical categories', asyn
   await expect(page.getByRole('row').filter({ hasText: 'Avery Example' })).toContainText('122.40');
 });
 
+test('client reports expose annual and employee amounts without a wide phone table', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await mockShell(page, 'client');
+  await page.route('**/api/v1/client/pay_periods**', (route) => fulfillJson(route, { pay_periods: [] }));
+  await page.route('**/api/v1/client/reports/annual_payroll_summary', (route) => fulfillJson(route, { report: {
+    source_statement: 'Locked imports and Cornerstone payroll.',
+    totals: { gross_pay: 100, net_pay: 80, employer_taxes: '7', employer_contributions: '3', total_payroll_cost: 110 },
+    years: [{ year: 2026, gross_pay: 100, employee_taxes: 10, pretax_deductions: '4', after_tax_deductions: '6',
+      net_pay: 80, total_payroll_cost: 110, cornerstone_payroll_count: 1, quickbooks_payroll_count: 0,
+      opening_summary_count: 0, adjustment_count: 0, excluded_unlinked_paycheck_count: 0 }],
+  } }));
+  await page.route('**/api/v1/client/reports/ytd_summary**', (route) => fulfillJson(route, { report: {
+    employees: [{ employee_id: 1, name: 'Avery Example', gross_pay: 100, net_pay: 80, withholding_tax: 10,
+      payroll_field_taxable_additions_total: '2', payroll_field_non_taxable_additions_total: '3',
+      payroll_field_pre_tax_deductions_total: '4', payroll_field_post_tax_deductions_total: '6' }],
+    payroll_fields: { totals: [], entries: [], treatment_totals: {} },
+  } }));
+
+  await page.goto('/reports');
+  await expect(page.getByText('Employer Costs').locator('..')).toContainText('$10.00');
+  const annualCards = page.locator('.lg\\:hidden').filter({ hasText: '2026' });
+  await expect(annualCards.first()).toContainText('$10.00');
+  const employeeCards = page.locator('[aria-label="Employee payroll summary"]');
+  await expect(employeeCards).toContainText('Avery Example');
+  await expect(employeeCards).toContainText('Field additions');
+  await expect(employeeCards).toContainText('$5.00');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await employeeCards.getByText('Avery Example').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('client-reports-320.png'), fullPage: true });
+  for (const width of [390, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(employeeCards.getByText('Avery Example')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
+
 test('client summary keeps the latest $0-pay selection when an older request finishes later', async ({ page }) => {
   await mockShell(page, 'client');
   await page.route('**/api/v1/client/pay_periods**', (route) => fulfillJson(route, { pay_periods: [] }));

@@ -160,15 +160,15 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
       <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
       <div className="fixed inset-0 z-[61] flex items-center justify-center p-4">
         <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-          <div className="flex items-start justify-between border-b px-6 py-5">
-            <div>
+          <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-5">
+            <div className="min-w-0">
               <h2 className="text-2xl font-semibold text-gray-900">Form 500</h2>
               <p className="mt-1 text-sm text-gray-500">
                 Save the official Guam deposit form to this pay period, preview it in-app, and reprint it later.
               </p>
               {payPeriodLabel ? <p className="mt-2 text-sm font-medium text-primary-700">{payPeriodLabel}</p> : null}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
               {savedAt ? (
                 <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
                   Saved {new Date(savedAt).toLocaleString()}
@@ -182,7 +182,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto bg-gray-50 px-6 py-6">
+          <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4 sm:px-6 sm:py-6">
             {error ? (
               <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
                 {error}

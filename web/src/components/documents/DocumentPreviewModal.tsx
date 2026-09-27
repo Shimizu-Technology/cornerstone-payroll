@@ -37,27 +37,24 @@ export function DocumentPreviewModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="border-b border-neutral-200 px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
+      <DialogContent className="dialog-wide max-h-[min(90vh,90dvh)] overflow-y-auto p-0">
+        <DialogHeader className="border-b border-neutral-200 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 break-words">
               <DialogTitle>{document?.title || 'Document preview'}</DialogTitle>
               <DialogDescription>
                 {document ? `${document.file_name} • ${document.content_type}` : 'Preview document'}
               </DialogDescription>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
               <Button variant="outline" size="sm" onClick={onDownload}>
                 <Download className="mr-2 h-4 w-4" />
                 Download file
               </Button>
-              <Button size="sm" onClick={() => onOpenChange(false)}>
-                Close
-              </Button>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                 aria-label="Close preview"
               >
                 <X className="h-4 w-4" />
@@ -66,7 +63,7 @@ export function DocumentPreviewModal({
           </div>
         </DialogHeader>
 
-        <div className="px-6 py-5">
+        <div className="px-4 py-4 sm:px-6 sm:py-5">
           {loading ? (
             <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50">
               <div className="text-center">
@@ -104,9 +101,9 @@ export function DocumentPreviewModal({
           )}
         </div>
 
-        <DialogFooter className="border-t border-neutral-200 px-6 py-4 sm:justify-between">
+      <DialogFooter className="border-t border-neutral-200 px-4 py-4 sm:justify-between sm:px-6">
           <p className="text-sm text-neutral-500">Use preview for quick review, then download if you need the original file.</p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close
             </Button>

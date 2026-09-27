@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const runSteps = [
   { label: 'Client ready', detail: 'Company, employees, tax profile', icon: <Building2 className="h-4 w-4" />, status: 'Complete' },
   { label: 'Payroll in review', detail: 'Hours, deductions, checks', icon: <ReceiptText className="h-4 w-4" />, status: 'Active' },
-  { label: 'Filing packet', detail: 'Guam reports and DRT support', icon: <FileCheck2 className="h-4 w-4" />, status: 'Next' },
+  { label: 'Reports in preparation', detail: 'Guam and federal review packets', icon: <FileCheck2 className="h-4 w-4" />, status: 'Next' },
 ];
 
 const proofPoints = [
@@ -39,7 +39,7 @@ const featureBands = [
   {
     icon: <Printer className="h-5 w-5" />,
     title: 'Checks, reports, and records',
-    body: 'Check alignment, reprints, voids, replacements, signoff sheets, registers, and supporting exports stay tied to the period.',
+    body: 'Saved check packages, issuance and payment tracking, registers, and supporting exports stay tied to the pay period.',
   },
   {
     icon: <LockKeyhole className="h-5 w-5" />,
@@ -95,19 +95,19 @@ export function PublicHome() {
         </div>
       </header>
 
-      <section className="relative overflow-hidden border-b border-neutral-900/10">
+      <section id="workflow" className="relative overflow-hidden border-b border-neutral-900/10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(29,95,210,0.14),transparent_31%),radial-gradient(circle_at_88%_10%,rgba(244,127,11,0.13),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.22),rgba(255,255,255,0.74))]" />
-        <div className="relative mx-auto grid min-h-[620px] max-w-7xl items-center gap-12 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,1.03fr)_minmax(420px,0.72fr)] lg:px-8 lg:py-20">
+        <div className="relative mx-auto grid max-w-7xl items-center gap-8 px-5 py-10 sm:px-6 sm:py-16 lg:min-h-[620px] lg:grid-cols-[minmax(0,1.03fr)_minmax(420px,0.72fr)] lg:gap-12 lg:px-8 lg:py-20">
           <div className="max-w-3xl">
             <p className="mb-5 inline-flex rounded-full border border-primary-200 bg-white/80 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-[0.16em] text-primary-900 shadow-sm shadow-primary-100/60">
               Payroll software for Guam firms
             </p>
-            <h1 className="font-display text-4xl font-extrabold leading-[1.02] tracking-tight text-primary-950 text-balance sm:text-5xl lg:text-6xl">
-              Guam payroll, organized from pay run to filing.
+            <h1 className="font-display text-3xl font-extrabold leading-[1.08] tracking-tight text-primary-950 text-balance sm:text-5xl lg:text-6xl">
+              Guam payroll, organized from intake to year-end preparation.
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-neutral-700">
-              A clean payroll workspace for accounting teams that need local compliance, check printing, client handoffs,
-              and audit-ready records without forcing Guam workflows through mainland payroll software.
+            <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-700 sm:mt-6 sm:text-lg sm:leading-8">
+              One workspace for accounting teams to collect payroll inputs, review pay runs, generate check packages,
+              prepare Guam and federal reports, and work with clients.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a
@@ -129,8 +129,11 @@ export function PublicHome() {
                 <ArrowRight className="h-4 w-4" />
               </a>
             </div>
+            <a href="#features" className="mt-5 inline-flex min-h-11 items-center gap-2 text-sm font-bold text-primary-800 underline-offset-4 hover:underline lg:hidden">
+              Explore the workspace <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </a>
 
-            <div className="mt-10 grid max-w-2xl gap-3 sm:grid-cols-3" aria-label="Platform highlights">
+            <div className="mt-10 hidden max-w-2xl gap-3 sm:grid sm:grid-cols-3" aria-label="Platform highlights">
               {proofPoints.map((point) => (
                 <div key={point.value} className="rounded-2xl border border-white/80 bg-white/65 px-4 py-3 shadow-sm shadow-neutral-200/50 backdrop-blur-sm">
                   <p className="font-display text-lg font-extrabold text-primary-950">{point.value}</p>
@@ -140,7 +143,7 @@ export function PublicHome() {
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative hidden lg:block">
             <div className="absolute -inset-5 rounded-[2.25rem] bg-white/45 blur-2xl" />
             <div className="relative rounded-[2rem] border border-white/85 bg-white/78 p-4 shadow-2xl shadow-primary-950/10 backdrop-blur-xl">
               <div className="rounded-[1.45rem] border border-neutral-200/70 bg-white p-5">
@@ -148,7 +151,7 @@ export function PublicHome() {
                   <div>
                     <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Today’s payroll desk</p>
                     <h2 className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">Pay period review</h2>
-                    <p className="mt-1 text-sm text-neutral-500">MoSa Hospitality • Biweekly payroll</p>
+                    <p className="mt-1 text-sm text-neutral-500">Illustrative client • Biweekly payroll</p>
                   </div>
                   <div className="rounded-2xl bg-success-50 p-2.5 text-success-600 ring-1 ring-success-100">
                     <ShieldCheck className="h-5 w-5" />
@@ -170,7 +173,7 @@ export function PublicHome() {
                   </div>
                 </div>
 
-                <div id="workflow" className="mt-5 space-y-3">
+                <div className="mt-5 space-y-3">
                   {runSteps.map((item) => (
                     <div key={item.label} className="flex items-center gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4">
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-primary-800 shadow-sm ring-1 ring-neutral-200">
@@ -200,6 +203,14 @@ export function PublicHome() {
                 </div>
               </div>
             </div>
+          </div>
+          <div className="rounded-2xl border border-primary-100 bg-white/80 p-4 shadow-sm lg:hidden" aria-label="Payroll workflow at a glance">
+            <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-primary-700">How the work flows</p>
+            <ol className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-sm font-semibold text-primary-950">
+              <li>Set up client</li><li aria-hidden="true" className="text-accent-600">→</li>
+              <li>Review payroll</li><li aria-hidden="true" className="text-accent-600">→</li>
+              <li>Prepare records</li>
+            </ol>
           </div>
         </div>
       </section>

@@ -72,7 +72,7 @@ export function ClientDashboard(): ReactElement {
         actions={<Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
       />
 
-      <div className="p-6 lg:p-8 space-y-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && (
           <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
             {error}
@@ -162,9 +162,9 @@ export function ClientDashboard(): ReactElement {
                   key={payroll.id}
                   type="button"
                   onClick={() => navigate(payRunHref(payroll.id))}
-                  className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60"
+                  className="flex w-full flex-wrap items-start justify-between gap-2 rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-medium text-neutral-900">{payroll.period_description}</p>
                     <p className="text-sm text-neutral-500">
                       {new Date(payroll.pay_date).toLocaleDateString()} • {payroll.employee_count} employees
@@ -222,8 +222,9 @@ function QuickLink({
   onClick,
 }: QuickLinkProps): ReactElement {
   return (
-    <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={onClick}>
+    <Card className="hover:-translate-y-0.5 hover:border-primary-300">
       <CardContent className="pt-6">
+        <button type="button" onClick={onClick} className="w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
         <div className="flex items-center gap-4">
           <div className="rounded-xl bg-primary-100 p-3 text-primary-700">{icon}</div>
           <div>
@@ -231,6 +232,7 @@ function QuickLink({
             <p className="text-sm text-neutral-500">{description}</p>
           </div>
         </div>
+        </button>
       </CardContent>
     </Card>
   );
