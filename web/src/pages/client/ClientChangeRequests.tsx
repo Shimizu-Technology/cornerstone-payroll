@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientEmployeeChangeRequestsApi } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 
@@ -21,6 +23,7 @@ export function ClientChangeRequests() {
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
   const [notice, setNotice] = useState<string | null>(routeState?.portalNotice || null);
   const [requestedSelection] = useState<number | null>(routeState?.selectedRequestId || null);
+  const detailsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -56,13 +59,16 @@ export function ClientChangeRequests() {
   const loadRequest = async (id: number) => {
     const response = await clientEmployeeChangeRequestsApi.get(id);
     setSelected(response.data);
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
   };
 
   return (
     <div>
       <Header title="Change Requests" description="Track payroll-sensitive updates submitted for payroll team approval." />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {notice && (
           <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             <span>{notice}</span>
@@ -73,7 +79,7 @@ export function ClientChangeRequests() {
 
         <div className="flex flex-col gap-4 md:flex-row">
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="max-w-md" />
-          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full md:w-44">
             <option value="">All Statuses</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
@@ -81,14 +87,29 @@ export function ClientChangeRequests() {
           </Select>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-          <Card>
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+          <Card className="min-w-0">
             <CardContent className="p-0">
               {loading ? (
                 <div className="py-12 text-center text-sm text-gray-500">Loading change requests...</div>
               ) : requests.length === 0 ? (
                 <div className="py-12 text-center text-sm text-gray-500">No change requests found.</div>
               ) : (
+                <>
+                <div className="space-y-3 p-3 lg:hidden">
+                  {requests.map((request) => (
+                    <MobileRecordCard key={request.id}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="min-w-0 font-semibold text-neutral-950">{request.employee_name}</p>
+                        <StatusBadge status={request.status} />
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-600">{request.request_kind === 'create' ? 'New worker' : 'Update'} · {new Date(request.created_at).toLocaleDateString()}</p>
+                      <p className="mt-1 text-xs text-neutral-500">Requested by {request.requested_by_name || '—'}</p>
+                      <Button className="mt-4 w-full" variant="outline" onClick={() => void loadRequest(request.id)}>View request</Button>
+                    </MobileRecordCard>
+                  ))}
+                </div>
+                <div className="hidden lg:block">
                 <Table stickyHeader>
                   <TableHeader>
                     <TableRow>
@@ -101,8 +122,8 @@ export function ClientChangeRequests() {
                   </TableHeader>
                   <TableBody striped>
                     {requests.map((request) => (
-                      <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" onClick={() => void loadRequest(request.id)}>
-                        <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
+                      <TableRow key={request.id}>
+                        <TableCell className="font-medium text-gray-900"><button type="button" className="text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
@@ -111,11 +132,13 @@ export function ClientChangeRequests() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
+                </>
               )}
             </CardContent>
           </Card>
 
-          <Card>
+          <Card ref={detailsRef} className="min-w-0 scroll-mt-4">
             <CardHeader>
               <CardTitle>{selected ? `Request #${selected.id}` : 'Request Details'}</CardTitle>
             </CardHeader>

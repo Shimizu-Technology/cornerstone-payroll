@@ -134,3 +134,37 @@ test('client reviews complex payroll and explicitly approves the exact calculati
   await expect(page.getByText('Approved by MoSa Approver. Cornerstone may now complete its payroll review.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve This Exact Revision' })).toHaveCount(0);
 });
+
+test('client can find and review every payroll amount on a narrow phone before approval', async ({ page }, testInfo): Promise<void> => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await mockClientShell(page);
+  await page.route('**/api/v1/client/pay_periods', (route) => fulfillJson(route, {
+    pay_periods: [{
+      key: 'native-702', id: 702, record_type: 'native', start_date: '2026-08-16', end_date: '2026-08-31',
+      pay_date: '2026-09-05', employee_count: 2, total_gross: '6500.00', total_net: '4890.00',
+      status: 'calculated', source: { label: 'Cornerstone', detail: 'Cornerstone payroll' },
+    }],
+  }));
+  await page.route('**/api/v1/client/pay_periods/702**', (route) => fulfillJson(route, { pay_period: payPeriod('pending') }));
+
+  await page.goto('/companies/1/pay-runs');
+  await page.getByRole('button', { name: 'Review & Approve' }).click();
+
+  const mobileDetails = page.locator('[aria-label="Employee payroll details"]');
+  await expect(mobileDetails.getByText('Mo Example')).toBeVisible();
+  await expect(mobileDetails.getByText('$2,649.00')).toBeVisible();
+  await expect(mobileDetails.getByText('Loans').first()).toBeVisible();
+  await expect(mobileDetails.getByText('Insurance').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve This Exact Revision' })).toBeDisabled();
+  const detailsBottom = await mobileDetails.evaluate((node) => node.getBoundingClientRect().bottom + window.scrollY);
+  const approvalTop = await page.getByRole('heading', { name: 'Payroll review revision 3' }).evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
+  expect(approvalTop).toBeGreaterThan(detailsBottom);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await mobileDetails.getByText('Mo Example').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('client-approval-320.png'), fullPage: true });
+  for (const width of [390, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(mobileDetails.getByText('Mo Example')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
