@@ -530,7 +530,10 @@ export function PayPeriodDetail({
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) return;
     lastRefreshTokenRef.current = refreshToken;
-    if (payRunId > 0) void loadPayPeriod(payRunId, true);
+    if (payRunId > 0) {
+      setCheckPrintRefreshToken((token) => token + 1);
+      void loadPayPeriod(payRunId, true);
+    }
   }, [loadPayPeriod, payRunId, refreshToken]);
 
   useEffect(() => {
