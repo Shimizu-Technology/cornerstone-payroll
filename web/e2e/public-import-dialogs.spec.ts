@@ -335,7 +335,7 @@ test('MoSa import routes missing period pay to the worksheet and requires review
   };
   await preview();
   await expect(dialog.getByRole('alert')).toContainText('Period pay is required for Variable Salary');
-  await expect(dialog.getByText('Missing period pay', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Missing period pay', { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Return to payroll worksheet' }).click();
   await expect(dialog).not.toBeVisible();
@@ -343,7 +343,7 @@ test('MoSa import routes missing period pay to the worksheet and requires review
   periodPayEntered = true;
   await page.getByRole('button', { name: 'Open payroll import' }).click();
   await preview();
-  await expect(dialog.getByText('$9,000.00')).toBeVisible();
+  await expect(dialog.getByText('$9,000.00', { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
   await dialog.getByRole('checkbox', { name: /Replace existing hours/ }).check();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeEnabled();
