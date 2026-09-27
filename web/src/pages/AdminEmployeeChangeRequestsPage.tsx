@@ -18,34 +18,58 @@ export function AdminEmployeeChangeRequestsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
+
+  const invalidateRequests = useCallback(() => {
+    ++listRequestIdRef.current;
+    ++detailRequestIdRef.current;
+  }, []);
+
+  const selectRequest = useCallback(async (id: number) => {
+    const requestId = ++detailRequestIdRef.current;
+    setSelected(null);
+    setReviewNotes('');
+    setError(null);
+    try {
+      const response = await adminEmployeeChangeRequestsApi.get(id);
+      if (detailRequestIdRef.current !== requestId) return;
+      setSelected(response.data);
+      setReviewNotes(response.data.review_notes || '');
+    } catch (err) {
+      if (detailRequestIdRef.current === requestId) {
+        setError(err instanceof Error ? err.message : 'Failed to load request details');
+      }
+    }
+  }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
+    ++detailRequestIdRef.current;
     try {
       setLoading(true);
       setError(null);
+      setSelected(null);
+      setReviewNotes('');
       const response = await adminEmployeeChangeRequestsApi.list({ status: status || undefined });
+      if (listRequestIdRef.current !== requestId) return;
       setRequests(response.data);
       if (response.data[0]) {
         await selectRequest(response.data[0].id);
-      } else {
-        setSelected(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load client change requests');
+      if (listRequestIdRef.current === requestId) {
+        setError(err instanceof Error ? err.message : 'Failed to load client change requests');
+      }
     } finally {
-      setLoading(false);
+      if (listRequestIdRef.current === requestId) setLoading(false);
     }
-  }, [status]);
+  }, [status, selectRequest]);
 
   useEffect(() => {
     void load();
-  }, [load]);
-
-  const selectRequest = async (id: number) => {
-    const response = await adminEmployeeChangeRequestsApi.get(id);
-    setSelected(response.data);
-    setReviewNotes(response.data.review_notes || '');
-  };
+    return invalidateRequests;
+  }, [load, invalidateRequests]);
 
   const updateRequest = async (action: 'approve' | 'reject') => {
     if (!selected) return;
@@ -73,7 +97,12 @@ export function AdminEmployeeChangeRequestsPage() {
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
 
         <div className="max-w-xs">
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select value={status} onChange={(e) => {
+            invalidateRequests();
+            setSelected(null);
+            setReviewNotes('');
+            setStatus(e.target.value);
+          }}>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>

@@ -319,8 +319,12 @@ describe('PayRunWorkspace check status refresh', () => {
     </MemoryRouter>);
 
     const phoneCard = await screen.findByRole('group', { name: 'Payment record for Alice Reyes' });
+    const desktopRow = screen.getByRole('row', { name: /Alice Reyes/ });
     expect(within(phoneCard).getByText('Paper check · 4401')).toBeTruthy();
     expect(within(phoneCard).getByText('$500.00')).toBeTruthy();
+    expect(within(phoneCard).getByText('Assigned')).toBeTruthy();
+    expect(within(desktopRow).getByText('Assigned')).toBeTruthy();
+    expect(within(desktopRow).getByRole('button', { name: 'Switch for this run' })).toBeTruthy();
     fireEvent.click(within(phoneCard).getByRole('button', { name: 'Switch for this run' }));
     expect(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' })).toBeTruthy();
   });
