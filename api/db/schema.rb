@@ -3738,6 +3738,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 
   execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_payroll_item_legacy_disposition_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'payroll_item_legacy_dispositions are append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER payroll_item_legacy_dispositions_append_only
+    BEFORE UPDATE OR DELETE ON payroll_item_legacy_dispositions
+    FOR EACH ROW EXECUTE FUNCTION prevent_payroll_item_legacy_disposition_mutation();
+  SQL
+
+  execute <<~SQL
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
     BEGIN

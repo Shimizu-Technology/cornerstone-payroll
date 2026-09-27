@@ -34,6 +34,20 @@ RSpec.describe PayrollItemLegacyDispositionService do
       .to raise_error(described_class::Error, /changed after preview/)
   end
 
+  it "rejects database-level updates to a disposition" do
+    disposition = described_class.apply!(company_id: company.id, actor: actor, entries: [ reviewed_entry ]).sole
+
+    expect { PayrollItemLegacyDisposition.where(id: disposition.id).update_all(reason: "changed") }
+      .to raise_error(ActiveRecord::StatementInvalid, /append-only/)
+  end
+
+  it "rejects database-level deletion of a disposition" do
+    disposition = described_class.apply!(company_id: company.id, actor: actor, entries: [ reviewed_entry ]).sole
+
+    expect { PayrollItemLegacyDisposition.where(id: disposition.id).delete_all }
+      .to raise_error(ActiveRecord::StatementInvalid, /append-only/)
+  end
+
   it "does not disposition a zero-net item with earned wages" do
     item.update!(gross_pay: 100, total_deductions: 100, net_pay: 0)
     expect { described_class.apply!(company_id: company.id, actor: actor, entries: [ reviewed_entry ]) }
