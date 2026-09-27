@@ -17,6 +17,12 @@ module Api
         # GET /api/v1/admin/employees
         def index
           employees = Employee.where(company_id: current_company_id)
+          if params[:eligible_pay_period_id].present?
+            period = PayPeriod.find_by(id: params[:eligible_pay_period_id], company_id: current_company_id)
+            return render json: { error: "Pay period not found" }, status: :not_found unless period
+
+            employees = employees.eligible_for_period(period.start_date, period.end_date)
+          end
           employees = apply_filters(employees)
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_work_profiles)

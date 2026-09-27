@@ -91,7 +91,7 @@ class AnnualPayrollSummary
   def native_items_for(period)
     PayrollItem.joins(:pay_period)
                .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-               .not_voided
+               .not_voided.reportable
                .where(company_id: company.id, pay_periods: {
                  id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: period.range).select(:id)
                })
@@ -208,7 +208,7 @@ class AnnualPayrollSummary
 
   def overall_employee_count
     native_ids = PayrollItem.joins(:pay_period)
-                            .not_voided
+                            .not_voided.reportable
                             .where(company_id: company.id, pay_periods: {
                               id: PayPeriod.reportable_committed.where(company_id: company.id).where.not(pay_date: nil).select(:id)
                             })

@@ -54,6 +54,20 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"].all? { |e| e["status"] == "active" }).to be true
       end
 
+      it "uses pay-period eligibility for the payroll worksheet" do
+        period = create(:pay_period, company: company, start_date: Date.new(2026, 9, 13), end_date: Date.new(2026, 9, 26), pay_date: Date.new(2026, 10, 2))
+        future_hire = create(:employee, company: company, hire_date: Date.new(2027, 1, 1))
+        recent_hire = create(:employee, company: company, hire_date: Date.new(2026, 9, 20))
+        recently_terminated = create(:employee, company: company, status: "terminated", termination_date: Date.new(2026, 9, 18))
+
+        get "/api/v1/admin/employees", params: { eligible_pay_period_id: period.id }
+
+        expect(response).to have_http_status(:ok)
+        employee_ids = response.parsed_body.fetch("data").pluck("id")
+        expect(employee_ids).to include(recent_hire.id, recently_terminated.id)
+        expect(employee_ids).not_to include(future_hire.id)
+      end
+
       it "filters the migrated employee setup review queue" do
         review_employee = create(
           :employee,

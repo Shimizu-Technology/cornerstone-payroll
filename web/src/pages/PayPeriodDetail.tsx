@@ -425,21 +425,21 @@ export function PayPeriodDetail({
     })));
   }, []);
 
-  const loadAllActiveEmployees = useCallback(async () => {
+  const loadEligibleEmployees = useCallback(async (periodId: number) => {
     const allEmployees: Employee[] = [];
     let page = 1;
     let totalPages = 1;
 
     try {
       do {
-        const response = await employeesApi.list({ status: 'active', per_page: 100, page });
+        const response = await employeesApi.list({ eligible_pay_period_id: periodId, per_page: 100, page });
         allEmployees.push(...response.data);
         totalPages = response.meta.total_pages;
         page += 1;
       } while (page <= totalPages);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      throw new Error(`Failed to load active employees page ${page}: ${message}`);
+      throw new Error(`Failed to load pay-period employees page ${page}: ${message}`);
     }
 
     return allEmployees;
@@ -464,7 +464,7 @@ export function PayPeriodDetail({
         prefetchedPayPeriod
           ? Promise.resolve({ pay_period: prefetchedPayPeriod })
           : payPeriodsApi.get(periodId),
-        loadAllActiveEmployees(),
+        loadEligibleEmployees(periodId),
         payPeriodsApi.liabilities(periodId).catch((err) => {
           if (isCurrentRequest()) {
             setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
@@ -495,7 +495,7 @@ export function PayPeriodDetail({
         setLoading(false);
       }
     }
-  }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
+  }, [loadEligibleEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect((): (() => void) => {
     // Reset cross-pay-period observer state so divergence indicators don't
@@ -743,15 +743,15 @@ export function PayPeriodDetail({
       // Build salary overrides payload for variable salary employees.
       // Send zeroes too so clearing a variable salary amount removes stale overrides.
       const includedEmployeeIds = new Set([
-        ...Object.keys(hoursMap).map((employeeId) => Number(employeeId)).filter(Number.isFinite),
         ...payrollItems.map((pi) => pi.employee_id),
         ...additionalEmployeeIds,
       ]);
       const salary_overrides: Record<string, number> = {};
       const missingVariableSalaryEmployees: string[] = [];
       employees.forEach((employee) => {
-        if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
+        if (employee.employment_type === 'salary' && employee.salary_type === 'variable') {
           const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          if (!includedEmployeeIds.has(employee.id) && amount <= 0) return;
           salary_overrides[String(employee.id)] = amount;
           if (amount <= 0 && payPeriod.includes_base_salary !== false) {
             missingVariableSalaryEmployees.push(`${employee.first_name} ${employee.last_name}`);
@@ -1522,8 +1522,10 @@ export function PayPeriodDetail({
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={hasPendingCalculationChanges
+            disabled={processing || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={payrollItems.length === 0
+              ? 'Enter pay for at least one employee before approval'
+              : hasPendingCalculationChanges
               ? 'Recalculate the staged payroll changes before approval'
               : payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved'
                 ? 'Client approval is required for this revision'
@@ -2089,26 +2091,28 @@ export function PayPeriodDetail({
           </Card>
         )}
 
-        {/* Missing Employees Warning */}
+        {/* Active employees remain available for a later adjustment without
+            becoming payroll records for a period in which they earned nothing. */}
         {isCalculated && (() => {
           const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
           const excludedEmployeeIds = new Set(payPeriod.excluded_employee_ids || []);
           const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id) && !excludedEmployeeIds.has(emp.id));
           if (missingEmployees.length === 0) return null;
           return (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-medium text-amber-800">
-                    {missingEmployees.length} active employee{missingEmployees.length !== 1 ? 's' : ''} not included in this payroll:
+                  <p className="font-medium text-slate-800">
+                    No pay in this period for {missingEmployees.length} eligible employee{missingEmployees.length !== 1 ? 's' : ''}
                   </p>
-                  <ul className="mt-2 text-sm text-amber-700 space-y-1">
+                  <p className="mt-1 text-sm text-slate-600">They have no payroll item or paycheck for this run. Enter pay and recalculate if one should be included.</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-700">
                     {missingEmployees.map((emp) => (
                       <li key={emp.id} className="flex items-center gap-2">
                         <span>{emp.first_name} {emp.last_name}</span>
-                        <span className="text-amber-500 text-xs">({emp.employment_type})</span>
+                        <span className="text-xs text-slate-500">({emp.employment_type})</span>
                         {additionalEmployeeIds.has(emp.id) ? (
-                          <span className="text-xs text-green-600 font-medium">Added — enter hours below, then Recalculate</span>
+                          <span className="text-xs font-medium text-emerald-700">Ready for pay entry — enter the amount below, then recalculate</span>
                         ) : (
                           <button
                             onClick={() => {
@@ -2118,9 +2122,9 @@ export function PayPeriodDetail({
                                 [String(emp.id)]: { regular: 0, overtime: 0, wage_rates: prev[String(emp.id)]?.wage_rates },
                               }));
                             }}
-                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                            className="text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                           >
-                            Include in Payroll
+                            Enter pay
                           </button>
                         )}
                       </li>
@@ -2133,9 +2137,6 @@ export function PayPeriodDetail({
                   </Button>
                 )}
               </div>
-              <p className="mt-2 text-xs text-amber-600">
-                These employees were not in the imported payroll data. Click &quot;Include in Payroll&quot; then Recalculate to add them.
-              </p>
             </div>
           );
         })()}
@@ -3373,7 +3374,7 @@ export function PayPeriodDetail({
         {isDraft && payrollItems.length === 0 && employees.length === 0 && (
           <div className="flex flex-col items-center p-12 text-center text-gray-500">
             <UserPlus className="mb-4 h-8 w-8 text-gray-400" aria-hidden="true" />
-            <p>No active employees found. Add employees first before running payroll.</p>
+            <p>No employees are eligible for this pay period. Check hire and termination dates before running payroll.</p>
             <Link
               className="mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
               to={newEmployeePath(companyId, { returnTo: currentPath })}

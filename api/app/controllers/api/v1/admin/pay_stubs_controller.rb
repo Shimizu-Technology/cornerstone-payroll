@@ -86,7 +86,7 @@ module Api
           results = { success: [], errors: [] }
 
           all_items = pay_period.payroll_items
-                                .not_voided
+                                .not_voided.reportable
                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                                 .to_a
           eligible_items = all_items.select { |item| pay_stub_printable?(item) }
@@ -181,7 +181,7 @@ module Api
 
             items = selected_items
           else
-            all_items = base_items.not_voided.to_a
+            all_items = base_items.not_voided.reportable.to_a
             items = all_items.select do |item|
               pay_stub_printable?(item) && (!deposit_only || item.effective_payment_delivery_method == "direct_deposit")
             end
@@ -227,7 +227,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .not_voided
+                         .not_voided.reportable
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)
@@ -256,7 +256,7 @@ module Api
         private
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company }).find(params[:payroll_item_id] || params[:id])
+          @payroll_item = PayrollItem.reportable.includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company }).find(params[:payroll_item_id] || params[:id])
 
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found

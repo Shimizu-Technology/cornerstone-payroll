@@ -23,6 +23,7 @@ class PayrollItem < ApplicationRecord
   has_many :payroll_time_allocations, dependent: :destroy
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
+  has_one :legacy_disposition, class_name: "PayrollItemLegacyDisposition", dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 
@@ -101,6 +102,7 @@ class PayrollItem < ApplicationRecord
   scope :not_voided,         -> { where(voided: false) }
   scope :checks_only,        -> { with_check_number.not_voided }
   scope :voided_checks,      -> { where(voided: true) }
+  scope :reportable,         -> { where.not(id: PayrollItemLegacyDisposition.select(:payroll_item_id)) }
   scope :printed,            -> { where.not(check_printed_at: nil) }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
 

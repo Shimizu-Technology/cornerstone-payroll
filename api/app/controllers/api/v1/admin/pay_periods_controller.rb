@@ -26,7 +26,7 @@ module Api
         # GET /api/v1/admin/pay_periods
         def index
           @pay_periods = PayPeriod.where(company_id: current_company_id)
-                                   .includes(:payroll_items, :voided_by, :correction_events, :company_workweek,
+                                   .includes({ payroll_items: :legacy_disposition }, :voided_by, :correction_events, :company_workweek,
                                              :supplemental_pay_periods)
                                    .period_reverse_chronological
 
@@ -301,7 +301,7 @@ module Api
           end
           employee_ids = employee_ids.map(&:to_i).uniq - excluded_employee_ids
 
-          results = { success: [], errors: [] }
+          results = { success: [], skipped: [], errors: [] }
 
           eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
           eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
@@ -422,6 +422,14 @@ module Api
               end
 
               if payroll_item.variable_salary_missing?
+                if payroll_item.new_record? && PayrollItemActivity.classify(payroll_item) == :verified_empty &&
+                   !Array(params[:employee_ids]).map(&:to_i).include?(employee.id)
+                  # The unsaved child is in the association target; a later
+                  # pay-period update would otherwise autosave it.
+                  @pay_period.association(:payroll_items).target.delete(payroll_item)
+                  results[:skipped] << { employee_id: employee.id, name: employee.full_name, reason: "No payroll activity" }
+                  next
+                end
                 results[:errors] << {
                   employee_id: employee.id,
                   error: "Enter this employee's variable salary amount for the pay period before recalculating."
@@ -433,8 +441,18 @@ module Api
               PayrollItem.transaction(requires_new: true) do
                 PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 payroll_item.calculate!
+                case PayrollItemActivity.classify(payroll_item)
+                when :verified_empty
+                  # The worksheet includes the active roster, but an employee
+                  # with no payroll activity is not part of this pay period.
+                  payroll_item.destroy!
+                  results[:skipped] << { employee_id: employee.id, name: employee.full_name, reason: "No payroll activity" }
+                when :review
+                  raise ArgumentError, "#{employee.full_name} has a zero-pay payroll item with source or payment evidence. Review or remove it before finalizing this run."
+                else
+                  results[:success] << { employee_id: employee.id, name: employee.full_name }
+                end
               end
-              results[:success] << { employee_id: employee.id, name: employee.full_name }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, error: e.message }
             end
@@ -946,7 +964,7 @@ module Api
         end
 
         def pay_period_business_summary(record)
-          aggregates = record.payroll_items.not_voided.pick(
+          aggregates = record.payroll_items.not_voided.reportable.pick(
             Arel.sql("COUNT(*)"),
             Arel.sql("COALESCE(SUM(gross_pay), 0)"),
             Arel.sql("COALESCE(SUM(total_deductions), 0)"),
@@ -1080,7 +1098,7 @@ module Api
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items
           if items.loaded?
-            arr = items.to_a.reject(&:voided?)
+            arr = items.to_a.reject { |item| item.voided? || item.legacy_disposition.present? }
             {
               count: arr.size,
               gross: arr.sum { |i| i.gross_pay.to_f },
@@ -1089,7 +1107,7 @@ module Api
               employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
             }
           else
-            row = items.not_voided.pick(
+            row = items.not_voided.reportable.pick(
               Arel.sql("COUNT(*)"),
               Arel.sql("COALESCE(SUM(gross_pay), 0)"),
               Arel.sql("COALESCE(SUM(net_pay), 0)"),
@@ -1252,7 +1270,7 @@ module Api
           end
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.includes(:check_events, :payroll_item_field_entries, :time_tracking_entry_allocations, employee: :department).map do |item|
+            json[:payroll_items] = pay_period.payroll_items.reportable.includes(:check_events, :payroll_item_field_entries, :time_tracking_entry_allocations, employee: :department).map do |item|
               payroll_item_json(item)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)

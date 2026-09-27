@@ -113,7 +113,7 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
   end
   let!(:pay_period) do
     bridge
-    create(
+    period = create(
       :pay_period,
       company: company,
       status: "calculated",
@@ -121,6 +121,8 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
       end_date: Date.new(2026, 4, 3),
       pay_date: Date.new(2026, 4, 9)
     )
+    create(:payroll_item, pay_period: period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
+    period
   end
 
   after do
