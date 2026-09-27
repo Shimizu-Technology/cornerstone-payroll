@@ -102,6 +102,14 @@ body {
   box-sizing: border-box;
 }
 
+.cornerstone-sign-in .cl-rootBox,
+.cornerstone-sign-in .cl-cardBox,
+.cornerstone-sign-in .cl-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
 h1,
 h2,
 h3,
