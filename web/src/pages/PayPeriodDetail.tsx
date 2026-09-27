@@ -743,15 +743,15 @@ export function PayPeriodDetail({
       // Build salary overrides payload for variable salary employees.
       // Send zeroes too so clearing a variable salary amount removes stale overrides.
       const includedEmployeeIds = new Set([
-        ...Object.keys(hoursMap).map((employeeId) => Number(employeeId)).filter(Number.isFinite),
         ...payrollItems.map((pi) => pi.employee_id),
         ...additionalEmployeeIds,
       ]);
       const salary_overrides: Record<string, number> = {};
       const missingVariableSalaryEmployees: string[] = [];
       employees.forEach((employee) => {
-        if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
+        if (employee.employment_type === 'salary' && employee.salary_type === 'variable') {
           const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          if (!includedEmployeeIds.has(employee.id) && amount <= 0) return;
           salary_overrides[String(employee.id)] = amount;
           if (amount <= 0 && payPeriod.includes_base_salary !== false) {
             missingVariableSalaryEmployees.push(`${employee.first_name} ${employee.last_name}`);

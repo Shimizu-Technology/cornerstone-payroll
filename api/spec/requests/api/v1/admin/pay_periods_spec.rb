@@ -1147,6 +1147,23 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response.parsed_body.dig("results", "success").pluck("employee_id")).to eq([ employee.id ])
     end
 
+    it "skips an unpaid variable-salary employee without blocking another employee's pay" do
+      variable = create(:employee, company: company, department: department,
+        employment_type: "salary", salary_type: "variable", pay_rate: 0)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "success").pluck("employee_id")).to eq([ employee.id ])
+      expect(response.parsed_body.dig("results", "skipped").pluck("employee_id")).to include(variable.id)
+      expect(pay_period.reload.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ variable.id ] }
+      expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ variable.id ])
+    end
+
     it "rejects a post-cutover live calculation without changing payroll state" do
       existing_item = pay_period.payroll_items.create!(
         company: company,

@@ -422,6 +422,14 @@ module Api
               end
 
               if payroll_item.variable_salary_missing?
+                if payroll_item.new_record? && PayrollItemActivity.classify(payroll_item) == :verified_empty &&
+                   !Array(params[:employee_ids]).map(&:to_i).include?(employee.id)
+                  # The unsaved child is in the association target; a later
+                  # pay-period update would otherwise autosave it.
+                  @pay_period.association(:payroll_items).target.delete(payroll_item)
+                  results[:skipped] << { employee_id: employee.id, name: employee.full_name, reason: "No payroll activity" }
+                  next
+                end
                 results[:errors] << {
                   employee_id: employee.id,
                   error: "Enter this employee's variable salary amount for the pay period before recalculating."
