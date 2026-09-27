@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
   recordActivities: vi.fn(),
+  updatePaymentMethod: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
@@ -41,7 +42,7 @@ vi.mock('@/services/api', () => ({
   employeesApi: { list: apiMocks.employeesList },
   recordActivitiesApi: { list: apiMocks.recordActivities },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
-  payrollItemsApi: { updatePaymentMethod: vi.fn() },
+  payrollItemsApi: { updatePaymentMethod: apiMocks.updatePaymentMethod },
 }));
 
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
@@ -49,7 +50,18 @@ vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
 }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
-  ChecksPanel: () => <div>Check register</div>,
+  ChecksPanel: ({ onChecksChanged }: { onChecksChanged?: () => Promise<void> }) => (
+    <div>
+      Check register
+      <button onClick={() => void onChecksChanged?.()}>Simulate check status change</button>
+    </div>
+  ),
+}));
+
+vi.mock('@/pages/PayPeriodDetail', () => ({
+  PayPeriodDetail: ({ refreshToken }: { refreshToken?: number }) => (
+    <div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
+  ),
 }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
@@ -284,5 +296,169 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Complete activity history')).toBeTruthy();
     expect(screen.getByText('Payroll milestones')).toBeTruthy();
     expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
+  });
+});
+
+describe('PayRunWorkspace check status refresh', () => {
+  afterEach(cleanup);
+
+  it('updates the pay-run summary when a check action changes its status', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+    apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+    apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+    apiMocks.recordActivities.mockResolvedValue({ data: [], meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0 } });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    apiMocks.getPayPeriod.mockResolvedValueOnce({ pay_period: preparedRun }).mockResolvedValueOnce({ pay_period: issuedRun });
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(screen.queryByText('Prepared')).toBeNull();
+    expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the newest check status when summary refreshes finish out of order', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    let resolveFirstRefresh!: (response: { pay_period: typeof preparedRun }) => void;
+    let resolveSecondRefresh!: (response: { pay_period: typeof issuedRun }) => void;
+    apiMocks.getPayPeriod
+      .mockResolvedValueOnce({ pay_period: preparedRun })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirstRefresh = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecondRefresh = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    const changeButton = screen.getByRole('button', { name: 'Simulate check status change' });
+    fireEvent.click(changeButton);
+    fireEvent.click(changeButton);
+    await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
+
+    await act(async () => { resolveSecondRefresh({ pay_period: issuedRun }); });
+    expect(screen.getByText('Issued')).toBeTruthy();
+    await act(async () => { resolveFirstRefresh({ pay_period: preparedRun }); });
+    expect(screen.getByText('Issued')).toBeTruthy();
+    expect(screen.queryByText('Prepared')).toBeNull();
+  });
+
+  it('does not replace a newer payment-method switch with an older check refresh', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.updatePaymentMethod.mockResolvedValue({});
+    const checkRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'unprinted' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const depositRun = {
+      ...checkRun,
+      payroll_items: [{ ...checkRun.payroll_items[0], effective_payment_delivery_method: 'direct_deposit' }],
+    };
+    let resolveCheckRefresh!: (response: { pay_period: typeof checkRun }) => void;
+    let resolveSwitchRefresh!: (response: { pay_period: typeof depositRun }) => void;
+    apiMocks.getPayPeriod
+      .mockResolvedValueOnce({ pay_period: checkRun })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCheckRefresh = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSwitchRefresh = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Assigned')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch for this run' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' }), { target: { value: 'Payment not yet released' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this payment has not been issued/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm switch' }));
+    await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
+
+    await act(async () => { resolveSwitchRefresh({ pay_period: depositRun }); });
+    expect(screen.getByText('Stub ready')).toBeTruthy();
+    await act(async () => { resolveCheckRefresh({ pay_period: checkRun }); });
+    expect(screen.getByText('Stub ready')).toBeTruthy();
+    expect(screen.queryByText('Assigned')).toBeNull();
+  });
+
+  it('refreshes the mounted processing view after a check changes on the checks tab', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    apiMocks.getPayPeriod.mockResolvedValueOnce({ pay_period: preparedRun }).mockResolvedValueOnce({ pay_period: issuedRun });
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((await screen.findByTestId('mounted-processing-refresh-token')).textContent).toBe('0');
+    fireEvent.click(screen.getByRole('link', { name: /Checks & direct deposit/ }));
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
+    fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
+    expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
   });
 });

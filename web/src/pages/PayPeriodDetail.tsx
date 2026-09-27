@@ -311,11 +311,13 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
 interface PayPeriodDetailProps {
   initialPayPeriod?: PayPeriod;
   onPayPeriodChange?: (payPeriod: PayPeriod) => void;
+  refreshToken?: number;
 }
 
 export function PayPeriodDetail({
   initialPayPeriod,
   onPayPeriodChange,
+  refreshToken = 0,
 }: PayPeriodDetailProps): ReactElement {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const location = useLocation();
@@ -327,6 +329,7 @@ export function PayPeriodDetail({
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const initialPayPeriodRef = useRef(initialPayPeriod);
   const loadRequestIdRef = useRef(0);
+  const lastRefreshTokenRef = useRef(refreshToken);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -489,7 +492,7 @@ export function PayPeriodDetail({
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
-        if (!silent) setLoading(false);
+        setLoading(false);
       }
     }
   }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
@@ -523,6 +526,15 @@ export function PayPeriodDetail({
       loadRequestIdRef.current += 1;
     };
   }, [loadPayPeriod, payRunId]);
+
+  useEffect(() => {
+    if (lastRefreshTokenRef.current === refreshToken) return;
+    lastRefreshTokenRef.current = refreshToken;
+    if (payRunId > 0) {
+      setCheckPrintRefreshToken((token) => token + 1);
+      void loadPayPeriod(payRunId, true);
+    }
+  }, [loadPayPeriod, payRunId, refreshToken]);
 
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);
@@ -3395,7 +3407,7 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} />
+              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
             </div>
           </Card>
         )}
@@ -3425,7 +3437,10 @@ export function PayPeriodDetail({
             open={checkPrintOpen}
             payPeriodId={payPeriod.id}
             onOpenChange={setCheckPrintOpen}
-            onPackageGenerated={() => setCheckPrintRefreshToken((value) => value + 1)}
+            onPackageGenerated={() => {
+              setCheckPrintRefreshToken((value) => value + 1);
+              void loadPayPeriod(payPeriod.id, true);
+            }}
           />
         )}
 
