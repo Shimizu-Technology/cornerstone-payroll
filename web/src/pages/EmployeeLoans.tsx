@@ -670,7 +670,25 @@ export default function EmployeeLoans() {
                     {/* Transaction History */}
                     <h4 className="font-semibold text-sm mb-2">Transaction History</h4>
                     {expandedLoan.transactions && expandedLoan.transactions.length > 0 ? (
-                      <div className="overflow-x-auto">
+                      <>
+                      <div className="space-y-3 sm:hidden" aria-label="Loan transaction history">
+                        {(expandedLoan.transactions as LoanTransaction[]).map(txn => (
+                          <section key={txn.id} className="rounded-xl border border-neutral-200 bg-white p-3" aria-label={`${txn.transaction_type} on ${txn.transaction_date}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-neutral-900">{txn.transaction_date}</p>
+                              <Badge variant="outline" className={txn.transaction_type === 'payment' ? 'text-green-700' : 'text-blue-700'}>{txn.transaction_type}</Badge>
+                            </div>
+                            <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                              {expandedLoan.tracking_mode === 'balance_tracked' && <div><dt className="text-xs text-neutral-500">Before</dt><dd>{fmt(Number(txn.balance_before || 0))}</dd></div>}
+                              <div><dt className="text-xs text-neutral-500">Amount</dt><dd className="font-semibold">{txn.transaction_type === 'payment' ? `-${fmt(txn.amount)}` : `+${fmt(txn.amount)}`}</dd></div>
+                              {expandedLoan.tracking_mode === 'balance_tracked' && <div><dt className="text-xs text-neutral-500">After</dt><dd>{fmt(Number(txn.balance_after || 0))}</dd></div>}
+                            </dl>
+                            <p className="mt-3 break-words text-sm text-neutral-600">{txn.notes || 'No notes'}</p>
+                            <p className="mt-1 text-xs text-neutral-500">{txn.source.replace('_', ' ')}{txn.recorded_by_name ? ` · ${txn.recorded_by_name}` : ''}</p>
+                          </section>
+                        ))}
+                      </div>
+                      <div className="hidden overflow-x-auto sm:block">
                         <table className={`${expandedLoan.tracking_mode === 'balance_tracked' ? 'min-w-[42rem]' : 'min-w-[30rem]'} w-full text-sm`}>
                         <thead>
                           <tr className="border-b text-left text-gray-500">
@@ -705,6 +723,7 @@ export default function EmployeeLoans() {
                         </tbody>
                         </table>
                       </div>
+                      </>
                     ) : (
                       <p className="text-gray-500 text-sm italic">No transactions recorded</p>
                     )}

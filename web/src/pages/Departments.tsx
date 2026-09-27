@@ -212,6 +212,7 @@ export function Departments() {
                 size="sm"
                 onClick={handleCancelAdd}
                 disabled={isSavingNew}
+                aria-label="Cancel adding department"
               >
                 <X className="w-4 h-4" />
               </Button>

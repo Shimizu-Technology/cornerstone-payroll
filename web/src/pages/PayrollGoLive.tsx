@@ -237,7 +237,22 @@ export function PayrollGoLive(): ReactElement {
                   <p className="font-semibold text-neutral-950">Company settings proposal</p>
                   <p className="mt-1 text-sm leading-6 text-neutral-600">The successor stays authoritative. Existing successor values are retained; the predecessor only fills blanks. Review every highlighted difference before applying.</p>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="space-y-3 p-3 sm:hidden" aria-label="Company settings proposal">
+                  {(review.setup_plan.company_field_proposals || []).map((proposal) => (
+                    <section key={proposal.field} className={`space-y-3 rounded-xl border border-neutral-200 p-4 ${proposal.requires_review ? 'bg-warning-50/50' : 'bg-white'}`} aria-label={proposal.field.replaceAll('_', ' ')}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h4 className="font-semibold text-neutral-900">{proposal.field.replaceAll('_', ' ')}</h4>
+                        <Badge variant={proposal.decision === 'missing_in_both' ? 'warning' : proposal.requires_review ? 'default' : 'success'}>{proposalDecisionLabels[proposal.decision]}</Badge>
+                      </div>
+                      <dl className="space-y-2 text-sm">
+                        <div><dt className="text-xs font-medium text-neutral-500">Predecessor reference</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.source_value)}</dd></div>
+                        <div><dt className="text-xs font-medium text-neutral-500">Current successor</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.current_value)}</dd></div>
+                        <div><dt className="text-xs font-medium text-neutral-500">Will use</dt><dd className="break-words font-semibold text-neutral-900">{proposalValue(proposal.proposed_value)}</dd></div>
+                      </dl>
+                    </section>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
                   <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
                     <thead className="bg-white text-xs font-semibold uppercase tracking-wide text-neutral-500">
                       <tr><th className="px-5 py-3">Setting</th><th className="px-5 py-3">Predecessor reference</th><th className="px-5 py-3">Current successor</th><th className="px-5 py-3">Will use</th><th className="px-5 py-3">Decision</th></tr>
@@ -371,7 +386,7 @@ function CompanySetupReviewPanel({
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         {review.sections.map((section) => (
           <div key={section.key} className={`rounded-xl border bg-white p-4 ${section.complete ? 'border-success-200' : 'border-warning-200'}`}>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-semibold text-neutral-900">{section.label}</p>
               <Badge variant={section.complete ? 'success' : 'warning'}>{section.complete ? 'Ready to review' : 'Incomplete'}</Badge>
             </div>
@@ -424,7 +439,7 @@ function MessageList({ tone, title, messages }: { tone: 'danger' | 'warning' | '
 }
 
 function ReadinessFact({ label, value, passed }: { label: string; value: boolean | number; passed: boolean }): ReactElement {
-  return <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 ${passed ? 'border-success-200 bg-success-50' : 'border-neutral-200 bg-white'}`}><span className="text-sm font-medium text-neutral-700">{label}</span><span className={`flex items-center gap-2 text-sm font-bold ${passed ? 'text-success-700' : 'text-neutral-600'}`}>{passed ? <CheckCircle2 className="h-4 w-4" /> : <CircleDashed className="h-4 w-4" />}{typeof value === 'boolean' ? (value ? 'Yes' : 'Not yet') : value}</span></div>;
+  return <div className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 ${passed ? 'border-success-200 bg-success-50' : 'border-neutral-200 bg-white'}`}><span className="min-w-0 break-words text-sm font-medium text-neutral-700">{label}</span><span className={`flex shrink-0 items-center gap-2 text-sm font-bold ${passed ? 'text-success-700' : 'text-neutral-600'}`}>{passed ? <CheckCircle2 className="h-4 w-4" /> : <CircleDashed className="h-4 w-4" />}{typeof value === 'boolean' ? (value ? 'Yes' : 'Not yet') : value}</span></div>;
 }
 
 function Comparison({ label, source, target }: { label: string; source: string | number; target: string | number }): ReactElement {
