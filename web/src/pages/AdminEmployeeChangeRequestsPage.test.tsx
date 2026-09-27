@@ -38,8 +38,8 @@ it('keeps the newest selected request when detail responses finish out of order'
 
   render(<AdminEmployeeChangeRequestsPage />);
   await screen.findByText('Request #1');
-  fireEvent.click(screen.getByText('Bob Santos'));
-  fireEvent.click(screen.getByText('Alice Reyes'));
+  fireEvent.click(screen.getByRole('button', { name: /Bob Santos/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Alice Reyes/ }));
   await act(async () => { resolveAliceAgain({ data: alice }); });
   expect(screen.getByText('Request #1')).toBeTruthy();
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Alice notes');
@@ -57,11 +57,13 @@ it('ignores the previous filter response after the status changes', async () => 
   apiMocks.get.mockResolvedValue({ data: approved });
 
   render(<AdminEmployeeChangeRequestsPage />);
+  await waitFor(() => expect(apiMocks.list).toHaveBeenCalledWith({ status: 'pending' }));
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
+  await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(2));
+  expect(apiMocks.list.mock.calls.map(([params]) => params?.status)).toEqual(['pending', 'approved']);
   await screen.findByText('Request #3');
   await act(async () => { resolvePending({ data: [request(1, 'Alice Reyes', 'Pending notes')] }); });
 
-  expect(screen.getByText('Cara Chen')).toBeTruthy();
-  expect(screen.queryByText('Alice Reyes')).toBeNull();
-  await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button', { name: /Cara Chen/ })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Alice Reyes/ })).toBeNull();
 });
