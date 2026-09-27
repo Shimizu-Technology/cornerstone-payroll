@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ export function AdminEmployeeChangeRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -68,7 +69,7 @@ export function AdminEmployeeChangeRequestsPage() {
     <div>
       <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
 
         <div className="max-w-xs">
@@ -88,6 +89,32 @@ export function AdminEmployeeChangeRequestsPage() {
               ) : requests.length === 0 ? (
                 <div className="py-12 text-center text-sm text-gray-500">No requests found.</div>
               ) : (
+                <>
+                <div className="space-y-3 p-4 sm:hidden">
+                  {requests.map((request) => (
+                    <button
+                      key={request.id}
+                      type="button"
+                      aria-pressed={selected?.id === request.id}
+                      onClick={() => {
+                        void selectRequest(request.id).then(() => {
+                          detailRef.current?.focus({ preventScroll: true });
+                          detailRef.current?.scrollIntoView?.({ block: 'start' });
+                        });
+                      }}
+                      className={`w-full rounded-xl border p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 ${selected?.id === request.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'}`}
+                    >
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 break-words font-semibold text-neutral-950">{request.employee_name}</span>
+                        <StatusBadge status={request.status} />
+                      </span>
+                      <span className="mt-3 block text-sm text-neutral-600">{request.request_kind === 'create' ? 'New worker' : 'Update'} · {request.requested_by_name || 'Unknown requester'}</span>
+                      <span className="mt-1 block text-xs text-neutral-500">Submitted {new Date(request.created_at).toLocaleString()}</span>
+                      <span className="mt-3 block text-sm font-semibold text-primary-700">Review request</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="hidden sm:block">
                 <Table stickyHeader>
                   <TableHeader>
                     <TableRow>
@@ -100,7 +127,7 @@ export function AdminEmployeeChangeRequestsPage() {
                   </TableHeader>
                   <TableBody striped>
                     {requests.map((request) => (
-                      <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" onClick={() => void selectRequest(request.id)}>
+                      <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" tabIndex={0} onClick={() => void selectRequest(request.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectRequest(request.id); } }}>
                         <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
@@ -110,11 +137,13 @@ export function AdminEmployeeChangeRequestsPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
+                </>
               )}
             </CardContent>
           </Card>
 
-          <Card>
+          <Card ref={detailRef} tabIndex={-1} className="scroll-mt-4 outline-none">
             <CardHeader>
               <CardTitle>{selected ? `Request #${selected.id}` : 'Request Details'}</CardTitle>
             </CardHeader>

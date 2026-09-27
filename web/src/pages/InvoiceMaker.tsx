@@ -1475,13 +1475,13 @@ export function InvoiceMaker() {
 
       {invoiceMode === 'manual' ? (
         <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
-          <div className="space-y-6">
+          <div className="order-2 min-w-0 space-y-6 lg:order-1">
             {invoiceHistoryPanel}
             {billingProfilesPanel}
             {recipientsPanel}
           </div>
 
-          <div className="space-y-6">
+          <div className="order-1 min-w-0 space-y-6 lg:order-2">
             {alertBanner}
 
           <Card>
@@ -1738,7 +1738,7 @@ export function InvoiceMaker() {
         </div>
       ) : (
         <div className="grid gap-6 p-4 sm:p-6 lg:p-8 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_340px]">
-          <div className="space-y-6">
+          <div className="order-3 min-w-0 space-y-6 xl:order-1">
             {alertBanner}
             <Card className="overflow-hidden">
               <CardContent className="space-y-4">
@@ -1825,7 +1825,7 @@ export function InvoiceMaker() {
           </div>
 
           <Card
-            className="flex min-h-[min(760px,calc(100vh-260px))] overflow-hidden"
+            className="order-1 flex min-h-[min(760px,calc(100vh-260px))] min-w-0 overflow-hidden xl:order-2"
             onDrop={handleChatDrop}
             onDragOver={handleChatDragOver}
           >
@@ -2033,7 +2033,7 @@ export function InvoiceMaker() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6 xl:col-span-2 2xl:col-span-1">
+          <div className="order-2 min-w-0 space-y-6 xl:order-3 xl:col-span-2 2xl:col-span-1">
             <Card>
               <CardContent className="space-y-4">
                 <div>

@@ -1666,7 +1666,39 @@ export function HistoricalPayroll(): ReactElement {
               )}
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[34rem] overflow-auto border-y border-neutral-200">
+              <div className="max-h-[34rem] space-y-3 overflow-y-auto border-y border-neutral-200 p-4 sm:hidden">
+                {detail.workers.map((worker) => (
+                  <div key={worker.id} className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-semibold text-neutral-950">{worker.source_name}</p>
+                        <p className="mt-1 text-xs text-neutral-500">Hired {shortDate(worker.hire_date)}</p>
+                      </div>
+                      <Badge variant={worker.source_status === 'active' ? 'success' : 'default'}>{worker.source_status}</Badge>
+                    </div>
+                    <div className="mt-4">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Disposition</p>
+                      {canMutate && detail.status === 'previewed' ? (
+                        <select
+                          aria-label={`Disposition for ${worker.source_name}`}
+                          value={worker.employee_id ? String(worker.employee_id) : worker.mapping_status === 'archive_only' ? 'archive_only' : ''}
+                          onChange={(event) => void updateWorkerDisposition(worker.id, event.target.value)}
+                          disabled={mappingWorkerId !== null}
+                          className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
+                        >
+                          <option value="" disabled>Needs review</option>
+                          <option value="archive_only">Keep as archive-only</option>
+                          {worker.employee_id && !employees.some((employee) => employee.id === worker.employee_id) && <option value={worker.employee_id}>{worker.employee_name || 'Currently linked employee'}</option>}
+                          <optgroup label="Link to live employee">
+                            {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.last_name}, {employee.first_name}{employee.status === 'active' ? '' : ` · ${employee.status}`}</option>)}
+                          </optgroup>
+                        </select>
+                      ) : <p className="text-sm text-neutral-900">{worker.employee_name || 'Archive-only'} · {worker.mapping_status.replaceAll('_', ' ')}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden max-h-[34rem] overflow-auto border-y border-neutral-200 sm:block">
                 <Table>
                   <TableHeader><TableRow><TableHead>Imported worker</TableHead><TableHead>Source status</TableHead><TableHead>Disposition</TableHead></TableRow></TableHeader>
                   <TableBody>
@@ -1778,7 +1810,33 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-6 text-primary-900">Excel and CSV are ready for this full report. Select a year or worker to make a readable PDF available.</div>
                   )}
 
-                  <div className={`overflow-x-auto rounded-xl border border-neutral-200 transition-opacity ${reportLoading ? 'opacity-60' : ''}`} aria-busy={reportLoading}>
+                  <div className={`space-y-3 transition-opacity sm:hidden ${reportLoading ? 'opacity-60' : ''}`} aria-busy={reportLoading}>
+                    {report.rows.map((row, rowIndex) => (
+                      <div key={`${report.report_type}-${reportPage}-${rowIndex}`} className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4">
+                        <dl className="space-y-2">
+                          {report.columns.slice(0, 3).map((column) => (
+                            <div key={column.key} className="flex min-w-0 justify-between gap-3 text-sm">
+                              <dt className="min-w-0 text-neutral-500">{column.label}</dt>
+                              <dd className="min-w-0 break-words text-right font-medium text-neutral-950">{reportCell(row[column.key] ?? null, column)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        {report.columns.length > 3 && <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
+                          <summary className="cursor-pointer font-semibold text-primary-700">All report values</summary>
+                          <dl className="mt-3 space-y-2">
+                            {report.columns.slice(3).map((column) => (
+                              <div key={column.key} className="flex min-w-0 justify-between gap-3">
+                                <dt className="min-w-0 text-neutral-500">{column.label}</dt>
+                                <dd className="min-w-0 break-words text-right font-medium text-neutral-950">{reportCell(row[column.key] ?? null, column)}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </details>}
+                      </div>
+                    ))}
+                    {report.rows.length === 0 && <p className="rounded-xl border border-neutral-200 p-4 text-sm text-neutral-500">No accepted historical records match these filters.</p>}
+                  </div>
+                  <div className={`hidden overflow-x-auto rounded-xl border border-neutral-200 transition-opacity sm:block ${reportLoading ? 'opacity-60' : ''}`} aria-busy={reportLoading}>
                     <Table>
                       <TableHeader><TableRow>{report.columns.map((column) => <TableHead key={column.key} className={column.format === 'money' || column.format === 'number' ? 'text-right' : undefined}>{column.label}</TableHead>)}</TableRow></TableHeader>
                       <TableBody>
@@ -1817,7 +1875,26 @@ export function HistoricalPayroll(): ReactElement {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div className="space-y-3 p-4 sm:hidden">
+                {detail.paychecks.map((row) => (
+                  <div key={row.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-semibold text-neutral-950">{row.source_employee_name}</p>
+                        <p className="mt-1 text-xs text-neutral-500">{shortDate(row.pay_date)} · Check {row.check_number || 'not provided'}</p>
+                      </div>
+                      <p className="shrink-0 font-mono text-sm font-bold tabular-nums text-neutral-950">{dollars(row.net_pay)}</p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-neutral-600">
+                      <p>Gross <span className="block font-semibold text-neutral-950">{dollars(row.gross_pay)}</span></p>
+                      <p>FIT <span className="block font-semibold text-neutral-950">{dollars(row.federal_income_tax)}</span></p>
+                    </div>
+                    <Button className="mt-4 w-full" size="sm" variant="outline" onClick={() => setPaycheck(row)}>View paycheck details</Button>
+                  </div>
+                ))}
+                {detail.paychecks.length === 0 && <p className="p-4 text-sm text-neutral-500">No historical paychecks match these filters.</p>}
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
                 <Table>
                   <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Employee</TableHead><TableHead className="text-right">Gross</TableHead><TableHead className="text-right">FIT</TableHead><TableHead className="text-right">SS / Medicare</TableHead><TableHead className="text-right">Other deductions</TableHead><TableHead className="text-right">Net</TableHead><TableHead>Check</TableHead><TableHead><span className="sr-only">Details</span></TableHead></TableRow></TableHeader>
                   <TableBody>
@@ -1887,7 +1964,21 @@ export function HistoricalPayroll(): ReactElement {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                  <div className="space-y-3 sm:hidden">
+                    {evidenceManifest.rows.map((row) => {
+                      const retained = selectedBatch.source_files?.find((source) => source.position === row.position - 1);
+                      return <div key={`${row.position}-${row.sha256}`} className="min-w-0 rounded-xl border border-neutral-200 p-4">
+                        <p className="break-words font-semibold text-neutral-950">{row.report_label}</p>
+                        <p className="mt-1 break-all text-xs text-neutral-500">{row.filename}</p>
+                        <p className="mt-3 text-sm text-neutral-700">{row.evidence_role}</p>
+                        <div className="mt-3 flex flex-wrap gap-2"><Badge variant={row.retention_status === 'verified' ? 'success' : row.retention_status === 'missing' ? 'warning' : 'danger'}>{humanizeToken(row.retention_status)}</Badge><Badge variant={row.header_validation === 'validated' ? 'success' : row.header_validation === 'failed' ? 'danger' : 'default'}>Headers: {humanizeToken(row.header_validation)}</Badge>{row.required && <Badge variant="info">Required</Badge>}</div>
+                        <p className="mt-3 text-xs text-neutral-500">Coverage: {row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}</p>
+                        <details className="mt-3 border-t border-neutral-100 pt-3 text-xs"><summary className="cursor-pointer font-semibold text-primary-700">File details</summary><p className="mt-2 break-all font-mono text-neutral-600">SHA-256 {row.sha256}</p><p className="mt-1 text-neutral-600">{fileSize(row.byte_size)} · {row.row_count ?? 0} rows</p><p className="mt-1 text-neutral-600">{row.description}</p></details>
+                        {canMutate && retained && <Button className="mt-4 w-full" size="sm" variant="outline" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}
+                      </div>;
+                    })}
+                  </div>
+                  <div className="hidden overflow-x-auto rounded-xl border border-neutral-200 sm:block">
                     <Table>
                       <TableHeader><TableRow><TableHead>Source report</TableHead><TableHead>What it proves</TableHead><TableHead>Header check</TableHead><TableHead>Coverage</TableHead><TableHead>Integrity</TableHead><TableHead><span className="sr-only">Download</span></TableHead></TableRow></TableHeader>
                       <TableBody>

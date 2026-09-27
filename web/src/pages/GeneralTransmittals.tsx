@@ -483,7 +483,7 @@ export function GeneralTransmittals() {
         )}
 
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-6">
+          <div className="order-2 min-w-0 space-y-6 xl:order-1">
             <Card>
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -549,7 +549,7 @@ export function GeneralTransmittals() {
             )}
           </div>
 
-          <div className="space-y-6">
+          <div className="order-1 min-w-0 space-y-6 xl:order-2">
             <Card>
               <CardContent className="space-y-6">
                 <div className="flex flex-col gap-3 border-b border-neutral-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
