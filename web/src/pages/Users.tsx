@@ -559,11 +559,11 @@ export function Users() {
                         <>
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="flex items-center gap-2 truncate font-semibold text-neutral-950">
+                              <p className="flex flex-wrap items-center gap-2 break-words font-semibold text-neutral-950">
                                 {user.name}
                                 {user.platform_owner && <OwnerBadge />}
                               </p>
-                              <p className="truncate text-sm text-neutral-500">{user.email}</p>
+                              <p className="break-all text-sm text-neutral-500">{user.email}</p>
                             </div>
                             {user.active === false ? <span className="text-sm text-neutral-500">Inactive</span> : <span className="text-sm font-medium text-green-600">Active</span>}
                           </div>
