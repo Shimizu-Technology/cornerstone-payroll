@@ -30,7 +30,6 @@ module Api
           bank_address
           check_memo_template
           auto_create_fit_check
-          require_distinct_check_print_confirmer
           printer_profile_lock_version
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
@@ -70,11 +69,11 @@ module Api
               total: loaded_items.size,
               direct_deposit_count: deposit_items.size,
               delivered: loaded_items.count { |i| i.check_status == "delivered" },
+              prepared: loaded_items.count { |i| i.check_status == "prepared" },
               printed: loaded_items.count { |i| i.check_status == "printed" },
-              unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
+              unprinted: loaded_items.count { |i| i.check_status == "unprinted" },
               voided: loaded_items.count(&:voided),
               check_stock_type: @pay_period.company.check_stock_type,
-              requires_verified_print_package: @pay_period.company.require_distinct_check_print_confirmer?
             }
           }
         end
@@ -122,9 +121,6 @@ module Api
         def batch_pdf
           unless @pay_period.committed?
             return render json: { error: "Can only generate check PDF for committed pay periods" }, status: :unprocessable_entity
-          end
-          if @pay_period.company.require_distinct_check_print_confirmer?
-            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
 
           items = @pay_period.payroll_items
@@ -201,9 +197,6 @@ module Api
           unless @pay_period.committed?
             return render json: { error: "Pay period is not committed" }, status: :unprocessable_entity
           end
-          if @pay_period.company.require_distinct_check_print_confirmer?
-            return render json: { error: "Use a verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
-          end
 
           user = User.find(current_user_id)
           items = @pay_period.payroll_items.unprinted.with_check_number
@@ -232,9 +225,6 @@ module Api
         def show
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
-          end
-          if @payroll_item.company.require_distinct_check_print_confirmer?
-            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
 
           if @payroll_item.check_number.blank?
@@ -270,9 +260,6 @@ module Api
         def mark_printed
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
-          end
-          if @payroll_item.company.require_distinct_check_print_confirmer?
-            return render json: { error: "Use a verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
           end
 
           user = User.find(current_user_id)
@@ -825,6 +812,7 @@ module Api
             reconciliation_status: CheckReconciliationStatus.for(item),
             aire_linked: item.time_tracking_entry_allocations.any?,
             check_printed_at: item.check_printed_at,
+            check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
             voided: item.voided,
             voided_at: item.voided_at,
@@ -864,7 +852,6 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
-            require_distinct_check_print_confirmer: company.require_distinct_check_print_confirmer,
             check_layout_config: sanitize_check_layout_config(company.check_stock_type, render_company.check_layout_config || {}),
             active_printer_profile_id: render_settings.printer_profile&.id,
             active_printer_profile_name: render_settings.printer_profile&.name,

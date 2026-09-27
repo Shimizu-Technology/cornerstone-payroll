@@ -76,6 +76,33 @@ RSpec.describe "Check print runs", type: :request do
     )
   end
 
+  it "keeps a prepared package downloadable as an immutable record" do
+    bytes = "%PDF-1.4 saved package"
+    print_run.update_columns(
+      status: "prepared",
+      sha256: Digest::SHA256.hexdigest(bytes),
+      byte_size: bytes.bytesize
+    )
+    allow_any_instance_of(R2StorageService).to receive(:download).and_return(bytes)
+    allow(CheckPackagePreparation).to receive(:current_run?).and_return(true)
+
+    get "/api/v1/admin/check_print_runs/#{print_run.id}/pdf"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to eq(bytes)
+  end
+
+  it "refuses an outdated prepared PDF before downloading it" do
+    print_run.update_column(:status, "prepared")
+    allow(R2StorageService).to receive(:new).and_call_original
+
+    get "/api/v1/admin/check_print_runs/#{print_run.id}/pdf"
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to include("no longer match")
+    expect(R2StorageService).not_to have_received(:new)
+  end
+
   it "forbids client-portal users from listing saved packages" do
     client_user = create(:user, company: company, organization: company.organization, role: "client")
     allow_any_instance_of(Api::V1::Admin::CheckPrintRunsController)
@@ -138,7 +165,7 @@ RSpec.describe "Check print runs", type: :request do
     history_packages = response.parsed_body.fetch("check_print_runs").select do |saved|
       saved.fetch("filename").start_with?("history-package-")
     end
-    expect(history_packages.pluck("confirmation_state")).to all(eq("verification_required"))
+    expect(history_packages.pluck("confirmation_state")).to all(eq("legacy"))
     expect(PayrollItem).to have_received(:where).once
     expect(NonEmployeeCheck).to have_received(:where).once
     expect(CheckPrintRenderFingerprint).not_to have_received(:for_record)
@@ -193,8 +220,8 @@ RSpec.describe "Check print runs", type: :request do
 
     payload = response.parsed_body.fetch("check_print_runs").find { |saved| saved.fetch("id") == run.id }
     expect(payload).to include(
-      "confirmation_state" => "verification_required",
-      "confirmation_issue" => "Open this package to verify it against current payroll data."
+      "confirmation_state" => "legacy",
+      "confirmation_issue" => "This package predates automatic preparation. Generate a new package to prepare these checks."
     )
   end
 
@@ -270,7 +297,7 @@ RSpec.describe "Check print runs", type: :request do
 
     expect(response).to have_http_status(:service_unavailable)
     expect(response.parsed_body).to eq(
-      "error" => "The check package could not be generated. No checks were marked printed. Please try again."
+      "error" => "The check package could not be generated. No checks were prepared. Please try again."
     )
     expect(response.body).not_to include("private storage detail")
     expect(Rails.logger).to have_received(:error).with(include(
@@ -317,22 +344,8 @@ RSpec.describe "Check print runs", type: :request do
     ))
   end
 
-  it "returns a structured retryable response when print confirmation has an infrastructure failure" do
-    service = instance_double(CheckPrintRunConfirmationService)
-    allow(CheckPrintRunConfirmationService).to receive(:new).and_return(service)
-    allow(service).to receive(:call).and_raise(ActiveRecord::ConnectionNotEstablished, "private database detail")
-    allow(Rails.logger).to receive(:error)
-
+  it "does not expose a print-confirmation action" do
     post "/api/v1/admin/check_print_runs/#{print_run.id}/confirm"
-
-    expect(response).to have_http_status(:service_unavailable)
-    expect(response.parsed_body).to eq(
-      "error" => "Print confirmation could not be recorded. No check print statuses were changed. Please try again."
-    )
-    expect(response.body).not_to include("private database detail")
-    expect(Rails.logger).to have_received(:error).with(include(
-      "[check_print_runs#confirm]",
-      "ActiveRecord::ConnectionNotEstablished: private database detail"
-    ))
+    expect(response).to have_http_status(:not_found)
   end
 end

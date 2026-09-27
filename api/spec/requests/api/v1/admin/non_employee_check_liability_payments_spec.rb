@@ -137,7 +137,7 @@ RSpec.describe "Non-employee liability payments", type: :request do
       payment_date: "2026-08-21"
     }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to match(/Print the check/)
+      expect(response.parsed_body.fetch("error")).to match(/Generate a current check package/)
 
     payment.mark_printed!
     post "/api/v1/admin/non_employee_checks/#{payment.id}/mark_paid", params: {

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class NonEmployeeCheckLineItem < ApplicationRecord
-  belongs_to :non_employee_check
+  belongs_to :non_employee_check, touch: true
 
   before_validation :normalize_fields
 

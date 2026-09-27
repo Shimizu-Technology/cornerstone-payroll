@@ -6,7 +6,7 @@
 #
 # The service edits the payroll_item in place to the corrected values,
 # fixes YTD by subtracting the original contribution and re-adding the
-# corrected one, and (for already-printed checks) voids the old check
+# corrected one, and (for prepared or printed checks) voids the old check
 # number and assigns a new one. The result is a single clean replacement
 # check at the corrected amount.
 #
@@ -22,10 +22,9 @@
 # Modes
 # -----
 # - `:in_place` — used when the original check was committed but never
-#   printed (`check_printed_at IS NULL`). The check number is reused;
-#   no void event is logged because no physical paper went out.
-# - `:void_and_reissue` — used when the original was printed (and is
-#   now back in our possession). The old check number is voided in the
+#   prepared or printed. The check number is reused.
+# - `:void_and_reissue` — used when the original was prepared or printed.
+#   The old check number is voided in the
 #   audit trail, a fresh check number is assigned, and the new one
 #   becomes the canonical check for the period.
 #
@@ -176,7 +175,9 @@ class ReplaceCheckService
       # Step 4 — persist the replacement on the same row.
       update_attrs = {
         check_printed_at:  nil,
-        check_print_count: 0
+        check_print_count: 0,
+        check_prepared_at: nil,
+        check_prepared_source_updated_at: nil
       }
       if mode == :void_and_reissue
         update_attrs[:check_number]            = new_check_number
@@ -271,7 +272,7 @@ class ReplaceCheckService
   # Mode + simulation
   # ---------------------------------------------------------------------
   def detect_mode
-    @payroll_item.check_printed_at.present? ? :void_and_reissue : :in_place
+    @payroll_item.check_prepared_at.present? || @payroll_item.check_printed_at.present? ? :void_and_reissue : :in_place
   end
 
   # Build a duck-typed clone of the item with corrected inputs *and* run

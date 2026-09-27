@@ -9,7 +9,7 @@ class CheckEvent < ApplicationRecord
   # when the original check was uncashed (operator has it in hand or it was
   # never given out). The void of the old check # is logged separately as a
   # `voided` event for backwards compatibility with existing reports.
-  VALID_EVENT_TYPES = %w[assigned printed delivered voided reprinted batch_downloaded replaced renumbered].freeze
+  VALID_EVENT_TYPES = %w[assigned prepared printed delivered voided reprinted batch_downloaded replaced renumbered].freeze
   DELIVERY_EVIDENCE_TYPES = %w[hand_delivery mail courier other].freeze
 
   validates :event_type, inclusion: { in: VALID_EVENT_TYPES }
@@ -73,10 +73,10 @@ class CheckEvent < ApplicationRecord
   end
 
   def aire_entry_lifecycle_status
-    return "payment_prepared" if event_type == "printed"
+    return "payment_prepared" if %w[prepared printed].include?(event_type)
     return "payment_issued" if event_type == "delivered"
     return "payment_voided" if event_type == "voided" && payroll_item.voided?
     return "payment_issued" if event_type == "voided" && payroll_item.check_status == "delivered"
-    "payment_prepared" if event_type == "voided" && payroll_item.check_status == "printed"
+    "payment_prepared" if event_type == "voided" && %w[prepared printed].include?(payroll_item.check_status)
   end
 end

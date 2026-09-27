@@ -101,7 +101,7 @@ export function PrinterProfileManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} dismissOnEscape={!saving && busyProfileId === null}>
-      <DialogContent className="dialog-wide flex max-h-[94vh] max-w-3xl flex-col overflow-hidden p-0">
+      <DialogContent className="dialog-wide flex max-h-[94vh] max-w-3xl flex-col overflow-hidden p-0" style={{ marginInline: 'auto' }}>
         <DialogHeader className="shrink-0 border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
           <DialogTitle className="text-xl text-white">Printer profiles</DialogTitle>
           <DialogDescription className="mt-1 text-slate-300">

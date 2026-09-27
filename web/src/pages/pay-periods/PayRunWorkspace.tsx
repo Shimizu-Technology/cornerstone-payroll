@@ -507,19 +507,19 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               <TableBody striped>
                 {items.map((item) => {
                   const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending';
+                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_status === 'printed' ? 'Printed' : item.check_status === 'prepared' ? 'Prepared' : item.check_number ? 'Assigned' : 'Pending';
                   return (
                     <TableRow key={item.id}>
                       <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
                       <TableCell>{isDeposit ? 'Direct deposit' : 'Paper check'}</TableCell>
                       <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Rehearsal preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
-                      <TableCell><Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : item.check_printed_at ? 'success' : 'default'}>{status}</Badge></TableCell>
+                      <TableCell><Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : ['prepared', 'printed', 'delivered'].includes(item.check_status || '') ? 'success' : 'default'}>{status}</Badge></TableCell>
                       <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
                       <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-wrap justify-end gap-2">
                           {payRun.status === 'committed' && !item.voided && Number(item.net_pay || 0) > 0 &&
-                            (isDeposit || (!item.check_printed_at && !item.check_print_count && item.check_status !== 'printed' && item.check_status !== 'delivered')) && (
+                            (isDeposit || (!item.check_prepared_at && !item.check_printed_at && !item.check_print_count && item.check_status !== 'printed' && item.check_status !== 'delivered')) && (
                             <Button size="sm" variant="outline" onClick={() => { setSwitchItem(item); setSwitchError(null); }}>Switch for this run</Button>
                           )}
                           <Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>
@@ -540,7 +540,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             open={checkPrintOpen}
             payPeriodId={payRun.id}
             onOpenChange={setCheckPrintOpen}
-            onConfirmed={handlePrintConfirmed}
+            onPackageGenerated={handlePrintConfirmed}
           />
         </>
       )}

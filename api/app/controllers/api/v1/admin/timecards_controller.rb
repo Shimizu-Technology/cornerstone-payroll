@@ -441,6 +441,7 @@ module Api
             department_name: item.employee&.department&.name,
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
+            check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
             check_status: item.check_status,
             loan_deduction: item.loan_deduction,

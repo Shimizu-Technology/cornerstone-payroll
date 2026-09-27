@@ -3425,7 +3425,7 @@ export function PayPeriodDetail({
             open={checkPrintOpen}
             payPeriodId={payPeriod.id}
             onOpenChange={setCheckPrintOpen}
-            onConfirmed={() => setCheckPrintRefreshToken((value) => value + 1)}
+            onPackageGenerated={() => setCheckPrintRefreshToken((value) => value + 1)}
           />
         )}
 

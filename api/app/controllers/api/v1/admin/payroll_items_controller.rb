@@ -372,6 +372,7 @@ module Api
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
             check_printed_at: item.check_printed_at,
+            check_prepared_at: item.check_prepared_at,
             check_date: item.check_date,
             check_memo: item.check_memo,
             custom_earnings: item.custom_earnings || [],

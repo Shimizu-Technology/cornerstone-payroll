@@ -27,6 +27,7 @@ class CheckPrintQueueService
         total: items.size,
         eligible: items.count { |item| item.fetch(:eligible) },
         unprinted: items.count { |item| item.fetch(:eligible) && item.fetch(:status) == "unprinted" },
+        prepared: items.count { |item| item.fetch(:eligible) && item.fetch(:status) == "prepared" },
         printed: items.count { |item| item.fetch(:eligible) && item.fetch(:status) == "printed" },
         voided: items.count { |item| item.fetch(:status) == "voided" },
         check_stock_type: pay_period.company.check_stock_type,
@@ -70,6 +71,7 @@ class CheckPrintQueueService
       status: item.check_status,
       print_count: item.check_print_count.to_i,
       printed_at: item.check_printed_at&.iso8601,
+      prepared_at: item.check_prepared_at&.iso8601,
       eligible: eligible,
       disabled_reason: payroll_item_disabled_reason(item)
     }
@@ -89,6 +91,7 @@ class CheckPrintQueueService
       status: check.check_status,
       print_count: check.print_count.to_i,
       printed_at: check.printed_at&.iso8601,
+      prepared_at: check.prepared_at&.iso8601,
       eligible: eligible,
       disabled_reason: non_employee_check_disabled_reason(check)
     }
