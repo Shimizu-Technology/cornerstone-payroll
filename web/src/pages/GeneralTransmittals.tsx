@@ -483,72 +483,6 @@ export function GeneralTransmittals() {
         )}
 
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="order-2 min-w-0 space-y-6 xl:order-1">
-            <Card>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold text-neutral-900">Transmittal history</h2>
-                    <p className="text-xs text-neutral-500">Drafts and generated packets</p>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={() => setForm(emptyForm())}><Plus className="h-4 w-4" /></Button>
-                </div>
-                {loading ? <p className="text-sm text-neutral-500">Loading…</p> : transmittals.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-4 text-sm text-neutral-500">No transmittals yet.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {transmittals.map((transmittal) => (
-                      <button
-                        type="button"
-                        key={transmittal.id}
-                        onClick={() => loadTransmittal(transmittal.id)}
-                        className={`w-full rounded-xl border p-3 text-left transition ${form.id === transmittal.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 hover:border-primary-200 hover:bg-neutral-50'}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="line-clamp-2 text-sm font-semibold text-neutral-900">{transmittal.title}</p>
-                          <Badge className={transmittal.source_kind === 'pay_period' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
-                            {transmittal.source_kind === 'pay_period' ? 'Payroll' : 'Standalone'}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 flex justify-between text-xs text-neutral-500">
-                          <span>{transmittal.item_count} included</span>
-                          <span>{transmittal.artifact_count} versions</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {form.artifacts.length > 0 && (
-              <Card>
-                <CardContent className="space-y-3">
-                  <div>
-                    <h2 className="font-semibold text-neutral-900">Generated versions</h2>
-                    <p className="text-xs text-neutral-500">Immutable evidence of exactly what was produced</p>
-                  </div>
-                  {form.artifacts.map((artifact) => (
-                    <div key={artifact.id} className="rounded-xl border border-neutral-200 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-neutral-900">Version {artifact.version_number}</p>
-                          <p className="text-xs text-neutral-500">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
-                        </div>
-                        <FileClock className="h-4 w-4 text-primary-600" />
-                      </div>
-                      <p className="mt-2 truncate font-mono text-[10px] text-neutral-400" title={artifact.sha256}>SHA-256 {artifact.sha256}</p>
-                      <div className="mt-3 flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1" onClick={() => previewArtifact(artifact)}><Eye className="mr-1.5 h-3.5 w-3.5" />View</Button>
-                        <Button size="sm" variant="outline" className="flex-1" onClick={() => downloadArtifact(artifact)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
           <div className="order-1 min-w-0 space-y-6 xl:order-2">
             <Card>
               <CardContent className="space-y-6">
@@ -641,6 +575,72 @@ export function GeneralTransmittals() {
               </CardContent>
             </Card>
           </div>
+          <div className="order-2 min-w-0 space-y-6 xl:order-1">
+            <Card>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-neutral-900">Transmittal history</h2>
+                    <p className="text-xs text-neutral-500">Drafts and generated packets</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => setForm(emptyForm())}><Plus className="h-4 w-4" /></Button>
+                </div>
+                {loading ? <p className="text-sm text-neutral-500">Loading…</p> : transmittals.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-4 text-sm text-neutral-500">No transmittals yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {transmittals.map((transmittal) => (
+                      <button
+                        type="button"
+                        key={transmittal.id}
+                        onClick={() => loadTransmittal(transmittal.id)}
+                        className={`w-full rounded-xl border p-3 text-left transition ${form.id === transmittal.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 hover:border-primary-200 hover:bg-neutral-50'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="line-clamp-2 text-sm font-semibold text-neutral-900">{transmittal.title}</p>
+                          <Badge className={transmittal.source_kind === 'pay_period' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
+                            {transmittal.source_kind === 'pay_period' ? 'Payroll' : 'Standalone'}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex justify-between text-xs text-neutral-500">
+                          <span>{transmittal.item_count} included</span>
+                          <span>{transmittal.artifact_count} versions</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {form.artifacts.length > 0 && (
+              <Card>
+                <CardContent className="space-y-3">
+                  <div>
+                    <h2 className="font-semibold text-neutral-900">Generated versions</h2>
+                    <p className="text-xs text-neutral-500">Immutable evidence of exactly what was produced</p>
+                  </div>
+                  {form.artifacts.map((artifact) => (
+                    <div key={artifact.id} className="rounded-xl border border-neutral-200 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-neutral-900">Version {artifact.version_number}</p>
+                          <p className="text-xs text-neutral-500">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
+                        </div>
+                        <FileClock className="h-4 w-4 text-primary-600" />
+                      </div>
+                      <p className="mt-2 truncate font-mono text-[10px] text-neutral-400" title={artifact.sha256}>SHA-256 {artifact.sha256}</p>
+                      <div className="mt-3 flex gap-2">
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => previewArtifact(artifact)}><Eye className="mr-1.5 h-3.5 w-3.5" />View</Button>
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => downloadArtifact(artifact)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
         </div>
       </main>
 

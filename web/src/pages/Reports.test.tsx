@@ -44,6 +44,18 @@ describe('Reports library navigation', () => {
     await waitFor(() => expect(document.activeElement).toBe(section));
     expect(section.querySelector('a[href="/checks-payments"]')).toBeTruthy();
   });
+
+  it('returns focus to a report when its already selected library card is chosen again', async () => {
+    render(<MemoryRouter><Reports /></MemoryRouter>);
+    const openChecks = screen.getByRole('button', { name: 'Review checks' });
+    fireEvent.click(openChecks);
+    const section = await screen.findByRole('region', { name: 'Checks & Payments Register' });
+    await waitFor(() => expect(document.activeElement).toBe(section));
+
+    openChecks.focus();
+    fireEvent.click(openChecks);
+    await waitFor(() => expect(document.activeElement).toBe(section));
+  });
 });
 
 const report = {

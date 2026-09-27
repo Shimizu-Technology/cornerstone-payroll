@@ -1881,7 +1881,7 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words font-semibold text-neutral-950">{row.source_employee_name}</p>
-                        <p className="mt-1 text-xs text-neutral-500">{shortDate(row.pay_date)} · Check {row.check_number || 'not provided'}</p>
+                        <p className="mt-1 text-xs text-neutral-500">{row.period_type === 'opening_summary' ? 'Opening summary · ' : ''}{shortDate(row.pay_date)} · Check {row.check_number || 'not provided'}</p>
                       </div>
                       <p className="shrink-0 font-mono text-sm font-bold tabular-nums text-neutral-950">{dollars(row.net_pay)}</p>
                     </div>

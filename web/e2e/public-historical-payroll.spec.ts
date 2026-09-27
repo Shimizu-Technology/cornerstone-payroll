@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalReport, HistoricalReportType, HistoricalYtdBridge, PayrollGoLivePayload } from '@/services/api';
+import type { HistoricalClientBootstrap, HistoricalCutoverReview, HistoricalEvidenceManifest, HistoricalImportBatch, HistoricalImportDetail, HistoricalImportProvider, HistoricalPaycheck, HistoricalReport, HistoricalReportType, HistoricalYtdBridge, PayrollGoLivePayload } from '@/services/api';
 import type { Employee } from '@/types';
 
 interface MockWorker {
@@ -1831,7 +1831,20 @@ for (const width of [320, 390]) {
 test(`shows historical report values and evidence actions on a ${width}px phone`, async ({ page }): Promise<void> => {
   await page.setViewportSize({ width, height: 844 });
   await mockApplicationShell(page);
-  const accepted = { ...detailWithVerifiedSource(1), status: 'locked' as const };
+  const openingPaycheck: HistoricalPaycheck = {
+    id: 80, historical_pay_period_id: 10, historical_worker_id: 20,
+    source_employee_name: 'Opening Summary Worker', pay_date: '2024-12-31',
+    period_start: '2024-01-01', period_end: '2024-12-31', period_type: 'opening_summary',
+    source_status: 'active', reconciliation_status: 'opening_summary',
+    hours_total: '0', gross_pay: '2000', adjusted_gross: '2000',
+    pretax_deductions: '0', employee_taxes: '400', federal_income_tax: '200',
+    social_security_tax: '125', medicare_tax: '75', after_tax_deductions: '0',
+    net_pay: '1600', employer_taxes: '200', employer_contributions: '0',
+    total_payroll_cost: '2200', hours_breakdown: [], earnings_breakdown: [],
+    pretax_deduction_breakdown: [], after_tax_deduction_breakdown: [],
+    employee_tax_breakdown: [], employer_tax_breakdown: [], employer_contribution_breakdown: [],
+  };
+  const accepted = { ...detailWithVerifiedSource(1), status: 'locked' as const, paychecks: [openingPaycheck] };
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [accepted],
     meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, archive: acceptedArchive },
@@ -1848,6 +1861,7 @@ test(`shows historical report values and evidence actions on a ${width}px phone`
   await page.goto('/historical-payroll');
 
   await expect(page.getByText('All report values').first()).toBeVisible();
+  await expect(page.getByText('Opening summary · Dec 31, 2024 · Check not provided')).toBeVisible();
   await expect(page.getByRole('table').filter({ hasText: 'Gross pay' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Download original' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);

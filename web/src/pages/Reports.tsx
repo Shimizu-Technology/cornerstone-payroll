@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -2989,9 +2989,9 @@ function QuarterlyOfficialFormModal({
             <Button variant={mobileView === 'fields' ? 'primary' : 'outline'} onClick={() => setMobileView('fields')}>Form fields</Button>
             <Button variant={mobileView === 'preview' ? 'primary' : 'outline'} onClick={() => previewUrl ? setMobileView('preview') : void previewPdf()} disabled={working || !fields}>{previewUrl ? 'PDF preview' : 'Generate preview'}</Button>
           </div>
+          {error ? <div role="alert" className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 lg:mx-5">{error}</div> : null}
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
             <div className={`${mobileView === 'fields' ? 'block' : 'hidden'} min-h-0 overflow-y-auto bg-gray-50 p-4 lg:block lg:p-5`}>
-              {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
               {loading || !fields ? (
                 <div className="rounded-md border bg-white p-4 text-sm text-gray-500 sm:p-6">Loading form values...</div>
               ) : (
@@ -4039,15 +4039,19 @@ function ReportsContent() {
 
   const activeReportDefinition = reports.find((report) => report.id === activeReport) || null;
 
-  useEffect(() => {
-    if (!activeReport) return;
+  const focusActiveReport = useCallback(() => {
     const section = activeReportRef.current;
     if (!section) return;
     section.focus({ preventScroll: true });
     section.scrollIntoView?.({ block: 'start' });
-  }, [activeReport]);
+  }, []);
+
+  useEffect(() => {
+    if (activeReport) focusActiveReport();
+  }, [activeReport, focusActiveReport]);
 
   const openReport = (reportId: ReportId) => {
+    if (reportId === activeReport) focusActiveReport();
     setSearchParams({ report: reportId });
     setRecentReportsState((current) => {
       const currentIds = current.key === recentsKey ? current.ids : readStoredReportIds(recentsKey);
