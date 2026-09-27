@@ -108,7 +108,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
-  const [markingPrintedId, setMarkingPrintedId] = useState<number | null>(null);
   const [generatingFit, setGeneratingFit] = useState(false);
   const [fitError, setFitError] = useState<string | null>(null);
   const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
@@ -118,7 +117,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
   const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
   const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
-  const requiresVerifiedPrintPackage = company?.require_distinct_check_print_confirmer === true;
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -223,18 +221,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       // ignore
     } finally {
       setVoidConfirming(false);
-    }
-  };
-
-  const handleMarkPrinted = async (id: number) => {
-    setMarkingPrintedId(id);
-    try {
-      await nonEmployeeChecksApi.markPrinted(id);
-      loadChecks();
-    } catch {
-      // ignore
-    } finally {
-      setMarkingPrintedId(null);
     }
   };
 
@@ -680,7 +666,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:gap-1 [&>button]:w-full sm:[&>button]:w-auto">
-                      {!requiresVerifiedPrintPackage && <Button
+                      <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handlePreviewPdf(check)}
@@ -688,8 +674,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         className="text-xs px-2 py-1"
                       >
                         {pdfLoading === check.id ? '...' : 'Preview'}
-                      </Button>}
-                      {!requiresVerifiedPrintPackage && <Button
+                      </Button>
+                      <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handlePrintSingle(check)}
@@ -697,7 +683,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         className="text-xs px-2 py-1"
                       >
                         Print
-                      </Button>}
+                      </Button>
                       {!check.voided && (
                         <Button
                           size="sm"
@@ -706,11 +692,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                           className="text-xs px-2 py-1"
                         >
                           Edit
-                        </Button>
-                      )}
-                      {!requiresVerifiedPrintPackage && !check.voided && !check.printed_at && (
-                        <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
-                          {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
                         </Button>
                       )}
                       {!check.voided && voidingId !== check.id && (
@@ -727,7 +708,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                           <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
                         </div>
                       )}
-                      {!check.printed_at && !check.voided && (
+                      {!check.printed_at && !check.prepared_at && !check.voided && (
                         <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
                           {deletingId === check.id ? 'Deleting...' : 'Delete'}
                         </Button>

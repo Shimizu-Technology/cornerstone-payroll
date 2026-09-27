@@ -86,6 +86,7 @@ module MigrationPromotion
       issues << "This payroll already has numbered checks" if pay_period.payroll_items.with_check_number.exists?
       issues << "This payroll already has check activity" if CheckEvent.where(payroll_item_id: pay_period.payroll_item_ids).exists?
       issues << "This payroll already has print activity" if pay_period.payroll_items.where.not(check_printed_at: nil).exists? ||
+        pay_period.payroll_items.where.not(check_prepared_at: nil).exists? ||
         pay_period.payroll_items.where("check_print_count > 0").exists?
       issues << "This payroll contains voided checks" if pay_period.payroll_items.where(voided: true).exists?
       issues << "Resolve positive-net direct deposits before preparing paper checks" if direct_deposit_items.any?

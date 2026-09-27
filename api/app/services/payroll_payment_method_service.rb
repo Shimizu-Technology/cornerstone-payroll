@@ -85,7 +85,7 @@ class PayrollPaymentMethodService
 
     if old_method == "paper_check" && method == "direct_deposit"
       old_number = item.check_number
-      if item.check_printed_at.present? ||
+      if item.check_prepared? ||
          item.check_events.where(event_type: %w[printed batch_downloaded delivered]).exists? ||
          item.pay_period.check_print_runs.any? { |run| run.manifest.any? { |entry| entry["key"] == "payroll_item:#{item.id}" } } ||
          CheckReconciliationStatus.for(item) == "cleared"

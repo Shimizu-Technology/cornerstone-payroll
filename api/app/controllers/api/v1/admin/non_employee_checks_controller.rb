@@ -235,8 +235,8 @@ module Api
               error: "Void a prepared liability payment instead of deleting it so its history is preserved"
             }, status: :unprocessable_entity
           end
-          if @check.printed?
-            return render json: { error: "Cannot delete a printed check; void it instead" }, status: :unprocessable_entity
+          if @check.prepared_at.present? || @check.printed?
+            return render json: { error: "Cannot delete a prepared check; void it instead" }, status: :unprocessable_entity
           end
 
           @check.destroy!
@@ -245,10 +245,6 @@ module Api
 
         # POST /api/v1/admin/non_employee_checks/:id/mark_printed
         def mark_printed
-          if @check.pay_period && @check.company.require_distinct_check_print_confirmer?
-            return render json: { error: "Use the pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
-          end
-
           @check.mark_printed!
           render json: { non_employee_check: check_payload(@check.reload) }
         rescue ArgumentError => e
@@ -306,10 +302,6 @@ module Api
           checks = printable_batch_checks
           return if performed?
 
-          if checks.any? { |check| verified_print_package_required?(check) }
-            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
-          end
-
           if checks.empty?
             return render json: { error: "No printable non-employee checks found" }, status: :unprocessable_entity
           end
@@ -341,10 +333,6 @@ module Api
         def mark_all_printed
           checks = printable_batch_checks(include_printed: false)
           return if performed?
-          if checks.any? { |check| check.pay_period && check.company.require_distinct_check_print_confirmer? }
-            return render json: { error: "Use each pay period's verified check print package so a second operator can confirm printing" }, status: :unprocessable_entity
-          end
-
           marked_count = 0
           NonEmployeeCheck.transaction do
             checks.each do |check|
@@ -364,9 +352,6 @@ module Api
         def check_pdf
           unless @check.payment_method == "check"
             return render json: { error: "Only check payments have a printable check" }, status: :unprocessable_entity
-          end
-          if verified_print_package_required?(@check)
-            return render json: { error: "Use the verified check print package when second-person confirmation is enabled" }, status: :unprocessable_entity
           end
           render_company = render_company_for(@check.company)
           if render_company.first_hawaiian_4up_checks?
@@ -407,10 +392,6 @@ module Api
             company: company,
             actor: current_user
           ).apply_to(company)
-        end
-
-        def verified_print_package_required?(check)
-          check.pay_period.present? && check.company.require_distinct_check_print_confirmer?
         end
 
         def printable_batch_checks(include_printed: true)
@@ -579,6 +560,7 @@ module Api
             line_items: check.line_items.map { |line_item| line_item_payload(line_item) },
             print_count: check.print_count,
             printed_at: check.printed_at,
+            prepared_at: check.prepared_at,
             voided: check.voided,
             void_reason: check.void_reason,
             voided_at: check.voided_at,

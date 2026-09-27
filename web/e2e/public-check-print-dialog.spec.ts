@@ -4,9 +4,9 @@ const harnessModule = '/e2e/fixtures/check-print-dialog-harness.tsx';
 const queuePattern = '**/admin/pay_periods/703/check_print_queue';
 
 const queueResponse = {
-  items: [{ key: 'payroll_item:901', source_type: 'payroll_item', source_id: 901, check_number: '1001', payee: 'Test Employee', amount: 100, kind: 'employee', kind_label: 'Employee', status: 'unprinted', print_count: 0, printed_at: null, eligible: true, disabled_reason: null }],
+  items: [{ key: 'payroll_item:901', source_type: 'payroll_item', source_id: 901, check_number: '1001', payee: 'Test Employee', amount: 100, kind: 'employee', kind_label: 'Employee', status: 'unprinted', print_count: 0, printed_at: null, prepared_at: null, eligible: true, disabled_reason: null }],
   meta: {
-    total: 1, eligible: 1, unprinted: 1, printed: 0, voided: 0, check_stock_type: 'bottom_check', slot_count: 1,
+    total: 1, eligible: 1, unprinted: 1, prepared: 0, printed: 0, voided: 0, check_stock_type: 'bottom_check', slot_count: 1,
     printer_profile: { id: 8, name: 'Payroll Room Printer', check_stock_type: 'bottom_check', lock_version: 3, updated_at: '2026-09-22T00:00:00Z' },
   },
 };
@@ -80,10 +80,79 @@ test('printer profiles stay usable at laptop height and expose inline creation',
   await workspace.getByRole('button', { name: 'Manage' }).click();
   const manager = page.getByRole('dialog', { name: 'Printer profiles' });
   await expect(manager).toBeVisible();
+  const laptopBounds = await manager.boundingBox();
+  expect(laptopBounds).not.toBeNull();
+  expect(Math.abs(laptopBounds!.x + laptopBounds!.width / 2 - 1366 / 2)).toBeLessThan(2);
   await expect(manager.getByRole('button', { name: 'Done' })).toBeVisible();
   await manager.getByRole('button', { name: 'New profile' }).click();
   await manager.getByRole('textbox', { name: 'Profile name' }).fill('Accounting Office Canon');
   await expect(manager.getByRole('button', { name: 'Create and use profile' })).toBeEnabled();
+  await page.setViewportSize({ width: 2048, height: 1137 });
+  const desktopBounds = await manager.boundingBox();
+  expect(desktopBounds).not.toBeNull();
+  expect(Math.abs(desktopBounds!.x + desktopBounds!.width / 2 - 2048 / 2)).toBeLessThan(2);
+});
+
+test('previously printed checks remain visible but require explicit selection for another package', async ({ page }): Promise<void> => {
+  await routeWorkspace(page);
+  let selectedProfileId = 8;
+  await page.route('**/admin/printer_profiles', (route) => fulfillJson(route, { printer_profiles: [printerProfile, { ...printerProfile, id: 9, name: 'Office Printer' }], selections: [], active_printer_profile_id: 8 }));
+  await page.route('**/admin/printer_profile_selections/bottom_check', (route) => {
+    selectedProfileId = 9;
+    return fulfillJson(route, { selection: { id: 9 } });
+  });
+  await page.route(queuePattern, (route) => fulfillJson(route, {
+    ...queueResponse,
+    items: [{ ...queueResponse.items[0], status: 'printed', print_count: 1, printed_at: '2026-09-22T01:05:00Z' }],
+    meta: { ...queueResponse.meta, unprinted: 0, printed: 1, printer_profile: { ...queueResponse.meta.printer_profile, id: selectedProfileId } },
+  }));
+  await mountHarness(page);
+
+  const dialog = page.getByRole('dialog', { name: 'Print checks' });
+  await expect(dialog.getByText('Test Employee')).toBeVisible();
+  await expect(dialog.getByText(/not selected automatically/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Select not prepared' })).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: 'Select check 1001' }).check();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
+  await dialog.getByRole('combobox', { name: 'Printer profile' }).selectOption('9');
+  await expect(dialog.getByRole('combobox', { name: 'Printer profile' })).toHaveValue('9');
+  await expect(dialog.getByRole('checkbox', { name: 'Select check 1001' })).toBeChecked();
+  await expect(dialog.getByRole('button', { name: 'Generate and save package' })).toBeEnabled();
+});
+
+test('a saved package is complete without print confirmation and checks remain available', async ({ page }): Promise<void> => {
+  await routeWorkspace(page);
+  await page.route(queuePattern, (route) => fulfillJson(route, {
+    ...queueResponse,
+    items: [{ ...queueResponse.items[0], status: 'prepared', prepared_at: '2026-09-22T01:05:00Z' }],
+    meta: { ...queueResponse.meta, unprinted: 0, prepared: 1 },
+  }));
+  await page.unroute('**/admin/pay_periods/703/check_print_runs');
+  await page.route('**/admin/pay_periods/703/check_print_runs', (route) => fulfillJson(route, {
+    check_print_runs: [{
+      id: 42, pay_period_id: 703, status: 'prepared', check_stock_type: 'bottom_check',
+      printer_profile_id: 8, printer_profile_name: 'Payroll Room Printer', printer_profile_lock_version: 3,
+      calibration_digest: 'b'.repeat(64), starting_slot: 1, selected_count: 1,
+      manifest: [{ key: 'payroll_item:901', source_type: 'payroll_item', source_id: 901, check_number: '1001', payee: 'Test Employee', amount: '100.00' }],
+      filename: 'checks.pdf', sha256: 'a'.repeat(64), byte_size: 100,
+      generated_at: '2026-09-22T01:00:00Z', confirmed_at: null,
+      created_by_id: 1, created_by_name: 'Leon', confirmed_by_id: null, confirmed_by_name: null,
+      confirmation_state: 'prepared', confirmation_issue: null,
+    }],
+  }));
+  await page.route('**/admin/check_print_runs/42/pdf**', (route) => route.fulfill({
+    status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF',
+  }));
+  await mountHarness(page);
+
+  const dialog = page.getByRole('dialog', { name: 'Print checks' });
+  await expect(dialog.getByText('Package #42', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Test Employee')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Confirm printed correctly' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Create another package' }).click();
+  await expect(dialog.getByText('Test Employee')).toBeVisible();
+  await expect(dialog.getByRole('checkbox', { name: 'Select check 1001' })).not.toBeChecked();
 });
 
 test('check printing shows a stable starting state and can close without cancelling generation', async ({ page }): Promise<void> => {

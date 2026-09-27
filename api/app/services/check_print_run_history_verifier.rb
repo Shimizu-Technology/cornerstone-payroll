@@ -10,17 +10,18 @@ class CheckPrintRunHistoryVerifier
 
     runs.index_with do |run|
       next [ "confirmed", nil ] if run.confirmed?
+      if run.prepared?
+        next [ "prepared", nil ] if CheckPackagePreparation.current_run?(run, current_records)
+
+        next [ "outdated", "Checks in this package no longer match the current check details. Generate a replacement package." ]
+      end
 
       CheckPrintRunSelectionVerifier.new(
         run: run,
         current_records: current_records,
         verify_render_inputs: false
       ).call
-      if run.manifest.any? { |entry| entry["render_input_digest"].present? }
-        [ "verification_required", "Open this package to verify it against current payroll data." ]
-      else
-        [ "ready", nil ]
-      end
+      [ "legacy", "This package predates automatic preparation. Generate a new package to prepare these checks." ]
     rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
       [ "outdated", e.message ]
     end.transform_keys(&:id)

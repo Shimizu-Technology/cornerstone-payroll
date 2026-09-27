@@ -3207,11 +3207,6 @@ export const checksApi = {
   printRunPdf: (runId: number, disposition: 'inline' | 'attachment' = 'inline') =>
     api.getBlobWithParams(`/admin/check_print_runs/${runId}/pdf`, { disposition }),
 
-  confirmPrintRun: (runId: number) =>
-    api.post<{ check_print_run: CheckPrintRun; already_confirmed: boolean; marked_printed: number }>(
-      `/admin/check_print_runs/${runId}/confirm`
-    ),
-
 
   // POST to generate batch PDF (returns blob)
   batchPdf: (payPeriodId: number, options?: { startingSlot?: number }) =>
@@ -3592,7 +3587,6 @@ export interface CompanyDetail extends CompanyListItem {
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
   simple_payroll_register_enabled?: boolean;
-  require_distinct_check_print_confirmer?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
 }

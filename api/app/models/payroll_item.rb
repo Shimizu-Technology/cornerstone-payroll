@@ -104,6 +104,19 @@ class PayrollItem < ApplicationRecord
   scope :printed,            -> { where.not(check_printed_at: nil) }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
 
+  def check_prepared?
+    check_printed_at.present? || (check_prepared_at.present? && check_prepared_source_updated_at == updated_at)
+  end
+
+  # A verified package prepares a check without asserting that paper was printed.
+  # Keep updated_at stable: the package manifest snapshots the rendering inputs.
+  def mark_package_prepared!(user:, ip_address: nil)
+    return if check_prepared_at.present? && check_prepared_source_updated_at == updated_at
+
+    update_columns(check_prepared_at: Time.current, check_prepared_source_updated_at: updated_at)
+    check_events.create!(user: user, event_type: "prepared", check_number: check_number, ip_address: ip_address)
+  end
+
   # ---------------------------------------------------------------------------
   # Check lifecycle actions
   # ---------------------------------------------------------------------------
@@ -140,7 +153,7 @@ class PayrollItem < ApplicationRecord
 
   def mark_delivered!(user:, delivered_on:, delivery_method:, attestation:, evidence_reference: nil, note: nil, ip_address: nil)
     raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
-    raise ArgumentError, "Print the check before marking it delivered" if check_printed_at.blank?
+    raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
     raise ArgumentError, "Check actions are only available for committed pay periods" unless pay_period.committed?
     raise ArgumentError, "Confirm the delivery attestation" unless ActiveModel::Type::Boolean.new.cast(attestation)
     unless CheckEvent::DELIVERY_EVIDENCE_TYPES.include?(delivery_method.to_s)
@@ -153,7 +166,7 @@ class PayrollItem < ApplicationRecord
     ApplicationRecord.transaction do
       lock!
       raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
-      raise ArgumentError, "Print the check before marking it delivered" if check_printed_at.blank?
+      raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
 
       existing = check_events.find_by(event_type: "delivered", check_number: check_number)
       return { already_delivered: true, event: existing } if existing
@@ -217,6 +230,7 @@ class PayrollItem < ApplicationRecord
     end
     return "delivered" if delivered
     return "printed"  if check_printed_at.present?
+    return "prepared" if check_prepared?
     return "unprinted" if check_number.present?
     nil
   end

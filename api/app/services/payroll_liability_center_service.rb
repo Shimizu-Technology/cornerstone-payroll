@@ -128,6 +128,7 @@ class PayrollLiabilityCenterService
       check_number: payment.check_number,
       status: payment.check_status,
       printed_at: payment.printed_at,
+      prepared_at: payment.prepared_at,
       paid_at: payment.paid_at,
       paid_by_name: payment.paid_by&.name,
       created_by_name: payment.created_by&.name,
