@@ -385,6 +385,7 @@ import type {
 export const employeesApi = {
   list: (params?: {
     company_id?: number;
+    eligible_pay_period_id?: number;
     status?: string;
     department_id?: number;
     employment_type?: string;
@@ -1069,6 +1070,7 @@ export interface RunPayrollResponse {
   pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
   results: {
     success: { employee_id: number; name: string }[];
+    skipped: { employee_id: number; name: string; reason: string }[];
     errors: { employee_id: number; error: string }[];
   };
 }

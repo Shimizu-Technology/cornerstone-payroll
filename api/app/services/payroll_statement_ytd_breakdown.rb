@@ -345,7 +345,7 @@ class PayrollStatementYtdBreakdown
           period_id: pay_period.id
         )
       prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
-      items = employee.payroll_items.not_voided
+      items = employee.payroll_items.not_voided.reportable
         .where(company_id: company.id, pay_period_id: prior_periods.select(:id))
         .includes(
           :payroll_item_earnings,

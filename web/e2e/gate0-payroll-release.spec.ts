@@ -1087,7 +1087,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim()).toBe('+$12.34');
     await expect(bonusAlphaRow).not.toContainText('Inactive legacy rate');
     await registerSearch.fill('');
-    await expect(totalsRow).toContainText('Totals (5 employees)');
+    await expect(totalsRow).toContainText('Totals (4 employees)');
     expect((await totalCells.allTextContents()).map((value) => value.trim())).toEqual(unfilteredTotalValues);
 
     await page.getByRole('combobox').filter({ has: page.getByRole('option', { name: 'Hours Low-High' }) }).last().selectOption('hours:asc');
@@ -1953,7 +1953,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     try {
       const page = await context.newPage();
       const periodPath = `admin/pay_periods/${fixture.bonus_sync_pay_period_id}`;
-      const baseline = await accountantApi.post(`${periodPath}/run_payroll`);
+      const baseline = await accountantApi.post(`${periodPath}/run_payroll`, {
+        data: { hours: { [fixture.employee_id]: { regular: 80 } } },
+      });
       expect(baseline.ok()).toBeTruthy();
       const baselineBody = await baseline.json();
       const initial = baselineBody.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
@@ -1968,7 +1970,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await page.route('**/run_payroll', async (route) => {
         await route.fulfill({ json: {
           ...baselineBody,
-          results: { success: [], errors: [{ employee_id: fixture.employee_id, error: 'Review this employee setup before retrying.' }] },
+          results: { success: [], skipped: [], errors: [{ employee_id: fixture.employee_id, error: 'Review this employee setup before retrying.' }] },
         } });
       }, { times: 1 });
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();

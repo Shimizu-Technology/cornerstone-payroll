@@ -87,7 +87,7 @@ class TransmittalLogPdfGenerator
     end
 
     pay_period.payroll_items
-      .not_voided
+      .not_voided.reportable
       .where.not(check_number: nil)
       .pluck(:check_number)
       .map(&:to_s)
@@ -196,7 +196,7 @@ class TransmittalLogPdfGenerator
   end
 
   def render_tax_obligations(pdf)
-    items = pay_period.payroll_items.not_voided
+    items = pay_period.payroll_items.not_voided.reportable
     total_fit  = items.sum(:withholding_tax)
     emp_ss     = items.sum(:social_security_tax)
     er_ss      = items.sum(:employer_social_security_tax)

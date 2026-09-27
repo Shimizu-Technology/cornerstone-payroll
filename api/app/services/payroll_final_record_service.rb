@@ -42,7 +42,7 @@ class PayrollFinalRecordService
   attr_reader :pay_period
 
   def items
-    @items ||= pay_period.payroll_items.not_voided.includes(
+    @items ||= pay_period.payroll_items.not_voided.reportable.includes(
       :employee,
       :check_events,
       :check_reconciliation_events,
@@ -193,7 +193,7 @@ class PayrollFinalRecordService
     )
     native = PayrollItem.joins(:pay_period)
       .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-      .not_voided
+      .not_voided.reportable
       .where(company_id: pay_period.company_id, pay_periods: {
         id: PayPeriod.reportable_committed.where(company_id: pay_period.company_id, pay_date: period.range).select(:id)
       }).to_a

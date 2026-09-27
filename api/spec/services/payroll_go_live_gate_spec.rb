@@ -114,6 +114,8 @@ RSpec.describe PayrollGoLiveGate do
       end_date: Date.new(2026, 9, 15),
       pay_date: Date.new(2026, 9, 30)
     )
+    employee = create(:employee, company:)
+    create(:payroll_item, pay_period: period, employee:, company:, gross_pay: 100, net_pay: 90)
 
     expect { PayPeriodLifecycleService.new(pay_period: period, actor:).approve! }
       .to change { period.reload.status }.from("calculated").to("approved")

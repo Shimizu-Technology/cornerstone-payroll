@@ -121,7 +121,7 @@ class PayPeriodComparisonBuilder
     end
 
     period.payroll_items
-      .not_voided
+      .not_voided.reportable
       .includes(employee: :department)
       .to_a
   end

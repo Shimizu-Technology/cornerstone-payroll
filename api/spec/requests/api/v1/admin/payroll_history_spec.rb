@@ -116,6 +116,25 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
     )
   end
 
+  it "excludes disposed empty legacy items from native period headcount" do
+    period = create(:pay_period, :committed, company: company)
+    paid_employee = create(:employee, company: company)
+    unpaid_employee = create(:employee, company: company)
+    create(:payroll_item, pay_period: period, employee: paid_employee, hours_worked: 40, gross_pay: 600, net_pay: 500)
+    empty = create(:payroll_item, pay_period: period, employee: unpaid_employee, hours_worked: 0)
+    entry = PayrollItemLegacyDispositionService.preview(company_id: company.id)
+      .find { |row| row[:payroll_item_id] == empty.id }
+      .slice(:payroll_item_id, :evidence_digest)
+    PayrollItemLegacyDispositionService.apply!(company_id: company.id, actor: admin, entries: [ entry ])
+
+    get "/api/v1/admin/payroll_history"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").sole).to include(
+      "employee_count" => 1, "total_gross" => 600.0, "total_net" => 500.0
+    )
+  end
+
   it "filters and paginates the union on the server" do
     batch = create_batch(company: company, status: "locked", suffix: "filters")
     first = create_historical_period(batch: batch, suffix: "Alpha", pay_date: Date.new(2023, 12, 22))

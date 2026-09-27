@@ -32,7 +32,7 @@ class QuickbooksPayrollReportData
   def items(include_voided: false)
     @items_by_voided ||= {}
     @items_by_voided[include_voided] ||= begin
-      scope = pay_period.payroll_items
+      scope = pay_period.payroll_items.reportable
         .includes(:employee, :payroll_item_earnings, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type)
       scope = scope.not_voided unless include_voided
       scope.to_a.sort_by { |item| employee_sort_key(item.employee) }
