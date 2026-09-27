@@ -18,6 +18,7 @@ export function AdminEmployeeChangeRequestsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const currentStatusRef = useRef(status);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
 
@@ -45,31 +46,33 @@ export function AdminEmployeeChangeRequestsPage() {
 
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
+    const requestedStatus = currentStatusRef.current;
+    const isCurrentRequest = () => listRequestIdRef.current === requestId && currentStatusRef.current === requestedStatus;
     ++detailRequestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       setSelected(null);
       setReviewNotes('');
-      const response = await adminEmployeeChangeRequestsApi.list({ status: status || undefined });
-      if (listRequestIdRef.current !== requestId) return;
+      const response = await adminEmployeeChangeRequestsApi.list({ status: requestedStatus || undefined });
+      if (!isCurrentRequest()) return;
       setRequests(response.data);
       if (response.data[0]) {
         await selectRequest(response.data[0].id);
       }
     } catch (err) {
-      if (listRequestIdRef.current === requestId) {
+      if (isCurrentRequest()) {
         setError(err instanceof Error ? err.message : 'Failed to load client change requests');
       }
     } finally {
-      if (listRequestIdRef.current === requestId) setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
-  }, [status, selectRequest]);
+  }, [selectRequest]);
 
   useEffect(() => {
     void load();
     return invalidateRequests;
-  }, [load, invalidateRequests]);
+  }, [status, load, invalidateRequests]);
 
   const updateRequest = async (action: 'approve' | 'reject') => {
     if (!selected) return;
@@ -98,6 +101,7 @@ export function AdminEmployeeChangeRequestsPage() {
 
         <div className="max-w-xs">
           <Select value={status} onChange={(e) => {
+            currentStatusRef.current = e.target.value;
             invalidateRequests();
             setSelected(null);
             setReviewNotes('');

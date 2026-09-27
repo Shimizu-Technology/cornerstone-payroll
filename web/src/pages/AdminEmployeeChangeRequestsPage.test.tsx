@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { EmployeeChangeRequest } from '@/services/api';
 import { AdminEmployeeChangeRequestsPage } from './AdminEmployeeChangeRequestsPage';
 
-const apiMocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), approve: vi.fn(), reject: vi.fn() }));
 
 vi.mock('@/services/api', () => ({
   adminEmployeeChangeRequestsApi: apiMocks,
@@ -65,5 +65,28 @@ it('ignores the previous filter response after the status changes', async () => 
   await act(async () => { resolvePending({ data: [request(1, 'Alice Reyes', 'Pending notes')] }); });
 
   expect(screen.getByRole('button', { name: /Cara Chen/ })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Alice Reyes/ })).toBeNull();
+});
+
+it('refreshes the current filter when approval finishes after a filter change', async () => {
+  vi.clearAllMocks();
+  const pending = request(1, 'Alice Reyes', 'Pending notes');
+  const approved = request(3, 'Cara Chen', 'Approved notes', 'approved');
+  let resolveApproval!: () => void;
+  apiMocks.list.mockImplementation(({ status }: { status: string }) => Promise.resolve({ data: status === 'pending' ? [pending] : [approved] }));
+  apiMocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === pending.id ? pending : approved }));
+  apiMocks.approve.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveApproval = resolve; }));
+
+  render(<AdminEmployeeChangeRequestsPage />);
+  await screen.findByText('Request #1');
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
+  await screen.findByText('Request #3');
+
+  await act(async () => { resolveApproval(); });
+  await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(3));
+  expect(apiMocks.list.mock.calls.map(([params]) => params?.status)).toEqual(['pending', 'approved', 'approved']);
+  expect(screen.getByText('Request #3')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Alice Reyes/ })).toBeNull();
 });

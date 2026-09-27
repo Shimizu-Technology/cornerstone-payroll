@@ -1905,7 +1905,7 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
-                {chatError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{chatError}</p>}
+                {chatError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{chatError}</p>}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
@@ -2070,7 +2070,7 @@ export function InvoiceMaker() {
             {alertBanner}
             <Card className="overflow-hidden">
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-4">
                   <div>
                     <h2 className="text-base font-semibold text-neutral-900">Assistant Sessions</h2>
                     <p className="text-sm text-neutral-500">Draft invoices from chat</p>
@@ -2101,7 +2101,7 @@ export function InvoiceMaker() {
                     {chatSessions.map((session) => (
                       <div
                         key={session.id}
-                        className={`rounded-lg border p-3 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
+                        className={`rounded-lg border p-4 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
                           activeChatSession?.id === session.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
                         }`}
                       >
