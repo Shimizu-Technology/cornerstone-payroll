@@ -483,7 +483,7 @@ describe('PayRunWorkspace check status refresh', () => {
     fireEvent.click(screen.getByRole('link', { name: /Checks & direct deposit/ }));
     expect(await screen.findAllByText('Prepared')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
-    expect(await screen.findAllByText('Issued')).toBeTruthy();
+    expect(await screen.findAllByText('Issued')).toHaveLength(2);
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
     fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
