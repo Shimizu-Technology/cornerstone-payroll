@@ -388,15 +388,24 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     setSwitchError(null);
   };
 
-  const refreshPayRunSummary = async (): Promise<void> => {
+  const getCurrentPayRunSummary = async (): Promise<PayPeriod | null> => {
     const requestId = ++refreshRequestIdRef.current;
     try {
       const updated = await payPeriodsApi.get(payRun.id, companyId);
-      if (refreshRequestIdRef.current !== requestId) return;
-      onChanged(updated.pay_period);
+      return refreshRequestIdRef.current === requestId ? updated.pay_period : null;
+    } catch (error) {
+      if (refreshRequestIdRef.current !== requestId) return null;
+      throw error;
+    }
+  };
+
+  const refreshPayRunSummary = async (): Promise<void> => {
+    try {
+      const updated = await getCurrentPayRunSummary();
+      if (!updated) return;
+      onChanged(updated);
       setPrintRefreshError(null);
     } catch {
-      if (refreshRequestIdRef.current !== requestId) return;
       setPrintRefreshError('The check action succeeded, but the pay-run summary could not refresh. Reopen this run to see the latest status.');
     }
   };
@@ -415,8 +424,8 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         reason: switchReason.trim(),
         confirm_not_paid: true,
       });
-      const updated = await payPeriodsApi.get(payRun.id, companyId);
-      onChanged(updated.pay_period);
+      const updated = await getCurrentPayRunSummary();
+      if (updated) onChanged(updated);
       setCheckPrintRefreshToken((value) => value + 1);
       resetSwitchDialog();
     } catch (error) {
@@ -443,6 +452,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
         starting_check_number: paymentStartingNumber,
         check_date: paymentCheckDate,
       });
+      refreshRequestIdRef.current += 1;
       onChanged(response.pay_period);
       setPaymentPreview(response.promoted_payment);
       setPaymentNotice(response.promoted_payment.paper_check_count === 1

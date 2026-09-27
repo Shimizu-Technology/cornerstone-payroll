@@ -492,7 +492,7 @@ export function PayPeriodDetail({
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
-        if (!silent) setLoading(false);
+        setLoading(false);
       }
     }
   }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);

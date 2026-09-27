@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
   recordActivities: vi.fn(),
+  updatePaymentMethod: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
@@ -41,7 +42,7 @@ vi.mock('@/services/api', () => ({
   employeesApi: { list: apiMocks.employeesList },
   recordActivitiesApi: { list: apiMocks.recordActivities },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
-  payrollItemsApi: { updatePaymentMethod: vi.fn() },
+  payrollItemsApi: { updatePaymentMethod: apiMocks.updatePaymentMethod },
 }));
 
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
@@ -378,6 +379,52 @@ describe('PayRunWorkspace check status refresh', () => {
     await act(async () => { resolveFirstRefresh({ pay_period: preparedRun }); });
     expect(screen.getByText('Issued')).toBeTruthy();
     expect(screen.queryByText('Prepared')).toBeNull();
+  });
+
+  it('does not replace a newer payment-method switch with an older check refresh', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.updatePaymentMethod.mockResolvedValue({});
+    const checkRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'unprinted' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const depositRun = {
+      ...checkRun,
+      payroll_items: [{ ...checkRun.payroll_items[0], effective_payment_delivery_method: 'direct_deposit' }],
+    };
+    let resolveCheckRefresh!: (response: { pay_period: typeof checkRun }) => void;
+    let resolveSwitchRefresh!: (response: { pay_period: typeof depositRun }) => void;
+    apiMocks.getPayPeriod
+      .mockResolvedValueOnce({ pay_period: checkRun })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCheckRefresh = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSwitchRefresh = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Assigned')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch for this run' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' }), { target: { value: 'Payment not yet released' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this payment has not been issued/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm switch' }));
+    await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
+
+    await act(async () => { resolveSwitchRefresh({ pay_period: depositRun }); });
+    expect(screen.getByText('Stub ready')).toBeTruthy();
+    await act(async () => { resolveCheckRefresh({ pay_period: checkRun }); });
+    expect(screen.getByText('Stub ready')).toBeTruthy();
+    expect(screen.queryByText('Assigned')).toBeNull();
   });
 
   it('refreshes the mounted processing view after a check changes on the checks tab', async () => {
