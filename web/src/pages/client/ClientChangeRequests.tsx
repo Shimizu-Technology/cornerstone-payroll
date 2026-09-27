@@ -59,7 +59,7 @@ export function ClientChangeRequests() {
   const loadRequest = async (id: number) => {
     const response = await clientEmployeeChangeRequestsApi.get(id);
     setSelected(response.data);
-    if (window.matchMedia('(max-width: 1023px)').matches) {
+    if (window.innerWidth < 1024) {
       requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     }
   };

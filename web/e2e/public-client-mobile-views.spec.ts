@@ -33,6 +33,10 @@ test('client change request is selectable and readable at phone width', async ({
   await page.getByRole('button', { name: 'View request' }).click();
   await expect(page.getByText('Request #31')).toBeVisible();
   await expect(page.getByText('Please update the address.')).toBeVisible();
+  await expect.poll(() => page.getByText('Request #31').evaluate((node) => {
+    const bounds = node.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('client-change-request-320.png'), fullPage: true });
   await page.setViewportSize({ width: 768, height: 844 });
