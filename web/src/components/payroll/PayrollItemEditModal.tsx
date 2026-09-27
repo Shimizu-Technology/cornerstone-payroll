@@ -384,7 +384,7 @@ export function PayrollItemEditModal({
 
         <div className="space-y-4 mt-4">
           {/* Current calculated values (read-only) */}
-          <div className={`p-3 ${isContractor ? 'bg-emerald-50' : 'bg-gray-50'} rounded-lg text-sm grid grid-cols-3 gap-2`}>
+          <div className={`p-3 ${isContractor ? 'bg-emerald-50' : 'bg-gray-50'} rounded-lg text-sm grid grid-cols-1 gap-2 sm:grid-cols-3`}>
             <div>
               <span className="text-gray-500">Gross:</span>{' '}
               <span className="font-medium">{formatCurrency(item.gross_pay || 0)}</span>
@@ -436,7 +436,7 @@ export function PayrollItemEditModal({
                         <div className="text-sm font-medium text-gray-900">{rateEntry.label}</div>
                         <div className="text-xs text-gray-500">{formatCurrency(Number(rateEntry.rate))}/hr</div>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Regular</label>
                           <NumericInput
@@ -474,7 +474,7 @@ export function PayrollItemEditModal({
                   ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Regular</label>
                     <NumericInput
@@ -516,7 +516,7 @@ export function PayrollItemEditModal({
           {isSalary && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">Salary</h4>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">
                     Salary Override (per period)
@@ -547,7 +547,7 @@ export function PayrollItemEditModal({
           {/* Additional Earnings */}
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-2">Additional Earnings</h4>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">One-Time Bonus</label>
                 <NumericInput
@@ -812,7 +812,7 @@ export function PayrollItemEditModal({
             <p className="text-xs text-gray-400 mb-2">
               Override the date or memo printed on this person's check. Leave blank to use defaults.
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Check Date</label>
                 <Input
@@ -840,7 +840,7 @@ export function PayrollItemEditModal({
           </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
+        <DialogFooter className="!items-stretch gap-3 sm:items-center sm:justify-between">
           <div>
             {confirmRemove ? (
               <div className="flex items-center gap-2">

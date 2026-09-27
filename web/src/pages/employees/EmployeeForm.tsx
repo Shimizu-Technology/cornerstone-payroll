@@ -1145,8 +1145,19 @@ export function EmployeeForm() {
         }
       />
 
+      <nav aria-label="Employee form sections" className="overflow-x-auto border-b border-neutral-200 bg-white px-4 py-2 sm:hidden">
+        <div className="flex w-max gap-2 text-xs font-semibold">
+          <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-personal">Personal</a>
+          <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-employment">Employment</a>
+          {!isClient && <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-pay-items">Pay items</a>}
+          <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-tax">{form.employment_type === 'contractor' ? 'Contractor tax' : 'W-4'}</a>
+          <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-address">Address</a>
+          {isEditing && <a className="rounded-full bg-neutral-100 px-3 py-2 text-neutral-700" href="#employee-documents">Documents</a>}
+        </div>
+      </nav>
+
       {isEditing && employeeStatus === 'terminated' && !isClient && (
-        <div className="mx-6 lg:mx-8 mt-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+        <div className="mx-4 mt-6 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:mx-6 sm:flex-row sm:items-center sm:justify-between lg:mx-8">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
             <div>
@@ -1172,7 +1183,7 @@ export function EmployeeForm() {
         </div>
       )}
 
-      <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-6 pb-32 lg:p-8 lg:pb-32">
+      <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-4 pb-32 sm:p-6 sm:pb-32 lg:p-8 lg:pb-32">
         {generalError && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
@@ -1198,7 +1209,7 @@ export function EmployeeForm() {
         )}
 
         {/* Personal Information */}
-        <Card className="mb-6">
+        <Card id="employee-personal" className="mb-6 scroll-mt-28">
           <CardHeader>
             <CardTitle>Personal Information</CardTitle>
           </CardHeader>
@@ -1315,7 +1326,7 @@ export function EmployeeForm() {
         </Card>
 
         {/* Employment Information */}
-        <Card className="mb-6">
+        <Card id="employee-employment" className="mb-6 scroll-mt-28">
           <CardHeader>
             <CardTitle>Employment Information</CardTitle>
             {loadedEmployee?.configuration_review_status === 'needs_review' && <p className="mt-1 text-sm text-gray-600">Save verified details as you receive them. Missing imported details remain in Setup Review until confirmed.</p>}
@@ -1651,7 +1662,7 @@ export function EmployeeForm() {
         )}
 
         {!isClient && !isEditing && (
-          <Card className="mb-6 border-neutral-200">
+          <Card id="employee-pay-items" className="mb-6 scroll-mt-28 border-neutral-200">
             <CardHeader>
               <CardTitle>Additions and deductions</CardTitle>
               <CardDescription>Every employee can have their own additions, deductions, and employer contributions. Save the employee first, then add items on their pay setup page.</CardDescription>
@@ -1660,7 +1671,7 @@ export function EmployeeForm() {
         )}
 
         {!isClient && isEditing && (
-          <Card className="mb-6 border-neutral-200">
+          <Card id="employee-pay-items" className="mb-6 scroll-mt-28 border-neutral-200">
             <CardHeader>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2062,7 +2073,7 @@ export function EmployeeForm() {
 
         {/* Contractor Information — only shown for 1099 contractors */}
         {form.employment_type === 'contractor' && (
-          <Card className="mb-6">
+          <Card id="employee-tax" className="mb-6 scroll-mt-28">
             <CardHeader>
               <CardTitle>1099 Contractor Information</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
@@ -2141,7 +2152,7 @@ export function EmployeeForm() {
 
         {/* W-4 Tax Withholding — only shown for W-2 employees */}
         {form.employment_type !== 'contractor' && (
-          <Card className="mb-6">
+          <Card id="employee-tax" className="mb-6 scroll-mt-28">
             <CardHeader>
               <CardTitle>W-4 Tax Withholding</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
@@ -2433,7 +2444,7 @@ export function EmployeeForm() {
         )}
 
         {/* Address */}
-        <Card className="mb-6">
+        <Card id="employee-address" className="mb-6 scroll-mt-28">
           <CardHeader>
             <CardTitle>Address</CardTitle>
             <CardDescription>
@@ -2548,7 +2559,7 @@ export function EmployeeForm() {
 
       {isEditing && id && (
         <div className="px-6 pb-8 lg:px-8">
-          <Card className="max-w-4xl border-neutral-200/80 bg-white/95">
+          <Card id="employee-documents" className="max-w-4xl scroll-mt-28 border-neutral-200/80 bg-white/95">
             <CardHeader>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex gap-3">
