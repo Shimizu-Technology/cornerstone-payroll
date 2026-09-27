@@ -84,6 +84,7 @@ export function PayRunWorkspace(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const [processingRefreshToken, setProcessingRefreshToken] = useState(0);
   const routeKey = `${companyId}:${payRunId}`;
   const hasValidRouteIds = [companyId, payRunId].every((value) => Number.isInteger(value) && value > 0);
   const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
@@ -139,6 +140,11 @@ export function PayRunWorkspace(): ReactElement {
       ? { ...current, ...updated, payroll_items: updated.payroll_items ?? current.payroll_items }
       : current);
   }, []);
+
+  const handleChecksChange = useCallback((updated: PayPeriod): void => {
+    handlePayRunChange(updated);
+    setProcessingRefreshToken((token) => token + 1);
+  }, [handlePayRunChange]);
 
   const payRunListFallback = Number.isInteger(companyId) && companyId > 0 ? payRunsPath(companyId) : '/pay-periods';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunListFallback);
@@ -215,7 +221,7 @@ export function PayRunWorkspace(): ReactElement {
 
       <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
         {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
-        {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handlePayRunChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
+        {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
         {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
         {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
           <section hidden={activeTab !== 'work'} aria-label="Process payroll workspace">
@@ -224,6 +230,7 @@ export function PayRunWorkspace(): ReactElement {
                 key={`${companyId}:${payRunId}`}
                 initialPayPeriod={payRun}
                 onPayPeriodChange={handlePayRunChange}
+                refreshToken={processingRefreshToken}
               />
             </Suspense>
           </section>

@@ -311,11 +311,13 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
 interface PayPeriodDetailProps {
   initialPayPeriod?: PayPeriod;
   onPayPeriodChange?: (payPeriod: PayPeriod) => void;
+  refreshToken?: number;
 }
 
 export function PayPeriodDetail({
   initialPayPeriod,
   onPayPeriodChange,
+  refreshToken = 0,
 }: PayPeriodDetailProps): ReactElement {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const location = useLocation();
@@ -327,6 +329,7 @@ export function PayPeriodDetail({
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const initialPayPeriodRef = useRef(initialPayPeriod);
   const loadRequestIdRef = useRef(0);
+  const lastRefreshTokenRef = useRef(refreshToken);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -523,6 +526,12 @@ export function PayPeriodDetail({
       loadRequestIdRef.current += 1;
     };
   }, [loadPayPeriod, payRunId]);
+
+  useEffect(() => {
+    if (lastRefreshTokenRef.current === refreshToken) return;
+    lastRefreshTokenRef.current = refreshToken;
+    if (payRunId > 0) void loadPayPeriod(payRunId, true);
+  }, [loadPayPeriod, payRunId, refreshToken]);
 
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);

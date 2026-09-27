@@ -57,6 +57,12 @@ vi.mock('@/components/payroll/ChecksPanel', () => ({
   ),
 }));
 
+vi.mock('@/pages/PayPeriodDetail', () => ({
+  PayPeriodDetail: ({ refreshToken }: { refreshToken?: number }) => (
+    <div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
+  ),
+}));
+
 vi.mock('@/components/documents/PdfPreview', () => ({
   PdfPreview: ({ artifact }: { artifact: { filename: string; title?: string; note?: string } | null }) => artifact ? (
     <section aria-label="PDF preview">
@@ -372,5 +378,40 @@ describe('PayRunWorkspace check status refresh', () => {
     await act(async () => { resolveFirstRefresh({ pay_period: preparedRun }); });
     expect(screen.getByText('Issued')).toBeTruthy();
     expect(screen.queryByText('Prepared')).toBeNull();
+  });
+
+  it('refreshes the mounted processing view after a check changes on the checks tab', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    apiMocks.getPayPeriod.mockResolvedValueOnce({ pay_period: preparedRun }).mockResolvedValueOnce({ pay_period: issuedRun });
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((await screen.findByTestId('mounted-processing-refresh-token')).textContent).toBe('0');
+    fireEvent.click(screen.getByRole('link', { name: /Checks & direct deposit/ }));
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
+    fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
+    expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
   });
 });
