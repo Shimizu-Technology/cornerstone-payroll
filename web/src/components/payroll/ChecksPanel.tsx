@@ -21,6 +21,7 @@ interface ChecksPanelProps {
   payPeriod: PayPeriod;
   searchTerm?: string;
   refreshToken?: number;
+  onChecksChanged?: () => Promise<void>;
 }
 
 type CheckAction = 'preview' | 'stub';
@@ -68,7 +69,7 @@ function eventLabel(eventType: string): string {
   }
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
@@ -320,6 +321,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
         'Saved from the pay period Checks worksheet'
       );
       await load();
+      await onChecksChanged?.();
     } catch (err) {
       setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
     } finally {
@@ -329,14 +331,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
 
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
+    await Promise.all([load(), onChecksChanged?.()]);
     setVoidTarget(null);
-    await load();
   };
 
   // ---- Reprint complete callback ----
   const handleReprintComplete = async () => {
+    await Promise.all([load(), onChecksChanged?.()]);
     setReprintTarget(null);
-    await load();
   };
 
   if (payPeriod.status !== 'committed') {
@@ -815,8 +817,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
           item={deliveryTarget}
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {
+            await Promise.all([load(), onChecksChanged?.()]);
             setDeliveryTarget(null);
-            await load();
           }}
         />
       )}

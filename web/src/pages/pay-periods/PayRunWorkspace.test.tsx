@@ -49,7 +49,12 @@ vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
 }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
-  ChecksPanel: () => <div>Check register</div>,
+  ChecksPanel: ({ onChecksChanged }: { onChecksChanged?: () => Promise<void> }) => (
+    <div>
+      Check register
+      <button onClick={() => void onChecksChanged?.()}>Simulate check status change</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
@@ -284,5 +289,45 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Complete activity history')).toBeTruthy();
     expect(screen.getByText('Payroll milestones')).toBeTruthy();
     expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
+  });
+});
+
+describe('PayRunWorkspace check status refresh', () => {
+  afterEach(cleanup);
+
+  it('updates the pay-run summary when a check action changes its status', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+    apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+    apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+    apiMocks.recordActivities.mockResolvedValue({ data: [], meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0 } });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    apiMocks.getPayPeriod.mockResolvedValueOnce({ pay_period: preparedRun }).mockResolvedValueOnce({ pay_period: issuedRun });
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
+    expect(await screen.findByText('Issued')).toBeTruthy();
+    expect(screen.queryByText('Prepared')).toBeNull();
+    expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(2);
   });
 });

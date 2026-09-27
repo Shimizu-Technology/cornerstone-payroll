@@ -380,14 +380,19 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     setSwitchError(null);
   };
 
-  const handlePrintConfirmed = () => {
-    setCheckPrintRefreshToken((value) => value + 1);
-    void payPeriodsApi.get(payRun.id, companyId).then((updated) => {
+  const refreshPayRunSummary = async (): Promise<void> => {
+    try {
+      const updated = await payPeriodsApi.get(payRun.id, companyId);
       onChanged(updated.pay_period);
       setPrintRefreshError(null);
-    }).catch(() => {
-      setPrintRefreshError('Checks were saved, but the pay-run summary could not refresh. Reopen this run to see the latest status.');
-    });
+    } catch {
+      setPrintRefreshError('The check action succeeded, but the pay-run summary could not refresh. Reopen this run to see the latest status.');
+    }
+  };
+
+  const handlePrintConfirmed = () => {
+    setCheckPrintRefreshToken((value) => value + 1);
+    void refreshPayRunSummary();
   };
 
   const switchPaymentMethod = async () => {
@@ -535,7 +540,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
       </Card>
       {!isRehearsal && payRun.status === 'committed' && (
         <>
-          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} />
+          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} />
           <UnifiedCheckPrintDialog
             open={checkPrintOpen}
             payPeriodId={payRun.id}

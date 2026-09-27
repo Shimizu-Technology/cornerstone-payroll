@@ -3395,7 +3395,7 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} />
+              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
             </div>
           </Card>
         )}
@@ -3425,7 +3425,10 @@ export function PayPeriodDetail({
             open={checkPrintOpen}
             payPeriodId={payPeriod.id}
             onOpenChange={setCheckPrintOpen}
-            onPackageGenerated={() => setCheckPrintRefreshToken((value) => value + 1)}
+            onPackageGenerated={() => {
+              setCheckPrintRefreshToken((value) => value + 1);
+              void loadPayPeriod(payPeriod.id, true);
+            }}
           />
         )}
 
