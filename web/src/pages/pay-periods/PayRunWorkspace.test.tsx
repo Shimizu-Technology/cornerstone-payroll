@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -329,5 +329,48 @@ describe('PayRunWorkspace check status refresh', () => {
     expect(await screen.findByText('Issued')).toBeTruthy();
     expect(screen.queryByText('Prepared')).toBeNull();
     expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the newest check status when summary refreshes finish out of order', async () => {
+    vi.clearAllMocks();
+    apiMocks.isAdmin = true;
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
+    apiMocks.printQueue.mockResolvedValue({ items: [] });
+    const preparedRun = {
+      ...payRun,
+      status: 'committed',
+      parallel_run: false,
+      payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'prepared' }],
+    } as PayPeriod & { payroll_items: PayrollItem[] };
+    const issuedRun = {
+      ...preparedRun,
+      payroll_items: [{ ...preparedRun.payroll_items[0], check_status: 'delivered' }],
+    };
+    let resolveFirstRefresh!: (response: { pay_period: typeof preparedRun }) => void;
+    let resolveSecondRefresh!: (response: { pay_period: typeof issuedRun }) => void;
+    apiMocks.getPayPeriod
+      .mockResolvedValueOnce({ pay_period: preparedRun })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirstRefresh = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecondRefresh = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Prepared')).toBeTruthy();
+    const changeButton = screen.getByRole('button', { name: 'Simulate check status change' });
+    fireEvent.click(changeButton);
+    fireEvent.click(changeButton);
+    await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
+
+    await act(async () => { resolveSecondRefresh({ pay_period: issuedRun }); });
+    expect(screen.getByText('Issued')).toBeTruthy();
+    await act(async () => { resolveFirstRefresh({ pay_period: preparedRun }); });
+    expect(screen.getByText('Issued')).toBeTruthy();
+    expect(screen.queryByText('Prepared')).toBeNull();
   });
 });

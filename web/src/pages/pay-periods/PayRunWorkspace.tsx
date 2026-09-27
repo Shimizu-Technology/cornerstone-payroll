@@ -301,6 +301,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [hasNonEmployeeChecks, setHasNonEmployeeChecks] = useState<boolean | null>(null);
   const [printRefreshError, setPrintRefreshError] = useState<string | null>(null);
+  const refreshRequestIdRef = useRef(0);
   const [switchItem, setSwitchItem] = useState<PayrollItem | null>(null);
   const [switchReason, setSwitchReason] = useState('');
   const [confirmNotPaid, setConfirmNotPaid] = useState(false);
@@ -381,11 +382,14 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   };
 
   const refreshPayRunSummary = async (): Promise<void> => {
+    const requestId = ++refreshRequestIdRef.current;
     try {
       const updated = await payPeriodsApi.get(payRun.id, companyId);
+      if (refreshRequestIdRef.current !== requestId) return;
       onChanged(updated.pay_period);
       setPrintRefreshError(null);
     } catch {
+      if (refreshRequestIdRef.current !== requestId) return;
       setPrintRefreshError('The check action succeeded, but the pay-run summary could not refresh. Reopen this run to see the latest status.');
     }
   };

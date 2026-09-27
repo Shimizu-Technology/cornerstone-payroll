@@ -331,14 +331,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
-    await Promise.all([load(), onChecksChanged?.()]);
     setVoidTarget(null);
+    await Promise.all([load(), onChecksChanged?.()]);
   };
 
   // ---- Reprint complete callback ----
   const handleReprintComplete = async () => {
-    await Promise.all([load(), onChecksChanged?.()]);
     setReprintTarget(null);
+    await Promise.all([load(), onChecksChanged?.()]);
   };
 
   if (payPeriod.status !== 'committed') {
@@ -817,8 +817,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           item={deliveryTarget}
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {
-            await Promise.all([load(), onChecksChanged?.()]);
             setDeliveryTarget(null);
+            await Promise.all([load(), onChecksChanged?.()]);
           }}
         />
       )}
