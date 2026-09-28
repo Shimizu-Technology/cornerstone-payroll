@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "base64"
 
 RSpec.describe "Invoice Center and accounts receivable API", type: :request do
   let!(:company) { create(:company, name: "Shimizu Technology") }
@@ -24,7 +25,8 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
       Api::V1::Admin::InvoicePaymentsController,
       Api::V1::Admin::InvoiceCreditNotesController,
       Api::V1::Admin::InvoiceReceivablesController,
-      Api::V1::Admin::InvoiceRecipientsController
+      Api::V1::Admin::InvoiceRecipientsController,
+      Api::V1::Admin::InvoiceBillingProfilesController
     ]
     controllers.each do |controller|
       allow_any_instance_of(controller).to receive(:current_user).and_return(admin_user)
@@ -33,7 +35,43 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
   end
 
   after do
-    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center"))
+    storage = R2StorageService.new
+    InvoiceArtifact.where(organization_id: company.organization_id).pluck(:storage_key).each { |key| storage.delete(key) }
+    storage.delete(@uploaded_logo_key) if @uploaded_logo_key
+  end
+
+  it "stores an optional sender logo within the organization and freezes its reference on issue" do
+    logo_bytes = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lQoAAAAASUVORK5CYII=")
+    tempfile = Tempfile.new([ "invoice-logo", ".png" ])
+    tempfile.binmode
+    tempfile.write(logo_bytes)
+    tempfile.flush
+    file = Rack::Test::UploadedFile.new(tempfile.path, "image/png", original_filename: "logo.png")
+
+    post "/api/v1/admin/invoice_billing_profiles/#{profile.id}/logo", params: { file: file }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("invoice_billing_profile", "has_logo")).to be(true)
+    @uploaded_logo_key = profile.reload.logo_storage_key
+
+    invoice = create_draft
+    post "/api/v1/admin/invoices/#{invoice.id}/issue"
+    expect(response).to have_http_status(:ok), response.body
+    original_pdf_sha = invoice.reload.primary_artifact.sha256
+    original_logo_key = invoice.snapshot.dig("billing_profile", "logo_storage_key")
+
+    delete "/api/v1/admin/invoice_billing_profiles/#{profile.id}/logo"
+    expect(response).to have_http_status(:ok), response.body
+    expect(profile.reload.logo_storage_key).to be_nil
+    expect(invoice.reload.snapshot.dig("billing_profile", "logo_storage_key")).to eq(original_logo_key)
+    expect(invoice.primary_artifact.sha256).to eq(original_pdf_sha)
+    expect(InvoicePdfGenerator.new(invoice).generate).to start_with("%PDF")
+
+    other_organization = create(:organization)
+    other_profile = create(:invoice_billing_profile, organization: other_organization)
+    post "/api/v1/admin/invoice_billing_profiles/#{other_profile.id}/logo", params: { file: file }
+    expect(response).to have_http_status(:not_found)
+  ensure
+    tempfile&.close!
   end
 
   it "owns recipients and invoices at the organization level instead of the active payroll client" do
@@ -48,6 +86,38 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     get "/api/v1/admin/invoices", headers: { "X-Company-Id" => sibling_company.id.to_s }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to include(invoice.id)
+  end
+
+  it "uses the selected company's organization for a platform owner's invoice workspace" do
+    shimizu_org = create(:organization, name: "Shimizu Technology")
+    shimizu_company = create(:company, organization: shimizu_org, name: "Shimizu Technology")
+    platform_owner = create(:user, company: company, organization: company.organization, role: "super_admin")
+    allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_user).and_return(platform_owner)
+    allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_user).and_return(platform_owner)
+    allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_company_id).and_return(shimizu_company.id)
+    allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_company_id).and_return(shimizu_company.id)
+
+    post "/api/v1/admin/invoice_recipients", params: { invoice_recipient: { name: "Shimizu Customer" } }
+    expect(response).to have_http_status(:created), response.body
+    shimizu_recipient_id = response.parsed_body.dig("invoice_recipient", "id")
+    expect(InvoiceRecipient.find(shimizu_recipient_id).organization_id).to eq(shimizu_org.id)
+
+    post "/api/v1/admin/invoices", params: {
+      invoice: {
+        invoice_recipient_id: shimizu_recipient_id, invoice_date: "2026-09-28",
+        line_items: [ { description: "Development", quantity: 1, rate: 100 } ]
+      }
+    }
+    expect(response).to have_http_status(:created), response.body
+    expect(Invoice.find(response.parsed_body.dig("invoice", "id")).organization_id).to eq(shimizu_org.id)
+
+    post "/api/v1/admin/invoices/#{response.parsed_body.dig('invoice', 'id')}/preview_pdf"
+    expect(response).to have_http_status(:ok)
+    expect(AuditLog.where(action: "invoices#preview_pdf").order(:id).last.organization_id).to eq(shimizu_org.id)
+
+    get "/api/v1/admin/invoices", params: { billing_profile_id: profile.id }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("invoices")).to be_empty
   end
 
   it "allocates profile-specific numbers and issues an immutable PDF artifact" do
@@ -164,6 +234,9 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
       invoice_date: "2026-06-01",
       due_date: "2026-06-15",
       total_amount: "850.25",
+      subtotal_amount: "900.25",
+      discount_type: "amount",
+      discount_value: "50.00",
       delivered_at: "2026-06-01T09:30:00+10:00",
       delivery_channel: "email"
     }
@@ -171,7 +244,8 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response).to have_http_status(:created)
     invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
     artifact = invoice.artifacts.sole
-    expect(invoice).to have_attributes(origin: "imported", status: "open", invoice_number: "EXT-2048")
+    expect(invoice).to have_attributes(origin: "imported", status: "open", invoice_number: "EXT-2048",
+                                       subtotal_amount: 900.25.to_d, discount_amount: 50.to_d, total_amount: 850.25.to_d)
     expect(invoice.reader_status(as_of: Date.new(2026, 6, 20))).to eq("overdue")
     expect(invoice.deliveries.sole.channel).to eq("email")
     expect(R2StorageService.new.download(artifact.storage_key)).to eq(original)
@@ -179,7 +253,24 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
+  it "rejects malformed imported discount values without creating an invoice" do
+    expect do
+      post "/api/v1/admin/invoices/import", params: {
+        invoice_recipient_id: recipient.id,
+        invoice_billing_profile_id: profile.id,
+        invoice_number: "BAD-DISCOUNT",
+        invoice_date: "2026-06-01",
+        total_amount: "850.00",
+        subtotal_amount: [ "900.00" ],
+        discount_type: "amount",
+        discount_value: [ "50.00" ]
+      }
+    end.not_to change(Invoice, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   it "rolls back the entire import when historical delivery evidence cannot be recorded" do
+    existing_files = Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center/**/*")].reject { |path| File.directory?(path) }
     file = Tempfile.new([ "outside-invoice", ".pdf" ])
     file.binmode
     file.write("%PDF-1.4\nexternal invoice evidence\n%%EOF\n")
@@ -212,7 +303,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(InvoiceEvent.count).to eq(0)
     expect(InvoiceDelivery.count).to eq(0)
     stored_files = Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center/**/*")].reject { |path| File.directory?(path) }
-    expect(stored_files).to be_empty
+    expect(stored_files).to match_array(existing_files)
   ensure
     file&.close!
   end

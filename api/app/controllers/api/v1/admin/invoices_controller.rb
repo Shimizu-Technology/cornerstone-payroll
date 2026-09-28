@@ -94,7 +94,7 @@ module Api
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
-        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit => e
+        rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice issue failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
@@ -149,7 +149,7 @@ module Api
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
-        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit
+        rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
 
@@ -161,7 +161,7 @@ module Api
           else
             send_primary_artifact(disposition: "inline")
           end
-        rescue Prawn::Errors::CannotFit => e
+        rescue R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to generate invoice PDF" }, status: :unprocessable_entity
         end
@@ -175,7 +175,7 @@ module Api
           send_artifact(artifact, disposition: "attachment")
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
-        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit => e
+        rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
@@ -253,7 +253,9 @@ module Api
             :notes,
             :payment_terms,
             :email_subject,
-            :email_body
+            :email_body,
+            :discount_type,
+            :discount_value
           )
 
           validate_recipient!(raw[:invoice_recipient_id]) if raw[:invoice_recipient_id].present?
@@ -330,8 +332,18 @@ module Api
         def build_imported_invoice
           recipient = validate_recipient!(params.require(:invoice_recipient_id))
           profile = validate_billing_profile!(params.require(:invoice_billing_profile_id))
-          total = BigDecimal(params.require(:total_amount).to_s)
+          total = import_decimal!(params.require(:total_amount), "Invoice total")
           raise ArgumentError, "Invoice total must be greater than zero" unless total.positive?
+          subtotal = import_decimal!(params[:subtotal_amount].presence || total.to_s, "Subtotal")
+          discount_type = params[:discount_type].presence || "none"
+          discount_value = import_decimal!(params[:discount_value].presence || "0", "Discount")
+          discount = case discount_type
+          when "percent" then (subtotal * discount_value / 100).round(2)
+          when "amount" then discount_value
+          when "none" then 0.to_d
+          else raise ArgumentError, "Discount type is invalid"
+          end
+          raise ArgumentError, "Imported subtotal and discount must equal the invoice total" unless subtotal - discount == total
 
           invoice = Invoice.new(
             organization_id: current_organization_id,
@@ -347,12 +359,27 @@ module Api
             notes: params[:notes],
             origin: "imported",
             total_amount: total,
+            discount_type: discount_type,
+            discount_value: discount_value,
             created_by: current_user,
             updated_by: current_user,
-            source_metadata: { original_filename: params[:file]&.original_filename }
+            source_metadata: { original_filename: params[:file]&.original_filename, gross_subtotal: subtotal.to_s("F") }
           )
-          invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: total, position: 0)
+          invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: subtotal, position: 0)
           invoice
+        end
+
+        def import_decimal!(value, label)
+          raise ArgumentError, "#{label} must be a number" unless value.is_a?(String) || value.is_a?(Numeric)
+
+          decimal = begin
+            BigDecimal(value.to_s)
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "#{label} must be a valid amount"
+          end
+          raise ArgumentError, "#{label} must have at most two decimal places" unless decimal.finite? && decimal == decimal.round(2)
+
+          decimal
         end
 
         def imported_source_company

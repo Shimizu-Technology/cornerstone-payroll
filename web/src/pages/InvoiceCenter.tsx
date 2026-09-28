@@ -15,10 +15,12 @@ import {
   Import,
   Loader2,
   MailCheck,
+  Pause,
   Plus,
   ReceiptText,
   RotateCcw,
   Search,
+  Send,
   Undo2,
   Upload,
   WalletCards,
@@ -26,27 +28,35 @@ import {
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 import {
   invoiceBillingProfilesApi,
   invoiceReceivablesApi,
+  invoiceRecurrencesApi,
   invoiceRecipientsApi,
+  invoiceSendSchedulesApi,
   invoicesApi,
+  organizationsApi,
   type BlobDownload,
   type Invoice,
   type InvoiceBillingProfile,
+  type InvoiceDiscountType,
   type InvoiceLineItem,
   type InvoiceReceivablesSummary,
+  type InvoiceRecurrence,
   type InvoiceRecipient,
+  type InvoiceSendSchedule,
   type InvoiceStatus,
 } from '@/services/api';
 
 type Modal = 'new' | 'import' | 'details' | null;
-type DetailAction = 'payment' | 'delivery' | 'credit' | null;
+type DetailAction = 'payment' | 'delivery' | 'credit' | 'recurrence' | 'schedule_email' | null;
 type Payment = NonNullable<Invoice['payments']>[number];
 type CreditNote = NonNullable<Invoice['credit_notes']>[number];
 type FinancialActivity =
@@ -66,6 +76,8 @@ interface DraftForm {
   customer_reference: string;
   payment_terms: string;
   notes: string;
+  discount_type: InvoiceDiscountType;
+  discount_value: string;
   line_items: DraftLine[];
 }
 
@@ -77,13 +89,19 @@ interface ImportForm {
   invoice_date: string;
   due_date: string;
   total_amount: string;
+  subtotal_amount: string;
+  discount_type: InvoiceDiscountType;
+  discount_value: string;
   customer_reference: string;
   notes: string;
   delivered_at: string;
   delivery_channel: string;
 }
 
-const dateOnly = () => new Date().toISOString().slice(0, 10);
+const dateOnly = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), description: '', quantity: 1, rate: 0, position: 0 });
 const emptyDraft = (): DraftForm => ({
   invoice_billing_profile_id: '',
@@ -94,6 +112,8 @@ const emptyDraft = (): DraftForm => ({
   customer_reference: '',
   payment_terms: '',
   notes: '',
+  discount_type: 'none',
+  discount_value: '',
   line_items: [newLine()],
 });
 const emptyImport = (): ImportForm => ({
@@ -104,6 +124,9 @@ const emptyImport = (): ImportForm => ({
   invoice_date: dateOnly(),
   due_date: '',
   total_amount: '',
+  subtotal_amount: '',
+  discount_type: 'none',
+  discount_value: '',
   customer_reference: '',
   notes: '',
   delivered_at: '',
@@ -148,6 +171,11 @@ const formatDate = (value?: string | null) => {
 };
 
 const formatDateTime = (value?: string | null) => value ? new Date(value).toLocaleString() : '—';
+const localDateTimeInput = (value: string) => {
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+};
 
 function downloadBlob(data: BlobDownload, fallback: string) {
   const url = URL.createObjectURL(data.blob);
@@ -185,16 +213,26 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
 
 export function InvoiceCenter() {
   const { user } = useAuth();
+  const { activeCompany } = useCompany();
+  const invoiceOrganizationId = user?.role === 'super_admin'
+    ? activeCompany?.organization_id || user.organization_id
+    : user?.organization_id;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [profiles, setProfiles] = useState<InvoiceBillingProfile[]>([]);
   const [summary, setSummary] = useState<InvoiceReceivablesSummary | null>(null);
+  const [recurrences, setRecurrences] = useState<InvoiceRecurrence[]>([]);
+  const [sendSchedules, setSendSchedules] = useState<InvoiceSendSchedule[]>([]);
+  const [otherOrganization, setOtherOrganization] = useState<{ id: number; name: string } | null>(null);
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [detailAction, setDetailAction] = useState<DetailAction>(null);
   const [draft, setDraft] = useState<DraftForm>(emptyDraft);
   const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
   const [importForm, setImportForm] = useState<ImportForm>(emptyImport);
+  const [sendRecipients, setSendRecipients] = useState('');
+  const [sendAt, setSendAt] = useState('');
+  const [editingSendScheduleId, setEditingSendScheduleId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'active' | InvoiceStatus | 'archived' | 'all'>('active');
   const [businessFilter, setBusinessFilter] = useState<'all' | string>('all');
   const [search, setSearch] = useState('');
@@ -205,24 +243,65 @@ export function InvoiceCenter() {
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const loadSequence = useRef(0);
+  const loadedOrganizationId = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!invoiceOrganizationId || invoiceOrganizationId === user?.organization_id || user?.role !== 'super_admin') return;
+    let active = true;
+    void organizationsApi.get(invoiceOrganizationId).then((response) => {
+      if (active) setOtherOrganization({ id: invoiceOrganizationId, name: response.data.name });
+    }).catch(() => {
+      if (active) setOtherOrganization(null);
+    });
+    return () => { active = false; };
+  }, [invoiceOrganizationId, user?.organization_id, user?.role]);
 
   const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const sequence = ++loadSequence.current;
     const billingProfileId = businessFilter === 'all' ? undefined : Number(businessFilter);
+    if (loadedOrganizationId.current !== invoiceOrganizationId) {
+      loadedOrganizationId.current = invoiceOrganizationId;
+      setInvoices([]);
+      setRecipients([]);
+      setProfiles([]);
+      setRecurrences([]);
+      setSendSchedules([]);
+      setSummary(null);
+      setSelected(null);
+      setBusy(false);
+      setPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      setDraft(emptyDraft());
+      setImportForm(emptyImport());
+      setEditingDraftId(null);
+      setModal(null);
+      setDetailAction(null);
+      setEditingSendScheduleId(null);
+      setSendRecipients('');
+      setSendAt('');
+      setBusinessFilter('all');
+      setLoading(true);
+    }
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [invoiceResult, recipientResult, profileResult, summaryResult] = await Promise.all([
+      const [invoiceResult, recipientResult, profileResult, summaryResult, recurrenceResult, sendScheduleResult] = await Promise.all([
         invoicesApi.list({ billing_profile_id: billingProfileId }),
         invoiceRecipientsApi.list({ active: true }),
         invoiceBillingProfilesApi.list(),
         invoiceReceivablesApi.summary({ billing_profile_id: billingProfileId }),
+        invoiceRecurrencesApi.list(),
+        invoiceSendSchedulesApi.list(),
       ]);
       if (sequence !== loadSequence.current) return;
       setInvoices(invoiceResult.invoices);
       setRecipients(recipientResult.invoice_recipients);
       setProfiles(profileResult.invoice_billing_profiles);
       setSummary(summaryResult);
+      setRecurrences(recurrenceResult.invoice_recurrences);
+      setSendSchedules(sendScheduleResult.invoice_send_schedules);
       const activeProfiles = profileResult.invoice_billing_profiles.filter((profile) => profile.active);
       const defaultProfile = activeProfiles.find((profile) => profile.is_default) || activeProfiles[0];
       setDraft((current) => ({ ...current, invoice_billing_profile_id: current.invoice_billing_profile_id || String(defaultProfile?.id || '') }));
@@ -234,7 +313,7 @@ export function InvoiceCenter() {
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [businessFilter]);
+  }, [businessFilter, invoiceOrganizationId]);
 
   useEffect(() => {
     let active = true;
@@ -306,6 +385,7 @@ export function InvoiceCenter() {
       setSelected(invoice);
       setModal('details');
       setDetailAction(null);
+      setEditingSendScheduleId(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to open invoice');
     } finally {
@@ -349,6 +429,8 @@ export function InvoiceCenter() {
       customer_reference: selected.customer_reference || '',
       payment_terms: selected.payment_terms || '',
       notes: selected.notes || '',
+      discount_type: selected.discount_type || 'none',
+      discount_value: selected.discount_type === 'none' ? '' : String(selected.discount_value ?? ''),
       line_items: (selected.line_items || []).map((line, position) => ({
         ...line,
         localId: `saved-${line.id || position}`,
@@ -363,10 +445,18 @@ export function InvoiceCenter() {
     setEditingDraftId(null);
   };
 
+  const submittedDraftLines = draft.line_items.filter((line) => line.description.trim() && Number(line.quantity) > 0);
+
   const submitDraft = () => run(async () => {
     if (!draft.invoice_recipient_id) throw new Error('Choose a customer');
-    const lines = draft.line_items.filter((line) => line.description.trim() && Number(line.quantity) > 0);
+    const lines = submittedDraftLines;
     if (!lines.length) throw new Error('Add at least one invoice line');
+    const discountValue = draft.discount_type === 'none' ? 0 : Number(draft.discount_value);
+    const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.rate), 0);
+    if (draft.discount_type !== 'none' && draft.discount_value.trim() === '') throw new Error('Enter a discount');
+    if (!Number.isFinite(discountValue) || discountValue < 0) throw new Error('Enter a valid discount');
+    if (draft.discount_type === 'percent' && discountValue > 100) throw new Error('Percentage discount cannot exceed 100%');
+    if (draft.discount_type === 'amount' && discountValue > subtotal) throw new Error('Fixed discount cannot exceed the subtotal');
     const payload = {
       invoice_recipient_id: Number(draft.invoice_recipient_id),
       invoice_billing_profile_id: Number(draft.invoice_billing_profile_id),
@@ -377,6 +467,8 @@ export function InvoiceCenter() {
       customer_reference: draft.customer_reference || null,
       payment_terms: draft.payment_terms || null,
       notes: draft.notes || null,
+      discount_type: draft.discount_type,
+      discount_value: discountValue,
       line_items: lines.map((line, position) => ({ ...line, position })),
     };
     const result = editingDraftId
@@ -392,6 +484,16 @@ export function InvoiceCenter() {
   const submitImport = () => run(async () => {
     if (!importForm.file) throw new Error('Choose the original invoice PDF or image');
     if (!importForm.invoice_number.trim()) throw new Error('Enter the invoice number shown on the original');
+    if (importForm.discount_type !== 'none') {
+      const subtotal = Number(importForm.subtotal_amount);
+      const discount = Number(importForm.discount_value);
+      if (!importForm.subtotal_amount.trim() || !Number.isFinite(subtotal) || subtotal <= 0) throw new Error('Enter the original subtotal');
+      if (!importForm.discount_value.trim() || !Number.isFinite(discount) || discount < 0) throw new Error('Enter the original discount');
+      if (importForm.discount_type === 'percent' && discount > 100) throw new Error('Percentage discount cannot exceed 100%');
+      if (importForm.discount_type === 'amount' && discount > subtotal) throw new Error('Fixed discount cannot exceed the subtotal');
+      const discountedTotal = roundInvoiceCurrency(subtotal - (importForm.discount_type === 'percent' ? invoicePercentDiscount(subtotal, discount) : discount));
+      if (discountedTotal !== roundInvoiceCurrency(Number(importForm.total_amount))) throw new Error('Subtotal minus discount must equal the invoice total');
+    }
     const result = await invoicesApi.import({
       file: importForm.file,
       invoice_recipient_id: Number(importForm.invoice_recipient_id),
@@ -400,6 +502,9 @@ export function InvoiceCenter() {
       invoice_date: importForm.invoice_date,
       due_date: importForm.due_date || undefined,
       total_amount: Number(importForm.total_amount),
+      subtotal_amount: importForm.discount_type === 'none' ? undefined : Number(importForm.subtotal_amount),
+      discount_type: importForm.discount_type === 'none' ? undefined : importForm.discount_type,
+      discount_value: importForm.discount_type === 'none' ? undefined : Number(importForm.discount_value),
       customer_reference: importForm.customer_reference || undefined,
       notes: importForm.notes || undefined,
       delivered_at: importForm.delivered_at || undefined,
@@ -418,17 +523,19 @@ export function InvoiceCenter() {
 
   const previewSelected = async () => {
     if (!selected) return;
+    const organizationId = loadedOrganizationId.current;
     setBusy(true);
     try {
       const data = selected.status === 'draft'
         ? await invoicesApi.previewPdf(selected.id)
         : await invoicesApi.downloadArtifact(selected.id, 'inline');
+      if (organizationId !== loadedOrganizationId.current) return;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(data.blob));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to preview invoice');
+      if (organizationId === loadedOrganizationId.current) setError(requestError instanceof Error ? requestError.message : 'Unable to preview invoice');
     } finally {
-      setBusy(false);
+      if (organizationId === loadedOrganizationId.current) setBusy(false);
     }
   };
 
@@ -527,7 +634,92 @@ export function InvoiceCenter() {
     }, status === 'archived' ? 'Invoice archived.' : status === 'restored' ? 'Invoice restored.' : `Invoice marked ${status}.`);
   };
 
-  const invoiceTotal = draft.line_items.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
+  const submitRecurrence = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected) return;
+    const values = new FormData(event.currentTarget);
+    void run(async () => {
+      await invoiceRecurrencesApi.create({
+        source_invoice_id: selected.id,
+        start_on: String(values.get('start_on')),
+        ends_on: String(values.get('ends_on') || '') || null,
+        interval_unit: String(values.get('interval_unit')) as 'week' | 'month',
+        interval_count: Number(values.get('interval_count')),
+        due_after_days: Number(values.get('due_after_days')),
+      });
+      setDetailAction(null);
+    }, 'Recurring schedule created. Each occurrence becomes a draft for review and issue.');
+  };
+
+  const updateRecurrence = (recurrence: InvoiceRecurrence) => {
+    void run(async () => {
+      await invoiceRecurrencesApi.update(recurrence.id, !recurrence.active);
+    }, recurrence.active ? 'Recurring schedule paused.' : 'Recurring schedule resumed.');
+  };
+
+  const openScheduleEmail = (schedule?: InvoiceSendSchedule) => {
+    setEditingSendScheduleId(schedule?.id || null);
+    setSendRecipients(schedule?.recipients.join(', ') || selected?.invoice_recipient?.email || '');
+    setSendAt(schedule ? localDateTimeInput(schedule.send_at) : '');
+    setDetailAction('schedule_email');
+  };
+
+  const submitScheduledEmail = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected) return;
+    const recipients = [...new Set(sendRecipients.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean))];
+    if (!recipients.length || recipients.length > 10) {
+      setError('Enter 1 to 10 recipient email addresses');
+      return;
+    }
+    const at = new Date(sendAt);
+    if (!Number.isFinite(at.getTime()) || at.getTime() <= Date.now()) {
+      setError('Choose a future send time');
+      return;
+    }
+    void run(async () => {
+      if (editingSendScheduleId) {
+        await invoiceSendSchedulesApi.update(editingSendScheduleId, { recipients, send_at: at.toISOString() });
+      } else {
+        await invoiceSendSchedulesApi.create({ invoice_id: selected.id, recipients, send_at: at.toISOString() });
+      }
+      setDetailAction(null);
+      setEditingSendScheduleId(null);
+    }, editingSendScheduleId ? 'Scheduled email updated.' : 'Invoice email scheduled. A provider acceptance will be recorded when it sends.');
+  };
+
+  const cancelScheduledEmail = (schedule: InvoiceSendSchedule) => {
+    void run(async () => {
+      await invoiceSendSchedulesApi.update(schedule.id, { cancel: true });
+      if (editingSendScheduleId === schedule.id) {
+        setDetailAction(null);
+        setEditingSendScheduleId(null);
+      }
+    }, 'Scheduled email cancelled.');
+  };
+
+  const retryScheduledEmail = (schedule: InvoiceSendSchedule) => {
+    void run(async () => {
+      await invoiceSendSchedulesApi.update(schedule.id, { retry: true });
+    }, 'Email retry queued with the same provider idempotency key. Check provider delivery before retrying an interrupted send.');
+  };
+
+  const selectedSendSchedules = selected ? sendSchedules.filter((schedule) => schedule.invoice_id === selected.id) : [];
+  const activeRecurrences = recurrences.filter((recurrence) => recurrence.active);
+  const invoiceOrganizationName = !invoiceOrganizationId
+    ? 'Organization-wide finance'
+    : invoiceOrganizationId === user?.organization_id
+      ? user?.organization_name || `Organization #${invoiceOrganizationId}`
+      : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`;
+
+  const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
+  const discountInput = Number(draft.discount_value || 0);
+  const invoiceDiscount = draft.discount_type === 'none' || !Number.isFinite(discountInput)
+    ? 0
+    : draft.discount_type === 'percent'
+      ? invoicePercentDiscount(invoiceSubtotal, discountInput)
+      : discountInput;
+  const invoiceTotal = Math.max(0, roundInvoiceCurrency(invoiceSubtotal - invoiceDiscount));
 
   return (
     <div className="space-y-6">
@@ -535,9 +727,10 @@ export function InvoiceCenter() {
         title="Invoice Center"
         description="Create invoices, preserve outside invoices, and track organization receivables from issue through payment."
         contextLabel="Organization"
-        contextValue={user?.organization_name || 'Organization-wide finance'}
+        contextValue={invoiceOrganizationName || 'Organization-wide finance'}
         actions={(
           <div className="flex flex-wrap gap-2">
+            <Link to="/tools/invoices/assistant" className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"><Building2 className="mr-1.5 h-4 w-4" />Senders & logos</Link>
             <Link to="/tools/invoices/assistant" className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"><Bot className="mr-1.5 h-4 w-4" />AI invoice maker</Link>
             <Button variant="outline" onClick={() => setModal('import')}><Import className="mr-1.5 h-4 w-4" />Import invoice</Button>
             <Button onClick={openNewDraft}><Plus className="mr-1.5 h-4 w-4" />New invoice</Button>
@@ -549,9 +742,9 @@ export function InvoiceCenter() {
         <div className="flex items-start gap-3">
           <div className="rounded-xl bg-white p-2.5 text-primary-700 shadow-sm"><Building2 className="h-5 w-5" /></div>
           <div>
-            <p className="font-semibold text-neutral-950">Organization-wide accounts receivable</p>
+            <p className="font-semibold text-neutral-950">Invoice organization: {invoiceOrganizationName}</p>
             <p className="mt-1 max-w-2xl text-sm leading-5 text-neutral-600">
-              Invoices belong to an invoice-from business, not the payroll client selected in the sidebar. Choose a business to focus its totals and activity.
+              {activeCompany ? `Selected company: ${activeCompany.name}. ` : ''}New invoices and recipients belong to this organization. The From business sets the invoice sender, not its data access boundary.
             </p>
           </div>
         </div>
@@ -596,6 +789,30 @@ export function InvoiceCenter() {
           </CardContent></Card>
         ))}
       </div>
+
+      <Card>
+        <CardContent className="p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 font-semibold text-neutral-950"><CalendarClock className="h-4 w-4 text-primary-700" />Recurring invoices</h2>
+              <p className="mt-1 text-sm text-neutral-600">{activeRecurrences.length} active across this organization. Each occurrence creates a draft for review; it is not sent automatically.</p>
+            </div>
+            <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-800">Organization schedules</span>
+          </div>
+          {recurrences.length ? <div className="mt-4 divide-y divide-neutral-100 rounded-xl border border-neutral-200">
+            {[...recurrences].sort((a, b) => Number(b.active) - Number(a.active) || a.next_on.localeCompare(b.next_on)).map((recurrence) => {
+              const source = invoices.find((invoice) => invoice.id === recurrence.source_invoice_id);
+              return <div key={recurrence.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                <div>
+                  <button type="button" onClick={() => openDetails(recurrence.source_invoice_id)} className="font-semibold text-neutral-900 underline-offset-2 hover:text-primary-700 hover:underline">{source?.invoice_number || `Invoice #${recurrence.source_invoice_id}`}</button>
+                  <p className="mt-0.5 text-neutral-500">Every {recurrence.interval_count > 1 ? `${recurrence.interval_count} ` : ''}{recurrence.interval_unit}{recurrence.interval_count > 1 ? 's' : ''} · Next {formatDate(recurrence.next_on)} · Due {recurrence.due_after_days} days after invoice date{recurrence.ends_on ? ` · Ends ${formatDate(recurrence.ends_on)}` : ''}</p>
+                </div>
+                <div className="flex items-center gap-2"><Badge className={recurrence.active ? 'bg-emerald-50 text-emerald-800' : 'bg-neutral-100 text-neutral-600'}>{recurrence.active ? 'Active' : 'Paused'}</Badge><Button variant="outline" size="sm" onClick={() => updateRecurrence(recurrence)} disabled={busy}>{recurrence.active ? <Pause className="mr-1 h-3.5 w-3.5" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}{recurrence.active ? 'Pause' : 'Resume'}</Button></div>
+              </div>;
+            })}
+          </div> : <p className="mt-4 rounded-xl border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">No recurring schedules yet. Open an issued native invoice to create one.</p>}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card>
@@ -660,9 +877,34 @@ export function InvoiceCenter() {
                 <button type="button" onClick={() => setDraft({ ...draft, line_items: draft.line_items.filter((item) => item.localId !== line.localId) })} className="rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove line ${index + 1}`}><X className="mx-auto h-4 w-4" /></button>
               </div>)}
             </div></div>
+            <div className="rounded-xl border border-neutral-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-neutral-900">Discount</h3>
+              <p className="mt-1 text-xs text-neutral-500">Applied to the invoice subtotal before it is issued.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-medium">Type
+                  <select value={draft.discount_type} onChange={(event) => setDraft({ ...draft, discount_type: event.target.value as InvoiceDiscountType, discount_value: '' })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">
+                    <option value="none">No discount</option>
+                    <option value="percent">Percentage</option>
+                    <option value="amount">Fixed amount</option>
+                  </select>
+                </label>
+                {draft.discount_type !== 'none' && <label className="text-sm font-medium">{draft.discount_type === 'percent' ? 'Percent off' : 'Amount off'}
+                  <Input className="mt-1" type="number" min="0" max={draft.discount_type === 'percent' ? 100 : Math.max(0, invoiceSubtotal)} step="0.01" value={draft.discount_value} onChange={(event) => setDraft({ ...draft, discount_value: event.target.value })} placeholder="0.00" />
+                </label>}
+              </div>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">Payment terms<Textarea className="mt-1" value={draft.payment_terms} onChange={(e) => setDraft({ ...draft, payment_terms: e.target.value })} rows={3} /></label><label className="text-sm font-medium">Notes<Textarea className="mt-1" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} /></label></div>
           </div>
-          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5"><p className="text-sm font-medium text-neutral-500">Draft total</p><p className="mt-2 text-3xl font-semibold">{money(invoiceTotal)}</p><p className="mt-4 text-sm leading-relaxed text-neutral-600">A draft can be edited and previewed. Once issued, financial fields are locked; changes require a credit or a replacement invoice so the audit trail stays trustworthy.</p><div className="mt-6 space-y-2"><Button className="w-full" onClick={submitDraft} disabled={busy}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{editingDraftId ? 'Save changes' : 'Save draft'}</Button><Button className="w-full" variant="outline" onClick={closeDraftModal}>Cancel</Button></div></div>
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+            <p className="text-sm font-medium text-neutral-500">Draft total</p>
+            <p className="mt-2 text-3xl font-semibold">{money(invoiceTotal)}</p>
+            <dl className="mt-4 space-y-2 border-t border-neutral-200 pt-4 text-sm">
+              <div className="flex justify-between gap-3"><dt className="text-neutral-600">Subtotal</dt><dd className="font-medium">{money(invoiceSubtotal)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-neutral-600">Discount{draft.discount_type === 'percent' && draft.discount_value ? ` (${draft.discount_value}%)` : ''}</dt><dd className="font-medium">−{money(invoiceDiscount)}</dd></div>
+            </dl>
+            <p className="mt-4 text-sm leading-relaxed text-neutral-600">A draft can be edited and previewed. Once issued, financial fields are locked; changes require a credit or a replacement invoice so the audit trail stays trustworthy.</p>
+            <div className="mt-6 space-y-2"><Button className="w-full" onClick={submitDraft} disabled={busy}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{editingDraftId ? 'Save changes' : 'Save draft'}</Button><Button className="w-full" variant="outline" onClick={closeDraftModal}>Cancel</Button></div>
+          </div>
         </div>
       </ModalShell>}
 
@@ -679,20 +921,35 @@ export function InvoiceCenter() {
             <label className="text-sm font-medium">Customer reference<Input className="mt-1" value={importForm.customer_reference} onChange={(e) => setImportForm({ ...importForm, customer_reference: e.target.value })} /></label>
             <label className="text-sm font-medium">Already sent at <span className="font-normal text-neutral-400">(optional)</span><Input className="mt-1" type="datetime-local" value={importForm.delivered_at} onChange={(e) => setImportForm({ ...importForm, delivered_at: e.target.value })} /></label>
           </div>
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+            <label className="text-sm font-medium">Discount shown on the original invoice
+              <select value={importForm.discount_type} onChange={(event) => setImportForm({ ...importForm, discount_type: event.target.value as InvoiceDiscountType, discount_value: '', subtotal_amount: '' })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3">
+                <option value="none">No discount</option><option value="percent">Percentage</option><option value="amount">Fixed amount</option>
+              </select>
+            </label>
+            {importForm.discount_type !== 'none' && <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium">Original subtotal<Input className="mt-1" type="number" min="0.01" step="0.01" value={importForm.subtotal_amount} onChange={(event) => setImportForm({ ...importForm, subtotal_amount: event.target.value })} /></label>
+              <label className="text-sm font-medium">{importForm.discount_type === 'percent' ? 'Percent off' : 'Amount off'}<Input className="mt-1" type="number" min="0" max={importForm.discount_type === 'percent' ? 100 : undefined} step="0.01" value={importForm.discount_value} onChange={(event) => setImportForm({ ...importForm, discount_value: event.target.value })} /></label>
+              <p className="sm:col-span-2 text-xs text-neutral-600">Subtotal minus discount must match the invoice total above. The original file remains unchanged.</p>
+            </div>}
+          </div>
           <label className="text-sm font-medium">Internal notes<Textarea className="mt-1" value={importForm.notes} onChange={(e) => setImportForm({ ...importForm, notes: e.target.value })} rows={3} /></label>
           <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setModal(null)}>Cancel</Button><Button onClick={submitImport} disabled={busy}><Import className="mr-1.5 h-4 w-4" />Import and track</Button></div>
         </div>
       </ModalShell>}
 
-      {modal === 'details' && selected && <ModalShell title={`${selected.invoice_number} · ${selected.recipient_name || 'Customer'}`} subtitle={`${selected.origin === 'imported' ? 'Imported invoice' : 'Cornerstone invoice'} · ${statusLabel(selected.status)}`} onClose={() => { setModal(null); setDetailAction(null); }} wide>
+      {modal === 'details' && selected && <ModalShell title={`${selected.invoice_number} · ${selected.recipient_name || 'Customer'}`} subtitle={`${selected.origin === 'imported' ? 'Imported invoice' : 'Native invoice'} · ${statusLabel(selected.status)}`} onClose={() => { setModal(null); setDetailAction(null); }} wide>
         <div className={`space-y-6 transition-opacity duration-200 ${busy ? 'opacity-70' : 'opacity-100'}`}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[['Invoice total', money(selected.total_amount, selected.currency)], ['Paid', money(selected.amount_paid, selected.currency)], ['Credits', money(selected.credit_total, selected.currency)], ['Balance due', money(selected.balance_due, selected.currency)]].map(([label, value]) => <div key={label} className="rounded-xl border border-neutral-200 p-4"><p className="text-xs font-medium uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>)}
           </div>
+          {selected.discount_type !== 'none' && <div className="flex flex-wrap gap-x-6 gap-y-1 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700"><span>Subtotal <strong>{money(selected.subtotal_amount, selected.currency)}</strong></span><span>Discount{selected.discount_type === 'percent' ? ` (${selected.discount_value}%)` : ''} <strong>−{money(selected.discount_amount, selected.currency)}</strong></span></div>}
           {selected.legacy_artifact_missing && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">This legacy invoice has lifecycle history but no exact preserved file. New and imported invoices always preserve immutable evidence.</div>}
           <div className="flex min-h-11 flex-wrap gap-2 transition-all duration-200">
             <Button variant="outline" onClick={previewSelected} disabled={busy}><Eye className="mr-1.5 h-4 w-4" />Preview</Button>
             {selected.status === 'draft' ? <><Button variant="outline" onClick={editSelectedDraft}>Edit draft</Button><Button onClick={issueSelected} disabled={busy}><CheckCircle2 className="mr-1.5 h-4 w-4" />Issue invoice</Button></> : <Button variant="outline" onClick={downloadSelected} disabled={!selected.has_artifact || busy}><Download className="mr-1.5 h-4 w-4" />Download original</Button>}
+            {selected.origin === 'native' && selected.base_status === 'open' && <Button variant="outline" onClick={() => setDetailAction('recurrence')} disabled={busy}><CalendarClock className="mr-1.5 h-4 w-4" />Make recurring</Button>}
+            {selected.base_status === 'open' && selected.artifacts?.some((artifact) => artifact.content_type === 'application/pdf' && ['issued_pdf', 'imported_original', 'legacy_snapshot'].includes(artifact.kind)) && <Button variant="outline" onClick={() => openScheduleEmail()} disabled={busy}><Send className="mr-1.5 h-4 w-4" />Schedule email</Button>}
             {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Record delivery</Button>}
             {!['draft', 'voided', 'uncollectible'].includes(selected.status) && <><Button variant="outline" onClick={() => setDetailAction('payment')} disabled={selected.balance_due <= 0}><CircleDollarSign className="mr-1.5 h-4 w-4" />Record payment</Button><Button variant="outline" onClick={() => setDetailAction('credit')} disabled={selected.balance_due <= 0}><FileText className="mr-1.5 h-4 w-4" />Issue credit</Button></>}
             {selected.archived ? <Button variant="outline" onClick={() => changeLifecycle('restored')}><RotateCcw className="mr-1.5 h-4 w-4" />Restore</Button> : <Button variant="outline" onClick={() => changeLifecycle('archived')}><Archive className="mr-1.5 h-4 w-4" />Archive</Button>}
@@ -702,6 +959,25 @@ export function InvoiceCenter() {
 
           {detailAction && <div key={detailAction} className="invoice-action-panel rounded-2xl border border-primary-200 bg-primary-50/40 p-4">
             {detailAction === 'payment' && <form onSubmit={submitPayment} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" defaultValue={selected.balance_due} className="mt-1" /></label><label className="text-sm font-medium">Received on<Input required name="received_on" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Method<select name="payment_method" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="check">Check</option><option value="ach">ACH</option><option value="cash">Cash</option><option value="card">Card</option><option value="wire">Wire</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Reference<Input name="reference_number" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Save payment</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
+            {detailAction === 'recurrence' && <form onSubmit={submitRecurrence} className="space-y-4">
+              <div><h3 className="font-semibold text-neutral-900">Create recurring drafts</h3><p className="mt-1 text-sm text-neutral-600">The issued invoice supplies the line items, discount, and sender. New occurrences are drafts that need review and issue.</p></div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <label className="text-sm font-medium">First invoice date<Input required name="start_on" type="date" min={dateOnly()} defaultValue={dateOnly()} className="mt-1" /></label>
+                <label className="text-sm font-medium">Repeat<select name="interval_unit" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="month">Monthly</option><option value="week">Weekly</option></select></label>
+                <label className="text-sm font-medium">Every<Input required name="interval_count" type="number" min="1" step="1" defaultValue="1" className="mt-1" /></label>
+                <label className="text-sm font-medium">Due after days<Input required name="due_after_days" type="number" min="0" step="1" defaultValue="30" className="mt-1" /></label>
+                <label className="text-sm font-medium">End date (optional)<Input name="ends_on" type="date" min={dateOnly()} className="mt-1" /></label>
+              </div>
+              <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>Create schedule</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div>
+            </form>}
+            {detailAction === 'schedule_email' && <form onSubmit={submitScheduledEmail} className="space-y-4">
+              <div><h3 className="font-semibold text-neutral-900">{editingSendScheduleId ? 'Change scheduled email' : 'Schedule invoice email'}</h3><p className="mt-1 text-sm text-neutral-600">An issued PDF and a configured invoice sender email are required. A send is recorded when the provider accepts it; inbox delivery is not confirmed.</p></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-medium">Recipients <span className="font-normal text-neutral-500">(up to 10, separated by commas)</span><Textarea required value={sendRecipients} onChange={(event) => setSendRecipients(event.target.value)} rows={2} className="mt-1" placeholder="billing@example.com, owner@example.com" /></label>
+                <label className="text-sm font-medium">Send at <span className="font-normal text-neutral-500">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><Input required type="datetime-local" value={sendAt} onChange={(event) => setSendAt(event.target.value)} className="mt-1" /></label>
+              </div>
+              <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{editingSendScheduleId ? 'Save changes' : 'Schedule email'}</Button><Button type="button" variant="ghost" onClick={() => { setDetailAction(null); setEditingSendScheduleId(null); }}>Cancel</Button></div>
+            </form>}
             {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Record delivery</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
             {detailAction === 'credit' && <form onSubmit={submitCredit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" className="mt-1" /></label><label className="text-sm font-medium">Issue date<Input required name="issue_date" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Reason<Input required name="reason" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Issue credit</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
           </div>}
@@ -719,6 +995,21 @@ export function InvoiceCenter() {
                 ))}
                 {!financialActivity.length && <p className="py-3 text-sm text-neutral-500">No payments or credits recorded.</p>}
               </div></div>
+              <div className="rounded-xl border border-neutral-200 p-4">
+                <div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><CalendarClock className="h-4 w-4" />Scheduled email</h3><span className="text-xs text-neutral-400">{selectedSendSchedules.length} records</span></div>
+                <p className="mt-1 text-xs text-neutral-500">Sent means accepted by the email provider. Inbox delivery is not confirmed.</p>
+                <div className="mt-3 space-y-2">
+                  {selectedSendSchedules.map((schedule) => <div key={schedule.id} className="rounded-lg bg-neutral-50 p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{schedule.status === 'sent' ? 'Provider accepted' : schedule.status}</p><span className="text-xs text-neutral-500">{formatDateTime(schedule.send_at)}</span></div>
+                    <p className="mt-1 break-words text-neutral-600">To {schedule.recipients.join(', ')}</p>
+                    {schedule.last_error && <p className="mt-1 text-xs text-red-700">Send failed: {schedule.last_error}</p>}
+                    {schedule.provider_reference && <p className="mt-1 text-xs text-neutral-500">Provider reference: {schedule.provider_reference}</p>}
+                    {schedule.status === 'pending' && <div className="mt-2 flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => openScheduleEmail(schedule)} disabled={busy}>Edit</Button><Button type="button" size="sm" variant="outline" onClick={() => cancelScheduledEmail(schedule)} disabled={busy}>Cancel send</Button></div>}
+                    {schedule.status === 'failed' && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => retryScheduledEmail(schedule)} disabled={busy}>Retry send</Button>}
+                  </div>)}
+                  {!selectedSendSchedules.length && <p className="py-2 text-sm text-neutral-500">No email is scheduled for this invoice.</p>}
+                </div>
+              </div>
               <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><MailCheck className="h-4 w-4" />Delivery history</h3><span className="text-xs text-neutral-400">Newest first</span></div><div className="mt-3 space-y-2">{deliveryHistory.map((delivery) => <div key={delivery.id} className="rounded-lg bg-neutral-50 p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{delivery.channel.replaceAll('_', ' ')}</p><span className="text-xs text-neutral-400">{formatDateTime(delivery.delivered_at)}</span></div><p className="mt-1 text-neutral-600">To {delivery.recipient || 'Recipient not recorded'}</p>{delivery.provider_reference && <p className="mt-1 text-xs text-neutral-500">Reference: {delivery.provider_reference}</p>}{delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}<p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p></div>)}{!deliveryHistory.length && <p className="py-3 text-sm text-neutral-500">No delivery has been recorded.</p>}</div></div>
               <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}</div></div>; })}</div></div>
             </div>

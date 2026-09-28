@@ -3,6 +3,7 @@
 class Invoice < ApplicationRecord
   STATUSES = %w[draft open voided uncollectible].freeze
   ORIGINS = %w[native imported].freeze
+  DISCOUNT_TYPES = %w[none percent amount].freeze
   PRIMARY_ARTIFACT_KINDS = %w[issued_pdf imported_original legacy_snapshot].freeze
   SNAPSHOT_VERSION = 2
 
@@ -12,6 +13,7 @@ class Invoice < ApplicationRecord
   belongs_to :invoice_billing_profile
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :updated_by, class_name: "User", optional: true
+  belongs_to :invoice_recurrence, optional: true
 
   has_many :line_items,
            -> { order(:position, :id) },
@@ -23,6 +25,8 @@ class Invoice < ApplicationRecord
   has_many :payments, -> { chronological }, class_name: "InvoicePayment", dependent: :restrict_with_error
   has_many :credit_notes, -> { chronological }, class_name: "InvoiceCreditNote", dependent: :restrict_with_error
   has_many :deliveries, -> { chronological }, class_name: "InvoiceDelivery", dependent: :restrict_with_error
+  has_many :send_schedules, class_name: "InvoiceSendSchedule", dependent: :restrict_with_error
+  has_many :recurrences, class_name: "InvoiceRecurrence", foreign_key: :source_invoice_id, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :line_items, allow_destroy: true
 
@@ -38,10 +42,15 @@ class Invoice < ApplicationRecord
   validates :origin, inclusion: { in: ORIGINS }
   validates :currency, format: { with: /\A[A-Z]{3}\z/ }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
+  validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
+  validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
+  validate :discount_value_has_cent_precision
   validate :recipient_must_belong_to_organization
   validate :billing_profile_must_belong_to_organization
   validate :company_must_belong_to_organization
+  validate :recurrence_must_belong_to_organization
   validate :due_date_cannot_precede_invoice_date
+  validate :discount_within_subtotal
   validate :must_have_line_items, if: :issued?
   validate :issued_financial_content_is_immutable, on: :update
 
@@ -109,6 +118,35 @@ class Invoice < ApplicationRecord
 
   def balance_due
     [ BigDecimal(total_amount.to_s) - amount_paid - credit_total, BigDecimal("0") ].max
+  end
+
+  def subtotal_amount
+    if origin == "imported" && line_items.empty?
+      stored_subtotal = source_metadata&.fetch("gross_subtotal", nil)
+      return BigDecimal(stored_subtotal.to_s) if stored_subtotal.present?
+
+      total = BigDecimal(total_amount.to_s)
+      return total + BigDecimal(discount_value.to_s) if discount_type == "amount"
+      if discount_type == "percent" && BigDecimal(discount_value.to_s) < 100
+        return (total / (1 - BigDecimal(discount_value.to_s) / 100)).round(2)
+      end
+      return total
+    end
+
+    line_items.reject(&:marked_for_destruction?).sum(BigDecimal("0")) do |item|
+      BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)
+    end
+  end
+
+  def discount_amount
+    case discount_type
+    when "percent"
+      (subtotal_amount * BigDecimal(discount_value.to_s) / 100).round(2)
+    when "amount"
+      BigDecimal(discount_value.to_s)
+    else
+      BigDecimal("0")
+    end
   end
 
   def reader_status(as_of: Date.current)
@@ -242,6 +280,8 @@ class Invoice < ApplicationRecord
     self.email_subject = email_subject.to_s.strip.presence
     self.email_body = email_body.to_s.strip.presence
     self.source_metadata = source_metadata.presence || {}
+    self.discount_type = discount_type.presence || "none"
+    self.discount_value = 0 if discount_value.nil?
   end
 
   def assign_invoice_number
@@ -257,9 +297,7 @@ class Invoice < ApplicationRecord
   def sync_total_amount
     return if origin == "imported" && line_items.empty? && total_amount.present?
 
-    self.total_amount = line_items.reject(&:marked_for_destruction?).sum do |item|
-      BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)
-    end
+    self.total_amount = [ subtotal_amount - discount_amount, BigDecimal("0") ].max
   end
 
   def default_organization_from_company
@@ -293,10 +331,38 @@ class Invoice < ApplicationRecord
     errors.add(:company, "must belong to the same organization")
   end
 
+  def recurrence_must_belong_to_organization
+    return if invoice_recurrence.blank? || organization_id.blank? || invoice_recurrence.organization_id == organization_id
+
+    errors.add(:invoice_recurrence, "must belong to the same organization")
+  end
+
   def due_date_cannot_precede_invoice_date
     return if due_date.blank? || invoice_date.blank? || due_date >= invoice_date
 
     errors.add(:due_date, "cannot be before the invoice date")
+  end
+
+  def discount_within_subtotal
+    return unless discount_type.in?(DISCOUNT_TYPES)
+
+    if discount_type == "percent" && BigDecimal(discount_value.to_s) > 100
+      errors.add(:discount_value, "cannot exceed 100 percent")
+    elsif discount_type == "amount" && BigDecimal(discount_value.to_s) > subtotal_amount
+      errors.add(:discount_value, "cannot exceed the subtotal")
+    elsif discount_type == "none" && BigDecimal(discount_value.to_s).positive?
+      errors.add(:discount_value, "must be zero without a discount")
+    end
+  end
+
+  def discount_value_has_cent_precision
+    raw_value = discount_value_before_type_cast
+    return if raw_value.nil?
+
+    value = BigDecimal(raw_value.to_s)
+    errors.add(:discount_value, "cannot have more than two decimal places") unless value.finite? && value == value.round(2)
+  rescue ArgumentError, TypeError
+    errors.add(:discount_value, "must be a valid amount")
   end
 
   def must_have_line_items
@@ -311,6 +377,7 @@ class Invoice < ApplicationRecord
     protected_changes = changes.keys & %w[
       invoice_billing_profile_id invoice_recipient_id invoice_number invoice_date due_date currency
       customer_reference service_period_start service_period_end total_amount payment_terms snapshot origin
+      discount_type discount_value
     ]
     return if protected_changes.empty?
 
@@ -342,7 +409,11 @@ class Invoice < ApplicationRecord
         "notes" => notes,
         "email_subject" => email_subject,
         "email_body" => email_body,
-        "total_amount" => total_amount.to_s
+        "total_amount" => total_amount.to_s,
+        "subtotal_amount" => subtotal_amount.to_s,
+        "discount_type" => discount_type,
+        "discount_value" => discount_value.to_s,
+        "discount_amount" => discount_amount.to_s
       },
       "billing_profile" => billing_profile_snapshot,
       "recipient" => recipient_snapshot,
@@ -372,7 +443,10 @@ class Invoice < ApplicationRecord
       "payment_instructions" => profile&.payment_instructions,
       "default_payment_terms" => profile&.default_payment_terms,
       "remit_to" => profile&.remit_to,
-      "footer_note" => profile&.footer_note
+      "footer_note" => profile&.footer_note,
+      "logo_storage_key" => profile&.logo_storage_key,
+      "logo_content_type" => profile&.logo_content_type,
+      "logo_sha256" => profile&.logo_sha256
     }
   end
 
