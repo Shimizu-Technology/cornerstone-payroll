@@ -29,6 +29,7 @@ import {
 import { Header } from '@/components/layout/Header';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { FinanceBookSelector, useFinanceBook } from '@/contexts/FinanceBookContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -234,6 +235,7 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
 
 export function InvoiceCenter() {
   const { user } = useAuth();
+  const { activeBook } = useFinanceBook();
   const { activeCompany, activeOrganizationId, activeOrganizationName } = useCompany();
   const invoiceOrganizationId = activeOrganizationId || user?.organization_id;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -776,7 +778,7 @@ export function InvoiceCenter() {
     <div className="space-y-6">
       <Header
         title="Invoice Center"
-        description="Create invoices, preserve outside invoices, and track organization receivables from issue through payment."
+        description="Create invoices, preserve outside invoices, and track each book's receivables from issue through payment."
         contextLabel="Organization"
         contextValue={invoiceOrganizationName || 'Organization-wide finance'}
         actions={(
@@ -789,13 +791,15 @@ export function InvoiceCenter() {
         )}
       />
 
+      <FinanceBookSelector disabled={busy || scopeLoading} />
+
       <div className="flex flex-col gap-4 rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/80 to-white p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="flex items-start gap-3">
           <div className="rounded-xl bg-white p-2.5 text-primary-700 shadow-sm"><Building2 className="h-5 w-5" /></div>
           <div>
-            <p className="font-semibold text-neutral-950">Invoice organization: {invoiceOrganizationName}</p>
+            <p className="font-semibold text-neutral-950">Organization: {invoiceOrganizationName}</p>
             <p className="mt-1 max-w-2xl text-sm leading-5 text-neutral-600">
-              {activeCompany ? `Selected company: ${activeCompany.name}. ` : ''}New invoices and recipients belong to this organization. The From business sets the invoice sender, not its data access boundary.
+              {activeCompany ? `Payroll client: ${activeCompany.name}. ` : ''}New invoices and customers belong to the {activeBook.name} book. Changing the payroll client does not change this book. The From business sets the invoice sender.
             </p>
           </div>
         </div>
@@ -846,9 +850,9 @@ export function InvoiceCenter() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 font-semibold text-neutral-950"><CalendarClock className="h-4 w-4 text-primary-700" />Recurring invoices</h2>
-              <p className="mt-1 text-sm text-neutral-600">{activeRecurrences.length} active across this organization. Each occurrence creates a draft for review; it is not sent automatically.</p>
+              <p className="mt-1 text-sm text-neutral-600">{activeRecurrences.length} active in this book. Each occurrence creates a draft for review; it is not sent automatically.</p>
             </div>
-            <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-800">Organization schedules</span>
+            <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-800">Book schedules</span>
           </div>
           {recurrences.length ? <div className="mt-4 divide-y divide-neutral-100 rounded-xl border border-neutral-200">
             {[...recurrences].sort((a, b) => Number(b.active) - Number(a.active) || a.next_on.localeCompare(b.next_on)).map((recurrence) => {
@@ -869,7 +873,7 @@ export function InvoiceCenter() {
         <Card>
           <CardContent className="p-0">
             <div className="flex flex-col gap-3 border-b border-neutral-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div><h2 className="font-semibold text-neutral-950">Invoices</h2><p className="text-sm text-neutral-500">{selectedBusiness ? `Issued by ${selectedBusiness.name}` : 'All invoice businesses in this organization'}</p></div>
+              <div><h2 className="font-semibold text-neutral-950">Invoices</h2><p className="text-sm text-neutral-500">{selectedBusiness ? `Issued by ${selectedBusiness.name}` : 'All senders in this book'}</p></div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search number or customer" className="pl-9 sm:w-64" /></div>
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm">
@@ -925,7 +929,7 @@ export function InvoiceCenter() {
             </div>
             <div><div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold">Line items</h3><Button type="button" size="sm" variant="outline" onClick={() => setDraft({ ...draft, line_items: [...draft.line_items, { ...newLine(), position: draft.line_items.length }] })}><Plus className="mr-1 h-3.5 w-3.5" />Add line</Button></div><div className="space-y-2">
               {draft.line_items.map((line, index) => <div key={line.localId} className="grid gap-2 rounded-xl border border-neutral-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_120px_36px]">
-                <Input value={line.description} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, description: e.target.value } : item) })} placeholder="Description" />
+                <Input value={line.description} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, description: e.target.value } : item) })} placeholder="Description" aria-label={`Line ${index + 1} description`} />
                 <Input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, quantity: Number(e.target.value) } : item) })} aria-label="Quantity" />
                 <Input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, rate: Number(e.target.value) } : item) })} aria-label="Rate" />
                 <button type="button" onClick={() => setDraft({ ...draft, line_items: draft.line_items.filter((item) => item.localId !== line.localId) })} className="rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove line ${index + 1}`}><X className="mx-auto h-4 w-4" /></button>

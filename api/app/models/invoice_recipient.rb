@@ -7,6 +7,7 @@ class InvoiceRecipient < ApplicationRecord
 
   before_validation :normalize_blanks
   before_validation :default_organization_from_company
+  include FinanceBookOwned
 
   validates :name, presence: true
   validates :default_rate, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true

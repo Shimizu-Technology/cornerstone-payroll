@@ -28,6 +28,7 @@ import {
   type InvoiceTemplateType,
 } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
+import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
 import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 
 type DraftLineItem = InvoiceLineItem & {
@@ -1289,7 +1290,7 @@ export function InvoiceMaker() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
-            <p className="text-sm text-neutral-500">Saved invoices for this organization</p>
+            <p className="text-sm text-neutral-500">Saved invoices for this book</p>
           </div>
           <Button size="sm" variant="outline" onClick={handleNewInvoice}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -1574,6 +1575,7 @@ export function InvoiceMaker() {
       />
 
       <div className="px-4 pt-4 sm:px-6 sm:pt-6 lg:px-8">
+        <FinanceBookSelector disabled={saving || loading} />
         <div className="mb-3 flex flex-col gap-3 rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-sm text-primary-900 sm:flex-row sm:items-center sm:justify-between">
           <span>Payments, credits, delivery history, imports, aging, and invoice lifecycle controls live in Invoice Center.</span>
           <Link
@@ -1844,7 +1846,7 @@ export function InvoiceMaker() {
                       <Mail className="h-4 w-4 text-primary-600" />
                       Email Draft
                     </h3>
-                    <p className="text-xs text-neutral-500">Draft text to copy into Gmail after attaching the PDF.</p>
+                    <p className="text-xs text-neutral-500">Used when you send the issued invoice from Invoice Center. You can also copy it for manual delivery.</p>
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={copyEmail} disabled={!invoiceForm.email_subject && !invoiceForm.email_body}>
                     <Copy className="mr-1.5 h-4 w-4" />
@@ -1852,8 +1854,8 @@ export function InvoiceMaker() {
                   </Button>
                 </div>
                 <div className="space-y-3">
-                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" disabled={selectedInvoiceReadOnly} />
-                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} disabled={selectedInvoiceReadOnly} />
+                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Email subject" aria-label="Email subject" disabled={selectedInvoiceReadOnly} />
+                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Email message" aria-label="Email message" rows={4} disabled={selectedInvoiceReadOnly} />
                 </div>
               </div>
 
