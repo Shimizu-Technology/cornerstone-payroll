@@ -705,6 +705,9 @@ export interface OrganizationCompanyTransferPreview {
   selected_invoice_count: number;
   company_invoice_count: number;
   selected_invoice_numbers: string[];
+  source_invoice_numbers_to_unlink: string[];
+  assistant_sessions_to_move: number;
+  assistant_sessions_to_unlink: number;
   home_users_to_move: number;
   staff_home_users_to_rehome: number;
   assignments_to_remove: number;
