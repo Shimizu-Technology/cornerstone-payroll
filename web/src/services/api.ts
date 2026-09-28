@@ -696,6 +696,21 @@ export interface OrganizationCreateResponse {
   invitation_error?: string | null;
 }
 
+export interface OrganizationCompanyTransferPreview {
+  company: { id: number; name: string };
+  source_organization: { id: number; name: string };
+  payroll_periods: number;
+  employee_count: number;
+  billing_profiles: Array<{ id: number; name: string; legal_name: string | null; invoice_count: number }>;
+  selected_invoice_count: number;
+  company_invoice_count: number;
+  selected_invoice_numbers: string[];
+  home_users_to_move: number;
+  staff_home_users_to_rehome: number;
+  assignments_to_remove: number;
+  blockers: string[];
+}
+
 export const organizationsApi = {
   list: (params?: { page?: number; per_page?: number }) =>
     api.get<{ data: OrganizationSummary[]; meta?: PaginationMeta }>('/admin/organizations', params),
@@ -703,6 +718,11 @@ export const organizationsApi = {
     api.get<{ data: OrganizationSummary }>(`/admin/organizations/${id}`),
   create: (data: { name: string; slug?: string; status?: 'active' | 'inactive'; client_limit?: number | null; unlimited_clients?: boolean; primary_company_name?: string; admin?: { email: string; name?: string } }) =>
     api.post<OrganizationCreateResponse>('/admin/organizations', { organization: data }),
+  companyTransferPreview: (companyId: number, billingProfileId?: number) =>
+    api.get<{ transfer: OrganizationCompanyTransferPreview }>('/admin/organizations/company_transfer_preview',
+      { company_id: companyId, billing_profile_id: billingProfileId }),
+  transferCompany: (data: { company_id: number; billing_profile_id?: number; source_organization_id: number; name: string; slug: string; issuer_legal_name?: string }) =>
+    api.post<{ data: OrganizationSummary }>('/admin/organizations/transfer_company', { transfer: data }),
   update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status' | 'client_limit' | 'unlimited_clients'>>) =>
     api.patch<{ data: OrganizationSummary }>(`/admin/organizations/${id}`, { organization: data }),
   createAdminUser: (id: number, data: { email: string; name?: string }) =>

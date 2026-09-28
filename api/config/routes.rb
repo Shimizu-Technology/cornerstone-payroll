@@ -128,6 +128,10 @@ Rails.application.routes.draw do
           end
         end
         resources :organizations, only: [ :index, :show, :create, :update ] do
+          collection do
+            get :company_transfer_preview
+            post :transfer_company
+          end
           member do
             post "admin_users", to: "organizations#create_admin_user"
           end

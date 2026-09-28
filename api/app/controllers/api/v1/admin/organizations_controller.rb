@@ -94,7 +94,36 @@ module Api
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
+        # A separate path preserves an existing company's payroll ids and history.
+        # The ordinary create action always creates a new, empty company.
+        def company_transfer_preview
+          transfer = company_transfer_for(params[:company_id], params[:billing_profile_id])
+          render json: { transfer: transfer.preview }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company or billing profile not found" }, status: :not_found
+        end
+
+        def transfer_company
+          input = params.require(:transfer).permit(:company_id, :billing_profile_id, :name, :slug, :issuer_legal_name,
+                                                   :source_organization_id)
+          transfer = company_transfer_for(input[:company_id], input[:billing_profile_id])
+          destination = transfer.transfer!(name: input[:name], slug: input[:slug],
+                                           expected_source_organization_id: input[:source_organization_id],
+                                           actor: current_user, issuer_legal_name: input[:issuer_legal_name])
+          render json: { data: serialize_organizations([ destination.reload ], detailed: true).first }, status: :created
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company or billing profile not found" }, status: :not_found
+        rescue OrganizationCompanyTransfer::Conflict, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         private
+
+        def company_transfer_for(company_id, billing_profile_id)
+          company = Company.find(company_id)
+          profile = company.organization.invoice_billing_profiles.find(billing_profile_id) if billing_profile_id.present?
+          OrganizationCompanyTransfer.new(company: company, billing_profile: profile)
+        end
 
         def set_organization
           @organization = Organization.find_by(id: params[:id])
