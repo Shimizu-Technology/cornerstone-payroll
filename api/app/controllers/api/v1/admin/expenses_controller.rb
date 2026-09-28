@@ -163,7 +163,12 @@ module Api
         def paid_purchase_params
           return nil unless params.key?(:payment)
 
-          raw = params.require(:payment).permit(:paid_on, :payment_method, :reference_number, :notes)
+          payment = params[:payment]
+          raise ArgumentError, "Payment details must be an object" unless payment.is_a?(ActionController::Parameters)
+
+          raw = payment.permit(:paid_on, :payment_method, :reference_number, :notes)
+          raise ArgumentError, "Payment date must use YYYY-MM-DD" unless raw[:paid_on].is_a?(String)
+
           paid_on = Date.iso8601(raw.require(:paid_on))
           method = raw.require(:payment_method)
           reference = raw[:reference_number].to_s.strip.presence

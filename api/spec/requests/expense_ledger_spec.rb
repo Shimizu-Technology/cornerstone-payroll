@@ -108,6 +108,18 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(ExpensePayment.count).to eq(0)
   end
 
+  it "rejects malformed paid-purchase payment details without inserting records" do
+    vendor = create_vendor
+    expense = { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                expense_on: "2026-09-28", total_amount: "120.00", source_key: "malformed-42" }
+    [ [ "invalid" ], { paid_on: [ "2026-09-28" ], payment_method: "card", reference_number: "statement-42" } ].each do |payment|
+      post "/api/v1/admin/expenses", params: { expense: expense, payment: payment }
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+    expect(Expense.count).to eq(0)
+    expect(ExpensePayment.count).to eq(0)
+  end
+
   it "accepts an original bill retry after a later payment" do
     vendor = create_vendor
     expense = create_expense(vendor: vendor, source_key: "bill-42")
