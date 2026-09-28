@@ -11,7 +11,7 @@ class InvoicePdfGenerator
   INK = "111827"
   MUTED = "526176"
   LINE = "DCE4EB"
-  PANEL = "F3F6F8"
+  PANEL = "F3F7F7"
   ACCENT = "0A8278"
   ACCENT_SOFT = "EAF5F2"
   NAVY = "192D47"
@@ -61,20 +61,30 @@ class InvoicePdfGenerator
   def letterhead(pdf)
     top = pdf.cursor
     logo = InvoiceLogoStorageService.new.download(billing) if billing["logo_storage_key"].present?
+    name = billing["legal_name"].presence || billing["name"].to_s
+    left = logo ? 84 : 0
+    width = pdf.bounds.width - left
+    name_height = pdf.height_of(name, width: width, size: 18, style: :bold)
+    contact_height = contact_lines.sum { |line| pdf.height_of(line, width: width, size: 8.5) + 3 }
+    height = [ 68, name_height + 7 + contact_height ].max
     if logo
-      pdf.bounding_box([ 0, top ], width: 82, height: 55) do
-        pdf.image StringIO.new(logo), fit: [ 78, 50 ]
+      pdf.bounding_box([ 0, top ], width: 72, height: 58) do
+        pdf.image StringIO.new(logo), fit: [ 68, 54 ]
       end
     end
 
-    pdf.bounding_box([ logo ? 96 : 0, top ], width: pdf.bounds.width - (logo ? 96 : 0), height: 64) do
+    pdf.bounding_box([ left, top ], width: width, height: height) do
       pdf.fill_color NAVY
-      pdf.text billing["legal_name"].presence || billing["name"].to_s, size: 16, style: :bold
-      pdf.move_down 6
+      pdf.text name, size: 18, style: :bold
+      pdf.move_down 7
       pdf.fill_color MUTED
-      contact_lines.each { |line| pdf.text line, size: 8.5, leading: 2 }
+      contact_lines.each { |line| pdf.text line, size: 8.5, leading: 3 }
     end
-    pdf.move_cursor_to(top - 78)
+    pdf.move_cursor_to(top - height - 8)
+    pdf.stroke_color ACCENT
+    pdf.line_width 2
+    pdf.stroke_horizontal_rule
+    pdf.move_down 22
   end
 
   def invoice_title(pdf)
@@ -86,24 +96,26 @@ class InvoicePdfGenerator
     ].reject { |_label, value| value.blank? }
 
     top = pdf.cursor
-    pdf.fill_color NAVY
-    pdf.fill_rectangle [ 0, top ], pdf.bounds.width, 102
-    pdf.bounding_box([ 20, top - 19 ], width: pdf.bounds.width - 210, height: 75) do
-      pdf.fill_color "A8D9D3"
-      pdf.text "INVOICE", size: 10, style: :bold, character_spacing: 2
-      pdf.move_down 9
-      pdf.fill_color "FFFFFF"
-      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 19, style: :bold
+    pdf.fill_color PANEL
+    pdf.fill_rectangle [ 0, top ], pdf.bounds.width, 84
+    pdf.fill_color ACCENT
+    pdf.fill_rectangle [ 0, top ], 4, 84
+    pdf.bounding_box([ 24, top - 17 ], width: pdf.bounds.width - 220, height: 54) do
+      pdf.fill_color MUTED
+      pdf.text "INVOICE", size: 9, style: :bold, character_spacing: 1.8
+      pdf.move_down 8
+      pdf.fill_color NAVY
+      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 20, style: :bold
     end
-    pdf.bounding_box([ pdf.bounds.width - 190, top - 19 ], width: 170, height: 75) do
-      pdf.fill_color "A8D9D3"
-      pdf.text "TOTAL DUE", size: 9, style: :bold, align: :right, character_spacing: 1.5
+    pdf.bounding_box([ pdf.bounds.width - 188, top - 17 ], width: 164, height: 54) do
+      pdf.fill_color MUTED
+      pdf.text "AMOUNT DUE", size: 9, style: :bold, align: :right, character_spacing: 1.4
       pdf.move_down 7
-      pdf.fill_color "FFFFFF"
-      pdf.text money(invoice_data["total_amount"]), size: 21, style: :bold, align: :right
+      pdf.fill_color NAVY
+      pdf.text money(invoice_data["total_amount"]), size: 22, style: :bold, align: :right
     end
     pdf.fill_color INK
-    pdf.move_cursor_to(top - 120)
+    pdf.move_cursor_to(top - 101)
 
     return if rows.empty?
 
@@ -119,33 +131,30 @@ class InvoicePdfGenerator
       columns(2).width = 110
       columns(3).width = (pdf.bounds.width / 2) - 110
     end
-    pdf.move_down 22
+    pdf.move_down 20
   end
 
   def parties(pdf)
-    bill_to = labeled_block("Bill To", [
-      recipient["name"],
-      *recipient["address"].to_s.split("\n"),
-      recipient["email"]
-    ])
-    remit_to = labeled_block("Remit To", [
-      billing["remit_to"].presence || billing["legal_name"].presence || billing["name"],
-      *billing["address"].to_s.split("\n"),
-      billing["email"],
-      billing["phone"]
-    ])
+    bill_to = [ *recipient["address"].to_s.split("\n"), recipient["email"] ].compact_blank.join("\n")
+    remit_to = [ *billing["address"].to_s.split("\n"), billing["email"], billing["phone"] ].compact_blank.join("\n")
 
-    pdf.table([ [ bill_to, remit_to ] ], width: pdf.bounds.width, cell_style: { borders: [], padding: [ 0, 18, 0, 0 ],
-                                                                              size: 10, text_color: INK, valign: :top }) do
+    pdf.table([
+      [ "BILL TO", "REMIT TO" ],
+      [ recipient["name"].to_s, billing["remit_to"].presence || billing["legal_name"].presence || billing["name"].to_s ],
+      [ bill_to, remit_to ]
+    ], width: pdf.bounds.width, cell_style: { borders: [], padding: [ 2, 18, 2, 0 ],
+                                             size: 9.5, text_color: INK, valign: :top }) do
       columns(0).width = pdf.bounds.width / 2
       columns(1).width = pdf.bounds.width / 2
+      row(0).font_style = :bold
+      row(0).size = 8
+      row(0).text_color = ACCENT
+      row(1).font_style = :bold
+      row(1).size = 11
+      row(1).text_color = NAVY
+      row(2).text_color = MUTED
     end
     pdf.move_down 24
-  end
-
-  def labeled_block(label, lines)
-    body = lines.compact_blank.join("\n")
-    "#{label.upcase}\n#{body}"
   end
 
   def line_items(pdf)
@@ -220,6 +229,10 @@ class InvoicePdfGenerator
       row(summary_rows.length - 1).font_style = :bold
       row(summary_rows.length - 1).size = 11
       row(summary_rows.length - 1).text_color = NAVY
+      row(summary_rows.length - 1).borders = [ :top ]
+      row(summary_rows.length - 1).border_color = ACCENT
+      row(summary_rows.length - 1).border_width = 1
+      row(summary_rows.length - 1).padding_top = 10
     end
     payment_text = visible_payment_instructions
     terms = invoice_data["payment_terms"].presence
