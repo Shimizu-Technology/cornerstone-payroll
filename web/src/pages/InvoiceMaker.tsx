@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -256,6 +256,7 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 }
 
 export function InvoiceMaker() {
+  const location = useLocation();
   const { activeCompanyId } = useCompany();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingProfiles, setBillingProfiles] = useState<InvoiceBillingProfile[]>([]);
@@ -356,6 +357,14 @@ export function InvoiceMaker() {
     if (invoiceMode !== 'ai') return;
     chatMessagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [activeChatSession?.id, activeChatSession?.messages?.length, invoiceMode, optimisticChatMessages.length]);
+
+  useEffect(() => {
+    if (location.hash !== '#billing-profiles' || invoiceMode !== 'manual' || loading) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('billing-profiles')?.scrollIntoView({ block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, invoiceMode, loading]);
 
   useEffect(() => {
     const previews = chatImages.map((file) => ({
@@ -1419,12 +1428,12 @@ export function InvoiceMaker() {
   );
 
   const billingProfilesPanel = (
-    <Card>
+    <Card id="billing-profiles" className="scroll-mt-6">
       <CardContent className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Billing Profiles</h2>
-            <p className="text-sm text-neutral-500">Invoice from identities</p>
+            <p className="text-sm text-neutral-500">Choose a sender to edit its logo and billing details.</p>
           </div>
           <Button
             size="sm"
@@ -1503,7 +1512,7 @@ export function InvoiceMaker() {
             >
               <span className="font-medium text-neutral-900">{profile.name}</span>
               {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">Default</span>}
-              <span className="block truncate text-xs text-neutral-500">{profile.email || profile.phone || profile.website || 'No contact details'}</span>
+              <span className="block truncate text-xs text-neutral-500">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'}</span>
             </button>
           ))}
         </div>
