@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 import {
   invoiceBillingProfilesApi,
   invoiceReceivablesApi,
@@ -480,8 +481,8 @@ export function InvoiceCenter() {
       if (!importForm.discount_value.trim() || !Number.isFinite(discount) || discount < 0) throw new Error('Enter the original discount');
       if (importForm.discount_type === 'percent' && discount > 100) throw new Error('Percentage discount cannot exceed 100%');
       if (importForm.discount_type === 'amount' && discount > subtotal) throw new Error('Fixed discount cannot exceed the subtotal');
-      const discountedTotal = subtotal - (importForm.discount_type === 'percent' ? Math.round(subtotal * discount) / 100 : discount);
-      if (Math.abs(Math.round(discountedTotal * 100) - Math.round(Number(importForm.total_amount) * 100)) > 0) throw new Error('Subtotal minus discount must equal the invoice total');
+      const discountedTotal = roundInvoiceCurrency(subtotal - (importForm.discount_type === 'percent' ? invoicePercentDiscount(subtotal, discount) : discount));
+      if (discountedTotal !== roundInvoiceCurrency(Number(importForm.total_amount))) throw new Error('Subtotal minus discount must equal the invoice total');
     }
     const result = await invoicesApi.import({
       file: importForm.file,
@@ -704,9 +705,9 @@ export function InvoiceCenter() {
   const invoiceDiscount = draft.discount_type === 'none' || !Number.isFinite(discountInput)
     ? 0
     : draft.discount_type === 'percent'
-      ? Math.round(invoiceSubtotal * discountInput) / 100
+      ? invoicePercentDiscount(invoiceSubtotal, discountInput)
       : discountInput;
-  const invoiceTotal = Math.max(0, Math.round((invoiceSubtotal - invoiceDiscount) * 100) / 100);
+  const invoiceTotal = Math.max(0, roundInvoiceCurrency(invoiceSubtotal - invoiceDiscount));
 
   return (
     <div className="space-y-6">
