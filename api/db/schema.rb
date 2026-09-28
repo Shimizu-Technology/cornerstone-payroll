@@ -1088,6 +1088,85 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_130000) do
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
   end
 
+  create_table "expense_artifacts", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.string "content_type", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.bigint "expense_id", null: false
+    t.string "filename", null: false
+    t.bigint "organization_id", null: false
+    t.string "sha256", null: false
+    t.string "storage_key", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_expense_artifacts_on_created_by_id"
+    t.index ["expense_id"], name: "index_expense_artifacts_on_expense_id"
+    t.index ["organization_id"], name: "index_expense_artifacts_on_organization_id"
+    t.index ["storage_key"], name: "index_expense_artifacts_on_storage_key", unique: true
+  end
+
+  create_table "expense_payments", force: :cascade do |t|
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.bigint "expense_id", null: false
+    t.text "notes"
+    t.bigint "organization_id", null: false
+    t.date "paid_on", null: false
+    t.string "payment_method", null: false
+    t.bigint "recorded_by_id"
+    t.string "reference_number"
+    t.text "reversal_reason"
+    t.datetime "reversed_at"
+    t.bigint "reversed_by_id"
+    t.datetime "updated_at", null: false
+    t.index ["expense_id", "reversed_at"], name: "index_expense_payments_on_expense_id_and_reversed_at"
+    t.index ["expense_id"], name: "index_expense_payments_on_expense_id"
+    t.index ["organization_id"], name: "index_expense_payments_on_organization_id"
+    t.index ["recorded_by_id"], name: "index_expense_payments_on_recorded_by_id"
+    t.index ["reversed_by_id"], name: "index_expense_payments_on_reversed_by_id"
+    t.check_constraint "amount > 0::numeric", name: "check_expense_payment_positive"
+  end
+
+  create_table "expense_vendors", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.string "name", null: false
+    t.text "notes"
+    t.bigint "organization_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["organization_id", "name"], name: "index_expense_vendors_on_organization_id_and_name", unique: true
+    t.index ["organization_id"], name: "index_expense_vendors_on_organization_id"
+  end
+
+  create_table "expenses", force: :cascade do |t|
+    t.string "category", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "currency", default: "USD", null: false
+    t.text "description", null: false
+    t.date "due_on"
+    t.date "expense_on", null: false
+    t.bigint "expense_vendor_id", null: false
+    t.bigint "organization_id", null: false
+    t.string "reference_number"
+    t.string "source_key"
+    t.decimal "total_amount", precision: 12, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.text "void_reason"
+    t.datetime "voided_at"
+    t.index ["created_by_id"], name: "index_expenses_on_created_by_id"
+    t.index ["expense_vendor_id"], name: "index_expenses_on_expense_vendor_id"
+    t.index ["organization_id", "due_on"], name: "index_expenses_on_organization_id_and_due_on"
+    t.index ["organization_id", "expense_on"], name: "index_expenses_on_organization_id_and_expense_on"
+    t.index ["organization_id", "source_key"], name: "index_expenses_on_organization_id_and_source_key", unique: true, where: "(source_key IS NOT NULL)"
+    t.index ["organization_id"], name: "index_expenses_on_organization_id"
+    t.index ["updated_by_id"], name: "index_expenses_on_updated_by_id"
+    t.check_constraint "currency::text ~ '^[A-Z]{3}$'::text", name: "check_expense_currency"
+    t.check_constraint "total_amount > 0::numeric", name: "check_expense_total_positive"
+  end
+
   create_table "filing_status_configs", force: :cascade do |t|
     t.bigint "annual_tax_config_id", null: false
     t.datetime "created_at", null: false
@@ -3522,6 +3601,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_130000) do
   add_foreign_key "employees", "departments"
   add_foreign_key "employees", "employees", column: "previous_employee_id"
   add_foreign_key "employees", "employees", column: "test_workspace_source_employee_id", on_delete: :restrict
+  add_foreign_key "expense_artifacts", "expenses"
+  add_foreign_key "expense_artifacts", "organizations"
+  add_foreign_key "expense_artifacts", "users", column: "created_by_id"
+  add_foreign_key "expense_payments", "expenses"
+  add_foreign_key "expense_payments", "organizations"
+  add_foreign_key "expense_payments", "users", column: "recorded_by_id"
+  add_foreign_key "expense_payments", "users", column: "reversed_by_id"
+  add_foreign_key "expense_vendors", "organizations"
+  add_foreign_key "expenses", "expense_vendors"
+  add_foreign_key "expenses", "organizations"
+  add_foreign_key "expenses", "users", column: "created_by_id"
+  add_foreign_key "expenses", "users", column: "updated_by_id"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
   add_foreign_key "form500_filings", "companies"
   add_foreign_key "form500_filings", "pay_periods"

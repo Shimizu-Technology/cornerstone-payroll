@@ -1,0 +1,170 @@
+# frozen_string_literal: true
+
+require "csv"
+
+module Api
+  module V1
+    module Admin
+      class ExpensesController < BaseController
+        before_action :require_admin!
+        before_action :set_expense, only: %i[show update void upload_artifact download_artifact]
+
+        def index
+          page = [ params.fetch(:page, 1).to_i, 1 ].max
+          per_page = params.fetch(:per_page, 50).to_i.clamp(1, 100)
+          expenses = filtered_scope.includes(:expense_vendor, :expense_payments, :expense_artifacts)
+          total_count = expenses.count
+          rows = expenses.recent.offset((page - 1) * per_page).limit(per_page)
+          render json: {
+            expenses: rows.map { |expense| ExpensePayloadBuilder.call(expense) },
+            meta: { page: page, per_page: per_page, total_count: total_count },
+            summary: summary_for(filtered_scope.active)
+          }
+        rescue Date::Error
+          render json: { error: "Date filters must use YYYY-MM-DD" }, status: :unprocessable_entity
+        end
+
+        def show
+          render json: { expense: ExpensePayloadBuilder.call(@expense, detailed: true) }
+        end
+
+        def create
+          attrs = expense_params.to_h.symbolize_keys
+          source_key = attrs[:source_key].presence
+          if source_key && (existing = scope.find_by(source_key: source_key))
+            candidate = scope.new(attrs)
+            comparable = %i[expense_vendor_id category description expense_on due_on total_amount currency reference_number]
+            unless comparable.all? { |field| existing.public_send(field) == candidate.public_send(field) }
+              return render json: { error: "Source key already belongs to a different expense" }, status: :conflict
+            end
+            return render json: { expense: ExpensePayloadBuilder.call(existing, detailed: true), already_exists: true }
+          end
+
+          expense = scope.new(attrs)
+          expense.created_by = current_user
+          expense.updated_by = current_user
+          expense.save!
+          render json: { expense: ExpensePayloadBuilder.call(expense, detailed: true) }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { error: "An expense with that source key already exists" }, status: :conflict
+        end
+
+        def update
+          @expense.with_lock do
+            raise ArgumentError, "Voided expenses cannot be changed" if @expense.voided?
+
+            @expense.assign_attributes(expense_params.except(:source_key))
+            @expense.updated_by = current_user
+            @expense.save!
+          end
+          render json: { expense: ExpensePayloadBuilder.call(@expense.reload, detailed: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def void
+          reason = params.require(:reason).to_s.strip
+          raise ArgumentError, "A void reason is required" if reason.blank?
+
+          @expense.with_lock do
+            raise ArgumentError, "Expense has already been voided" if @expense.voided?
+            raise ArgumentError, "Reverse recorded payments before voiding" if @expense.expense_payments.active.exists?
+
+            @expense.update!(voided_at: Time.current, void_reason: reason, updated_by: current_user)
+          end
+          render json: { expense: ExpensePayloadBuilder.call(@expense.reload, detailed: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def upload_artifact
+          raise ArgumentError, "Voided expenses cannot receive receipts" if @expense.voided?
+
+          artifact = ExpenseArtifactStorageService.new.upload!(expense: @expense, actor: current_user, file: params[:file])
+          render json: { artifact: artifact.as_json(only: %i[id filename content_type byte_size sha256 created_at]) }, status: :created
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError => e
+          Rails.logger.warn("Expense receipt upload failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to store the expense receipt" }, status: :unprocessable_entity
+        end
+
+        def download_artifact
+          artifact = @expense.expense_artifacts.find(params[:artifact_id])
+          bytes = ExpenseArtifactStorageService.new.download(artifact)
+          send_data bytes, type: artifact.content_type, filename: artifact.filename, disposition: "attachment"
+        rescue R2StorageService::DownloadError => e
+          Rails.logger.warn("Expense receipt download failed: #{e.class}: #{e.message}")
+          render json: { error: "Expense receipt is unavailable" }, status: :not_found
+        end
+
+        def export
+          rows = filtered_scope.includes(:expense_vendor, :expense_payments)
+          csv = CSV.generate do |file|
+            file << %w[date vendor reference category description currency total paid balance status due_date]
+            rows.find_each do |expense|
+              file << [ expense.expense_on, safe_csv(expense.expense_vendor.name), safe_csv(expense.reference_number),
+                        safe_csv(expense.category), safe_csv(expense.description), expense.currency,
+                        expense.total_amount.to_s("F"), expense.amount_paid.to_s("F"), expense.balance_due.to_s("F"),
+                        expense.payment_status, expense.due_on ]
+            end
+          end
+          send_data csv, type: "text/csv", filename: "expenses-#{Date.current.iso8601}.csv", disposition: "attachment"
+        rescue Date::Error
+          render json: { error: "Date filters must use YYYY-MM-DD" }, status: :unprocessable_entity
+        end
+
+        private
+
+        def set_expense
+          @expense = scope.includes(:expense_vendor, :expense_payments, :expense_artifacts).find(params[:id])
+        end
+
+        def scope
+          Expense.where(organization_id: current_organization_id)
+        end
+
+        def filtered_scope
+          rows = scope
+          rows = rows.where(expense_vendor_id: params[:vendor_id]) if params[:vendor_id].present?
+          rows = rows.where(category: params[:category]) if params[:category].present?
+          rows = rows.where("expense_on >= ?", Date.iso8601(params[:from])) if params[:from].present?
+          rows = rows.where("expense_on <= ?", Date.iso8601(params[:to])) if params[:to].present?
+          rows = rows.active unless ActiveModel::Type::Boolean.new.cast(params[:include_voided])
+          rows
+        end
+
+        def expense_params
+          params.require(:expense).permit(:expense_vendor_id, :reference_number, :source_key, :category, :description,
+                                          :expense_on, :due_on, :total_amount, :currency)
+        end
+
+        def safe_csv(value)
+          string = value.to_s
+          string.match?(/\A\s*[=+\-@]/) ? "'#{string}" : string
+        end
+
+        def summary_for(rows)
+          totals = rows.group(:currency).sum(:total_amount)
+          paid = ExpensePayment.active.joins(:expense).where(expense_id: rows.select(:id))
+                               .group("expenses.currency").sum(:amount)
+          overdue = rows.where("due_on < ?", Date.current).where(
+            "total_amount > COALESCE((SELECT SUM(amount) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.reversed_at IS NULL), 0)"
+          ).count
+          {
+            currencies: totals.map do |currency, total|
+              amount_paid = paid.fetch(currency, 0.to_d)
+              { currency: currency, total_amount: total.to_s("F"), amount_paid: amount_paid.to_s("F"),
+                balance_due: (total - amount_paid).to_s("F") }
+            end,
+            overdue_count: overdue
+          }
+        end
+      end
+    end
+  end
+end
