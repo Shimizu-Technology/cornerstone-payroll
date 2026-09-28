@@ -74,7 +74,7 @@ export function FinanceAgentAccess() {
   }
 
   return <div className="min-h-screen bg-[#f8f7f4]">
-    <Header title="Agent access" description="Give an agent read-only access to one financial book. Keys expire after 90 days and can be revoked here."
+    <Header title="Agent access" description="Give an agent access to one financial book. Keys are read only unless you allow draft editing. They expire after 90 days and can be revoked here."
       contextLabel="Financial book" contextValue={activeBook.name} />
     <main className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <Link to="/tools/finance" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-800 hover:underline"><ArrowLeft className="h-4 w-4" />Finance overview</Link>
