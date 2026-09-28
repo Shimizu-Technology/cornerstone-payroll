@@ -19,6 +19,16 @@ production:
     queue: default
     schedule: every day at 7am
 
+  create_recurring_invoice_drafts:
+    class: InvoiceRecurrenceDispatchJob
+    queue: default
+    schedule: every hour at minute 5
+
+  dispatch_scheduled_invoice_emails:
+    class: InvoiceSendDispatchJob
+    queue: default
+    schedule: every minute
+
   dispatch_aire_payroll_acknowledgements:
     class: AirePayrollAcknowledgementDispatchJob
     queue: default

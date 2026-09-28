@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1804,6 +1804,51 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     t.index ["organization_id"], name: "index_invoice_recipients_on_organization_id"
   end
 
+  create_table "invoice_recurrences", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.integer "due_after_days", default: 30, null: false
+    t.date "ends_on"
+    t.integer "interval_count", default: 1, null: false
+    t.string "interval_unit", null: false
+    t.date "next_on", null: false
+    t.integer "occurrence_index", default: 0, null: false
+    t.bigint "organization_id", null: false
+    t.bigint "source_invoice_id", null: false
+    t.date "start_on", null: false
+    t.string "time_zone", default: "Pacific/Guam", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active", "next_on"], name: "index_invoice_recurrences_on_active_and_next_on"
+    t.index ["created_by_id"], name: "index_invoice_recurrences_on_created_by_id"
+    t.index ["organization_id"], name: "index_invoice_recurrences_on_organization_id"
+    t.index ["source_invoice_id"], name: "index_active_invoice_recurrences_on_source", unique: true, where: "(active = true)"
+    t.index ["source_invoice_id"], name: "index_invoice_recurrences_on_source_invoice_id"
+    t.check_constraint "interval_count > 0 AND due_after_days >= 0 AND occurrence_index >= 0", name: "check_invoice_recurrence_numbers"
+    t.check_constraint "interval_unit::text = ANY (ARRAY['week'::character varying::text, 'month'::character varying::text])", name: "check_invoice_recurrence_unit"
+  end
+
+  create_table "invoice_send_schedules", force: :cascade do |t|
+    t.integer "attempts", default: 0, null: false
+    t.datetime "claimed_at"
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.bigint "invoice_id", null: false
+    t.text "last_error"
+    t.bigint "organization_id", null: false
+    t.string "provider_reference"
+    t.jsonb "recipients", default: [], null: false
+    t.datetime "send_at", null: false
+    t.datetime "sent_at"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_invoice_send_schedules_on_created_by_id"
+    t.index ["invoice_id"], name: "index_invoice_send_schedules_on_invoice_id"
+    t.index ["organization_id"], name: "index_invoice_send_schedules_on_organization_id"
+    t.index ["status", "send_at"], name: "index_invoice_send_schedules_on_status_and_send_at"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'sending'::character varying::text, 'sent'::character varying::text, 'failed'::character varying::text, 'cancelled'::character varying::text])", name: "check_invoice_send_schedule_status"
+  end
+
   create_table "invoices", force: :cascade do |t|
     t.boolean "archived", default: false, null: false
     t.datetime "archived_at"
@@ -1812,6 +1857,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     t.bigint "created_by_id"
     t.string "currency", default: "USD", null: false
     t.string "customer_reference"
+    t.string "discount_type", default: "none", null: false
+    t.decimal "discount_value", precision: 12, scale: 2, default: "0.0", null: false
     t.date "due_date"
     t.text "email_body"
     t.string "email_subject"
@@ -1820,6 +1867,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     t.date "invoice_date", null: false
     t.string "invoice_number", null: false
     t.bigint "invoice_recipient_id", null: false
+    t.bigint "invoice_recurrence_id"
     t.datetime "issued_at"
     t.string "legacy_status"
     t.text "notes"
@@ -1827,6 +1875,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     t.string "origin", default: "native", null: false
     t.datetime "paid_at"
     t.text "payment_terms"
+    t.date "recurrence_on"
     t.datetime "sent_at"
     t.date "service_period_end"
     t.date "service_period_start"
@@ -1846,11 +1895,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     t.index ["invoice_billing_profile_id", "status", "due_date"], name: "idx_invoices_on_profile_status_due_date"
     t.index ["invoice_billing_profile_id"], name: "index_invoices_on_invoice_billing_profile_id"
     t.index ["invoice_recipient_id"], name: "index_invoices_on_invoice_recipient_id"
+    t.index ["invoice_recurrence_id", "recurrence_on"], name: "index_invoices_on_recurrence_occurrence", unique: true, where: "(invoice_recurrence_id IS NOT NULL)"
+    t.index ["invoice_recurrence_id"], name: "index_invoices_on_invoice_recurrence_id"
     t.index ["organization_id", "archived", "invoice_date"], name: "idx_invoices_on_org_archive_invoice_date"
     t.index ["organization_id", "invoice_date"], name: "index_invoices_on_org_invoice_date"
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
+    t.check_constraint "discount_type::text = ANY (ARRAY['none'::character varying::text, 'percent'::character varying::text, 'amount'::character varying::text])", name: "check_invoices_discount_type"
+    t.check_constraint "discount_value >= 0::numeric", name: "check_invoices_discount_value"
     t.check_constraint "origin::text = ANY (ARRAY['native'::character varying::text, 'imported'::character varying::text])", name: "check_invoices_origin"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'open'::character varying::text, 'voided'::character varying::text, 'uncollectible'::character varying::text])", name: "check_invoices_status"
   end
@@ -3779,4 +3832,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_010000) do
     BEFORE UPDATE OR DELETE ON payroll_filing_events
     FOR EACH ROW EXECUTE FUNCTION prevent_payroll_filing_event_mutation();
   SQL
+  add_foreign_key "invoice_recurrences", "invoices", column: "source_invoice_id"
+  add_foreign_key "invoice_recurrences", "organizations"
+  add_foreign_key "invoice_recurrences", "users", column: "created_by_id"
+  add_foreign_key "invoice_send_schedules", "invoices"
+  add_foreign_key "invoice_send_schedules", "organizations"
+  add_foreign_key "invoice_send_schedules", "users", column: "created_by_id"
+  add_foreign_key "invoices", "invoice_recurrences"
 end

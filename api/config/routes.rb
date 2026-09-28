@@ -492,6 +492,8 @@ Rails.application.routes.draw do
         # Invoice Center and bounded accounts receivable
         resources :invoice_billing_profiles, except: [:new, :edit]
         resources :invoice_recipients, except: [:new, :edit]
+        resources :invoice_recurrences, only: [:index, :create, :update]
+        resources :invoice_send_schedules, only: [:index, :create, :update]
         resources :invoices, except: [:new, :edit] do
           collection do
             post :import

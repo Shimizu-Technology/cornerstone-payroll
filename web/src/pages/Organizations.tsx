@@ -102,10 +102,6 @@ export function Organizations() {
       setNewError('Primary company name is required');
       return;
     }
-    if (!newAdminEmail.trim()) {
-      setNewError('First admin email is required');
-      return;
-    }
     if (!newUnlimitedClients && parseClientLimit(newClientLimit) < 1) {
       setNewError('Client limit must be at least 1, or choose unlimited');
       return;
@@ -120,10 +116,10 @@ export function Organizations() {
         client_limit: newUnlimitedClients ? null : parseClientLimit(newClientLimit),
         unlimited_clients: newUnlimitedClients,
         primary_company_name: newPrimaryCompanyName.trim(),
-        admin: {
+        admin: newAdminEmail.trim() ? {
           email: newAdminEmail.trim(),
           name: newAdminName.trim() || undefined,
-        },
+        } : undefined,
       });
 
       if (response.invitation_sent) {
@@ -385,8 +381,9 @@ export function Organizations() {
                   Unlimited
                 </label>
               </div>
-              <Input placeholder="First admin email *" type="email" value={newAdminEmail} onChange={(event) => setNewAdminEmail(event.target.value)} />
-              <Input placeholder="First admin name (optional)" value={newAdminName} onChange={(event) => setNewAdminName(event.target.value)} />
+              <Input placeholder="First admin email (optional)" type="email" value={newAdminEmail} onChange={(event) => setNewAdminEmail(event.target.value)} />
+              <Input placeholder="First admin name (optional)" value={newAdminName} onChange={(event) => setNewAdminName(event.target.value)} disabled={!newAdminEmail.trim()} />
+              <p className="text-xs leading-5 text-neutral-600">A first admin is optional. The platform owner can manage invoices for this organization by selecting its primary company, then opening Invoice Center.</p>
             </div>
             <div className="mt-4 flex gap-2">
               <Button onClick={handleCreateOrganization} disabled={isSavingNew}>

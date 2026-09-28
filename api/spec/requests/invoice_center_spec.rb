@@ -50,6 +50,34 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to include(invoice.id)
   end
 
+  it "uses the selected company's organization for a platform owner's invoice workspace" do
+    shimizu_org = create(:organization, name: "Shimizu Technology")
+    shimizu_company = create(:company, organization: shimizu_org, name: "Shimizu Technology")
+    platform_owner = create(:user, company: company, organization: company.organization, role: "super_admin")
+    allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_user).and_return(platform_owner)
+    allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_user).and_return(platform_owner)
+    allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_company_id).and_return(shimizu_company.id)
+    allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_company_id).and_return(shimizu_company.id)
+
+    post "/api/v1/admin/invoice_recipients", params: { invoice_recipient: { name: "Shimizu Customer" } }
+    expect(response).to have_http_status(:created), response.body
+    shimizu_recipient_id = response.parsed_body.dig("invoice_recipient", "id")
+    expect(InvoiceRecipient.find(shimizu_recipient_id).organization_id).to eq(shimizu_org.id)
+
+    post "/api/v1/admin/invoices", params: {
+      invoice: {
+        invoice_recipient_id: shimizu_recipient_id, invoice_date: "2026-09-28",
+        line_items: [ { description: "Development", quantity: 1, rate: 100 } ]
+      }
+    }
+    expect(response).to have_http_status(:created), response.body
+    expect(Invoice.find(response.parsed_body.dig("invoice", "id")).organization_id).to eq(shimizu_org.id)
+
+    get "/api/v1/admin/invoices", params: { billing_profile_id: profile.id }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("invoices")).to be_empty
+  end
+
   it "allocates profile-specific numbers and issues an immutable PDF artifact" do
     first = create_draft(invoice_number: nil)
     second = create_draft(invoice_number: nil)
@@ -164,6 +192,9 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
       invoice_date: "2026-06-01",
       due_date: "2026-06-15",
       total_amount: "850.25",
+      subtotal_amount: "900.25",
+      discount_type: "amount",
+      discount_value: "50.00",
       delivered_at: "2026-06-01T09:30:00+10:00",
       delivery_channel: "email"
     }
@@ -171,7 +202,8 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response).to have_http_status(:created)
     invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
     artifact = invoice.artifacts.sole
-    expect(invoice).to have_attributes(origin: "imported", status: "open", invoice_number: "EXT-2048")
+    expect(invoice).to have_attributes(origin: "imported", status: "open", invoice_number: "EXT-2048",
+                                       subtotal_amount: 900.25.to_d, discount_amount: 50.to_d, total_amount: 850.25.to_d)
     expect(invoice.reader_status(as_of: Date.new(2026, 6, 20))).to eq("overdue")
     expect(invoice.deliveries.sole.channel).to eq("email")
     expect(R2StorageService.new.download(artifact.storage_key)).to eq(original)
