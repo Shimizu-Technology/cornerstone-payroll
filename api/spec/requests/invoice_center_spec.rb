@@ -428,6 +428,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     }
 
     expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("invoice", "deliveries").sole.fetch("correctable")).to be(true)
     expect(delivery.reload.delivered_at.iso8601).to eq("2026-09-20T00:23:00Z")
     expect(invoice.reload.sent_at).to eq(delivery.delivered_at)
     expect(original_event.reload.occurred_at.iso8601).to eq("2026-09-20T10:23:00Z")
@@ -442,6 +443,8 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     invoice.events.find_by!(event_type: "delivery_recorded").update_columns(metadata: {
       delivery_id: delivery.id, send_schedule_id: 42
     })
+    get "/api/v1/admin/invoices/#{invoice.id}"
+    expect(response.parsed_body.dig("invoice", "deliveries").sole.fetch("correctable")).to be(false)
 
     patch "/api/v1/admin/invoices/#{invoice.id}/deliveries/#{delivery.id}", params: {
       delivered_at: "2026-09-20T10:23:00+10:00", reason: "Wrong time"
@@ -449,6 +452,22 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
 
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to eq("Provider deliveries cannot be corrected manually")
+    expect(invoice.events.where(event_type: "delivery_corrected")).to be_empty
+  end
+
+  it "rejects incomplete delivery correction timestamps" do
+    invoice = issue_invoice(total: 125)
+    post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: { channel: "email" }
+    delivery = invoice.deliveries.sole
+    original_time = delivery.delivered_at
+
+    [ "10:23", "2026-09-20" ].each do |partial_time|
+      patch "/api/v1/admin/invoices/#{invoice.id}/deliveries/#{delivery.id}", params: {
+        delivered_at: partial_time, reason: "Time zone correction"
+      }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(delivery.reload.delivered_at).to eq(original_time)
+    end
     expect(invoice.events.where(event_type: "delivery_corrected")).to be_empty
   end
 

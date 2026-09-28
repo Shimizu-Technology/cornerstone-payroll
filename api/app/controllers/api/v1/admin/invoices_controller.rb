@@ -222,7 +222,7 @@ module Api
 
         def correct_delivery
           delivery = @invoice.deliveries.find(params[:delivery_id])
-          corrected_time = Time.zone.parse(params.require(:delivered_at))
+          corrected_time = Time.zone.rfc3339(params.require(:delivered_at))
           reason = params.require(:reason).to_s.strip
           raise ArgumentError, "Corrected delivery time is invalid" if corrected_time.blank?
           raise ArgumentError, "Explain why the delivery time changed" if reason.blank?

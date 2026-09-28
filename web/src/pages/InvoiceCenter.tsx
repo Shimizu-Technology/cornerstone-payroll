@@ -181,6 +181,11 @@ const localDateTimeInput = (value: string) => {
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 };
+const localDateTimeInputWithSeconds = (value: string) => {
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 19);
+};
 
 function downloadBlob(data: BlobDownload, fallback: string) {
   const url = URL.createObjectURL(data.blob);
@@ -1039,7 +1044,7 @@ export function InvoiceCenter() {
                   {delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}
                   <p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p>
                   {delivery.correctable && (correctingDeliveryId === delivery.id ? <form onSubmit={(event) => submitDeliveryCorrection(event, delivery.id)} className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <label className="text-xs font-medium">Corrected local time<Input required name="delivered_at" type="datetime-local" defaultValue={localDateTimeInput(delivery.delivered_at)} className="mt-1" /></label>
+                    <label className="text-xs font-medium">Corrected local time<Input required name="delivered_at" type="datetime-local" step="1" defaultValue={localDateTimeInputWithSeconds(delivery.delivered_at)} className="mt-1" /></label>
                     <label className="text-xs font-medium">Reason<Input required name="reason" placeholder="For example, corrected time zone" className="mt-1" /></label>
                     <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={busy}>Save correction</Button><Button type="button" variant="ghost" onClick={() => setCorrectingDeliveryId(null)}>Cancel</Button></div>
                   </form> : <button type="button" className="mt-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline" onClick={() => setCorrectingDeliveryId(delivery.id)}>Correct time</button>)}
