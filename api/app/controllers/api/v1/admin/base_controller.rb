@@ -7,12 +7,46 @@ module Api
         include Auditable
 
         before_action :require_staff_access!
+        before_action :enforce_finance_context!
         before_action :enforce_company_access!
         before_action :enforce_test_workspace_access!
         before_action :enforce_test_workspace_safety!
         before_action :enforce_high_impact_role_policy!
 
         private
+
+        def enforce_finance_context!
+          return unless finance_request?
+
+          raw_organization_id = request.headers["X-Organization-Id"].presence
+          if raw_organization_id
+            unless raw_organization_id.to_s.match?(/\A[1-9]\d*\z/)
+              return render json: { error: "Invalid organization context" }, status: :unprocessable_entity
+            end
+
+            organization = Organization.find_by(id: raw_organization_id.to_i)
+            return render json: { error: "Organization not found" }, status: :not_found unless organization
+            unless current_user.super_admin? || organization.id == current_user.organization_id
+              return render json: { error: "You do not have access to this organization" }, status: :forbidden
+            end
+          end
+
+          raw_company_id = request.headers["X-Company-Id"].presence
+          return unless raw_company_id
+
+          unless raw_company_id.to_s.match?(/\A[1-9]\d*\z/)
+            return render json: { error: "Invalid company context" }, status: :unprocessable_entity
+          end
+
+          company = Company.find_by(id: raw_company_id.to_i)
+          return render json: { error: "Company not found" }, status: :not_found unless company
+          unless current_user.can_access_company?(company.id)
+            return render json: { error: "You do not have access to this company" }, status: :forbidden
+          end
+          if raw_organization_id && company.organization_id != raw_organization_id.to_i
+            render json: { error: "Company does not belong to the selected organization" }, status: :unprocessable_entity
+          end
+        end
 
         # Allow organization admins, managers, and accountants to access the admin namespace.
         def require_staff_access!

@@ -189,6 +189,33 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect { InvoiceScheduledSender.send!(schedule.id) }.not_to change(InvoiceDelivery, :count)
   end
 
+  it "queues an immediate invoice email with a durable schedule" do
+    source = issued_invoice
+    allow(InvoiceSendJob).to receive(:perform_later)
+
+    post "/api/v1/admin/invoice_send_schedules", params: {
+      invoice_id: source.id, recipients: [ "customer@example.com" ], send_now: true
+    }
+
+    expect(response).to have_http_status(:created), response.body
+    schedule = InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+    expect(schedule).to have_attributes(status: "pending", recipients: [ "customer@example.com" ])
+    expect(schedule.send_at).to be_within(10.seconds).of(Time.current)
+    expect(InvoiceSendJob).to have_received(:perform_later).with(schedule.id)
+  end
+
+  it "retains an immediate email for the dispatcher when enqueue fails" do
+    source = issued_invoice
+    allow(InvoiceSendJob).to receive(:perform_later).and_raise("queue unavailable")
+
+    post "/api/v1/admin/invoice_send_schedules", params: {
+      invoice_id: source.id, recipients: [ "customer@example.com" ], send_now: true
+    }
+
+    expect(response).to have_http_status(:created), response.body
+    expect(InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id")).status).to eq("pending")
+  end
+
   it "retries with the same email payload after the invoice balance changes" do
     source = issued_invoice
     post "/api/v1/admin/invoice_send_schedules", params: {

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanySwitcher } from './CompanySwitcher';
 
 const { companyContext } = vi.hoisted(() => ({ companyContext: vi.fn() }));
@@ -20,11 +20,13 @@ vi.mock('@/lib/keyboard-shortcuts', () => ({
 }));
 
 describe('CompanySwitcher', () => {
+  afterEach(cleanup);
   beforeEach(() => {
     companyContext.mockReturnValue({
       companies: [
         {
           id: 1,
+          organization_id: 1,
           name: 'Production Alpha',
           active: true,
           active_employees: 12,
@@ -36,6 +38,7 @@ describe('CompanySwitcher', () => {
         },
         {
           id: 2,
+          organization_id: 1,
           name: 'Alpha Training',
           active: true,
           active_employees: 12,
@@ -55,6 +58,7 @@ describe('CompanySwitcher', () => {
         payroll_environment: 'live',
       },
       canSwitchCompany: true,
+      activeOrganizationId: 1,
       switchCompany: vi.fn(),
     });
   });
@@ -71,5 +75,23 @@ describe('CompanySwitcher', () => {
     expect(screen.getByText('Production clients')).toBeTruthy();
     expect(screen.getByText('Test workspaces')).toBeTruthy();
     expect(screen.getByText('Training replay · ready')).toBeTruthy();
+  });
+
+  it('shows only clients in the selected organization', () => {
+    const context = companyContext();
+    companyContext.mockReturnValue({
+      ...context,
+      companies: [...context.companies, {
+        id: 3,
+        organization_id: 2,
+        name: 'Other firm client',
+        active_employees: 2,
+        payroll_environment: 'live',
+      }],
+    });
+
+    render(<MemoryRouter><CompanySwitcher /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Production Alpha/i }));
+    expect(screen.queryByText('Other firm client')).toBeNull();
   });
 });

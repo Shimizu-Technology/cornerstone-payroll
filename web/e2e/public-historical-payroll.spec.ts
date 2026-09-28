@@ -1432,6 +1432,8 @@ test('previews and creates a clean current-payroll roster after history is appli
     companies: [
       {
         id: 1,
+        organization_id: 1,
+        organization_name: 'Cornerstone Accounting',
         name: 'Historical Payroll Company',
         active: true,
         active_employees: rosterApplied ? 57 : 0,
@@ -1441,6 +1443,8 @@ test('previews and creates a clean current-payroll roster after history is appli
       },
       {
         id: 2,
+        organization_id: 1,
+        organization_name: 'Cornerstone Accounting',
         name: 'Another Client',
         active: true,
         active_employees: 1,
