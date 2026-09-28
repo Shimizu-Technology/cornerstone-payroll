@@ -7,4 +7,11 @@ describe('invoice currency calculations', () => {
     expect(discount).toBe(0.15);
     expect(roundInvoiceCurrency(0.29 - discount)).toBe(0.14);
   });
+
+  it('rounds negative ties away from zero without moving nearby values across the boundary', () => {
+    expect(roundInvoiceCurrency(-0.145)).toBe(-0.15);
+    expect(roundInvoiceCurrency(0.145)).toBe(0.15);
+    expect(roundInvoiceCurrency(0.14499999999999996)).toBe(0.14);
+    expect(roundInvoiceCurrency(-0.14499999999999996)).toBe(-0.14);
+  });
 });

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_124000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_125000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1851,7 +1851,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_124000) do
     t.index ["invoice_id"], name: "index_invoice_send_schedules_on_invoice_id"
     t.index ["organization_id"], name: "index_invoice_send_schedules_on_organization_id"
     t.index ["status", "send_at"], name: "index_invoice_send_schedules_on_status_and_send_at"
-    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'sending'::character varying::text, 'sent'::character varying::text, 'failed'::character varying::text, 'cancelled'::character varying::text])", name: "check_invoice_send_schedule_status"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'queued'::character varying::text, 'sending'::character varying::text, 'sent'::character varying::text, 'failed'::character varying::text, 'cancelled'::character varying::text])", name: "check_invoice_send_schedule_status"
   end
 
   create_table "invoices", force: :cascade do |t|
