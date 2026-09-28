@@ -295,7 +295,9 @@ describe('PayRunWorkspace rehearsal checks', () => {
 
     expect(await screen.findByText('Complete activity history')).toBeTruthy();
     expect(screen.getByText('Payroll milestones')).toBeTruthy();
-    expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
+    await waitFor(() => {
+      expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
+    });
   });
 });
 
