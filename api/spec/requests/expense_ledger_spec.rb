@@ -166,6 +166,35 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it "keeps paid, partial, overdue, open, and voided expenses in the correct status views" do
+    vendor = create_vendor
+    open_bill = create_expense(vendor: vendor)
+    paid_bill = create_expense(vendor: vendor)
+    partial_bill = create_expense(vendor: vendor)
+    overdue_bill = create_expense(vendor: vendor)
+    overdue_bill.update!(due_on: Date.yesterday)
+    voided_bill = create_expense(vendor: vendor)
+    post "/api/v1/admin/expenses/#{voided_bill.id}/void", params: { reason: "Duplicate bill" }
+    expect(response).to have_http_status(:ok)
+
+    [ [ paid_bill, "120.00" ], [ partial_bill, "20.00" ], [ overdue_bill, "20.00" ], [ open_bill, "10.00" ] ].each do |bill, amount|
+      post "/api/v1/admin/expenses/#{bill.id}/payments", params: {
+        amount: amount, paid_on: Date.current.iso8601, payment_method: "card"
+      }
+      expect(response).to have_http_status(:created)
+    end
+    reversed_payment = open_bill.expense_payments.first
+    post "/api/v1/admin/expenses/#{open_bill.id}/payments/#{reversed_payment.id}/reverse",
+         params: { reason: "Incorrect card charge" }
+    expect(response).to have_http_status(:ok)
+
+    { "paid" => paid_bill, "partial" => partial_bill, "overdue" => overdue_bill, "open" => open_bill }.each do |status, bill|
+      get "/api/v1/admin/expenses", params: { status: status, include_voided: true }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("expenses").map { |row| row.fetch("id") }).to eq([ bill.id ])
+    end
+  end
+
   it "uses the selected organization for a platform owner's expense workspace and audit trail" do
     other_org = create(:organization, name: "Shimizu Technology")
     other_company = create(:company, organization: other_org, name: "Shimizu Technology")
