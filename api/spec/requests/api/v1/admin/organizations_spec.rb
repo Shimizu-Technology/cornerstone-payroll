@@ -267,6 +267,62 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       expect(invoice.invoice_recipient.organization_id).to eq(payroll_company.reload.organization_id)
     end
 
+    it "preserves source-sender invoices and routes linked assistant sessions with their invoices" do
+      corner_profile = create(:invoice_billing_profile, organization: platform_org, name: "Cornerstone")
+      corner_invoice = create(:invoice, company: payroll_company, organization: platform_org,
+                              invoice_billing_profile: corner_profile, invoice_recipient: recipient)
+      shimizu_session = create(:invoice_chat_session, organization: platform_org,
+                               company: payroll_company, invoice: invoice, invoice_recipient: recipient)
+      corner_session = create(:invoice_chat_session, organization: platform_org,
+                              company: payroll_company, invoice: corner_invoice, invoice_recipient: recipient)
+
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      preview = response.parsed_body.fetch("transfer")
+      expect(preview.fetch("blockers")).to be_empty
+      expect(preview.fetch("source_invoice_numbers_to_unlink")).to eq([ corner_invoice.invoice_number ])
+      expect(preview.fetch("assistant_sessions_to_move")).to eq(1)
+      expect(preview.fetch("assistant_sessions_to_unlink")).to eq(1)
+
+      post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+        company_id: payroll_company.id, billing_profile_id: profile.id,
+        source_organization_id: platform_org.id, name: "Shimizu Technology LLC",
+        slug: "shimizu-technology", issuer_legal_name: "Shimizu Technology LLC"
+      } }
+      expect(response).to have_http_status(:created), response.body
+
+      destination = Organization.find_by!(slug: "shimizu-technology")
+      expect(corner_invoice.reload).to have_attributes(organization_id: platform_org.id, company_id: nil)
+      expect(corner_session.reload).to have_attributes(organization_id: platform_org.id, company_id: nil,
+                                                       invoice_recipient_id: recipient.id)
+      expect(recipient.reload).to have_attributes(organization_id: platform_org.id, company_id: nil)
+      expect(invoice.reload.organization_id).to eq(destination.id)
+      expect(shimizu_session.reload).to have_attributes(organization_id: destination.id,
+                                                        company_id: payroll_company.id,
+                                                        invoice_recipient_id: invoice.invoice_recipient_id)
+      expect(invoice.invoice_recipient_id).not_to eq(recipient.id)
+    end
+
+    it "blocks an unlinked company invoice assistant session until it is assigned" do
+      create(:invoice_chat_session, organization: platform_org, company: payroll_company)
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      expect(response.parsed_body.dig("transfer", "blockers")).to include(
+        "Unlinked invoice assistant sessions need manual assignment first"
+      )
+    end
+
+    it "blocks an invoice assistant session in another organization" do
+      other_organization = create(:organization)
+      create(:invoice_chat_session, organization: other_organization, company: payroll_company)
+
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      expect(response.parsed_body.dig("transfer", "blockers")).to include(
+        "Company has an invoice assistant session in another organization"
+      )
+    end
+
     it "limits both transfer actions to platform admins" do
       allow_any_instance_of(Api::V1::Admin::OrganizationsController).to receive(:current_user).and_return(org_admin)
       get "/api/v1/admin/organizations/company_transfer_preview", params: { company_id: payroll_company.id }
