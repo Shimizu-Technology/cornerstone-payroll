@@ -15,6 +15,7 @@ module Api
           source = Invoice.find_by(id: params.require(:source_invoice_id), organization_id: current_organization_id)
           return render json: { error: "Invoice not found" }, status: :not_found unless source
           raise ArgumentError, "Issue a native invoice before making it recurring" unless source.origin == "native" && source.open?
+          raise ArgumentError, "Issued invoice has no usable template" unless InvoiceRecurrenceGenerator.usable_source?(source)
 
           recurrence = InvoiceRecurrence.create!(
             organization_id: current_organization_id,
@@ -49,6 +50,8 @@ module Api
           render json: { error: "Recurrence not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { error: "Invoice already has an active recurrence" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end

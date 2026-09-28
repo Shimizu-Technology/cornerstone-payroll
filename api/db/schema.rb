@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_123000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_124000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1832,13 +1832,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_123000) do
     t.integer "attempts", default: 0, null: false
     t.datetime "claimed_at"
     t.datetime "created_at", null: false
+    t.datetime "first_claimed_at"
     t.bigint "created_by_id"
     t.bigint "invoice_id", null: false
     t.text "last_error"
     t.bigint "organization_id", null: false
     t.string "provider_reference"
     t.jsonb "recipients", default: [], null: false
+    t.text "rendered_body"
+    t.text "rendered_subject"
+    t.string "reply_to_email"
     t.datetime "send_at", null: false
+    t.string "sender_email"
     t.datetime "sent_at"
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false

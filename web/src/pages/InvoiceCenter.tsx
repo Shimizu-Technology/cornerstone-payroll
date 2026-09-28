@@ -688,7 +688,7 @@ export function InvoiceCenter() {
   const retryScheduledEmail = (schedule: InvoiceSendSchedule) => {
     void run(async () => {
       await invoiceSendSchedulesApi.update(schedule.id, { retry: true });
-    }, 'Email retry queued with the same provider idempotency key.');
+    }, 'Email retry queued with the same provider idempotency key. Check provider delivery before retrying an interrupted send.');
   };
 
   const selectedSendSchedules = selected ? sendSchedules.filter((schedule) => schedule.invoice_id === selected.id) : [];

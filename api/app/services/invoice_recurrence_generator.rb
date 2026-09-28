@@ -5,7 +5,7 @@ class InvoiceRecurrenceGenerator
     InvoiceRecurrence.where(active: true).where("next_on <= ?", today || Date.current + 1).order(:id).pluck(:id).each do |id|
       begin
         120.times { break unless generate!(id, today: today) }
-      rescue ActiveRecord::ActiveRecordError => e
+      rescue StandardError => e
         Rails.logger.error("Invoice recurrence #{id} failed: #{e.class}: #{e.message}")
       end
     end
@@ -23,7 +23,7 @@ class InvoiceRecurrenceGenerator
 
       date = recurrence.next_on
       source = recurrence.source_invoice
-      unless source.origin == "native" && source.issued? && !source.voided?
+      unless source.origin == "native" && source.issued? && !source.voided? && usable_source?(source)
         recurrence.update!(active: false)
         return
       end
@@ -67,6 +67,16 @@ class InvoiceRecurrenceGenerator
       end
       recurrence.advance!
       invoice
+    end
+  end
+
+  def self.usable_source?(source)
+    snapshot = source.snapshot
+    return false unless snapshot.is_a?(Hash) && snapshot["invoice"].is_a?(Hash)
+
+    lines = snapshot["line_items"]
+    lines.is_a?(Array) && lines.present? && lines.all? do |line|
+      line.is_a?(Hash) && %w[description quantity rate].all? { |key| line.key?(key) }
     end
   end
 end
