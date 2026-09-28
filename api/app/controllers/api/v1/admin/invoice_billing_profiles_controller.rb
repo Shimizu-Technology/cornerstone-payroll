@@ -6,7 +6,7 @@ module Api
       class InvoiceBillingProfilesController < BaseController
         before_action :require_admin!
 
-        before_action :set_profile, only: [ :show, :update, :destroy ]
+        before_action :set_profile, only: [ :show, :update, :destroy, :upload_logo, :remove_logo ]
 
         def index
           profiles = current_organization.invoice_billing_profiles.ordered
@@ -49,6 +49,20 @@ module Api
             @profile.destroy!
             render json: { message: "Billing profile deleted" }
           end
+        end
+
+        def upload_logo
+          InvoiceLogoStorageService.new.upload!(profile: @profile, file: params.require(:file))
+          render json: { invoice_billing_profile: profile_payload(@profile.reload) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError
+          render json: { error: "Unable to store the logo" }, status: :unprocessable_entity
+        end
+
+        def remove_logo
+          InvoiceLogoStorageService.new.remove!(profile: @profile)
+          render json: { invoice_billing_profile: profile_payload(@profile.reload) }
         end
 
         private
@@ -97,6 +111,9 @@ module Api
             invoice_prefix: profile.invoice_prefix,
             remit_to: profile.remit_to,
             footer_note: profile.footer_note,
+            has_logo: profile.logo_storage_key.present?,
+            logo_content_type: profile.logo_content_type,
+            logo_byte_size: profile.logo_byte_size,
             active: profile.active,
             is_default: profile.is_default,
             created_at: profile.created_at,

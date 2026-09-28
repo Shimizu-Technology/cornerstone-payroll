@@ -4279,6 +4279,9 @@ export interface InvoiceBillingProfile {
   invoice_prefix?: string | null;
   remit_to?: string | null;
   footer_note?: string | null;
+  has_logo?: boolean;
+  logo_content_type?: string | null;
+  logo_byte_size?: number | null;
   active: boolean;
   is_default: boolean;
   created_at?: string;
@@ -4627,6 +4630,13 @@ export const invoiceBillingProfilesApi = {
     api.post<{ invoice_billing_profile: InvoiceBillingProfile }>('/admin/invoice_billing_profiles', { invoice_billing_profile: data }),
   update: (id: number, data: InvoiceBillingProfilePayload) =>
     api.patch<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`, { invoice_billing_profile: data }),
+  uploadLogo: (id: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.postForm<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}/logo`, form);
+  },
+  removeLogo: (id: number) =>
+    api.delete<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}/logo`),
   delete: (id: number) =>
     api.delete<{ message: string; invoice_billing_profile?: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`),
 };

@@ -730,6 +730,7 @@ export function InvoiceCenter() {
         contextValue={invoiceOrganizationName || 'Organization-wide finance'}
         actions={(
           <div className="flex flex-wrap gap-2">
+            <Link to="/tools/invoices/assistant" className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"><Building2 className="mr-1.5 h-4 w-4" />Senders & logos</Link>
             <Link to="/tools/invoices/assistant" className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"><Bot className="mr-1.5 h-4 w-4" />AI invoice maker</Link>
             <Button variant="outline" onClick={() => setModal('import')}><Import className="mr-1.5 h-4 w-4" />Import invoice</Button>
             <Button onClick={openNewDraft}><Plus className="mr-1.5 h-4 w-4" />New invoice</Button>

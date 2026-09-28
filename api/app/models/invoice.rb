@@ -443,7 +443,10 @@ class Invoice < ApplicationRecord
       "payment_instructions" => profile&.payment_instructions,
       "default_payment_terms" => profile&.default_payment_terms,
       "remit_to" => profile&.remit_to,
-      "footer_note" => profile&.footer_note
+      "footer_note" => profile&.footer_note,
+      "logo_storage_key" => profile&.logo_storage_key,
+      "logo_content_type" => profile&.logo_content_type,
+      "logo_sha256" => profile&.logo_sha256
     }
   end
 

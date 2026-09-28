@@ -51,6 +51,7 @@ interface InvoiceFormState {
   invoice_recipient_id: string;
   invoice_number: string;
   invoice_date: string;
+  due_date: string;
   discount_type: InvoiceDiscountType;
   discount_value: string;
   service_period_start: string;
@@ -115,6 +116,7 @@ const emptyInvoiceForm = (): InvoiceFormState => ({
   invoice_recipient_id: '',
   invoice_number: '',
   invoice_date: today(),
+  due_date: '',
   discount_type: 'none',
   discount_value: '',
   service_period_start: '',
@@ -260,6 +262,7 @@ export function InvoiceMaker() {
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
+  const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -423,6 +426,7 @@ export function InvoiceMaker() {
     invoice_billing_profile_id: state.invoice_billing_profile_id ? Number(state.invoice_billing_profile_id) : undefined,
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
+    due_date: state.due_date || null,
     discount_type: state.discount_type,
     discount_value: state.discount_type === 'none' ? 0 : Number(state.discount_value || 0),
     service_period_start: state.service_period_start || null,
@@ -486,6 +490,7 @@ export function InvoiceMaker() {
       invoice_recipient_id: String(invoice.invoice_recipient_id),
       invoice_number: invoice.invoice_number || '',
       invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date || '',
       discount_type: invoice.discount_type || 'none',
       discount_value: invoice.discount_type === 'none' ? '' : String(invoice.discount_value ?? ''),
       service_period_start: invoice.service_period_start || '',
@@ -559,6 +564,7 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       invoice_number: '',
       invoice_date: preview.invoice_date || today(),
+      due_date: '',
       discount_type: 'none',
       discount_value: '',
       service_period_start: preview.service_period_start || '',
@@ -1165,6 +1171,7 @@ export function InvoiceMaker() {
   });
 
   const editBillingProfile = (profile: InvoiceBillingProfile) => {
+    setBillingLogoFile(null);
     setBillingProfileForm({
       id: profile.id,
       name: profile.name,
@@ -1193,16 +1200,37 @@ export function InvoiceMaker() {
       const response = billingProfileForm.id
         ? await invoiceBillingProfilesApi.update(billingProfileForm.id, payload)
         : await invoiceBillingProfilesApi.create(payload);
+      setBillingProfileForm((current) => ({ ...current, id: response.invoice_billing_profile.id }));
+      if (billingLogoFile) {
+        await invoiceBillingProfilesApi.uploadLogo(response.invoice_billing_profile.id, billingLogoFile);
+      }
       await loadData();
       setInvoiceForm((current) => current.invoice_billing_profile_id
         ? current
         : { ...current, invoice_billing_profile_id: String(response.invoice_billing_profile.id), payment_terms: current.payment_terms || response.invoice_billing_profile.default_payment_terms || '' });
       setBillingProfileForm(emptyBillingProfileForm());
+      setBillingLogoFile(null);
       setShowBillingProfileForm(false);
       setSuccess('Billing profile saved.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save billing profile');
+    } finally {
+      setBillingProfileSaving(false);
+    }
+  };
+
+  const removeBillingLogo = async () => {
+    if (!billingProfileForm.id) return;
+    setBillingProfileSaving(true);
+    setError(null);
+    try {
+      await invoiceBillingProfilesApi.removeLogo(billingProfileForm.id);
+      setBillingLogoFile(null);
+      await loadData();
+      setSuccess('Logo removed from future invoices. Issued PDFs are unchanged.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove logo');
     } finally {
       setBillingProfileSaving(false);
     }
@@ -1403,6 +1431,7 @@ export function InvoiceMaker() {
             variant="outline"
             onClick={() => {
               setBillingProfileForm(emptyBillingProfileForm());
+              setBillingLogoFile(null);
               setShowBillingProfileForm((value) => !value);
             }}
           >
@@ -1428,6 +1457,29 @@ export function InvoiceMaker() {
             </div>
             <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
             <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            <div className="rounded-xl border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-neutral-900"><ImagePlus className="h-4 w-4 text-primary-700" />Invoice logo</div>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-500">Optional PNG or JPEG, up to 1 MB. It appears on new PDF previews and issued invoices. Existing issued PDFs keep their original appearance.</p>
+              <label className="mt-3 block text-sm font-medium text-neutral-700">Choose logo
+                <input type="file" accept="image/png,image/jpeg" className="mt-1 block w-full text-sm" onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  if (file && (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 1_048_576)) {
+                    setError('Choose a PNG or JPEG logo that is 1 MB or smaller.');
+                    setBillingLogoFile(null);
+                    return;
+                  }
+                  setError(null);
+                  setBillingLogoFile(file);
+                }} />
+              </label>
+              {billingLogoFile && <p className="mt-2 text-xs text-neutral-600">Ready to upload: {billingLogoFile.name}</p>}
+              {billingProfileForm.id && billingProfiles.find((profile) => profile.id === billingProfileForm.id)?.has_logo && (
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-neutral-100 pt-3 text-xs text-neutral-600">
+                  <span>Logo attached to this sender</span>
+                  <Button type="button" size="sm" variant="outline" disabled={billingProfileSaving} onClick={removeBillingLogo}>Remove logo</Button>
+                </div>
+              )}
+            </div>
             <label className="flex items-center gap-2 text-sm text-neutral-600">
               <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
               Use as default profile
@@ -1665,6 +1717,10 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
                   <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-neutral-700">Due Date</span>
+                  <Input type="date" min={invoiceForm.invoice_date} value={invoiceForm.due_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, due_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">

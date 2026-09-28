@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "base64"
 
 RSpec.describe "Invoice Center and accounts receivable API", type: :request do
   let!(:company) { create(:company, name: "Shimizu Technology") }
@@ -24,7 +25,8 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
       Api::V1::Admin::InvoicePaymentsController,
       Api::V1::Admin::InvoiceCreditNotesController,
       Api::V1::Admin::InvoiceReceivablesController,
-      Api::V1::Admin::InvoiceRecipientsController
+      Api::V1::Admin::InvoiceRecipientsController,
+      Api::V1::Admin::InvoiceBillingProfilesController
     ]
     controllers.each do |controller|
       allow_any_instance_of(controller).to receive(:current_user).and_return(admin_user)
@@ -33,7 +35,43 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
   end
 
   after do
-    FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center"))
+    storage = R2StorageService.new
+    InvoiceArtifact.where(organization_id: company.organization_id).pluck(:storage_key).each { |key| storage.delete(key) }
+    storage.delete(@uploaded_logo_key) if @uploaded_logo_key
+  end
+
+  it "stores an optional sender logo within the organization and freezes its reference on issue" do
+    logo_bytes = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lQoAAAAASUVORK5CYII=")
+    tempfile = Tempfile.new([ "invoice-logo", ".png" ])
+    tempfile.binmode
+    tempfile.write(logo_bytes)
+    tempfile.flush
+    file = Rack::Test::UploadedFile.new(tempfile.path, "image/png", original_filename: "logo.png")
+
+    post "/api/v1/admin/invoice_billing_profiles/#{profile.id}/logo", params: { file: file }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("invoice_billing_profile", "has_logo")).to be(true)
+    @uploaded_logo_key = profile.reload.logo_storage_key
+
+    invoice = create_draft
+    post "/api/v1/admin/invoices/#{invoice.id}/issue"
+    expect(response).to have_http_status(:ok), response.body
+    original_pdf_sha = invoice.reload.primary_artifact.sha256
+    original_logo_key = invoice.snapshot.dig("billing_profile", "logo_storage_key")
+
+    delete "/api/v1/admin/invoice_billing_profiles/#{profile.id}/logo"
+    expect(response).to have_http_status(:ok), response.body
+    expect(profile.reload.logo_storage_key).to be_nil
+    expect(invoice.reload.snapshot.dig("billing_profile", "logo_storage_key")).to eq(original_logo_key)
+    expect(invoice.primary_artifact.sha256).to eq(original_pdf_sha)
+    expect(InvoicePdfGenerator.new(invoice).generate).to start_with("%PDF")
+
+    other_organization = create(:organization)
+    other_profile = create(:invoice_billing_profile, organization: other_organization)
+    post "/api/v1/admin/invoice_billing_profiles/#{other_profile.id}/logo", params: { file: file }
+    expect(response).to have_http_status(:not_found)
+  ensure
+    tempfile&.close!
   end
 
   it "owns recipients and invoices at the organization level instead of the active payroll client" do
@@ -232,6 +270,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
   end
 
   it "rolls back the entire import when historical delivery evidence cannot be recorded" do
+    existing_files = Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center/**/*")].reject { |path| File.directory?(path) }
     file = Tempfile.new([ "outside-invoice", ".pdf" ])
     file.binmode
     file.write("%PDF-1.4\nexternal invoice evidence\n%%EOF\n")
@@ -264,7 +303,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(InvoiceEvent.count).to eq(0)
     expect(InvoiceDelivery.count).to eq(0)
     stored_files = Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center/**/*")].reject { |path| File.directory?(path) }
-    expect(stored_files).to be_empty
+    expect(stored_files).to match_array(existing_files)
   ensure
     file&.close!
   end

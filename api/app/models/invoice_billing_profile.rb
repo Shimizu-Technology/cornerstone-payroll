@@ -12,6 +12,10 @@ class InvoiceBillingProfile < ApplicationRecord
 
   validates :name, presence: true, uniqueness: { scope: :organization_id }
   validates :invoice_prefix, length: { maximum: 16 }, allow_blank: true
+  validates :logo_content_type, inclusion: { in: InvoiceLogoStorageService::CONTENT_TYPES }, allow_nil: true
+  validates :logo_byte_size, numericality: { only_integer: true, greater_than: 0,
+                                             less_than_or_equal_to: InvoiceLogoStorageService::MAX_BYTES }, allow_nil: true
+  validate :logo_fields_are_complete
 
   scope :active, -> { where(active: true) }
   scope :ordered, -> { order(Arel.sql("is_default DESC"), :name, :id) }
@@ -65,6 +69,13 @@ class InvoiceBillingProfile < ApplicationRecord
   end
 
   private
+
+  def logo_fields_are_complete
+    fields = [ logo_storage_key, logo_content_type, logo_sha256, logo_byte_size ]
+    return if fields.all?(&:blank?) || fields.all?(&:present?)
+
+    errors.add(:logo_storage_key, "must include complete logo metadata")
+  end
 
   def normalize_blanks
     self.name = name.to_s.strip
