@@ -521,6 +521,20 @@ Rails.application.routes.draw do
         resource :invoice_receivables, only: [:show] do
           get :statement
         end
+
+        # Organization-owned expense and vendor ledger
+        resources :expense_vendors, only: [:index, :create, :update]
+        resources :expenses, only: [:index, :show, :create, :update] do
+          collection { get :export }
+          member do
+            post :void
+            post :upload_artifact
+            get "artifacts/:artifact_id", action: :download_artifact, as: :artifact
+          end
+          resources :payments, controller: :expense_payments, only: [:create] do
+            post :reverse, on: :member
+          end
+        end
         resources :invoice_chat_sessions, except: [:new, :edit] do
           member do
             post :message

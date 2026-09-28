@@ -5711,6 +5711,96 @@ export const historicalReportsApi = {
     api.getBlobWithParams(`/admin/historical_reports/${reportType}/${format}`, params),
 };
 
+export interface ExpenseVendor {
+  id: number;
+  organization_id: number;
+  name: string;
+  email?: string | null;
+  notes?: string | null;
+  active: boolean;
+}
+
+export interface ExpensePayment {
+  id: number;
+  amount: string;
+  paid_on: string;
+  payment_method: string;
+  reference_number?: string | null;
+  notes?: string | null;
+  reversed_at?: string | null;
+  reversal_reason?: string | null;
+}
+
+export interface ExpenseArtifact {
+  id: number;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  created_at: string;
+}
+
+export interface Expense {
+  id: number;
+  organization_id: number;
+  expense_vendor_id: number;
+  vendor_name: string;
+  reference_number?: string | null;
+  source_key?: string | null;
+  category: string;
+  description: string;
+  expense_on: string;
+  due_on?: string | null;
+  total_amount: string;
+  amount_paid: string;
+  balance_due: string;
+  payment_status: 'open' | 'partial' | 'paid' | 'overdue' | 'voided';
+  currency: string;
+  voided_at?: string | null;
+  void_reason?: string | null;
+  artifact_count: number;
+  payments?: ExpensePayment[];
+  artifacts?: ExpenseArtifact[];
+}
+
+export interface ExpenseSummary {
+  currencies: { currency: string; total_amount: string; amount_paid: string; balance_due: string }[];
+  overdue_count: number;
+}
+
+export const expenseVendorsApi = {
+  list: (active = false) => api.get<{ expense_vendors: ExpenseVendor[] }>('/admin/expense_vendors', { active }),
+  create: (data: { name: string; email?: string; notes?: string }) =>
+    api.post<{ expense_vendor: ExpenseVendor }>('/admin/expense_vendors', { expense_vendor: data }),
+  update: (id: number, data: Partial<Pick<ExpenseVendor, 'name' | 'email' | 'notes' | 'active'>>) =>
+    api.patch<{ expense_vendor: ExpenseVendor }>(`/admin/expense_vendors/${id}`, { expense_vendor: data }),
+};
+
+export const expensesApi = {
+  list: (params?: { page?: number; per_page?: number; vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean }) =>
+    api.get<{ expenses: Expense[]; meta: { page: number; per_page: number; total_count: number }; summary: ExpenseSummary }>('/admin/expenses', params),
+  show: (id: number) => api.get<{ expense: Expense }>(`/admin/expenses/${id}`),
+  create: (data: {
+    expense_vendor_id: number; category: string; description: string; expense_on: string; due_on?: string;
+    total_amount: string; currency: string; reference_number?: string; source_key?: string;
+  }) => api.post<{ expense: Expense; already_exists?: boolean }>('/admin/expenses', { expense: data }),
+  update: (id: number, data: Partial<Expense>) => api.patch<{ expense: Expense }>(`/admin/expenses/${id}`, { expense: data }),
+  recordPayment: (id: number, data: { amount: string; paid_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
+    api.post<{ payment_id: number; expense: Expense }>(`/admin/expenses/${id}/payments`, data),
+  reversePayment: (id: number, paymentId: number, reason: string) =>
+    api.post<{ expense: Expense }>(`/admin/expenses/${id}/payments/${paymentId}/reverse`, { reason }),
+  void: (id: number, reason: string) => api.post<{ expense: Expense }>(`/admin/expenses/${id}/void`, { reason }),
+  uploadArtifact: (id: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.postForm<{ artifact: ExpenseArtifact }>(`/admin/expenses/${id}/upload_artifact`, form);
+  },
+  downloadArtifact: (id: number, artifactId: number) =>
+    api.getBlobWithParams(`/admin/expenses/${id}/artifacts/${artifactId}`),
+  export: (params?: { vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean }) =>
+    api.getBlobWithParams('/admin/expenses/export', params),
+};
+
 // Auth
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),

@@ -85,7 +85,7 @@ class ApplicationController < ActionController::API
   end
 
   def current_organization
-    if current_user&.super_admin? && controller_path.start_with?("api/v1/admin/invoice")
+    if current_user&.super_admin? && controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense")
       current_company&.organization || current_user.organization
     else
       current_user&.organization
