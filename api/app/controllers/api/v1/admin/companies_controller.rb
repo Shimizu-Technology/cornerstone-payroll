@@ -34,7 +34,7 @@ module Api
         # Organization admins see their firm's companies; non-admin staff see assigned clients.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
-          companies = Company.where(id: accessible_ids).includes(:migration_source_company).order(:name)
+          companies = Company.where(id: accessible_ids).includes(:organization, :migration_source_company).order(:name)
           companies = companies.where(active: true) if params[:active] == "true"
 
           company_ids = companies.pluck(:id)
@@ -333,6 +333,8 @@ module Api
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)
           payload = {
             id: company.id,
+            organization_id: company.organization_id,
+            organization_name: company.organization.name,
             name: company.name,
             active: company.active,
             active_employees: active_employee_counts&.fetch(company.id, 0) || company.employees.active.count,

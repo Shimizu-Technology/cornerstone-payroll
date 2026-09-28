@@ -138,6 +138,34 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
+  it "searches and filters the full expense ledger before pagination" do
+    vendor = create_vendor(name: "Pacific Software")
+    51.times do |index|
+      Expense.create!(organization: company.organization, expense_vendor: vendor,
+                      category: "Software", description: "Routine bill #{index}",
+                      expense_on: Date.new(2026, 9, 1), total_amount: 10)
+    end
+    target = Expense.create!(organization: company.organization, expense_vendor: vendor,
+                             category: "Travel", description: "Rare receipt", reference_number: "NEEDLE-42",
+                             expense_on: Date.new(2026, 8, 1), total_amount: 25)
+
+    get "/api/v1/admin/expenses", params: { q: "NEEDLE-42", per_page: 50 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("meta", "total_count")).to eq(1)
+    expect(response.parsed_body.fetch("expenses").map { |row| row.fetch("id") }).to eq([ target.id ])
+
+    get "/api/v1/admin/expenses/export", params: { q: "NEEDLE-42" }
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("NEEDLE-42")
+    expect(response.body).not_to include("Routine bill")
+
+    get "/api/v1/admin/expenses", params: { status: "paid" }
+    expect(response.parsed_body.dig("meta", "total_count")).to eq(0)
+
+    get "/api/v1/admin/expenses", params: { status: "unknown" }
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   it "uses the selected organization for a platform owner's expense workspace and audit trail" do
     other_org = create(:organization, name: "Shimizu Technology")
     other_company = create(:company, organization: other_org, name: "Shimizu Technology")

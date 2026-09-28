@@ -18,6 +18,7 @@ describe('ApiClient company identity', (): void => {
     setAuthTokenProvider(null);
     setAuthToken(null);
     apiClient.setActiveCompanyId(null);
+    apiClient.setActiveOrganizationId(null);
     vi.restoreAllMocks();
   });
 
@@ -52,6 +53,19 @@ describe('ApiClient company identity', (): void => {
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
     expect(headers.get('X-Company-Id')).toBe('7');
     expect(headers.get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('sends explicit organization context for finance requests only', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    apiClient.setActiveCompanyId(7);
+    apiClient.setActiveOrganizationId(2);
+    await apiClient.get('/admin/invoices');
+    await apiClient.get('/admin/companies');
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Organization-Id')).toBe('2');
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).has('X-Organization-Id')).toBe(false);
   });
 
   it('honors an explicit company override and permits company-neutral requests', async (): Promise<void> => {

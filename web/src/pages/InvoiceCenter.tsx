@@ -159,6 +159,25 @@ const statusLabel = (status: InvoiceStatus) => ({
   archived: 'Archived',
 }[status]);
 
+type SendState = 'not_sent' | 'scheduled' | 'failed' | 'provider_accepted' | 'recorded_delivery';
+const sendStateLabel: Record<SendState, string> = {
+  not_sent: 'Needs sending', scheduled: 'Email pending', failed: 'Send failed',
+  provider_accepted: 'Provider accepted', recorded_delivery: 'Delivery recorded',
+};
+const sendStateStyle: Record<SendState, string> = {
+  not_sent: 'bg-neutral-100 text-neutral-600', scheduled: 'bg-sky-50 text-sky-800',
+  failed: 'bg-red-50 text-red-800', provider_accepted: 'bg-emerald-50 text-emerald-800',
+  recorded_delivery: 'bg-emerald-50 text-emerald-800',
+};
+
+function invoiceSendState(invoice: Invoice, schedules: InvoiceSendSchedule[]): SendState {
+  const related = schedules.filter((schedule) => schedule.invoice_id === invoice.id && schedule.status !== 'cancelled');
+  if (related.some((schedule) => schedule.status === 'failed')) return 'failed';
+  if (related.some((schedule) => ['pending', 'queued', 'sending'].includes(schedule.status))) return 'scheduled';
+  if (related.some((schedule) => schedule.status === 'sent')) return 'provider_accepted';
+  return invoice.sent_at ? 'recorded_delivery' : 'not_sent';
+}
+
 const money = (value?: number | null, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency,
@@ -223,10 +242,8 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
 
 export function InvoiceCenter() {
   const { user } = useAuth();
-  const { activeCompany } = useCompany();
-  const invoiceOrganizationId = user?.role === 'super_admin'
-    ? activeCompany?.organization_id || user.organization_id
-    : user?.organization_id;
+  const { activeCompany, activeOrganizationId, activeOrganizationName } = useCompany();
+  const invoiceOrganizationId = activeOrganizationId || user?.organization_id;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [profiles, setProfiles] = useState<InvoiceBillingProfile[]>([]);
@@ -243,8 +260,10 @@ export function InvoiceCenter() {
   const [importForm, setImportForm] = useState<ImportForm>(emptyImport);
   const [sendRecipients, setSendRecipients] = useState('');
   const [sendAt, setSendAt] = useState('');
+  const [sendMode, setSendMode] = useState<'now' | 'later'>('later');
   const [editingSendScheduleId, setEditingSendScheduleId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'active' | InvoiceStatus | 'archived' | 'all'>('active');
+  const [sendFilter, setSendFilter] = useState<'all' | SendState>('all');
   const [businessFilter, setBusinessFilter] = useState<'all' | string>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -344,8 +363,10 @@ export function InvoiceCenter() {
     const needle = search.trim().toLowerCase();
     const matchesSearch = !needle || [invoice.invoice_number, invoice.recipient_name, invoice.billing_profile_name, invoice.customer_reference]
       .some((value) => value?.toLowerCase().includes(needle));
-    return matchesStatus && matchesSearch;
-  }), [invoices, search, statusFilter]);
+    const matchesSend = sendFilter === 'all' || (invoice.base_status === 'open'
+      && invoice.balance_due > 0 && invoiceSendState(invoice, sendSchedules) === sendFilter);
+    return matchesStatus && matchesSearch && matchesSend;
+  }), [invoices, search, statusFilter, sendFilter, sendSchedules]);
 
   const activeProfiles = useMemo(() => profiles.filter((profile) => profile.active), [profiles]);
   const selectedBusiness = businessFilter === 'all'
@@ -683,9 +704,18 @@ export function InvoiceCenter() {
   };
 
   const openScheduleEmail = (schedule?: InvoiceSendSchedule) => {
+    setSendMode('later');
     setEditingSendScheduleId(schedule?.id || null);
     setSendRecipients(schedule?.recipients.join(', ') || selected?.invoice_recipient?.email || '');
     setSendAt(schedule ? localDateTimeInput(schedule.send_at) : '');
+    setDetailAction('schedule_email');
+  };
+
+  const openSendNow = () => {
+    setSendMode('now');
+    setEditingSendScheduleId(null);
+    setSendRecipients(selected?.invoice_recipient?.email || '');
+    setSendAt('');
     setDetailAction('schedule_email');
   };
 
@@ -697,20 +727,24 @@ export function InvoiceCenter() {
       setError('Enter 1 to 10 recipient email addresses');
       return;
     }
-    const at = new Date(sendAt);
-    if (!Number.isFinite(at.getTime()) || at.getTime() <= Date.now()) {
+    const at = sendMode === 'later' ? new Date(sendAt) : null;
+    if (sendMode === 'later' && (!at || !Number.isFinite(at.getTime()) || at.getTime() <= Date.now())) {
       setError('Choose a future send time');
       return;
     }
     void run(async () => {
       if (editingSendScheduleId) {
-        await invoiceSendSchedulesApi.update(editingSendScheduleId, { recipients, send_at: at.toISOString() });
+        await invoiceSendSchedulesApi.update(editingSendScheduleId, { recipients, send_at: at!.toISOString() });
       } else {
-        await invoiceSendSchedulesApi.create({ invoice_id: selected.id, recipients, send_at: at.toISOString() });
+        await invoiceSendSchedulesApi.create(sendMode === 'now'
+          ? { invoice_id: selected.id, recipients, send_now: true }
+          : { invoice_id: selected.id, recipients, send_at: at!.toISOString() });
       }
       setDetailAction(null);
       setEditingSendScheduleId(null);
-    }, editingSendScheduleId ? 'Scheduled email updated.' : 'Invoice email scheduled. A provider acceptance will be recorded when it sends.');
+    }, editingSendScheduleId ? 'Scheduled email updated.' : sendMode === 'now'
+      ? 'Invoice email queued. Provider acceptance will appear in the delivery history.'
+      : 'Invoice email scheduled. A provider acceptance will be recorded when it sends.');
   };
 
   const cancelScheduledEmail = (schedule: InvoiceSendSchedule) => {
@@ -731,11 +765,11 @@ export function InvoiceCenter() {
 
   const selectedSendSchedules = selected ? sendSchedules.filter((schedule) => schedule.invoice_id === selected.id) : [];
   const activeRecurrences = recurrences.filter((recurrence) => recurrence.active);
-  const invoiceOrganizationName = !invoiceOrganizationId
+  const invoiceOrganizationName = activeOrganizationName || (!invoiceOrganizationId
     ? 'Organization-wide finance'
     : invoiceOrganizationId === user?.organization_id
       ? user?.organization_name || `Organization #${invoiceOrganizationId}`
-      : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`;
+      : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`);
 
   const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
   const discountInput = Number(draft.discount_value || 0);
@@ -849,6 +883,9 @@ export function InvoiceCenter() {
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm">
                   <option value="active">Active</option><option value="draft">Draft</option><option value="open">Open</option><option value="overdue">Overdue</option><option value="partially_paid">Partially paid</option><option value="paid">Paid</option><option value="voided">Voided</option><option value="uncollectible">Uncollectible</option><option value="archived">Archived</option><option value="all">All</option>
                 </select>
+                <select aria-label="Filter invoices by email status" value={sendFilter} onChange={(event) => setSendFilter(event.target.value as typeof sendFilter)} className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm">
+                  <option value="all">All email statuses</option><option value="not_sent">Needs sending</option><option value="scheduled">Email pending</option><option value="failed">Send failed</option><option value="provider_accepted">Provider accepted</option><option value="recorded_delivery">Delivery recorded</option>
+                </select>
               </div>
             </div>
             {loading ? (
@@ -859,7 +896,7 @@ export function InvoiceCenter() {
               <div className="divide-y divide-neutral-100">
                 {filteredInvoices.map((invoice) => (
                   <button key={invoice.id} type="button" onClick={() => openDetails(invoice.id)} className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-neutral-50 sm:grid-cols-[minmax(0,1fr)_130px_130px_28px] sm:items-center">
-                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{invoice.base_status === 'open' && <Badge className={sendStateStyle[invoiceSendState(invoice, sendSchedules)]}>{sendStateLabel[invoiceSendState(invoice, sendSchedules)]}</Badge>}{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Balance</p><p className={`font-semibold ${invoice.status === 'overdue' ? 'text-amber-700' : 'text-neutral-900'}`}>{money(invoice.balance_due, invoice.currency)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Invoice total</p><p className="font-medium text-neutral-700">{money(invoice.total_amount, invoice.currency)}</p></div>
                     <Eye className="h-4 w-4 text-neutral-400" />
@@ -974,7 +1011,7 @@ export function InvoiceCenter() {
             <Button variant="outline" onClick={previewSelected} disabled={busy}><Eye className="mr-1.5 h-4 w-4" />Preview</Button>
             {selected.status === 'draft' ? <><Button variant="outline" onClick={editSelectedDraft}>Edit draft</Button><Button onClick={issueSelected} disabled={busy}><CheckCircle2 className="mr-1.5 h-4 w-4" />Issue invoice</Button></> : <Button variant="outline" onClick={downloadSelected} disabled={!selected.has_artifact || busy}><Download className="mr-1.5 h-4 w-4" />Download original</Button>}
             {selected.origin === 'native' && selected.base_status === 'open' && <Button variant="outline" onClick={() => setDetailAction('recurrence')} disabled={busy}><CalendarClock className="mr-1.5 h-4 w-4" />Make recurring</Button>}
-            {selected.base_status === 'open' && selected.artifacts?.some((artifact) => artifact.content_type === 'application/pdf' && ['issued_pdf', 'imported_original', 'legacy_snapshot'].includes(artifact.kind)) && <Button variant="outline" onClick={() => openScheduleEmail()} disabled={busy}><Send className="mr-1.5 h-4 w-4" />Schedule email</Button>}
+            {selected.base_status === 'open' && selected.artifacts?.some((artifact) => artifact.content_type === 'application/pdf' && ['issued_pdf', 'imported_original', 'legacy_snapshot'].includes(artifact.kind)) && <><Button onClick={openSendNow} disabled={busy}><Send className="mr-1.5 h-4 w-4" />Send now</Button><Button variant="outline" onClick={() => openScheduleEmail()} disabled={busy}><CalendarClock className="mr-1.5 h-4 w-4" />Schedule email</Button></>}
             {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Record delivery</Button>}
             {!['draft', 'voided', 'uncollectible'].includes(selected.status) && <><Button variant="outline" onClick={() => setDetailAction('payment')} disabled={selected.balance_due <= 0}><CircleDollarSign className="mr-1.5 h-4 w-4" />Record payment</Button><Button variant="outline" onClick={() => setDetailAction('credit')} disabled={selected.balance_due <= 0}><FileText className="mr-1.5 h-4 w-4" />Issue credit</Button></>}
             {selected.archived ? <Button variant="outline" onClick={() => changeLifecycle('restored')}><RotateCcw className="mr-1.5 h-4 w-4" />Restore</Button> : <Button variant="outline" onClick={() => changeLifecycle('archived')}><Archive className="mr-1.5 h-4 w-4" />Archive</Button>}
@@ -996,12 +1033,12 @@ export function InvoiceCenter() {
               <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>Create schedule</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div>
             </form>}
             {detailAction === 'schedule_email' && <form onSubmit={submitScheduledEmail} className="space-y-4">
-              <div><h3 className="font-semibold text-neutral-900">{editingSendScheduleId ? 'Change scheduled email' : 'Schedule invoice email'}</h3><p className="mt-1 text-sm text-neutral-600">An issued PDF and a configured invoice sender email are required. A send is recorded when the provider accepts it; inbox delivery is not confirmed.</p></div>
+              <div><h3 className="font-semibold text-neutral-900">{editingSendScheduleId ? 'Change scheduled email' : sendMode === 'now' ? 'Send invoice now' : 'Schedule invoice email'}</h3><p className="mt-1 text-sm text-neutral-600">Review the recipients before sending the preserved PDF for {selected.invoice_number}. A send is recorded when the provider accepts it; inbox delivery is not confirmed.</p></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-sm font-medium">Recipients <span className="font-normal text-neutral-500">(up to 10, separated by commas)</span><Textarea required value={sendRecipients} onChange={(event) => setSendRecipients(event.target.value)} rows={2} className="mt-1" placeholder="billing@example.com, owner@example.com" /></label>
-                <label className="text-sm font-medium">Send at <span className="font-normal text-neutral-500">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><Input required type="datetime-local" value={sendAt} onChange={(event) => setSendAt(event.target.value)} className="mt-1" /></label>
+                {sendMode === 'later' && <label className="text-sm font-medium">Send at <span className="font-normal text-neutral-500">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><Input required type="datetime-local" value={sendAt} onChange={(event) => setSendAt(event.target.value)} className="mt-1" /></label>}
               </div>
-              <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{editingSendScheduleId ? 'Save changes' : 'Schedule email'}</Button><Button type="button" variant="ghost" onClick={() => { setDetailAction(null); setEditingSendScheduleId(null); }}>Cancel</Button></div>
+              <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{editingSendScheduleId ? 'Save changes' : sendMode === 'now' ? 'Confirm and send' : 'Schedule email'}</Button><Button type="button" variant="ghost" onClick={() => { setDetailAction(null); setEditingSendScheduleId(null); }}>Cancel</Button></div>
             </form>}
             {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Record delivery</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
             {detailAction === 'credit' && <form onSubmit={submitCredit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" className="mt-1" /></label><label className="text-sm font-medium">Issue date<Input required name="issue_date" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Reason<Input required name="reason" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Issue credit</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}

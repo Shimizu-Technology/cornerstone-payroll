@@ -32,6 +32,7 @@ class ApiClient {
   private authToken: string | null = null;
   private authTokenProvider: (() => Promise<string | null>) | null = null;
   private activeCompanyId: number | null = null;
+  private activeOrganizationId: number | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -51,6 +52,16 @@ class ApiClient {
 
   getActiveCompanyId(): number | null {
     return this.activeCompanyId;
+  }
+
+  setActiveOrganizationId(organizationId: number | null) {
+    this.activeOrganizationId = organizationId;
+  }
+
+  private financeHeaders(endpoint: string): Record<string, string> {
+    return this.activeOrganizationId && /^\/admin\/(invoice|expense)/.test(endpoint)
+      ? { 'X-Organization-Id': String(this.activeOrganizationId) }
+      : {};
   }
 
   getAuthToken(): string | null {
@@ -90,11 +101,13 @@ class ApiClient {
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
     const { params, companyId, ...fetchOptions } = options;
     const initiatingCompanyId = companyId === undefined ? this.activeCompanyId : companyId;
+    const financeHeaders = this.financeHeaders(endpoint);
     const url = this.buildUrl(endpoint, params);
 
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
+      ...financeHeaders,
     };
 
     const token = await this.resolveAuthToken();
@@ -148,8 +161,9 @@ class ApiClient {
 
   async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
     const initiatingCompanyId = this.activeCompanyId;
+    const financeHeaders = this.financeHeaders(endpoint);
     const token = await this.resolveAuthToken();
-    const headers: HeadersInit = {};
+    const headers: HeadersInit = { ...financeHeaders };
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
@@ -180,7 +194,7 @@ class ApiClient {
   async getBlob(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<Blob> {
     const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = this.financeHeaders(endpoint);
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -206,7 +220,7 @@ class ApiClient {
   async postBlob(endpoint: string, body?: Record<string, unknown>): Promise<BlobDownload> {
     const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...this.financeHeaders(endpoint) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -245,7 +259,7 @@ class ApiClient {
   ): Promise<BlobDownload> {
     const initiatingCompanyId = this.activeCompanyId;
     const token = await this.resolveAuthToken();
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = this.financeHeaders(endpoint);
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -3435,6 +3449,7 @@ export const printerProfilesApi = {
 export interface CompanyListItem {
   id: number;
   organization_id: number;
+  organization_name?: string;
   name: string;
   active: boolean;
   active_employees: number;
@@ -3724,12 +3739,14 @@ export const companiesApi = {
     acknowledgement,
     payment_dispositions: paymentDispositions,
   }),
-  switchCompany: (companyId: number) => {
+  switchCompany: (companyId: number, organizationId?: number) => {
     api.setActiveCompanyId(companyId);
+    api.setActiveOrganizationId(organizationId ?? null);
     localStorage.setItem('activeCompanyId', String(companyId));
   },
   clearActiveCompanyId: () => {
     api.setActiveCompanyId(null);
+    api.setActiveOrganizationId(null);
     localStorage.removeItem('activeCompanyId');
   },
   getActiveCompanyId: (): number | null => {
@@ -4736,7 +4753,7 @@ export const invoiceRecurrencesApi = {
 
 export const invoiceSendSchedulesApi = {
   list: () => api.get<{ invoice_send_schedules: InvoiceSendSchedule[] }>('/admin/invoice_send_schedules'),
-  create: (data: { invoice_id: number; recipients: string[]; send_at: string }) =>
+  create: (data: { invoice_id: number; recipients: string[]; send_at?: string; send_now?: boolean }) =>
     api.post<{ invoice_send_schedule: InvoiceSendSchedule }>('/admin/invoice_send_schedules', data),
   update: (id: number, data: { recipients?: string[]; send_at?: string; cancel?: boolean; retry?: boolean }) =>
     api.patch<{ invoice_send_schedule: InvoiceSendSchedule }>(`/admin/invoice_send_schedules/${id}`, data),
@@ -5803,7 +5820,7 @@ export const expenseVendorsApi = {
 };
 
 export const expensesApi = {
-  list: (params?: { page?: number; per_page?: number; vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean }) =>
+  list: (params?: { page?: number; per_page?: number; vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string }) =>
     api.get<{ expenses: Expense[]; meta: { page: number; per_page: number; total_count: number }; summary: ExpenseSummary }>('/admin/expenses', params),
   show: (id: number) => api.get<{ expense: Expense }>(`/admin/expenses/${id}`),
   create: (data: {
@@ -5823,7 +5840,7 @@ export const expensesApi = {
   },
   downloadArtifact: (id: number, artifactId: number) =>
     api.getBlobWithParams(`/admin/expenses/${id}/artifacts/${artifactId}`),
-  export: (params?: { vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean }) =>
+  export: (params?: { vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string }) =>
     api.getBlobWithParams('/admin/expenses/export', params),
 };
 

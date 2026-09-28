@@ -5,25 +5,33 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface CompanyContextValue {
   companies: CompanyListItem[];
+  organizations: Array<{ id: number; name: string }>;
   activeCompany: CompanyListItem | null;
   activeCompanyId: number | null;
+  activeOrganizationId: number | null;
+  activeOrganizationName: string | null;
   canManageClients: boolean;
   canViewClientManagement: boolean;
   canSwitchCompany: boolean;
   loading: boolean;
   switchCompany: (companyId: number) => void;
+  switchOrganization: (organizationId: number) => void;
   refreshCompanies: () => Promise<void>;
 }
 
 const CompanyContext = createContext<CompanyContextValue>({
   companies: [],
+  organizations: [],
   activeCompany: null,
   activeCompanyId: null,
+  activeOrganizationId: null,
+  activeOrganizationName: null,
   canManageClients: false,
   canViewClientManagement: false,
   canSwitchCompany: false,
   loading: true,
   switchCompany: () => {},
+  switchOrganization: () => {},
   refreshCompanies: async () => {},
 });
 
@@ -48,10 +56,10 @@ function applyCompanyResponse(
   const storedId = companiesApi.getActiveCompanyId();
   if (storedId && res.companies.some(c => c.id === storedId)) {
     setActiveCompanyId(storedId);
-    companiesApi.switchCompany(storedId);
+    companiesApi.switchCompany(storedId, res.companies.find(c => c.id === storedId)?.organization_id);
   } else if (res.current_company_id) {
     setActiveCompanyId(res.current_company_id);
-    companiesApi.switchCompany(res.current_company_id);
+    companiesApi.switchCompany(res.current_company_id, res.companies.find(c => c.id === res.current_company_id)?.organization_id);
   }
   setFetched(true);
 }
@@ -139,27 +147,45 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, [authLoading, isAuthenticated, userId, fetched, refreshCompanies]);
 
   const switchCompany = useCallback((companyId: number) => {
+    const company = companies.find((candidate) => candidate.id === companyId);
+    if (!company) return;
     if (companyId === activeCompanyId) {
       return;
     }
 
     setActiveCompanyId(companyId);
-    companiesApi.switchCompany(companyId);
-  }, [activeCompanyId]);
+    companiesApi.switchCompany(companyId, company.organization_id);
+  }, [activeCompanyId, companies]);
 
   const activeCompany = companies.find(c => c.id === activeCompanyId) || null;
+  const activeOrganizationId = activeCompany?.organization_id ?? user?.organization_id ?? null;
+  const activeOrganizationName = activeCompany?.organization_name || user?.organization_name || null;
+  const organizations = Array.from(new Map(companies.map((company) => [
+    company.organization_id,
+    { id: company.organization_id, name: company.organization_name || `Organization #${company.organization_id}` },
+  ])).values()).sort((left, right) => left.name.localeCompare(right.name));
+  const switchOrganization = (organizationId: number) => {
+    if (organizationId === activeOrganizationId) return;
+    const destination = companies.find((company) => company.organization_id === organizationId && !company.test_workspace)
+      || companies.find((company) => company.organization_id === organizationId);
+    if (destination) switchCompany(destination.id);
+  };
 
   return (
     <CompanyContext.Provider
       value={{
         companies,
+        organizations,
         activeCompany,
         activeCompanyId,
+        activeOrganizationId,
+        activeOrganizationName,
         canManageClients,
         canViewClientManagement,
         canSwitchCompany,
         loading,
         switchCompany,
+        switchOrganization,
         refreshCompanies,
       }}
     >
