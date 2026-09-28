@@ -30,6 +30,7 @@ module Api
         def create
           invoice = Invoice.new(invoice_attributes)
           invoice.organization_id = current_organization_id
+          invoice.finance_book = current_finance_book
           invoice.company = optional_source_company
           invoice.created_by = current_user
           invoice.updated_by = current_user
@@ -251,7 +252,7 @@ module Api
 
         def invoice_scope
           Invoice
-            .where(organization_id: current_organization_id)
+            .where(finance_book_id: current_finance_book.id)
             .includes(
               :invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by,
               :artifacts, :events, :deliveries,
@@ -292,7 +293,7 @@ module Api
         end
 
         def validate_recipient!(id)
-          recipient = InvoiceRecipient.find_by(id: id, organization_id: current_organization_id)
+          recipient = InvoiceRecipient.find_by(id: id, finance_book_id: current_finance_book.id)
           raise ArgumentError, "Invoice recipient not found" unless recipient
           raise ArgumentError, "Invoice recipient is archived" unless recipient.active? || @invoice&.invoice_recipient_id == recipient.id
 
@@ -300,7 +301,7 @@ module Api
         end
 
         def validate_billing_profile!(id)
-          profile = InvoiceBillingProfile.find_by(id: id, organization_id: current_organization_id)
+          profile = InvoiceBillingProfile.find_by(id: id, finance_book_id: current_finance_book.id)
           raise ArgumentError, "Invoice billing profile not found" unless profile
           raise ArgumentError, "Invoice billing profile is archived" unless profile.active? || @invoice&.invoice_billing_profile_id == profile.id
 
@@ -375,6 +376,7 @@ module Api
 
           invoice = Invoice.new(
             organization_id: current_organization_id,
+            finance_book: current_finance_book,
             company: imported_source_company,
             invoice_recipient: recipient,
             invoice_billing_profile: profile,

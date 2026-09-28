@@ -17,11 +17,13 @@ class InvoiceChatSession < ApplicationRecord
            inverse_of: :invoice_chat_session
 
   before_validation :normalize_blanks
+  include FinanceBookOwned
 
   validates :title, presence: true
   validates :status, presence: true, inclusion: { in: STATUSES }
   validate :recipient_must_belong_to_organization
   validate :invoice_must_belong_to_organization
+  validate :finance_relations_must_belong_to_book
 
   scope :recent, -> { order(updated_at: :desc, created_at: :desc) }
 
@@ -40,6 +42,18 @@ class InvoiceChatSession < ApplicationRecord
   end
 
   private
+
+  def finance_book_parent
+    invoice || invoice_recipient
+  end
+
+  def finance_relations_must_belong_to_book
+    return if finance_book.blank?
+
+    { invoice: invoice, invoice_recipient: invoice_recipient }.each do |relation, record|
+      errors.add(relation, "must belong to the same financial book") if record && record.finance_book_id != finance_book_id
+    end
+  end
 
   def normalize_blanks
     self.organization ||= company&.organization

@@ -5,6 +5,7 @@ class ExpensePayloadBuilder
     payload = {
       id: expense.id,
       organization_id: expense.organization_id,
+      finance_book_id: expense.finance_book_id,
       expense_vendor_id: expense.expense_vendor_id,
       vendor_name: expense.expense_vendor.name,
       reference_number: expense.reference_number,

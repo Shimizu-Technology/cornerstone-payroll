@@ -10,7 +10,7 @@ module Api
 
         def index
           sessions = InvoiceChatSession
-            .where(organization_id: current_organization_id)
+            .where(finance_book_id: current_finance_book.id)
             .includes(:invoice_recipient, :invoice)
             .recent
           sessions = sessions.where(archived: false) unless include_archived_sessions?
@@ -33,6 +33,7 @@ module Api
         def create
           session = InvoiceChatSession.new(session_attributes)
           session.organization_id = current_organization_id
+          session.finance_book = current_finance_book
           session.created_by = current_user
           session.updated_by = current_user
 
@@ -126,7 +127,7 @@ module Api
             raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
 
             if (created_invoice_id = current_preview_created_invoice_id)
-              invoice = Invoice.find_by(id: created_invoice_id, organization_id: current_organization_id)
+              invoice = Invoice.find_by(id: created_invoice_id, finance_book_id: current_finance_book.id)
               raise ArgumentError, "Invoice already created for this preview but could not be found" unless invoice
               next
             end
@@ -199,7 +200,7 @@ module Api
         def set_session
           @session = InvoiceChatSession
             .includes(:invoice_recipient, :invoice, :messages)
-            .find_by(id: params[:id], organization_id: current_organization_id)
+            .find_by(id: params[:id], finance_book_id: current_finance_book.id)
           return if @session
 
           render json: { error: "Invoice chat session not found" }, status: :not_found
@@ -212,7 +213,7 @@ module Api
         def session_attributes
           raw = params.fetch(:invoice_chat_session, ActionController::Parameters.new).permit(:title, :invoice_recipient_id)
           if raw[:invoice_recipient_id].present?
-            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], organization_id: current_organization_id, active: true)
+            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], finance_book_id: current_finance_book.id, active: true)
             raise ArgumentError, "Invoice recipient not found" unless recipient
           end
           raw
@@ -228,6 +229,7 @@ module Api
 
           invoice = Invoice.new(
             organization_id: current_organization_id,
+            finance_book: current_finance_book,
             company_id: @session.company_id,
             invoice_recipient: recipient,
             invoice_billing_profile: billing_profile_from_preview!(preview),
@@ -262,7 +264,7 @@ module Api
           if preview["invoice_recipient_id"].present?
             recipient = InvoiceRecipient.find_by(
               id: preview["invoice_recipient_id"],
-              organization_id: current_organization_id,
+              finance_book_id: current_finance_book.id,
               active: true
             )
             raise ArgumentError, "Invoice recipient not found" unless recipient
@@ -273,14 +275,14 @@ module Api
           attrs = new_recipient_attributes_from_preview(preview["new_recipient"])
           raise ArgumentError, "Invoice recipient not found" if attrs.blank?
 
-          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, active: true))
+          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, finance_book: current_finance_book, active: true))
         end
 
         def billing_profile_from_preview!(preview)
           if preview["invoice_billing_profile_id"].present?
             profile = InvoiceBillingProfile.find_by(
               id: preview["invoice_billing_profile_id"],
-              organization_id: current_organization_id,
+              finance_book_id: current_finance_book.id,
               active: true
             )
             raise ArgumentError, "Invoice billing profile not found" unless profile
@@ -288,7 +290,7 @@ module Api
             return profile
           end
 
-          InvoiceBillingProfile.ensure_default_for!(current_organization)
+          InvoiceBillingProfile.ensure_default_for!(current_organization, finance_book: current_finance_book)
         end
 
         def new_recipient_attributes_from_preview(raw)

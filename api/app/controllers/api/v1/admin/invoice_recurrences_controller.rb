@@ -7,18 +7,19 @@ module Api
         before_action :require_admin!
 
         def index
-          rows = InvoiceRecurrence.where(organization_id: current_organization_id).order(:id)
+          rows = InvoiceRecurrence.where(finance_book_id: current_finance_book.id).order(:id)
           render json: { invoice_recurrences: rows.map { |row| payload(row) } }
         end
 
         def create
-          source = Invoice.find_by(id: params.require(:source_invoice_id), organization_id: current_organization_id)
+          source = Invoice.find_by(id: params.require(:source_invoice_id), finance_book_id: current_finance_book.id)
           return render json: { error: "Invoice not found" }, status: :not_found unless source
           raise ArgumentError, "Issue a native invoice before making it recurring" unless source.origin == "native" && source.open?
           raise ArgumentError, "Issued invoice has no usable template" unless InvoiceRecurrenceGenerator.usable_source?(source)
 
           recurrence = InvoiceRecurrence.create!(
             organization_id: current_organization_id,
+            finance_book: current_finance_book,
             source_invoice: source,
             created_by: current_user,
             start_on: Date.iso8601(params.require(:start_on)),
@@ -59,7 +60,7 @@ module Api
         private
 
         def scoped
-          InvoiceRecurrence.where(organization_id: current_organization_id)
+          InvoiceRecurrence.where(finance_book_id: current_finance_book.id)
         end
 
         def payload(row)

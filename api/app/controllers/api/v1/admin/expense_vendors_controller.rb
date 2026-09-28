@@ -13,7 +13,7 @@ module Api
         end
 
         def create
-          vendor = scope.create!(vendor_params)
+          vendor = scope.create!(vendor_params.merge(organization: current_organization, finance_book: current_finance_book))
           render json: { expense_vendor: vendor_payload(vendor) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -30,7 +30,7 @@ module Api
         private
 
         def scope
-          ExpenseVendor.where(organization_id: current_organization_id)
+          ExpenseVendor.where(organization_id: current_organization_id, finance_book_id: current_finance_book.id)
         end
 
         def vendor_params

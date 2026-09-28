@@ -35,6 +35,7 @@ class Invoice < ApplicationRecord
   before_validation :default_billing_profile
   before_validation :assign_invoice_number, on: :create
   before_validation :sync_total_amount
+  include FinanceBookOwned
 
   validates :invoice_number, presence: true, uniqueness: { scope: :invoice_billing_profile_id }
   validates :invoice_date, presence: true
@@ -49,6 +50,7 @@ class Invoice < ApplicationRecord
   validate :billing_profile_must_belong_to_organization
   validate :company_must_belong_to_organization
   validate :recurrence_must_belong_to_organization
+  validate :finance_relations_must_belong_to_book
   validate :due_date_cannot_precede_invoice_date
   validate :discount_within_subtotal
   validate :must_have_line_items, if: :issued?
@@ -269,6 +271,21 @@ class Invoice < ApplicationRecord
 
   private
 
+  def finance_book_parent
+    invoice_recurrence || invoice_billing_profile || invoice_recipient
+  end
+
+  def finance_relations_must_belong_to_book
+    return if finance_book.blank?
+
+    { invoice_recipient: invoice_recipient, invoice_billing_profile: invoice_billing_profile,
+      invoice_recurrence: invoice_recurrence }.each do |relation, record|
+      next if record.blank? || record.finance_book_id == finance_book_id
+
+      errors.add(relation, "must belong to the same financial book")
+    end
+  end
+
   def normalize_blanks
     self.status = status.presence || "draft"
     self.origin = origin.presence || "native"
@@ -307,7 +324,9 @@ class Invoice < ApplicationRecord
   def default_billing_profile
     return if invoice_billing_profile.present? || organization.blank?
 
-    self.invoice_billing_profile = InvoiceBillingProfile.ensure_default_for!(organization)
+    self.invoice_billing_profile = InvoiceBillingProfile.ensure_default_for!(
+      organization, finance_book: finance_book || invoice_recipient&.finance_book || invoice_recurrence&.finance_book
+    )
   end
 
   def recipient_must_belong_to_organization

@@ -9,8 +9,9 @@ class InvoiceBillingProfile < ApplicationRecord
 
   before_validation :normalize_blanks
   before_save :clear_other_defaults, if: :is_default?
+  include FinanceBookOwned
 
-  validates :name, presence: true, uniqueness: { scope: :organization_id }
+  validates :name, presence: true, uniqueness: { scope: :finance_book_id }
   validates :invoice_prefix, length: { maximum: 16 }, allow_blank: true
   validates :logo_content_type, inclusion: { in: InvoiceLogoStorageService::CONTENT_TYPES }, allow_nil: true
   validates :logo_byte_size, numericality: { only_integer: true, greater_than: 0,
@@ -20,9 +21,12 @@ class InvoiceBillingProfile < ApplicationRecord
   scope :active, -> { where(active: true) }
   scope :ordered, -> { order(Arel.sql("is_default DESC"), :name, :id) }
 
-  def self.ensure_default_for!(organization)
+  def self.ensure_default_for!(organization, finance_book: nil)
     organization.with_lock do
-      profiles = organization.invoice_billing_profiles
+      finance_book ||= organization.finance_books.first if organization.finance_books.one?
+      raise ArgumentError, "Select a financial book" unless finance_book&.organization_id == organization.id
+
+      profiles = finance_book.invoice_billing_profiles
       profiles.where(active: false, is_default: true).update_all(is_default: false)
 
       existing_default = profiles.active.where(is_default: true).order(:id).first
@@ -38,14 +42,15 @@ class InvoiceBillingProfile < ApplicationRecord
       end
 
       primary_company = organization.primary_company || organization.companies.order(:id).first
-      profile = profiles.find_or_initialize_by(name: organization.name)
+      profile = profiles.find_or_initialize_by(name: finance_book.name)
       profile.update!(
-        legal_name: profile.legal_name.presence || organization.name,
+        organization: organization,
+        legal_name: profile.legal_name.presence || finance_book.legal_name,
         phone: profile.phone.presence || primary_company&.phone,
         email: profile.email.presence || primary_company&.email,
         address: profile.address.presence || company_address(primary_company),
         invoice_prefix: profile.invoice_prefix.presence || "INV",
-        remit_to: profile.remit_to.presence || organization.name,
+        remit_to: profile.remit_to.presence || finance_book.legal_name,
         footer_note: refreshed_footer(profile.footer_note),
         active: true,
         is_default: true
@@ -94,7 +99,7 @@ class InvoiceBillingProfile < ApplicationRecord
   end
 
   def clear_other_defaults
-    self.class.where(organization_id: organization_id, is_default: true)
+    self.class.where(finance_book_id: finance_book_id, is_default: true)
       .where.not(id: id)
       .update_all(is_default: false)
   end

@@ -346,11 +346,11 @@ class InvoiceAiPreviewService
   end
 
   def active_recipients
-    InvoiceRecipient.where(organization_id: company.organization_id, active: true)
+    InvoiceRecipient.where(finance_book_id: session.finance_book_id, active: true)
   end
 
   def active_billing_profiles
-    InvoiceBillingProfile.where(organization_id: company.organization_id, active: true)
+    InvoiceBillingProfile.where(finance_book_id: session.finance_book_id, active: true)
   end
 
   def default_billing_profile

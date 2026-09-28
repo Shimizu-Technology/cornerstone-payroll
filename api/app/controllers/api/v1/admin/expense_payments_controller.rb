@@ -34,7 +34,7 @@ module Api
         private
 
         def scoped_expense
-          Expense.find_by!(id: params[:expense_id], organization_id: current_organization_id)
+          Expense.find_by!(id: params[:expense_id], finance_book_id: current_finance_book.id)
         end
       end
     end

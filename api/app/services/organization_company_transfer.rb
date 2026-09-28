@@ -60,9 +60,11 @@ class OrganizationCompanyTransfer
 
       company.update!(organization: destination)
       destination.update!(primary_company: company)
+      destination_book = destination.finance_books.find_by!(is_default: true)
+      destination_book.update!(company: company)
       User.where(id: moving_user_ids).update_all(organization_id: destination.id)
 
-      transfer_invoices!(destination, issuer_legal_name: issuer_legal_name)
+      transfer_invoices!(destination, destination_book: destination_book, issuer_legal_name: issuer_legal_name)
       # Legacy invoice creation used the selected payroll company even when the
       # sender was Cornerstone. Keep those invoices and their chats in the source
       # organization, without a cross-tenant company reference.
@@ -115,6 +117,7 @@ class OrganizationCompanyTransfer
     issues << "Company is the source organization's primary company" if source.primary_company_id == company.id
     issues << "Source organization needs a different primary company for staff" unless source.primary_company_id && source.primary_company_id != company.id
     issues << "Selected billing profile does not belong to the source organization" if billing_profile && billing_profile.organization_id != source.id
+    issues << "Resolve the company's existing financial book before transfer" if FinanceBook.where(company_id: company.id).exists?
     issues << "Company has an invoice in another organization" if Invoice.where(company_id: company.id).where.not(organization_id: source.id).exists?
     issues << "Company has an invoice assistant session in another organization" if InvoiceChatSession.where(company_id: company.id).where.not(organization_id: source.id).exists?
     issues << "Selected billing profile has invoices assigned to another company" if selected_invoices.where.not(company_id: [ nil, company.id ]).exists?
@@ -129,7 +132,7 @@ class OrganizationCompanyTransfer
     issues
   end
 
-  def transfer_invoices!(destination, issuer_legal_name:)
+  def transfer_invoices!(destination, destination_book:, issuer_legal_name:)
     invoice_ids = selected_invoices.pluck(:id)
     session_ids = selected_invoice_sessions.pluck(:id)
     recipient_ids = Invoice.where(id: invoice_ids).distinct.pluck(:invoice_recipient_id)
@@ -142,6 +145,7 @@ class OrganizationCompanyTransfer
       if used_in_source
         copy = recipient.dup
         copy.organization = destination
+        copy.finance_book = destination_book
         copy.company = recipient.company_id == company.id ? company : nil
         copy.save!
         Invoice.where(id: invoice_ids, invoice_recipient_id: recipient.id).update_all(invoice_recipient_id: copy.id)
@@ -150,7 +154,7 @@ class OrganizationCompanyTransfer
       else
         raise Conflict, "Recipient belongs to another company" if recipient.company_id && recipient.company_id != company.id
 
-        recipient.update_columns(organization_id: destination.id)
+        recipient.update_columns(organization_id: destination.id, finance_book_id: destination_book.id)
       end
     end
 
@@ -160,15 +164,15 @@ class OrganizationCompanyTransfer
 
     if billing_profile
       was_default = billing_profile.is_default?
-      billing_profile.update_columns(organization_id: destination.id, is_default: true,
+      billing_profile.update_columns(organization_id: destination.id, finance_book_id: destination_book.id, is_default: true,
                                      legal_name: issuer_legal_name.strip)
       if was_default
         source.invoice_billing_profiles.where.not(id: billing_profile.id).order(:id).first&.update!(is_default: true)
       end
     end
 
-    Invoice.where(id: invoice_ids).update_all(organization_id: destination.id)
-    InvoiceChatSession.where(id: session_ids).update_all(organization_id: destination.id)
+    Invoice.where(id: invoice_ids).update_all(organization_id: destination.id, finance_book_id: destination_book.id)
+    InvoiceChatSession.where(id: session_ids).update_all(organization_id: destination.id, finance_book_id: destination_book.id)
     [ InvoiceArtifact, InvoiceEvent, InvoicePayment, InvoiceCreditNote, InvoiceDelivery ].each do |model|
       model.where(invoice_id: invoice_ids).update_all(organization_id: destination.id)
     end
