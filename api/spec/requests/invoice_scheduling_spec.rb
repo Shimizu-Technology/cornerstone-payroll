@@ -104,6 +104,31 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect(InvoiceRecurrence.find_by!(source_invoice: valid_source).generated_invoices.count).to eq(1)
   end
 
+  it "rejects an unusable source and isolates a damaged existing recurrence" do
+    damaged_source = issued_invoice
+    valid_source = issued_invoice
+    post "/api/v1/admin/invoice_recurrences", params: {
+      source_invoice_id: damaged_source.id, start_on: "2026-09-01", interval_unit: "month"
+    }
+    expect(response).to have_http_status(:created)
+    post "/api/v1/admin/invoice_recurrences", params: {
+      source_invoice_id: valid_source.id, start_on: "2026-09-01", interval_unit: "month"
+    }
+    expect(response).to have_http_status(:created)
+
+    damaged_source.update_column(:snapshot, {})
+    InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 9, 28))
+
+    expect(InvoiceRecurrence.find_by!(source_invoice: damaged_source)).not_to be_active
+    expect(InvoiceRecurrence.find_by!(source_invoice: valid_source).generated_invoices.count).to eq(1)
+
+    post "/api/v1/admin/invoice_recurrences", params: {
+      source_invoice_id: damaged_source.id, start_on: "2026-10-01", interval_unit: "month"
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("usable template")
+  end
+
   it "scopes scheduling to the organization and validates recipients" do
     source = issued_invoice
     other = create(:invoice, :with_line_item)
@@ -154,6 +179,42 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect { InvoiceScheduledSender.send!(schedule.id) }.not_to change(InvoiceDelivery, :count)
   end
 
+  it "retries with the same email payload after the invoice balance changes" do
+    source = issued_invoice
+    post "/api/v1/admin/invoice_send_schedules", params: {
+      invoice_id: source.id, recipients: [ "customer@example.com" ], send_at: 1.minute.ago.iso8601
+    }
+    schedule = InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("RESEND_API_KEY").and_return("test-key")
+    allow(ENV).to receive(:[]).with("INVOICE_MAILER_FROM_EMAIL").and_return("invoices@example.com")
+    messages = []
+    allow(Resend::Emails).to receive(:send) do |message, options:|
+      messages << [ message, options ]
+      raise "provider response lost" if messages.size == 1
+
+      { id: "email-after-retry" }
+    end
+
+    expect { InvoiceScheduledSender.send!(schedule.id) }.to raise_error("provider response lost")
+    expect(schedule.reload.status).to eq("failed")
+    original_body = schedule.rendered_body
+    InvoicePaymentService.record!(invoice: source, actor: admin_user, amount: 100, received_on: Date.current,
+                                  payment_method: "check", currency: "USD")
+
+    patch "/api/v1/admin/invoice_send_schedules/#{schedule.id}", params: { retry: true }
+    expect(response).to have_http_status(:ok)
+    patch "/api/v1/admin/invoice_send_schedules/#{schedule.id}", params: { recipients: [ "other@example.com" ] }
+    expect(response).to have_http_status(:unprocessable_entity)
+
+    InvoiceScheduledSender.send!(schedule.id)
+    expect(schedule.reload).to have_attributes(status: "sent", rendered_body: original_body)
+    expect(messages.map { |message, _| message[:text] }).to eq([ original_body, original_body ])
+    expect(messages.map { |message, _| message[:to] }).to eq([ [ "customer@example.com" ], [ "customer@example.com" ] ])
+    expect(messages.map { |_, options| options[:idempotency_key] }.uniq).to eq([ "invoice-send-#{schedule.id}" ])
+  end
+
   it "cancels pending email before a worker claims it" do
     source = issued_invoice
     post "/api/v1/admin/invoice_send_schedules", params: {
@@ -178,5 +239,19 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
 
     expect(schedule.reload).to have_attributes(status: "failed", attempts: 0)
     expect(schedule.last_error).to include("verify provider delivery")
+  end
+
+  it "refuses a retry after the provider idempotency window expires" do
+    source = issued_invoice
+    schedule = InvoiceSendSchedule.create!(organization: source.organization, invoice: source,
+                                           recipients: [ "customer@example.com" ], send_at: 26.hours.ago,
+                                           status: "failed", attempts: 1, claimed_at: 25.hours.ago,
+                                           first_claimed_at: 25.hours.ago)
+
+    patch "/api/v1/admin/invoice_send_schedules/#{schedule.id}", params: { retry: true }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("idempotency window has expired")
+    expect(schedule.reload.status).to eq("failed")
   end
 end

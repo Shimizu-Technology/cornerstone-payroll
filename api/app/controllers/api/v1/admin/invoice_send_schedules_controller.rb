@@ -43,6 +43,10 @@ module Api
           schedule.with_lock do
             if params[:retry] == true || params[:retry] == "true"
               raise ArgumentError, "Only failed invoice emails can be retried" unless schedule.status == "failed"
+              if schedule.first_claimed_at.present? && schedule.first_claimed_at <= 24.hours.ago
+                raise ArgumentError, "The provider idempotency window has expired; verify delivery and create a new schedule"
+              end
+
               schedule.update!(status: "pending", last_error: nil)
               InvoiceEvent.record!(invoice: schedule.invoice, event_type: "email_retry_requested", actor: current_user,
                                    metadata: { send_schedule_id: schedule.id })
@@ -53,10 +57,17 @@ module Api
               InvoiceEvent.record!(invoice: schedule.invoice, event_type: "email_schedule_cancelled", actor: current_user,
                                    metadata: { send_schedule_id: schedule.id })
             else
+              raise ArgumentError, "A claimed email cannot be edited; create a new schedule" if schedule.attempts.positive?
+
               updates = {}
               updates[:send_at] = Time.iso8601(params[:send_at]) if params[:send_at].present?
               updates[:recipients] = InvoiceSendSchedule.normalize_recipients(params[:recipients]) if params.key?(:recipients)
               schedule.update!(updates)
+              if updates.present?
+                InvoiceEvent.record!(invoice: schedule.invoice, event_type: "email_schedule_updated", actor: current_user,
+                                     metadata: { send_schedule_id: schedule.id, send_at: schedule.send_at.iso8601,
+                                                 recipients: schedule.recipients })
+              end
             end
           end
           render json: { invoice_send_schedule: payload(schedule) }

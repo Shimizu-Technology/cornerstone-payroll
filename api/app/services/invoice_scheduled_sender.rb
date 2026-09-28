@@ -13,31 +13,41 @@ class InvoiceScheduledSender
         return
       end
 
-      schedule.update!(status: "sending", attempts: schedule.attempts + 1, claimed_at: Time.current)
+      invoice = schedule.invoice
+      profile = invoice.invoice_billing_profile
+      business = profile.legal_name.presence || profile.name
+      details = invoice.snapshot.is_a?(Hash) && invoice.snapshot["invoice"].is_a?(Hash) ? invoice.snapshot["invoice"] : {}
+      subject = details["email_subject"].presence || "Invoice #{invoice.invoice_number} from #{business}"
+      body = details["email_body"].presence ||
+        "Please find invoice #{invoice.invoice_number} attached. The current balance is #{invoice.currency} #{format('%.2f', invoice.balance_due)}."
+      reply_to = profile.email if profile.email.present? && profile.email.match?(URI::MailTo::EMAIL_REGEXP)
+      claimed_at = Time.current
+      schedule.update!(status: "sending", attempts: schedule.attempts + 1, claimed_at: claimed_at,
+                       first_claimed_at: schedule.first_claimed_at || claimed_at,
+                       rendered_subject: schedule.rendered_subject.presence || subject,
+                       rendered_body: schedule.rendered_body.presence || body,
+                       sender_email: schedule.sender_email.presence || ENV["INVOICE_MAILER_FROM_EMAIL"].presence,
+                       reply_to_email: schedule.attempts.zero? ? reply_to : schedule.reply_to_email)
     end
 
     invoice = schedule.invoice
     artifact = invoice.primary_artifact
     raise ArgumentError, "An issued PDF is required before sending" unless artifact&.content_type == "application/pdf"
 
-    sender = ENV["INVOICE_MAILER_FROM_EMAIL"].presence
-    raise ArgumentError, "Invoice sender email is not configured" if ENV["RESEND_API_KEY"].blank? || sender.blank?
+    raise ArgumentError, "Invoice sender email is not configured" if ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
 
     bytes = InvoiceArtifactStorageService.new.download(artifact)
-    profile = invoice.invoice_billing_profile
-    business = profile.legal_name.presence || profile.name
-    subject = invoice.snapshot.dig("invoice", "email_subject").presence || "Invoice #{invoice.invoice_number} from #{business}"
-    body = invoice.snapshot.dig("invoice", "email_body").presence ||
-      "Please find invoice #{invoice.invoice_number} attached. The current balance is #{invoice.currency} #{format('%.2f', invoice.balance_due)}."
+    raise ArgumentError, "Invoice artifact is unavailable" if bytes.nil?
+
     message = {
-      from: sender,
+      from: schedule.sender_email,
       to: schedule.recipients,
-      subject: subject,
-      text: body,
-      html: "<p>#{CGI.escapeHTML(body).gsub("\n", "<br>")}</p>",
+      subject: schedule.rendered_subject,
+      text: schedule.rendered_body,
+      html: "<p>#{CGI.escapeHTML(schedule.rendered_body).gsub("\n", "<br>")}</p>",
       attachments: [ { filename: artifact.filename, content: bytes.bytes } ]
     }
-    message[:reply_to] = profile.email if profile.email.present? && profile.email.match?(URI::MailTo::EMAIL_REGEXP)
+    message[:reply_to] = schedule.reply_to_email if schedule.reply_to_email.present?
 
     response = Resend::Emails.send(message, options: { idempotency_key: "invoice-send-#{schedule.id}" })
     reference = response[:id] || response["id"]
