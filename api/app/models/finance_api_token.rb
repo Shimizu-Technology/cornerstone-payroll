@@ -6,7 +6,7 @@ require "securerandom"
 class FinanceApiToken < ApplicationRecord
   PREFIX = "cfin_"
   TOKEN_PATTERN = /\A#{PREFIX}[a-f0-9]{64}\z/
-  SCOPES = %w[read].freeze
+  SCOPES = %w[read draft_write].freeze
 
   belongs_to :organization
   belongs_to :finance_book
@@ -18,10 +18,10 @@ class FinanceApiToken < ApplicationRecord
   validate :known_scopes
   validate :book_matches_organization
 
-  def self.issue!(finance_book:, actor:, name:, expires_at: 90.days.from_now)
+  def self.issue!(finance_book:, actor:, name:, scopes: [ "read" ], expires_at: 90.days.from_now)
     secret = "#{PREFIX}#{SecureRandom.hex(32)}"
     token = create!(finance_book: finance_book, organization: finance_book.organization, created_by: actor,
-                    name: name, token_digest: Digest::SHA256.hexdigest(secret), scopes: [ "read" ],
+                    name: name, token_digest: Digest::SHA256.hexdigest(secret), scopes: scopes,
                     expires_at: expires_at)
     [ token, secret ]
   end
@@ -45,6 +45,8 @@ class FinanceApiToken < ApplicationRecord
 
   def known_scopes
     errors.add(:scopes, "are invalid") unless scopes.is_a?(Array) && scopes.all? { |scope| SCOPES.include?(scope) }
+    errors.add(:scopes, "must include read access") unless scopes.is_a?(Array) && scopes.include?("read")
+    errors.add(:scopes, "cannot contain duplicates") if scopes.is_a?(Array) && scopes.uniq.length != scopes.length
   end
 
   def book_matches_organization

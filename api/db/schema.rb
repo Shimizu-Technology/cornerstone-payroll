@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1186,6 +1186,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
   end
 
+  create_table "finance_api_requests", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "finance_api_token_id", null: false
+    t.bigint "finance_book_id", null: false
+    t.string "idempotency_key", null: false
+    t.bigint "invoice_id"
+    t.bigint "organization_id", null: false
+    t.string "request_digest", null: false
+    t.jsonb "response_payload", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["finance_api_token_id"], name: "index_finance_api_requests_on_finance_api_token_id"
+    t.index ["finance_book_id", "idempotency_key"], name: "idx_finance_api_requests_book_key", unique: true
+    t.index ["finance_book_id"], name: "index_finance_api_requests_on_finance_book_id"
+    t.index ["invoice_id"], name: "index_finance_api_requests_on_invoice_id"
+    t.index ["organization_id"], name: "index_finance_api_requests_on_organization_id"
+  end
+
   create_table "finance_api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "created_by_id", null: false
@@ -1201,6 +1218,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
     t.index ["created_by_id"], name: "index_finance_api_tokens_on_created_by_id"
     t.index ["finance_book_id", "revoked_at"], name: "index_finance_api_tokens_on_finance_book_id_and_revoked_at"
     t.index ["finance_book_id"], name: "index_finance_api_tokens_on_finance_book_id"
+    t.index ["id", "finance_book_id"], name: "idx_finance_api_tokens_id_book", unique: true
     t.index ["organization_id"], name: "index_finance_api_tokens_on_organization_id"
     t.index ["token_digest"], name: "index_finance_api_tokens_on_token_digest", unique: true
   end
@@ -2019,6 +2037,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
     t.bigint "invoice_recurrence_id"
     t.datetime "issued_at"
     t.string "legacy_status"
+    t.integer "lock_version", default: 0, null: false
     t.text "notes"
     t.bigint "organization_id", null: false
     t.string "origin", default: "native", null: false
@@ -3551,6 +3570,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
   add_foreign_key "expenses", "expense_vendors", column: ["expense_vendor_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_expenses_expense_vendor_id_book_scope", deferrable: :deferred
   add_foreign_key "expenses", "finance_books"
   add_foreign_key "expenses", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expenses_book_organization"
+  add_foreign_key "finance_api_requests", "finance_api_tokens"
+  add_foreign_key "finance_api_requests", "finance_api_tokens", column: ["finance_api_token_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_token_book"
+  add_foreign_key "finance_api_requests", "finance_books"
+  add_foreign_key "finance_api_requests", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_requests_book_organization"
+  add_foreign_key "finance_api_requests", "invoices"
+  add_foreign_key "finance_api_requests", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_invoice_book"
+  add_foreign_key "finance_api_requests", "organizations"
   add_foreign_key "finance_api_tokens", "finance_books"
   add_foreign_key "finance_api_tokens", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_tokens_book_organization"
   add_foreign_key "finance_api_tokens", "organizations"

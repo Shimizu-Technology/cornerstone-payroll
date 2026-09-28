@@ -317,6 +317,19 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       )
     end
 
+    it "shows a blocker when selected invoices have agent request history" do
+      token, = FinanceApiToken.issue!(finance_book: invoice.finance_book, actor: org_admin, name: "Draft agent")
+      FinanceApiRequest.create!(organization: platform_org, finance_book: invoice.finance_book,
+                                finance_api_token: token, invoice: invoice, idempotency_key: "transfer-test-001",
+                                request_digest: "a" * 64)
+
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      expect(response.parsed_body.dig("transfer", "blockers")).to include(
+        "Agent-created invoice drafts need manual review before transfer"
+      )
+    end
+
     it "blocks an invoice assistant session in another organization" do
       other_organization = create(:organization)
       create(:invoice_chat_session, organization: other_organization, company: payroll_company)

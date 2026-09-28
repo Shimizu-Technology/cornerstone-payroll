@@ -129,6 +129,7 @@ class OrganizationCompanyTransfer
     issues << "Selected invoice assistant belongs to another company" if selected_invoice_sessions.where.not(company_id: [ nil, company.id ]).exists?
     issues << "Recurring invoices must be paused and resolved first" if InvoiceRecurrence.where(source_invoice_id: selected_invoices.select(:id)).exists?
     issues << "Scheduled invoice email must be cancelled or resolved first" if InvoiceSendSchedule.where(invoice_id: selected_invoices.select(:id)).exists?
+    issues << "Agent-created invoice drafts need manual review before transfer" if FinanceApiRequest.where(invoice_id: selected_invoices.select(:id)).exists?
     issues
   end
 
