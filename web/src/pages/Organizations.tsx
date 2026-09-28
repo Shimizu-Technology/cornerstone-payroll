@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationSummary } from '@/services/api';
+import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationCompanyTransferPreview, type OrganizationSummary } from '@/services/api';
 import type { PaginationMeta } from '@/types';
 
 export function Organizations() {
@@ -35,6 +35,15 @@ export function Organizations() {
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newError, setNewError] = useState<string | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [transferCompanyId, setTransferCompanyId] = useState('');
+  const [transferProfileId, setTransferProfileId] = useState('');
+  const [transferName, setTransferName] = useState('');
+  const [transferSlug, setTransferSlug] = useState('');
+  const [transferIssuer, setTransferIssuer] = useState('');
+  const [transferPreview, setTransferPreview] = useState<OrganizationCompanyTransferPreview | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -136,6 +145,57 @@ export function Organizations() {
       setNewError(err instanceof ApiError ? err.message : 'Failed to create organization');
     } finally {
       setIsSavingNew(false);
+    }
+  };
+
+  const reviewTransfer = async () => {
+    const companyId = Number(transferCompanyId);
+    if (!Number.isSafeInteger(companyId) || companyId < 1) {
+      setTransferError('Enter an existing company ID.');
+      return;
+    }
+    setTransferBusy(true);
+    setTransferError(null);
+    try {
+      const response = await organizationsApi.companyTransferPreview(companyId, transferProfileId ? Number(transferProfileId) : undefined);
+      setTransferPreview(response.transfer);
+      setTransferName((current) => current || response.transfer.company.name);
+      setTransferSlug((current) => current || response.transfer.company.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+      if (transferProfileId) setTransferIssuer((current) => current || response.transfer.billing_profiles.find((profile) => profile.id === Number(transferProfileId))?.legal_name || response.transfer.company.name);
+    } catch (err) {
+      setTransferPreview(null);
+      setTransferError(err instanceof Error ? err.message : 'Could not review the transfer');
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const executeTransfer = async () => {
+    if (!transferPreview || transferPreview.blockers.length || !transferName.trim() || !transferSlug.trim() || (transferProfileId && !transferIssuer.trim())) return;
+    setTransferBusy(true);
+    setTransferError(null);
+    try {
+      await organizationsApi.transferCompany({
+        company_id: transferPreview.company.id,
+        billing_profile_id: transferProfileId ? Number(transferProfileId) : undefined,
+        source_organization_id: transferPreview.source_organization.id,
+        name: transferName.trim(),
+        slug: transferSlug.trim(),
+        issuer_legal_name: transferProfileId ? transferIssuer.trim() : undefined,
+      });
+      setSuccessMessage(`${transferPreview.company.name} moved with its existing payroll history.`);
+      setIsTransferring(false);
+      setTransferPreview(null);
+      setTransferCompanyId('');
+      setTransferProfileId('');
+      setTransferName('');
+      setTransferSlug('');
+      setTransferIssuer('');
+      await fetchOrganizations(1);
+    } catch (err) {
+      setTransferError(err instanceof Error ? err.message : 'Could not move the company');
+    } finally {
+      setTransferBusy(false);
     }
   };
 
@@ -280,12 +340,10 @@ export function Organizations() {
       <Header
         title="Organizations"
         description="Manage accounting firm workspaces and their administrators"
-        actions={
-          <Button onClick={() => setIsAdding(true)} disabled={isAdding}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Organization
-          </Button>
-        }
+        actions={<div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setIsTransferring(true)} disabled={isTransferring}>Move existing client</Button>
+          <Button onClick={() => setIsAdding(true)} disabled={isAdding}><Plus className="mr-2 h-4 w-4" />New Organization</Button>
+        </div>}
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
@@ -338,6 +396,44 @@ export function Organizations() {
             <Mail className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             <p className="text-green-700">{successMessage}</p>
           </div>
+        )}
+
+        {isTransferring && (
+          <Card className="mb-6 space-y-4 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Move an existing client into its own organization</h3>
+                <p className="mt-1 text-sm text-neutral-600">The company keeps its payroll history and ID. The selected invoice sender and its invoices move with it. Review the affected records before continuing.</p>
+              </div>
+              <Button variant="ghost" size="sm" aria-label="Close transfer form" disabled={transferBusy} onClick={() => setIsTransferring(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="space-y-1 text-sm font-medium text-neutral-700">Existing company ID
+                <Input type="number" min={1} value={transferCompanyId} onChange={(event) => { setTransferCompanyId(event.target.value); setTransferPreview(null); }} />
+              </label>
+              <label className="space-y-1 text-sm font-medium text-neutral-700">Invoice sender to move
+                <Select value={transferProfileId} onChange={(event) => { setTransferProfileId(event.target.value); setTransferPreview(null); }}>
+                  <option value="">No invoice sender</option>
+                  {transferPreview?.billing_profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.invoice_count} invoices</option>)}
+                </Select>
+              </label>
+              <div className="flex items-end"><Button variant="outline" onClick={reviewTransfer} disabled={transferBusy}>{transferBusy ? 'Checking...' : 'Review transfer'}</Button></div>
+            </div>
+            {transferPreview && <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
+              <p className="font-semibold text-neutral-900">{transferPreview.company.name} from {transferPreview.source_organization.name}</p>
+              <p className="text-neutral-700">{transferPreview.employee_count} employees · {transferPreview.payroll_periods} pay periods · {transferPreview.selected_invoice_count} selected invoices · {transferPreview.home_users_to_move} client users move · {transferPreview.staff_home_users_to_rehome} staff users return to the source company · {transferPreview.assignments_to_remove} staff assignments removed</p>
+              {transferPreview.billing_profiles.length > 0 && !transferProfileId && <p className="text-amber-800">No sender selected. Invoices under an organization sender will remain in the source workspace.</p>}
+              {transferPreview.selected_invoice_numbers.length > 0 && <p className="text-neutral-600">Invoices: {transferPreview.selected_invoice_numbers.join(', ')}</p>}
+              {transferPreview.blockers.map((blocker) => <p key={blocker} className="text-danger-700">{blocker}</p>)}
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 font-medium text-neutral-700">New organization name<Input value={transferName} onChange={(event) => setTransferName(event.target.value)} /></label>
+                <label className="space-y-1 font-medium text-neutral-700">New organization slug<Input value={transferSlug} onChange={(event) => setTransferSlug(event.target.value)} /></label>
+                {transferProfileId && <label className="space-y-1 font-medium text-neutral-700">Legal invoice issuer<Input value={transferIssuer} onChange={(event) => setTransferIssuer(event.target.value)} /></label>}
+              </div>
+              <Button onClick={executeTransfer} disabled={transferBusy || transferPreview.blockers.length > 0 || !transferName.trim() || !transferSlug.trim() || (transferProfileId !== '' && !transferIssuer.trim())}>{transferBusy ? 'Moving...' : 'Move company and selected invoices'}</Button>
+            </div>}
+            {transferError && <p className="text-sm text-danger-700">{transferError}</p>}
+          </Card>
         )}
 
         {isAdding && (

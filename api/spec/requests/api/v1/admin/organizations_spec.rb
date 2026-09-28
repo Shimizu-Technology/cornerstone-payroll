@@ -183,6 +183,102 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
     end
   end
 
+  describe "moving an existing company into a new organization" do
+    let!(:payroll_company) { create(:company, organization: platform_org, name: "Shimizu Technology") }
+    let!(:profile) { create(:invoice_billing_profile, organization: platform_org, name: "Shimizu Technology", is_default: true) }
+    let!(:recipient) { create(:invoice_recipient, organization: platform_org, company: payroll_company) }
+    let!(:invoice) do
+      create(:invoice, :with_line_item, company: payroll_company, organization: platform_org,
+             invoice_billing_profile: profile, invoice_recipient: recipient)
+    end
+    let!(:client_user) { create(:user, organization: platform_org, company: payroll_company, role: :client) }
+
+    before do
+      platform_org.update!(primary_company: platform_company)
+      CompanyAssignment.create!(user: org_admin, company: payroll_company)
+    end
+
+    it "previews blockers and moves the company without replacing its payroll or invoice ids" do
+      pay_period = create(:pay_period, company: payroll_company)
+      original_audit = AuditLog.record!(user: super_admin, organization_id: platform_org.id,
+                                        company_id: payroll_company.id, action: "payroll#reviewed",
+                                        record_type: "pay_periods", record_id: pay_period.id)
+
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      expect(response).to have_http_status(:ok)
+      preview = response.parsed_body.fetch("transfer")
+      expect(preview.fetch("blockers")).to be_empty
+      expect(preview.fetch("selected_invoice_numbers")).to eq([ invoice.invoice_number ])
+
+      expect do
+        post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+          company_id: payroll_company.id, billing_profile_id: profile.id,
+          source_organization_id: platform_org.id, name: "Shimizu Technology LLC",
+          slug: "shimizu-technology", issuer_legal_name: "Shimizu Technology LLC"
+        } }
+      end.to change(Organization, :count).by(1).and change(Company, :count).by(0)
+      expect(response).to have_http_status(:created), response.body
+
+      destination = Organization.find_by!(slug: "shimizu-technology")
+      expect(destination.primary_company_id).to eq(payroll_company.id)
+      expect(payroll_company.reload.organization_id).to eq(destination.id)
+      expect(pay_period.reload.company_id).to eq(payroll_company.id)
+      expect(invoice.reload.organization_id).to eq(destination.id)
+      expect(invoice.invoice_recipient.reload.organization_id).to eq(destination.id)
+      expect(profile.reload.organization_id).to eq(destination.id)
+      expect(profile.legal_name).to eq("Shimizu Technology LLC")
+      expect(client_user.reload.organization_id).to eq(destination.id)
+      expect(CompanyAssignment.where(company_id: payroll_company.id)).to be_empty
+      expect(original_audit.reload.organization_id).to eq(destination.id)
+      expect(AuditLog.where(organization_id: platform_org.id, action: "organizations#company_transferred_out")).to exist
+    end
+
+    it "refuses a stale source or a company that is the source primary" do
+      post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+        company_id: payroll_company.id, billing_profile_id: profile.id,
+        source_organization_id: 999_999, name: "Shimizu Technology LLC", slug: "shimizu-technology"
+      } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(Organization.find_by(slug: "shimizu-technology")).to be_nil
+
+      get "/api/v1/admin/organizations/company_transfer_preview", params: { company_id: platform_company.id }
+      expect(response.parsed_body.dig("transfer", "blockers")).to include("Company is the source organization's primary company")
+    end
+
+    it "keeps a shared recipient in the source organization and rehomes source staff" do
+      corner_profile = create(:invoice_billing_profile, organization: platform_org, name: "Cornerstone")
+      corner_invoice = create(:invoice, company: platform_company, organization: platform_org,
+                              invoice_billing_profile: corner_profile, invoice_recipient: recipient)
+      staff = create(:user, organization: platform_org, company: payroll_company, role: :manager)
+
+      post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+        company_id: payroll_company.id, billing_profile_id: profile.id,
+        source_organization_id: platform_org.id, name: "Shimizu Technology LLC",
+        slug: "shimizu-technology", issuer_legal_name: "Shimizu Technology LLC"
+      } }
+      expect(response).to have_http_status(:created), response.body
+      expect(staff.reload.company_id).to eq(platform_company.id)
+      expect(staff.organization_id).to eq(platform_org.id)
+      expect(corner_invoice.reload.invoice_recipient_id).to eq(recipient.id)
+      expect(recipient.reload.organization_id).to eq(platform_org.id)
+      expect(recipient.company_id).to be_nil
+      expect(invoice.reload.invoice_recipient_id).not_to eq(recipient.id)
+      expect(invoice.invoice_recipient.organization_id).to eq(payroll_company.reload.organization_id)
+    end
+
+    it "limits both transfer actions to platform admins" do
+      allow_any_instance_of(Api::V1::Admin::OrganizationsController).to receive(:current_user).and_return(org_admin)
+      get "/api/v1/admin/organizations/company_transfer_preview", params: { company_id: payroll_company.id }
+      expect(response).to have_http_status(:forbidden)
+      post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+        company_id: payroll_company.id, source_organization_id: platform_org.id,
+        name: "Wrong Tenant", slug: "wrong-tenant"
+      } }
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
   describe "PATCH /api/v1/admin/organizations/:id" do
     it "updates organization metadata" do
       patch "/api/v1/admin/organizations/#{platform_org.id}",
