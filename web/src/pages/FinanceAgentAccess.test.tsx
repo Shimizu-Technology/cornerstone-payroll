@@ -59,7 +59,9 @@ describe('FinanceAgentAccess', () => {
     const view = render(<MemoryRouter><FinanceAgentAccess /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('No agent keys yet.')).toBeTruthy());
     await user.type(screen.getByPlaceholderText('Shimizu invoice agent'), 'Test agent');
+    await user.click(screen.getByRole('checkbox', { name: 'Allow draft creation and editing' }));
     await user.click(screen.getByRole('button', { name: 'Create key' }));
+    expect(state.create).toHaveBeenCalledWith('Test agent', true);
     expect(await screen.findByDisplayValue('cfin_test_secret')).toBeTruthy();
 
     state.bookId = 2;

@@ -59,7 +59,8 @@ class InvoicePayloadBuilder
       has_artifact: primary_artifact.present?,
       legacy_artifact_missing: invoice.issued? && primary_artifact.blank?,
       created_at: invoice.created_at,
-      updated_at: invoice.updated_at
+      updated_at: invoice.updated_at,
+      lock_version: invoice.lock_version
     }
 
     payload.merge!(detail_payload) if detailed

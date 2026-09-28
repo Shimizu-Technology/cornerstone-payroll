@@ -15,8 +15,9 @@ module Api
           name = params.require(:name).to_s.strip
           raise ArgumentError, "Give this access key a name" if name.blank?
 
+          scopes = params[:draft_write] == true || params[:draft_write] == "true" ? %w[read draft_write] : [ "read" ]
           token, secret = FinanceApiToken.transaction do
-            issued = FinanceApiToken.issue!(finance_book: current_finance_book, actor: current_user, name: name)
+            issued = FinanceApiToken.issue!(finance_book: current_finance_book, actor: current_user, name: name, scopes: scopes)
             AuditLog.record!(user: current_user, organization_id: current_organization_id,
                              company_id: current_finance_book.company_id, action: "finance_api_tokens#create",
                              record_type: "finance_api_tokens", record_id: issued.first.id, subject_name: issued.first.name,

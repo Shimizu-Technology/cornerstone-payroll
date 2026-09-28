@@ -15,7 +15,11 @@ Rails.application.routes.draw do
         get :context, to: "access#context"
         get :overview, to: "access#overview"
         get :invoices, to: "access#invoices"
+        post :invoices, to: "access#create_invoice"
         get "invoices/:id", to: "access#invoice"
+        patch "invoices/:id", to: "access#update_invoice"
+        get :recipients, to: "access#recipients"
+        get :billing_profiles, to: "access#billing_profiles"
         get :expenses, to: "access#expenses"
         get "expenses/:id", to: "access#expense"
       end

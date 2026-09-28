@@ -4,10 +4,12 @@
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -28,15 +30,16 @@ def positive_id(value):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("CORNERSTONE_FINANCE_API_URL"),
-                        required="CORNERSTONE_FINANCE_API_URL" not in os.environ,
                         help="API v1 base URL, such as https://example.com/api/v1")
     parser.add_argument("--organization-id", type=positive_id,
-                        default=os.getenv("CORNERSTONE_FINANCE_ORGANIZATION_ID"),
-                        required="CORNERSTONE_FINANCE_ORGANIZATION_ID" not in os.environ)
+                        default=os.getenv("CORNERSTONE_FINANCE_ORGANIZATION_ID"))
     parser.add_argument("--book-id", type=positive_id, default=os.getenv("CORNERSTONE_FINANCE_BOOK_ID"),
-                        required="CORNERSTONE_FINANCE_BOOK_ID" not in os.environ)
+                        help="Financial book ID")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("context", help="Show effective organization and book")
+    commands.add_parser("recipients", help="List active invoice recipients in this book")
+    commands.add_parser("billing-profiles", help="List active invoice senders in this book")
+    commands.add_parser("new-key", help="Generate an idempotency key for one draft write")
     overview = commands.add_parser("overview", help="Show receivables and payables")
     overview.add_argument("--as-of", help="YYYY-MM-DD for overdue balances")
     invoices = commands.add_parser("invoices", help="List invoices")
@@ -49,14 +52,27 @@ def build_parser():
     expenses.add_argument("--per-page", type=positive_id, default=50)
     expense = commands.add_parser("expense", help="Show one expense")
     expense.add_argument("id", type=positive_id)
+    draft_create = commands.add_parser("draft-create", help="Create a draft invoice from a JSON file")
+    draft_create.add_argument("file", help="JSON file containing the invoice fields")
+    draft_create.add_argument("--idempotency-key", required=True, help="Reuse this key when retrying the same request")
+    draft_update = commands.add_parser("draft-update", help="Update a draft invoice from a JSON file")
+    draft_update.add_argument("id", type=positive_id)
+    draft_update.add_argument("file", help="JSON file containing changed invoice fields")
+    draft_update.add_argument("--version", type=int, required=True, help="lock_version from the latest invoice read")
+    draft_update.add_argument("--idempotency-key", required=True, help="Reuse this key when retrying the same request")
     return parser
 
 
 def main():
     args = build_parser().parse_args()
+    if args.command == "new-key":
+        print(uuid.uuid4().hex)
+        return
     token = os.getenv("CORNERSTONE_FINANCE_TOKEN")
     if not token:
         raise ValueError("Set CORNERSTONE_FINANCE_TOKEN to a key from Finance Overview → Agent access")
+    if not args.base_url or not args.organization_id or not args.book_id:
+        raise ValueError("Set the finance API URL, organization ID, and book ID")
 
     base = args.base_url.rstrip("/")
     parsed = urllib.parse.urlparse(base)
@@ -69,8 +85,10 @@ def main():
     book_id = positive_id(str(args.book_id))
     path = {
         "context": "context", "overview": "overview", "invoices": "invoices",
+        "recipients": "recipients", "billing-profiles": "billing_profiles",
         "invoice": f"invoices/{args.id}" if args.command == "invoice" else "",
         "expenses": "expenses", "expense": f"expenses/{args.id}" if args.command == "expense" else "",
+        "draft-create": "invoices", "draft-update": f"invoices/{args.id}" if args.command == "draft-update" else "",
     }[args.command]
     query = {}
     if args.command == "overview" and args.as_of:
@@ -80,12 +98,29 @@ def main():
     url = f"{base}/finance/{path}"
     if query:
         url += "?" + urllib.parse.urlencode(query)
-    request = urllib.request.Request(url, headers={
+    headers = {
         "Authorization": f"Bearer {token}",
         "X-Organization-Id": str(organization_id),
         "X-Finance-Book-Id": str(book_id),
         "Accept": "application/json",
-    })
+    }
+    data = None
+    method = "GET"
+    if args.command in ("draft-create", "draft-update"):
+        if not re.fullmatch(r"[A-Za-z0-9:_-]{8,128}", args.idempotency_key):
+            raise ValueError("Idempotency key must be 8–128 letters, numbers, dashes, underscores, or colons")
+        if args.command == "draft-update" and args.version < 0:
+            raise ValueError("Invoice version must be zero or greater")
+        with open(args.file, encoding="utf-8") as invoice_file:
+            invoice = json.load(invoice_file)
+        if not isinstance(invoice, dict):
+            raise ValueError("Draft JSON file must contain one invoice object")
+        data = json.dumps({"invoice": invoice}).encode("utf-8")
+        headers.update({"Content-Type": "application/json", "Idempotency-Key": args.idempotency_key})
+        method = "POST" if args.command == "draft-create" else "PATCH"
+        if args.command == "draft-update":
+            headers["X-Invoice-Version"] = str(args.version)
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
             payload = json.load(response)

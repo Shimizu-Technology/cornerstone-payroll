@@ -18,11 +18,11 @@ ENV = {
 
 
 class FinanceCliTest(unittest.TestCase):
-    def run_cli(self, payload):
+    def run_cli(self, payload, command=None):
         opener = mock.Mock()
         opener.open.return_value = contextlib.closing(io.BytesIO(json.dumps(payload).encode()))
         output = io.StringIO()
-        with mock.patch.dict(os.environ, ENV, clear=True), mock.patch.object(sys, "argv", ["finance_cli.py", "context"]), \
+        with mock.patch.dict(os.environ, ENV, clear=True), mock.patch.object(sys, "argv", ["finance_cli.py", *(command or ["context"])]), \
                 mock.patch("finance_cli.urllib.request.build_opener", return_value=opener), contextlib.redirect_stdout(output):
             finance_cli.main()
         return opener.open.call_args, output.getvalue()
@@ -46,6 +46,31 @@ class FinanceCliTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Use HTTPS"):
                 finance_cli.main()
             opener.assert_not_called()
+
+    def test_draft_writes_send_json_idempotency_and_version(self):
+        response = {"scope": {"organization_id": 7, "finance_book_id": 11}, "invoice": {"id": 42, "lock_version": 1}}
+        invoice_file = mock.mock_open(read_data=json.dumps({"notes": "Agent draft"}))
+        with mock.patch("builtins.open", invoice_file):
+            args, _ = self.run_cli(response, ["draft-create", "invoice.json", "--idempotency-key", "draft-create-001"])
+        request = args.args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.headers["Idempotency-key"], "draft-create-001")
+        self.assertEqual(json.loads(request.data), {"invoice": {"notes": "Agent draft"}})
+
+        with mock.patch("builtins.open", invoice_file):
+            args, _ = self.run_cli(response, ["draft-update", "42", "changes.json", "--version", "0",
+                                              "--idempotency-key", "draft-update-001"])
+        request = args.args[0]
+        self.assertEqual(request.get_method(), "PATCH")
+        self.assertEqual(request.headers["X-invoice-version"], "0")
+        self.assertEqual(request.full_url, "https://finance.example.test/api/v1/finance/invoices/42")
+
+    def test_new_key_needs_no_api_credentials(self):
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(sys, "argv", ["finance_cli.py", "new-key"]), \
+                contextlib.redirect_stdout(output):
+            finance_cli.main()
+        self.assertRegex(output.getvalue().strip(), r"^[a-f0-9]{32}$")
 
 
 if __name__ == "__main__":
