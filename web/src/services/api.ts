@@ -4420,6 +4420,7 @@ export interface Invoice {
   line_items?: InvoiceLineItem[];
   created_at: string;
   updated_at: string;
+  lock_version?: number;
 }
 
 export interface InvoiceRecipientPayload {
@@ -5876,8 +5877,8 @@ export interface FinanceApiToken {
 export const financeApiTokensApi = {
   list: (): Promise<{ finance_book_id: number; tokens: FinanceApiToken[] }> =>
     api.get('/admin/finance_api_tokens'),
-  create: (name: string): Promise<{ token: FinanceApiToken; secret: string }> =>
-    api.post('/admin/finance_api_tokens', { name }),
+  create: (name: string, draftWrite = false): Promise<{ token: FinanceApiToken; secret: string }> =>
+    api.post('/admin/finance_api_tokens', { name, draft_write: draftWrite }),
   revoke: (id: number): Promise<{ token: FinanceApiToken }> =>
     api.delete(`/admin/finance_api_tokens/${id}`),
 };
