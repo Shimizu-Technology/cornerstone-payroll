@@ -4491,7 +4491,7 @@ export interface InvoiceSendSchedule {
   invoice_id: number;
   recipients: string[];
   send_at: string;
-  status: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
+  status: 'pending' | 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
   attempts: number;
   provider_reference?: string | null;
   last_error?: string | null;

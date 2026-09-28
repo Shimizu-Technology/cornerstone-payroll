@@ -121,7 +121,17 @@ class Invoice < ApplicationRecord
   end
 
   def subtotal_amount
-    return BigDecimal(total_amount.to_s) if origin == "imported" && line_items.empty?
+    if origin == "imported" && line_items.empty?
+      stored_subtotal = source_metadata&.fetch("gross_subtotal", nil)
+      return BigDecimal(stored_subtotal.to_s) if stored_subtotal.present?
+
+      total = BigDecimal(total_amount.to_s)
+      return total + BigDecimal(discount_value.to_s) if discount_type == "amount"
+      if discount_type == "percent" && BigDecimal(discount_value.to_s) < 100
+        return (total / (1 - BigDecimal(discount_value.to_s) / 100)).round(2)
+      end
+      return total
+    end
 
     line_items.reject(&:marked_for_destruction?).sum(BigDecimal("0")) do |item|
       BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)

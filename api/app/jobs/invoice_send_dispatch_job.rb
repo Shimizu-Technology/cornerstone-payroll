@@ -6,7 +6,12 @@ class InvoiceSendDispatchJob < ApplicationJob
   def perform
     # A queue outage after a claim must not strand the schedule indefinitely.
     InvoiceSendSchedule.where(status: "queued").where("updated_at < ?", 10.minutes.ago)
-                       .update_all(status: "pending", updated_at: Time.current)
+                       .find_each do |schedule|
+      next if queued_send_job_exists?(schedule.id)
+
+      InvoiceSendSchedule.where(id: schedule.id, status: "queued")
+                         .update_all(status: "pending", updated_at: Time.current)
+    end
 
     # A worker can exit after claiming an email. Leave it for explicit review and
     # retry rather than automatically sending a second copy after a timeout.
@@ -32,5 +37,14 @@ class InvoiceSendDispatchJob < ApplicationJob
       InvoiceSendSchedule.where(id: id, status: "queued").update_all(status: "pending", updated_at: Time.current)
       raise
     end
+  end
+
+  private
+
+  def queued_send_job_exists?(schedule_id)
+    SolidQueue::Job.where(class_name: "InvoiceSendJob", finished_at: nil)
+                   .where.not(id: SolidQueue::FailedExecution.select(:job_id))
+                   .where("arguments::jsonb -> 'arguments' @> ?::jsonb", [ schedule_id ].to_json)
+                   .exists?
   end
 end

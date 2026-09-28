@@ -56,6 +56,6 @@ class InvoiceRecurrence < ApplicationRecord
   end
 
   def valid_time_zone
-    errors.add(:time_zone, "is invalid") unless ActiveSupport::TimeZone[time_zone]
+    errors.add(:time_zone, "is invalid") unless time_zone.is_a?(String) && time_zone.present? && ActiveSupport::TimeZone[time_zone]
   end
 end

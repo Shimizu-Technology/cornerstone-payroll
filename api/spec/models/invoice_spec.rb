@@ -3,6 +3,15 @@
 require "rails_helper"
 
 RSpec.describe Invoice, type: :model do
+  it "uses the recorded gross subtotal when an imported invoice has no line items" do
+    invoice = build(:invoice, origin: "imported", total_amount: "0.14", discount_type: "percent",
+                    discount_value: "50", source_metadata: { "gross_subtotal" => "0.29" })
+
+    expect(invoice.subtotal_amount).to eq(0.29.to_d)
+    expect(invoice.discount_amount).to eq(0.15.to_d)
+    expect(invoice.total_amount).to eq(0.14.to_d)
+  end
+
   it "calculates total amount from line items" do
     invoice = build(:invoice, :with_line_item)
     invoice.line_items.build(description: "Bookkeeping", quantity: 1.5, rate: 80, position: 1)
