@@ -10,6 +10,7 @@ import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
 import { expenseVendorsApi, expensesApi, organizationsApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
 
 type ExpenseForm = {
+  source_key: string;
   expense_vendor_id: string;
   category: string;
   description: string;
@@ -25,6 +26,7 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const emptyExpense = (): ExpenseForm => ({
+  source_key: `ui:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`,
   expense_vendor_id: '', category: '', description: '', expense_on: today(), due_on: '',
   total_amount: '', currency: 'USD', reference_number: '',
 });
@@ -87,6 +89,11 @@ export function ExpenseLedger() {
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [form, setForm] = useState<ExpenseForm>(emptyExpense);
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
+  const [purchasePaidOn, setPurchasePaidOn] = useState(today);
+  const [purchaseMethod, setPurchaseMethod] = useState('card');
+  const [purchaseReference, setPurchaseReference] = useState('');
+  const [purchaseEvidenceNote, setPurchaseEvidenceNote] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [vendorEmail, setVendorEmail] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -177,16 +184,26 @@ export function ExpenseLedger() {
       throw new Error('Choose a vendor and enter a category, description, and expense date');
     }
     if (!(Number(form.total_amount) > 0)) throw new Error('Enter an amount greater than zero');
+    if (alreadyPaid && !purchaseReference.trim() && !purchaseEvidenceNote.trim()) {
+      throw new Error('Add a payment reference or evidence note before marking this purchase paid');
+    }
     const response = await expensesApi.create({
       expense_vendor_id: Number(form.expense_vendor_id), category: form.category.trim(),
-      description: form.description.trim(), expense_on: form.expense_on, due_on: form.due_on || undefined,
+      description: form.description.trim(), expense_on: form.expense_on, due_on: alreadyPaid ? undefined : form.due_on || undefined,
       total_amount: form.total_amount, currency: form.currency, reference_number: form.reference_number.trim() || undefined,
-    });
+      source_key: form.source_key,
+    }, alreadyPaid ? { paid_on: purchasePaidOn, payment_method: purchaseMethod,
+      reference_number: purchaseReference.trim() || undefined, notes: purchaseEvidenceNote.trim() || undefined } : undefined);
     await load(1);
     setSelected((await expensesApi.show(response.expense.id)).expense);
     setForm(emptyExpense());
+    setAlreadyPaid(false);
+    setPurchasePaidOn(today());
+    setPurchaseReference('');
+    setPurchaseEvidenceNote('');
     setShowExpenseForm(false);
-    setNotice('Expense recorded. Add its receipt and payment evidence in the detail panel.');
+    setNotice(alreadyPaid ? 'Paid purchase recorded. Add its original receipt in the detail panel.'
+      : 'Vendor bill recorded. Add its original and record payments when they clear.');
   });
 
   const openExpense = (id: number) => run(async () => {
@@ -273,18 +290,29 @@ export function ExpenseLedger() {
         </section>}
 
         {showExpenseForm && <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-label="Add expense">
-          <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-neutral-950">Record an expense</h2><p className="text-sm text-neutral-500">Add the bill first, then attach the original and record verified payments.</p></div><button aria-label="Close expense form" onClick={() => setShowExpenseForm(false)}><X className="h-4 w-4" /></button></div>
+          <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-neutral-950">Record an expense</h2><p className="text-sm text-neutral-500">Enter a bill to pay or a purchase already paid.</p></div><button aria-label="Close expense form" onClick={() => setShowExpenseForm(false)}><X className="h-4 w-4" /></button></div>
+          <fieldset className="mb-4 flex flex-wrap gap-4" aria-label="Expense payment state">
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="radio" checked={!alreadyPaid} onChange={() => setAlreadyPaid(false)} />Bill to pay</label>
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="radio" checked={alreadyPaid} onChange={() => setAlreadyPaid(true)} />Already paid</label>
+          </fieldset>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm font-medium">Vendor<select className={inputClass} value={form.expense_vendor_id} onChange={(event) => setForm({ ...form, expense_vendor_id: event.target.value })}><option value="">Choose vendor</option>{vendors.filter((vendor) => vendor.active).map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></label>
             <label className="text-sm font-medium">Category<Input className="mt-1" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} placeholder="Software, travel, supplies…" /></label>
             <label className="text-sm font-medium">Expense date<Input className="mt-1" type="date" value={form.expense_on} onChange={(event) => setForm({ ...form, expense_on: event.target.value })} /></label>
-            <label className="text-sm font-medium">Due date (optional)<Input className="mt-1" type="date" value={form.due_on} onChange={(event) => setForm({ ...form, due_on: event.target.value })} /></label>
+            {!alreadyPaid && <label className="text-sm font-medium">Due date (optional)<Input className="mt-1" type="date" value={form.due_on} onChange={(event) => setForm({ ...form, due_on: event.target.value })} /></label>}
             <label className="text-sm font-medium">Amount<Input className="mt-1" type="number" min="0.01" step="0.01" value={form.total_amount} onChange={(event) => setForm({ ...form, total_amount: event.target.value })} /></label>
             <label className="text-sm font-medium">Currency<Input className="mt-1" value={form.currency} maxLength={3} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label>
             <label className="text-sm font-medium sm:col-span-2">Vendor bill or reference<Input className="mt-1" value={form.reference_number} onChange={(event) => setForm({ ...form, reference_number: event.target.value })} /></label>
             <label className="text-sm font-medium sm:col-span-2 lg:col-span-4">Description<Textarea className="mt-1" rows={2} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
           </div>
-          <Button className="mt-4" onClick={saveExpense} disabled={busy}>Save expense</Button>
+          {alreadyPaid && <div className="mt-4 grid gap-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="sm:col-span-2 lg:col-span-4"><h3 className="text-sm font-semibold text-neutral-950">Payment evidence</h3><p className="text-xs text-neutral-600">Use a bank, card, or processor record to confirm payment. Attach the original receipt after saving.</p></div>
+            <label className="text-sm font-medium">Paid on<Input className="mt-1" type="date" value={purchasePaidOn} onChange={(event) => setPurchasePaidOn(event.target.value)} /></label>
+            <label className="text-sm font-medium">Method<select className={inputClass} value={purchaseMethod} onChange={(event) => setPurchaseMethod(event.target.value)}><option value="card">Card</option><option value="ach">ACH</option><option value="check">Check</option><option value="wire">Wire</option><option value="cash">Cash</option><option value="other">Other</option></select></label>
+            <label className="text-sm font-medium">Statement or transaction reference<Input className="mt-1" value={purchaseReference} onChange={(event) => setPurchaseReference(event.target.value)} /></label>
+            <label className="text-sm font-medium">Evidence note<Input className="mt-1" value={purchaseEvidenceNote} onChange={(event) => setPurchaseEvidenceNote(event.target.value)} /></label>
+          </div>}
+          <Button className="mt-4" onClick={saveExpense} disabled={busy}>{alreadyPaid ? 'Save paid purchase' : 'Save vendor bill'}</Button>
         </section>}
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
