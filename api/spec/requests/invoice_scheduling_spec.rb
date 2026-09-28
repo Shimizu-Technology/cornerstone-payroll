@@ -241,6 +241,47 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect(schedule.last_error).to include("verify provider delivery")
   end
 
+  it "claims due emails once so delayed jobs do not block later schedules" do
+    source = issued_invoice
+    schedules = 101.times.map do |index|
+      InvoiceSendSchedule.create!(organization: source.organization, invoice: source,
+                                  recipients: [ "customer@example.com" ], send_at: (101 - index).minutes.ago)
+    end
+    allow(InvoiceSendJob).to receive(:perform_later)
+
+    InvoiceSendDispatchJob.new.perform
+    expect(schedules.first(100).map { |schedule| schedule.reload.status }.uniq).to eq([ "queued" ])
+    expect(schedules.last.reload.status).to eq("pending")
+
+    InvoiceSendDispatchJob.new.perform
+    expect(schedules.last.reload.status).to eq("queued")
+    expect(InvoiceSendJob).to have_received(:perform_later).exactly(101).times
+  end
+
+  it "returns a claimed email to pending if enqueueing fails" do
+    source = issued_invoice
+    schedule = InvoiceSendSchedule.create!(organization: source.organization, invoice: source,
+                                           recipients: [ "customer@example.com" ], send_at: 1.minute.ago)
+    allow(InvoiceSendJob).to receive(:perform_later).and_raise("queue unavailable")
+
+    expect { InvoiceSendDispatchJob.new.perform }.to raise_error("queue unavailable")
+    expect(schedule.reload.status).to eq("pending")
+  end
+
+  it "requeues an abandoned dispatch claim" do
+    source = issued_invoice
+    schedule = InvoiceSendSchedule.create!(organization: source.organization, invoice: source,
+                                           recipients: [ "customer@example.com" ], send_at: 15.minutes.ago,
+                                           status: "queued")
+    schedule.update_columns(updated_at: 11.minutes.ago)
+    allow(InvoiceSendJob).to receive(:perform_later)
+
+    InvoiceSendDispatchJob.new.perform
+
+    expect(schedule.reload.status).to eq("queued")
+    expect(InvoiceSendJob).to have_received(:perform_later).with(schedule.id).once
+  end
+
   it "refuses a retry after the provider idempotency window expires" do
     source = issued_invoice
     schedule = InvoiceSendSchedule.create!(organization: source.organization, invoice: source,

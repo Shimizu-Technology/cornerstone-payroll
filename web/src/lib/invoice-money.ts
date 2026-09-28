@@ -1,8 +1,9 @@
+import Decimal from 'decimal.js';
+
 export function roundInvoiceCurrency(value: number): number {
-  const cents = value * 100;
-  return Math.round(cents + Number.EPSILON * Math.max(1, Math.abs(cents))) / 100;
+  return new Decimal(value).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 }
 
 export function invoicePercentDiscount(subtotal: number, percentage: number): number {
-  return roundInvoiceCurrency((subtotal * percentage) / 100);
+  return new Decimal(subtotal).times(percentage).div(100).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 }

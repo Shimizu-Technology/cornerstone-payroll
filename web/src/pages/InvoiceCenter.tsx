@@ -437,9 +437,11 @@ export function InvoiceCenter() {
     setEditingDraftId(null);
   };
 
+  const submittedDraftLines = draft.line_items.filter((line) => line.description.trim() && Number(line.quantity) > 0);
+
   const submitDraft = () => run(async () => {
     if (!draft.invoice_recipient_id) throw new Error('Choose a customer');
-    const lines = draft.line_items.filter((line) => line.description.trim() && Number(line.quantity) > 0);
+    const lines = submittedDraftLines;
     if (!lines.length) throw new Error('Add at least one invoice line');
     const discountValue = draft.discount_type === 'none' ? 0 : Number(draft.discount_value);
     const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.rate), 0);
@@ -700,7 +702,7 @@ export function InvoiceCenter() {
       ? user?.organization_name || `Organization #${invoiceOrganizationId}`
       : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`;
 
-  const invoiceSubtotal = draft.line_items.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
+  const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
   const discountInput = Number(draft.discount_value || 0);
   const invoiceDiscount = draft.discount_type === 'none' || !Number.isFinite(discountInput)
     ? 0
