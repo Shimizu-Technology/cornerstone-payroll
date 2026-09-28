@@ -3,7 +3,11 @@
 class InvoiceRecurrenceGenerator
   def self.generate_due!(today: nil)
     InvoiceRecurrence.where(active: true).where("next_on <= ?", today || Date.current + 1).order(:id).pluck(:id).each do |id|
-      120.times { break unless generate!(id, today: today) }
+      begin
+        120.times { break unless generate!(id, today: today) }
+      rescue ActiveRecord::ActiveRecordError => e
+        Rails.logger.error("Invoice recurrence #{id} failed: #{e.class}: #{e.message}")
+      end
     end
   end
 
@@ -12,10 +16,17 @@ class InvoiceRecurrenceGenerator
       recurrence = InvoiceRecurrence.lock.find(id)
       local_today = today || ActiveSupport::TimeZone[recurrence.time_zone].today
       return unless recurrence.active? && recurrence.next_on <= local_today
+      if recurrence.ends_on.present? && recurrence.next_on > recurrence.ends_on
+        recurrence.update!(active: false)
+        return
+      end
 
       date = recurrence.next_on
       source = recurrence.source_invoice
-      raise ActiveRecord::RecordInvalid, source unless source.origin == "native" && source.issued? && !source.voided?
+      unless source.origin == "native" && source.issued? && !source.voided?
+        recurrence.update!(active: false)
+        return
+      end
 
       invoice = Invoice.find_by(invoice_recurrence_id: recurrence.id, recurrence_on: date)
       unless invoice

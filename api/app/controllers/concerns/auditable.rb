@@ -90,7 +90,7 @@ module Auditable
 
     AuditLog.record!(
       user: current_user,
-      organization_id: current_user.organization_id,
+      organization_id: controller_path.start_with?("api/v1/admin/invoice") ? current_organization_id : current_user.organization_id,
       company_id: audit_company_id,
       action: action_label,
       record_type: record_type,

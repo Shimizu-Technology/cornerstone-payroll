@@ -44,6 +44,8 @@ module Api
             if params[:retry] == true || params[:retry] == "true"
               raise ArgumentError, "Only failed invoice emails can be retried" unless schedule.status == "failed"
               schedule.update!(status: "pending", last_error: nil)
+              InvoiceEvent.record!(invoice: schedule.invoice, event_type: "email_retry_requested", actor: current_user,
+                                   metadata: { send_schedule_id: schedule.id })
             elsif schedule.status != "pending"
               raise ArgumentError, "Only pending invoice emails can be cancelled or changed"
             elsif params[:cancel] == true || params[:cancel] == "true"

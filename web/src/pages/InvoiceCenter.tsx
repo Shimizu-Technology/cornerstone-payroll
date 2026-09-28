@@ -269,6 +269,9 @@ export function InvoiceCenter() {
       setEditingDraftId(null);
       setModal(null);
       setDetailAction(null);
+      setEditingSendScheduleId(null);
+      setSendRecipients('');
+      setSendAt('');
       setBusinessFilter('all');
       setLoading(true);
     }

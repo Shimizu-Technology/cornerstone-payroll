@@ -253,7 +253,8 @@ class InvoicePdfGenerator
   def footer(pdf)
     generated_at = snapshot["generated_at"].presence
     note = billing["footer_note"].presence || "Thank you for your business."
-    footer_text = [ note, generated_at && "Issued #{format_timestamp(generated_at)}" ].compact.join(" | ")
+    timestamp_label = invoice_data["status"] == "draft" ? "Draft preview" : "Issued"
+    footer_text = [ note, generated_at && "#{timestamp_label} #{format_timestamp(generated_at)}" ].compact.join(" | ")
 
     pdf.repeat(:all) do
       pdf.canvas do

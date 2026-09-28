@@ -39,12 +39,18 @@ module Api
 
         def update
           recurrence = scoped.find(params[:id])
-          recurrence.update!(active: ActiveModel::Type::Boolean.new.cast(params.require(:active)))
+          if ActiveModel::Type::Boolean.new.cast(params.require(:active))
+            recurrence.resume!
+          else
+            recurrence.update!(active: false)
+          end
           render json: { invoice_recurrence: payload(recurrence) }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Recurrence not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private

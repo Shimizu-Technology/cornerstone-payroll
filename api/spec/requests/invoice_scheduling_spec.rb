@@ -51,6 +51,59 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect { InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 3, 31)) }.not_to change(Invoice, :count)
   end
 
+  it "stops at the end date and cannot be resumed past it" do
+    source = issued_invoice
+    post "/api/v1/admin/invoice_recurrences", params: {
+      source_invoice_id: source.id, start_on: "2026-01-31", ends_on: "2026-02-28", interval_unit: "month"
+    }
+    recurrence = InvoiceRecurrence.find(response.parsed_body.dig("invoice_recurrence", "id"))
+
+    InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 3, 31))
+    expect(recurrence.reload).to have_attributes(active: false, next_on: Date.new(2026, 3, 31))
+    expect(recurrence.generated_invoices.count).to eq(2)
+
+    patch "/api/v1/admin/invoice_recurrences/#{recurrence.id}", params: { active: true }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(recurrence.reload).not_to be_active
+    expect { InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 3, 31)) }.not_to change(Invoice, :count)
+  end
+
+  it "resumes a paused recurrence at its next future occurrence" do
+    source = issued_invoice
+    start_on = 3.months.ago.to_date.beginning_of_month
+    post "/api/v1/admin/invoice_recurrences", params: {
+      source_invoice_id: source.id, start_on: start_on.iso8601, interval_unit: "month"
+    }
+    recurrence = InvoiceRecurrence.find(response.parsed_body.dig("invoice_recurrence", "id"))
+
+    patch "/api/v1/admin/invoice_recurrences/#{recurrence.id}", params: { active: false }
+    expect(response).to have_http_status(:ok)
+    patch "/api/v1/admin/invoice_recurrences/#{recurrence.id}", params: { active: true }
+
+    expect(response).to have_http_status(:ok)
+    expect(recurrence.reload).to be_active
+    expect(recurrence.next_on).to be >= ActiveSupport::TimeZone[recurrence.time_zone].today
+    expect(recurrence.occurrence_index).to be > 0
+    expect { InvoiceRecurrenceGenerator.generate_due! }.not_to change(Invoice, :count)
+  end
+
+  it "deactivates a voided source without blocking other recurring drafts" do
+    voided_source = issued_invoice
+    valid_source = issued_invoice
+    [ voided_source, valid_source ].each do |source|
+      post "/api/v1/admin/invoice_recurrences", params: {
+        source_invoice_id: source.id, start_on: "2026-09-01", interval_unit: "month"
+      }
+      expect(response).to have_http_status(:created)
+    end
+    voided_source.void!(actor: admin_user, reason: "No longer billable")
+
+    InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 9, 28))
+
+    expect(InvoiceRecurrence.find_by!(source_invoice: voided_source)).not_to be_active
+    expect(InvoiceRecurrence.find_by!(source_invoice: valid_source).generated_invoices.count).to eq(1)
+  end
+
   it "scopes scheduling to the organization and validates recipients" do
     source = issued_invoice
     other = create(:invoice, :with_line_item)
