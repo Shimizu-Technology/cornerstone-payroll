@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_013000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_014000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1156,6 +1156,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_013000) do
     t.bigint "expense_vendor_id", null: false
     t.bigint "finance_book_id", null: false
     t.bigint "organization_id", null: false
+    t.boolean "payment_included_at_creation", default: false, null: false
     t.string "reference_number"
     t.string "source_key"
     t.decimal "total_amount", precision: 12, scale: 2, null: false

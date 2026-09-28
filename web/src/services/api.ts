@@ -5858,7 +5858,7 @@ export interface FinanceOverview {
 }
 
 export const financeOverviewApi = {
-  show: (asOf?: string) => api.get<FinanceOverview>('/admin/finance_overview', asOf ? { as_of: asOf } : undefined),
+  show: (asOf?: string): Promise<FinanceOverview> => api.get<FinanceOverview>('/admin/finance_overview', asOf ? { as_of: asOf } : undefined),
 };
 
 export const expenseVendorsApi = {
@@ -5876,7 +5876,7 @@ export const expensesApi = {
   create: (data: {
     expense_vendor_id: number; category: string; description: string; expense_on: string; due_on?: string;
     total_amount: string; currency: string; reference_number?: string; source_key?: string;
-  }, payment?: { paid_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
+  }, payment?: { paid_on: string; payment_method: string; reference_number?: string; notes?: string }): Promise<{ expense: Expense; already_exists?: boolean }> =>
     api.post<{ expense: Expense; already_exists?: boolean }>('/admin/expenses', { expense: data, ...(payment ? { payment } : {}) }),
   update: (id: number, data: Partial<Expense>) => api.patch<{ expense: Expense }>(`/admin/expenses/${id}`, { expense: data }),
   recordPayment: (id: number, data: { amount: string; paid_on: string; payment_method: string; reference_number?: string; notes?: string }) =>

@@ -34,6 +34,7 @@ module Api
           attrs = expense_params.to_h.symbolize_keys
           payment = paid_purchase_params
           source_key = attrs[:source_key].presence
+          raise ArgumentError, "A source key is required for paid purchases" if payment && source_key.blank?
           if source_key && (existing = scope.find_by(source_key: source_key))
             candidate = scope.new(attrs)
             unless same_expense?(existing, candidate) && same_paid_purchase?(existing, payment)
@@ -44,6 +45,7 @@ module Api
 
           expense = scope.new(attrs)
           expense.finance_book = current_finance_book
+          expense.payment_included_at_creation = payment.present?
           expense.created_by = current_user
           expense.updated_by = current_user
           Expense.transaction do
@@ -145,6 +147,8 @@ module Api
         end
 
         def same_paid_purchase?(expense, payment)
+          return false unless expense.payment_included_at_creation? == payment.present?
+
           active = expense.expense_payments.active.to_a
           return true if payment.blank?
           return false unless active.one?

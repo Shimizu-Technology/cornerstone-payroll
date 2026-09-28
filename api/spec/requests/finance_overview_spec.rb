@@ -40,4 +40,10 @@ RSpec.describe "Financial book overview", type: :request do
       "open_expense_count" => 1, "overdue_expense_count" => 1
     } ])
   end
+
+  it "rejects a non-string as-of date" do
+    get "/api/v1/admin/finance_overview", params: { as_of: [ "2026-09-29" ] },
+        headers: { "X-Organization-Id" => company.organization_id.to_s, "X-Finance-Book-Id" => book.id.to_s }
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
 end

@@ -91,13 +91,45 @@ RSpec.describe "Organization expense ledger", type: :request do
 
     post "/api/v1/admin/expenses", params: request.deep_merge(payment: { reference_number: "different-statement" })
     expect(response).to have_http_status(:conflict)
+
+    post "/api/v1/admin/expenses", params: request.except(:payment)
+    expect(response).to have_http_status(:conflict)
+  end
+
+  it "requires a stable source key for a paid purchase" do
+    vendor = create_vendor
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                 expense_on: "2026-09-28", total_amount: "120.00" },
+      payment: { paid_on: "2026-09-28", payment_method: "card", reference_number: "statement-42" }
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(Expense.count).to eq(0)
+    expect(ExpensePayment.count).to eq(0)
+  end
+
+  it "accepts an original bill retry after a later payment" do
+    vendor = create_vendor
+    expense = create_expense(vendor: vendor, source_key: "bill-42")
+    post "/api/v1/admin/expenses/#{expense.id}/payments", params: {
+      amount: "120.00", paid_on: "2026-09-29", payment_method: "ach", reference_number: "ach-42"
+    }
+    expect(response).to have_http_status(:created)
+
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Annual subscription",
+                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: "120.00", source_key: "bill-42" }
+    }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["already_exists"]).to be(true)
+    expect(response.parsed_body.dig("expense", "payment_status")).to eq("paid")
   end
 
   it "rolls back a paid purchase when the payment evidence is invalid" do
     vendor = create_vendor
     post "/api/v1/admin/expenses", params: {
       expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
-                 expense_on: "2026-09-28", total_amount: "120.00" },
+                 expense_on: "2026-09-28", total_amount: "120.00", source_key: "invalid-payment-42" },
       payment: { paid_on: "2026-09-28", payment_method: "unknown", reference_number: "statement-42" }
     }
     expect(response).to have_http_status(:unprocessable_entity)
