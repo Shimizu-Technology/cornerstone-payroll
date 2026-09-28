@@ -37,6 +37,21 @@ RSpec.describe InvoicePdfGenerator do
     expect(bill_to.y).to be_within(0.5).of(remit_to.y)
   end
 
+  it "keeps a wrapping legal name and contact details above the invoice heading" do
+    invoice.invoice_billing_profile.update!(
+      legal_name: "Shimizu Technology Professional Services and Consulting LLC",
+      address: "123 Marine Corps Drive\nSuite 200\nHagåtña, GU 96910"
+    )
+
+    runs = reader_for(invoice).pages.first.runs
+    last_contact_line = runs.find { |run| run.text.include?("billing@example.com") }
+    invoice_heading = runs.find { |run| run.text.include?("INVOICE DATE") }
+
+    expect(last_contact_line).to be_present
+    expect(invoice_heading).to be_present
+    expect(last_contact_line.y).to be > invoice_heading.y
+  end
+
   it "shows terms beside the subtotal and total and omits an unused service-date column" do
     invoice.invoice_billing_profile.update!(payment_instructions: nil)
     runs = reader_for(invoice).pages.first.runs
