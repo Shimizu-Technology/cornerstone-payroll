@@ -44,6 +44,7 @@ class Invoice < ApplicationRecord
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
   validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
+  validate :discount_value_has_cent_precision
   validate :recipient_must_belong_to_organization
   validate :billing_profile_must_belong_to_organization
   validate :company_must_belong_to_organization
@@ -342,6 +343,16 @@ class Invoice < ApplicationRecord
     elsif discount_type == "none" && BigDecimal(discount_value.to_s).positive?
       errors.add(:discount_value, "must be zero without a discount")
     end
+  end
+
+  def discount_value_has_cent_precision
+    raw_value = discount_value_before_type_cast
+    return if raw_value.nil?
+
+    value = BigDecimal(raw_value.to_s)
+    errors.add(:discount_value, "cannot have more than two decimal places") unless value.finite? && value == value.round(2)
+  rescue ArgumentError, TypeError
+    errors.add(:discount_value, "must be a valid amount")
   end
 
   def must_have_line_items

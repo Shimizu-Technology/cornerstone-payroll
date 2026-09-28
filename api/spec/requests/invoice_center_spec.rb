@@ -73,6 +73,10 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response).to have_http_status(:created), response.body
     expect(Invoice.find(response.parsed_body.dig("invoice", "id")).organization_id).to eq(shimizu_org.id)
 
+    post "/api/v1/admin/invoices/#{response.parsed_body.dig('invoice', 'id')}/preview_pdf"
+    expect(response).to have_http_status(:ok)
+    expect(AuditLog.where(action: "invoices#preview_pdf").order(:id).last.organization_id).to eq(shimizu_org.id)
+
     get "/api/v1/admin/invoices", params: { billing_profile_id: profile.id }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("invoices")).to be_empty
@@ -209,6 +213,22 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(R2StorageService.new.download(artifact.storage_key)).to eq(original)
   ensure
     file&.close!
+  end
+
+  it "rejects malformed imported discount values without creating an invoice" do
+    expect do
+      post "/api/v1/admin/invoices/import", params: {
+        invoice_recipient_id: recipient.id,
+        invoice_billing_profile_id: profile.id,
+        invoice_number: "BAD-DISCOUNT",
+        invoice_date: "2026-06-01",
+        total_amount: "850.00",
+        subtotal_amount: [ "900.00" ],
+        discount_type: "amount",
+        discount_value: [ "50.00" ]
+      }
+    end.not_to change(Invoice, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "rolls back the entire import when historical delivery evidence cannot be recorded" do

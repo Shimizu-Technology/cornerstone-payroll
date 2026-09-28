@@ -29,6 +29,18 @@ class InvoiceRecurrence < ApplicationRecord
     update!(occurrence_index: next_index, next_on: next_date, active: ends_on.blank? || next_date <= ends_on)
   end
 
+  def resume!
+    with_lock do
+      local_today = ActiveSupport::TimeZone[time_zone].today
+      next_index = occurrence_index
+      next_index += 1 while occurrence_date(next_index) < local_today
+      next_date = occurrence_date(next_index)
+      raise ArgumentError, "Recurrence has already ended" if ends_on.present? && next_date > ends_on
+
+      update!(occurrence_index: next_index, next_on: next_date, active: true)
+    end
+  end
+
   private
 
   def source_belongs_to_organization

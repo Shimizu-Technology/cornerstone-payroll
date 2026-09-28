@@ -34,6 +34,13 @@ RSpec.describe Invoice, type: :model do
     expect(invoice.errors[:discount_value]).to include("cannot exceed 100 percent")
   end
 
+  it "rejects discount precision that would change after database storage" do
+    invoice = build(:invoice, :with_line_item, discount_type: "percent", discount_value: "1.005")
+
+    expect(invoice).not_to be_valid
+    expect(invoice.errors[:discount_value]).to include("cannot have more than two decimal places")
+  end
+
   it "requires line items when issued" do
     invoice = build(:invoice, status: "open")
 

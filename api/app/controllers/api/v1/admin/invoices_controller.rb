@@ -332,11 +332,11 @@ module Api
         def build_imported_invoice
           recipient = validate_recipient!(params.require(:invoice_recipient_id))
           profile = validate_billing_profile!(params.require(:invoice_billing_profile_id))
-          total = BigDecimal(params.require(:total_amount).to_s)
+          total = import_decimal!(params.require(:total_amount), "Invoice total")
           raise ArgumentError, "Invoice total must be greater than zero" unless total.positive?
-          subtotal = BigDecimal(params[:subtotal_amount].presence || total.to_s)
+          subtotal = import_decimal!(params[:subtotal_amount].presence || total.to_s, "Subtotal")
           discount_type = params[:discount_type].presence || "none"
-          discount_value = BigDecimal(params[:discount_value].presence || "0")
+          discount_value = import_decimal!(params[:discount_value].presence || "0", "Discount")
           discount = case discount_type
           when "percent" then (subtotal * discount_value / 100).round(2)
           when "amount" then discount_value
@@ -367,6 +367,19 @@ module Api
           )
           invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: subtotal, position: 0)
           invoice
+        end
+
+        def import_decimal!(value, label)
+          raise ArgumentError, "#{label} must be a number" unless value.is_a?(String) || value.is_a?(Numeric)
+
+          decimal = begin
+            BigDecimal(value.to_s)
+          rescue ArgumentError, TypeError
+            raise ArgumentError, "#{label} must be a valid amount"
+          end
+          raise ArgumentError, "#{label} must have at most two decimal places" unless decimal.finite? && decimal == decimal.round(2)
+
+          decimal
         end
 
         def imported_source_company
