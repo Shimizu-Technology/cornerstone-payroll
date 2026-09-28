@@ -17,6 +17,8 @@ class Organization < ApplicationRecord
   has_many :invoice_payments, dependent: :restrict_with_error
   has_many :invoice_credit_notes, dependent: :restrict_with_error
   has_many :invoice_deliveries, dependent: :restrict_with_error
+  has_many :invoice_recurrences, dependent: :restrict_with_error
+  has_many :invoice_send_schedules, dependent: :restrict_with_error
   belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug

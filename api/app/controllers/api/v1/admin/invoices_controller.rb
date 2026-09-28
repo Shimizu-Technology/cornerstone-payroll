@@ -253,7 +253,9 @@ module Api
             :notes,
             :payment_terms,
             :email_subject,
-            :email_body
+            :email_body,
+            :discount_type,
+            :discount_value
           )
 
           validate_recipient!(raw[:invoice_recipient_id]) if raw[:invoice_recipient_id].present?
@@ -332,6 +334,16 @@ module Api
           profile = validate_billing_profile!(params.require(:invoice_billing_profile_id))
           total = BigDecimal(params.require(:total_amount).to_s)
           raise ArgumentError, "Invoice total must be greater than zero" unless total.positive?
+          subtotal = BigDecimal(params[:subtotal_amount].presence || total.to_s)
+          discount_type = params[:discount_type].presence || "none"
+          discount_value = BigDecimal(params[:discount_value].presence || "0")
+          discount = case discount_type
+          when "percent" then (subtotal * discount_value / 100).round(2)
+          when "amount" then discount_value
+          when "none" then 0.to_d
+          else raise ArgumentError, "Discount type is invalid"
+          end
+          raise ArgumentError, "Imported subtotal and discount must equal the invoice total" unless subtotal - discount == total
 
           invoice = Invoice.new(
             organization_id: current_organization_id,
@@ -347,11 +359,13 @@ module Api
             notes: params[:notes],
             origin: "imported",
             total_amount: total,
+            discount_type: discount_type,
+            discount_value: discount_value,
             created_by: current_user,
             updated_by: current_user,
             source_metadata: { original_filename: params[:file]&.original_filename }
           )
-          invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: total, position: 0)
+          invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: subtotal, position: 0)
           invoice
         end
 

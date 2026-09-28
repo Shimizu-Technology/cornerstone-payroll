@@ -19,6 +19,7 @@ import {
   type Invoice,
   type InvoiceBillingProfile,
   type InvoiceBillingProfilePayload,
+  type InvoiceDiscountType,
   type InvoiceLineItem,
   type InvoicePayload,
   type InvoiceRecipient,
@@ -49,6 +50,8 @@ interface InvoiceFormState {
   invoice_recipient_id: string;
   invoice_number: string;
   invoice_date: string;
+  discount_type: InvoiceDiscountType;
+  discount_value: string;
   service_period_start: string;
   service_period_end: string;
   notes: string;
@@ -111,6 +114,8 @@ const emptyInvoiceForm = (): InvoiceFormState => ({
   invoice_recipient_id: '',
   invoice_number: '',
   invoice_date: today(),
+  discount_type: 'none',
+  discount_value: '',
   service_period_start: '',
   service_period_end: '',
   notes: '',
@@ -280,10 +285,12 @@ export function InvoiceMaker() {
   const [createdChatInvoice, setCreatedChatInvoice] = useState<Invoice | null>(null);
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
+  const scopeGenerationRef = useRef(0);
+  const requestedCompanyIdRef = useRef<number | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (generation = scopeGenerationRef.current) => {
     setLoading(true);
     setError(null);
     try {
@@ -293,6 +300,7 @@ export function InvoiceMaker() {
         invoiceBillingProfilesApi.list({ active: true }),
         invoiceChatSessionsApi.list({ include_archived: showArchivedChatSessions }),
       ]);
+      if (generation !== scopeGenerationRef.current) return;
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
       setBillingProfiles(billingProfileResponse.invoice_billing_profiles);
@@ -306,14 +314,30 @@ export function InvoiceMaker() {
       });
       setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invoices');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load invoices');
     } finally {
-      setLoading(false);
+      if (generation === scopeGenerationRef.current) setLoading(false);
     }
   }, [showArchivedChatSessions]);
 
   useEffect(() => {
-    loadData();
+    const generation = ++scopeGenerationRef.current;
+    if (requestedCompanyIdRef.current !== activeCompanyId) {
+      requestedCompanyIdRef.current = activeCompanyId;
+      setInvoices([]);
+      setRecipients([]);
+      setBillingProfiles([]);
+      setChatSessions([]);
+      setActiveChatSession(null);
+      setCreatedChatInvoice(null);
+      setOptimisticChatMessages([]);
+      setChatImages([]);
+      setChatAttachmentPreviews([]);
+      setPreviewUrl(null);
+      setInvoiceForm(emptyInvoiceForm());
+      savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
+    }
+    void loadData(generation);
   }, [loadData, activeCompanyId]);
 
   useEffect(() => {
@@ -346,10 +370,17 @@ export function InvoiceMaker() {
     [invoiceForm.line_items]
   );
 
-  const invoiceTotal = useMemo(
+  const invoiceSubtotal = useMemo(
     () => activeLineItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0), 0),
     [activeLineItems]
   );
+  const discountInput = Number(invoiceForm.discount_value || 0);
+  const invoiceDiscount = invoiceForm.discount_type === 'none' || !Number.isFinite(discountInput)
+    ? 0
+    : invoiceForm.discount_type === 'percent'
+      ? Math.round(invoiceSubtotal * discountInput) / 100
+      : discountInput;
+  const invoiceTotal = Math.max(0, Math.round((invoiceSubtotal - invoiceDiscount) * 100) / 100);
 
   const selectedRecipient = useMemo(
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
@@ -389,6 +420,8 @@ export function InvoiceMaker() {
     invoice_billing_profile_id: state.invoice_billing_profile_id ? Number(state.invoice_billing_profile_id) : undefined,
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
+    discount_type: state.discount_type,
+    discount_value: state.discount_type === 'none' ? 0 : Number(state.discount_value || 0),
     service_period_start: state.service_period_start || null,
     service_period_end: state.service_period_end || null,
     notes: state.notes.trim() || null,
@@ -450,6 +483,8 @@ export function InvoiceMaker() {
       invoice_recipient_id: String(invoice.invoice_recipient_id),
       invoice_number: invoice.invoice_number || '',
       invoice_date: invoice.invoice_date,
+      discount_type: invoice.discount_type || 'none',
+      discount_value: invoice.discount_type === 'none' ? '' : String(invoice.discount_value ?? ''),
       service_period_start: invoice.service_period_start || '',
       service_period_end: invoice.service_period_end || '',
       notes: invoice.notes || '',
@@ -521,6 +556,8 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       invoice_number: '',
       invoice_date: preview.invoice_date || today(),
+      discount_type: 'none',
+      discount_value: '',
       service_period_start: preview.service_period_start || '',
       service_period_end: preview.service_period_end || '',
       notes: preview.notes || '',
@@ -549,11 +586,13 @@ export function InvoiceMaker() {
 
   const loadInvoice = async (id: number) => {
     setError(null);
+    const generation = scopeGenerationRef.current;
     try {
       const response = await invoicesApi.get(id);
+      if (generation !== scopeGenerationRef.current) return;
       hydrateInvoiceForm(response.invoice);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invoice');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load invoice');
     }
   };
 
@@ -581,7 +620,7 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'Cornerstone Payroll'}`.trim()
+        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'your business'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
@@ -636,6 +675,12 @@ export function InvoiceMaker() {
       const payload = buildPayload();
       if (!payload.invoice_recipient_id) throw new Error('Bill To recipient is required');
       if (!payload.invoice_date) throw new Error('Invoice date is required');
+      if (invoiceForm.discount_type !== 'none') {
+        const value = Number(invoiceForm.discount_value);
+        if (invoiceForm.discount_value.trim() === '' || !Number.isFinite(value) || value < 0) throw new Error('Enter a valid discount');
+        if (invoiceForm.discount_type === 'percent' && value > 100) throw new Error('Percentage discount cannot exceed 100%');
+        if (invoiceForm.discount_type === 'amount' && value > invoiceSubtotal) throw new Error('Fixed discount cannot exceed the subtotal');
+      }
 
       const response = invoiceForm.id
         ? await invoicesApi.update(invoiceForm.id, payload, markDraft)
@@ -1613,7 +1658,7 @@ export function InvoiceMaker() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
                   <div className="flex items-center justify-between gap-3 sm:justify-start">
-                    <span className="text-sm font-medium text-neutral-700">{currency(invoiceTotal)}</span>
+                    <span className="text-sm font-medium text-neutral-700">{currency(invoiceSubtotal)}</span>
                     <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
                       <Plus className="mr-1.5 h-4 w-4" />
                       Line
@@ -1666,6 +1711,30 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-4">
+                <h3 className="text-sm font-semibold text-neutral-900">Discount</h3>
+                <p className="mt-1 text-xs text-neutral-500">Applied to the subtotal when this draft is issued.</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">Type</span>
+                    <select value={invoiceForm.discount_type} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_type: event.target.value as InvoiceDiscountType, discount_value: '' }))} disabled={selectedInvoiceReadOnly} className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500">
+                      <option value="none">No discount</option>
+                      <option value="percent">Percentage</option>
+                      <option value="amount">Fixed amount</option>
+                    </select>
+                  </label>
+                  {invoiceForm.discount_type !== 'none' && <label className="space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">{invoiceForm.discount_type === 'percent' ? 'Percent off' : 'Amount off'}</span>
+                    <Input type="number" min="0" max={invoiceForm.discount_type === 'percent' ? 100 : Math.max(0, invoiceSubtotal)} step="0.01" value={invoiceForm.discount_value} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_value: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                  </label>}
+                </div>
+                <dl className="mt-4 space-y-1.5 border-t border-neutral-200 pt-3 text-sm">
+                  <div className="flex justify-between gap-3"><dt className="text-neutral-600">Subtotal</dt><dd className="font-medium">{currency(invoiceSubtotal)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-neutral-600">Discount{invoiceForm.discount_type === 'percent' && invoiceForm.discount_value ? ` (${invoiceForm.discount_value}%)` : ''}</dt><dd className="font-medium">−{currency(invoiceDiscount)}</dd></div>
+                  <div className="flex justify-between gap-3 border-t border-neutral-200 pt-2 font-semibold"><dt>Total</dt><dd>{currency(invoiceTotal)}</dd></div>
+                </dl>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
