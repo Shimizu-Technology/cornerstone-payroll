@@ -9,13 +9,14 @@ const isTestWorkspace = (company: { test_workspace?: boolean; payroll_environmen
   company.test_workspace ?? company.payroll_environment === 'migration_rehearsal';
 
 export function CompanySwitcher() {
-  const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
+  const { companies, activeCompany, activeOrganizationId, canSwitchCompany, switchCompany } = useCompany();
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const productionCompanies = companies.filter(company => !isTestWorkspace(company));
-  const testWorkspaces = companies.filter(isTestWorkspace);
+  const organizationCompanies = companies.filter(company => !activeOrganizationId || company.organization_id === activeOrganizationId);
+  const productionCompanies = organizationCompanies.filter(company => !isTestWorkspace(company));
+  const testWorkspaces = organizationCompanies.filter(isTestWorkspace);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -46,11 +47,11 @@ export function CompanySwitcher() {
     }
   };
 
-  if (!canSwitchCompany || companies.length <= 1) {
+  if (!canSwitchCompany || organizationCompanies.length <= 1) {
     return (
       <div className="border-b border-neutral-200/70 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Payroll client</p>
         </div>
         <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
           {activeCompany?.name || 'Loading...'}
@@ -65,7 +66,7 @@ export function CompanySwitcher() {
   return (
     <div className="relative border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Payroll client</p>
         <span className="rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">
           {platformShortcut('Option K')}
         </span>

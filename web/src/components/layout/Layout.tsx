@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { Outlet, useOutlet } from 'react-router';
+import { Outlet, useLocation, useOutlet } from 'react-router';
 import { FlaskConical, Menu, PanelLeftOpen, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
@@ -14,7 +14,9 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 }
 
 export function Layout() {
-  const { activeCompany, activeCompanyId } = useCompany();
+  const { activeCompany, activeCompanyId, activeOrganizationName } = useCompany();
+  const location = useLocation();
+  const financePage = location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
   const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
     || Boolean(activeCompany?.test_workspace_sealed_at);
   const outlet = useOutlet();
@@ -161,7 +163,7 @@ export function Layout() {
           </button>
           <div className="min-w-0 text-center">
             <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
-            <p className="truncate text-xs font-medium text-primary-700">{activeCompany?.name || 'Payroll workspace'}</p>
+            <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
           </div>
           <div className="h-9 w-9" />
         </div>

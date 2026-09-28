@@ -85,11 +85,21 @@ class ApplicationController < ActionController::API
   end
 
   def current_organization
-    if current_user&.super_admin? && controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense")
-      current_company&.organization || current_user.organization
-    else
-      current_user&.organization
+    return current_user&.organization unless finance_request?
+
+    requested_id = request.headers["X-Organization-Id"].presence
+    if requested_id
+      organization = Organization.find_by(id: requested_id.to_s.to_i) if requested_id.to_s.match?(/\A[1-9]\d*\z/)
+      return organization if organization && (current_user&.super_admin? || organization.id == current_user&.organization_id)
+
+      return nil
     end
+
+    current_user&.super_admin? ? current_company&.organization || current_user.organization : current_user&.organization
+  end
+
+  def finance_request?
+    controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense")
   end
 
   def current_organization_id

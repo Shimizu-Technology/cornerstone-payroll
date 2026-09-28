@@ -38,6 +38,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
+import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 import { employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
@@ -317,7 +318,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
         </NavLink>
       </div>
 
-      {/* Company switcher — hide when collapsed */}
+      {/* Workspace selectors — hide when collapsed */}
+      {!collapsed && <OrganizationSwitcher onNavigate={onNavigate} />}
       {!collapsed && <CompanySwitcher />}
 
       {/* Nav */}
