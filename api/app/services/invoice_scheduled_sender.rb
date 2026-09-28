@@ -30,32 +30,32 @@ class InvoiceScheduledSender
                        reply_to_email: schedule.attempts.zero? ? reply_to : schedule.reply_to_email)
     end
 
-    invoice = schedule.invoice
-    artifact = invoice.primary_artifact
-    raise ArgumentError, "An issued PDF is required before sending" unless artifact&.content_type == "application/pdf"
-
-    raise ArgumentError, "Invoice sender email is not configured" if ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
-
-    bytes = InvoiceArtifactStorageService.new.download(artifact)
-    raise ArgumentError, "Invoice artifact is unavailable" if bytes.nil?
-
-    message = {
-      from: schedule.sender_email,
-      to: schedule.recipients,
-      subject: schedule.rendered_subject,
-      text: schedule.rendered_body,
-      html: "<p>#{CGI.escapeHTML(schedule.rendered_body).gsub("\n", "<br>")}</p>",
-      attachments: [ { filename: artifact.filename, content: bytes.bytes } ]
-    }
-    message[:reply_to] = schedule.reply_to_email if schedule.reply_to_email.present?
-
-    response = Resend::Emails.send(message, options: { idempotency_key: "invoice-send-#{schedule.id}" })
-    reference = response[:id] || response["id"]
-    raise "Invoice email provider did not return a message ID" if reference.blank?
-
-    InvoiceSendSchedule.transaction do
-      schedule.lock!
+    # Keep the row locked through the provider call. Stale-send recovery skips
+    # locked rows, so an in-flight request cannot be offered for retry.
+    schedule.with_lock do
       return unless schedule.status == "sending"
+
+      invoice = schedule.invoice
+      artifact = invoice.primary_artifact
+      raise ArgumentError, "An issued PDF is required before sending" unless artifact&.content_type == "application/pdf"
+      raise ArgumentError, "Invoice sender email is not configured" if ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
+
+      bytes = InvoiceArtifactStorageService.new.download(artifact)
+      raise ArgumentError, "Invoice artifact is unavailable" if bytes.nil?
+
+      message = {
+        from: schedule.sender_email,
+        to: schedule.recipients,
+        subject: schedule.rendered_subject,
+        text: schedule.rendered_body,
+        html: "<p>#{CGI.escapeHTML(schedule.rendered_body).gsub("\n", "<br>")}</p>",
+        attachments: [ { filename: artifact.filename, content: bytes.bytes } ]
+      }
+      message[:reply_to] = schedule.reply_to_email if schedule.reply_to_email.present?
+
+      response = Resend::Emails.send(message, options: { idempotency_key: "invoice-send-#{schedule.id}" })
+      reference = response[:id] || response["id"]
+      raise "Invoice email provider did not return a message ID" if reference.blank?
 
       sent_at = Time.current
       schedule.recipients.each do |recipient|

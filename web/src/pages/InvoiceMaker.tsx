@@ -28,6 +28,7 @@ import {
   type InvoiceTemplateType,
 } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
+import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 
 type DraftLineItem = InvoiceLineItem & {
   local_id: string;
@@ -378,9 +379,9 @@ export function InvoiceMaker() {
   const invoiceDiscount = invoiceForm.discount_type === 'none' || !Number.isFinite(discountInput)
     ? 0
     : invoiceForm.discount_type === 'percent'
-      ? Math.round(invoiceSubtotal * discountInput) / 100
+      ? invoicePercentDiscount(invoiceSubtotal, discountInput)
       : discountInput;
-  const invoiceTotal = Math.max(0, Math.round((invoiceSubtotal - invoiceDiscount) * 100) / 100);
+  const invoiceTotal = Math.max(0, roundInvoiceCurrency(invoiceSubtotal - invoiceDiscount));
 
   const selectedRecipient = useMemo(
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
