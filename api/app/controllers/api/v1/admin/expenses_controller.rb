@@ -32,10 +32,11 @@ module Api
 
         def create
           attrs = expense_params.to_h.symbolize_keys
+          payment = paid_purchase_params
           source_key = attrs[:source_key].presence
           if source_key && (existing = scope.find_by(source_key: source_key))
             candidate = scope.new(attrs)
-            unless same_expense?(existing, candidate)
+            unless same_expense?(existing, candidate) && same_paid_purchase?(existing, payment)
               return render json: { error: "Source key already belongs to a different expense" }, status: :conflict
             end
             return render json: { expense: ExpensePayloadBuilder.call(existing, detailed: true), already_exists: true }
@@ -45,17 +46,26 @@ module Api
           expense.finance_book = current_finance_book
           expense.created_by = current_user
           expense.updated_by = current_user
-          expense.save!
+          Expense.transaction do
+            expense.save!
+            if payment
+              ExpensePaymentService.record!(expense: expense, actor: current_user, amount: expense.total_amount,
+                                            paid_on: payment.fetch(:paid_on), payment_method: payment.fetch(:payment_method),
+                                            reference_number: payment[:reference_number], notes: payment[:notes])
+            end
+          end
           render json: { expense: ExpensePayloadBuilder.call(expense, detailed: true) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
           existing = source_key && scope.find_by(source_key: source_key)
-          if existing && same_expense?(existing, scope.new(attrs))
+          if existing && same_expense?(existing, scope.new(attrs)) && same_paid_purchase?(existing, payment)
             render json: { expense: ExpensePayloadBuilder.call(existing, detailed: true), already_exists: true }
           else
             render json: { error: "An expense with that source key already exists" }, status: :conflict
           end
+        rescue ArgumentError, Date::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def update
@@ -132,6 +142,31 @@ module Api
         def same_expense?(existing, candidate)
           comparable = %i[expense_vendor_id category description expense_on due_on total_amount currency reference_number]
           comparable.all? { |field| existing.public_send(field) == candidate.public_send(field) }
+        end
+
+        def same_paid_purchase?(expense, payment)
+          active = expense.expense_payments.active.to_a
+          return true if payment.blank?
+          return false unless active.one?
+
+          recorded = active.first
+          recorded.amount == expense.total_amount && recorded.paid_on == payment[:paid_on] &&
+            recorded.payment_method == payment[:payment_method] &&
+            recorded.reference_number.to_s == payment[:reference_number].to_s &&
+            recorded.notes.to_s == payment[:notes].to_s
+        end
+
+        def paid_purchase_params
+          return nil unless params.key?(:payment)
+
+          raw = params.require(:payment).permit(:paid_on, :payment_method, :reference_number, :notes)
+          paid_on = Date.iso8601(raw.require(:paid_on))
+          method = raw.require(:payment_method)
+          reference = raw[:reference_number].to_s.strip.presence
+          notes = raw[:notes].to_s.strip.presence
+          raise ArgumentError, "Add a payment reference or evidence note" if reference.blank? && notes.blank?
+
+          { paid_on: paid_on, payment_method: method, reference_number: reference, notes: notes }
         end
 
         def set_expense

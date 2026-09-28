@@ -65,7 +65,7 @@ class ApiClient {
   }
 
   private financeHeaders(endpoint: string): Record<string, string> {
-    if (!/^\/admin\/(invoice|expense|finance_books)/.test(endpoint)) return {};
+    if (!/^\/admin\/(invoice|expense|finance_)/.test(endpoint)) return {};
     return {
       ...(this.activeOrganizationId ? { 'X-Organization-Id': String(this.activeOrganizationId) } : {}),
       ...(this.activeFinanceBookId ? { 'X-Finance-Book-Id': String(this.activeFinanceBookId) } : {}),
@@ -5839,6 +5839,28 @@ export interface ExpenseSummary {
   overdue_count: number;
 }
 
+export interface FinanceOverview {
+  finance_book_id: number;
+  as_of: string;
+  currencies: Array<{
+    currency: string;
+    receivables: string;
+    overdue_receivables: string;
+    payments_received: string;
+    payables: string;
+    overdue_payables: string;
+    payments_made: string;
+    open_invoice_count: number;
+    overdue_invoice_count: number;
+    open_expense_count: number;
+    overdue_expense_count: number;
+  }>;
+}
+
+export const financeOverviewApi = {
+  show: (asOf?: string) => api.get<FinanceOverview>('/admin/finance_overview', asOf ? { as_of: asOf } : undefined),
+};
+
 export const expenseVendorsApi = {
   list: (active = false) => api.get<{ expense_vendors: ExpenseVendor[] }>('/admin/expense_vendors', { active }),
   create: (data: { name: string; email?: string; notes?: string }) =>
@@ -5854,7 +5876,8 @@ export const expensesApi = {
   create: (data: {
     expense_vendor_id: number; category: string; description: string; expense_on: string; due_on?: string;
     total_amount: string; currency: string; reference_number?: string; source_key?: string;
-  }) => api.post<{ expense: Expense; already_exists?: boolean }>('/admin/expenses', { expense: data }),
+  }, payment?: { paid_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
+    api.post<{ expense: Expense; already_exists?: boolean }>('/admin/expenses', { expense: data, ...(payment ? { payment } : {}) }),
   update: (id: number, data: Partial<Expense>) => api.patch<{ expense: Expense }>(`/admin/expenses/${id}`, { expense: data }),
   recordPayment: (id: number, data: { amount: string; paid_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
     api.post<{ payment_id: number; expense: Expense }>(`/admin/expenses/${id}/payments`, data),
