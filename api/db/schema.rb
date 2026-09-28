@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_125000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_28_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1620,6 +1620,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_125000) do
     t.string "invoice_prefix"
     t.boolean "is_default", default: false, null: false
     t.string "legal_name"
+    t.integer "logo_byte_size"
+    t.string "logo_content_type"
+    t.string "logo_sha256"
+    t.string "logo_storage_key"
     t.string "name", null: false
     t.bigint "organization_id", null: false
     t.text "payment_instructions"
@@ -1628,6 +1632,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_125000) do
     t.datetime "updated_at", null: false
     t.string "website"
     t.index ["organization_id", "is_default"], name: "index_invoice_billing_profiles_one_default_per_org", unique: true, where: "(is_default = true)"
+    t.index ["logo_storage_key"], name: "index_invoice_billing_profiles_on_logo_storage_key", unique: true
     t.index ["organization_id", "name"], name: "index_invoice_billing_profiles_on_organization_id_and_name", unique: true
     t.index ["organization_id"], name: "index_invoice_billing_profiles_on_organization_id"
   end

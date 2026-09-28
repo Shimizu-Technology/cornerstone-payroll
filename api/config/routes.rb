@@ -490,7 +490,12 @@ Rails.application.routes.draw do
         end
 
         # Invoice Center and bounded accounts receivable
-        resources :invoice_billing_profiles, except: [:new, :edit]
+        resources :invoice_billing_profiles, except: [:new, :edit] do
+          member do
+            post :logo, action: :upload_logo
+            delete :logo, action: :remove_logo
+          end
+        end
         resources :invoice_recipients, except: [:new, :edit]
         resources :invoice_recurrences, only: [:index, :create, :update]
         resources :invoice_send_schedules, only: [:index, :create, :update]

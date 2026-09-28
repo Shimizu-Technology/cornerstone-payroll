@@ -26,7 +26,7 @@ RSpec.describe InvoicePdfGenerator do
 
   it "keeps the party cards below dynamic invoice metadata" do
     runs = reader_for(invoice).pages.first.runs
-    reference = runs.find { |run| run.text.include?("Invoice Date") }
+    reference = runs.find { |run| run.text.include?("INVOICE DATE") }
     bill_to = runs.find { |run| run.text == "BILL TO" }
     remit_to = runs.find { |run| run.text == "REMIT TO" }
 
@@ -42,9 +42,9 @@ RSpec.describe InvoicePdfGenerator do
     runs = reader_for(invoice).pages.first.runs
     terms = runs.find { |run| run.text == "TERMS" }
     subtotal = runs.find { |run| run.text == "Subtotal" }
-    total_due = runs.find { |run| run.text == "TOTAL DUE" }
+    total_due = runs.reverse.find { |run| run.text == "TOTAL DUE" }
 
-    expect(terms.y).to be_within(4).of(subtotal.y)
+    expect(terms.y).to be_within(6).of(subtotal.y)
     expect(subtotal.y).to be > total_due.y
     expect(runs.none? { |run| run.text == "Date" }).to be(true)
   end

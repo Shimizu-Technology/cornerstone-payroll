@@ -9,11 +9,12 @@ class InvoicePdfGenerator
   PAGE_MARGIN = 48
   PAGE_BOTTOM_MARGIN = 68
   INK = "111827"
-  MUTED = "6B7280"
-  LINE = "D1D5DB"
-  PANEL = "F8FAFC"
-  ACCENT = "0F766E"
-  ACCENT_SOFT = "ECFDF5"
+  MUTED = "526176"
+  LINE = "DCE4EB"
+  PANEL = "F3F6F8"
+  ACCENT = "0A8278"
+  ACCENT_SOFT = "EAF5F2"
+  NAVY = "192D47"
 
   def initialize(invoice, snapshot: nil)
     @invoice = invoice
@@ -58,17 +59,22 @@ class InvoicePdfGenerator
   end
 
   def letterhead(pdf)
-    pdf.fill_color INK
-    pdf.text billing["legal_name"].presence || billing["name"].to_s, size: 17, style: :bold
-    pdf.move_down 4
-    pdf.fill_color MUTED
-    contact_lines.each { |line| pdf.text line, size: 8.5 }
-    pdf.fill_color INK
+    top = pdf.cursor
+    logo = InvoiceLogoStorageService.new.download(billing) if billing["logo_storage_key"].present?
+    if logo
+      pdf.bounding_box([ 0, top ], width: 82, height: 55) do
+        pdf.image StringIO.new(logo), fit: [ 78, 50 ]
+      end
+    end
 
-    pdf.stroke_color LINE
-    pdf.line_width 0.75
-    pdf.stroke_horizontal_rule
-    pdf.move_down 20
+    pdf.bounding_box([ logo ? 96 : 0, top ], width: pdf.bounds.width - (logo ? 96 : 0), height: 64) do
+      pdf.fill_color NAVY
+      pdf.text billing["legal_name"].presence || billing["name"].to_s, size: 16, style: :bold
+      pdf.move_down 6
+      pdf.fill_color MUTED
+      contact_lines.each { |line| pdf.text line, size: 8.5, leading: 2 }
+    end
+    pdf.move_cursor_to(top - 78)
   end
 
   def invoice_title(pdf)
@@ -79,27 +85,41 @@ class InvoicePdfGenerator
       [ "Customer Reference", invoice_data["customer_reference"] ]
     ].reject { |_label, value| value.blank? }
 
-    title = pdf.make_table(
-      [
-        [ { content: "INVOICE", size: 30, font_style: :bold, text_color: INK } ],
-        [ { content: invoice_data["invoice_number"].presence || "Draft", size: 11, font_style: :bold, text_color: ACCENT, padding: [ 4, 0, 0, 0 ] } ]
-      ],
-      width: 240,
-      cell_style: { borders: [], padding: 0 }
-    )
-    metadata = pdf.make_table(rows, width: 250, cell_style: { size: 9, padding: [ 6, 8 ], border_color: "E5E7EB" }) do
-      columns(0).font_style = :bold
-      columns(0).text_color = "374151"
-      columns(0).background_color = PANEL
-      columns(0).width = 95
-      columns(1).width = 155
+    top = pdf.cursor
+    pdf.fill_color NAVY
+    pdf.fill_rectangle [ 0, top ], pdf.bounds.width, 102
+    pdf.bounding_box([ 20, top - 19 ], width: pdf.bounds.width - 210, height: 75) do
+      pdf.fill_color "A8D9D3"
+      pdf.text "INVOICE", size: 10, style: :bold, character_spacing: 2
+      pdf.move_down 9
+      pdf.fill_color "FFFFFF"
+      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 19, style: :bold
     end
+    pdf.bounding_box([ pdf.bounds.width - 190, top - 19 ], width: 170, height: 75) do
+      pdf.fill_color "A8D9D3"
+      pdf.text "TOTAL DUE", size: 9, style: :bold, align: :right, character_spacing: 1.5
+      pdf.move_down 7
+      pdf.fill_color "FFFFFF"
+      pdf.text money(invoice_data["total_amount"]), size: 21, style: :bold, align: :right
+    end
+    pdf.fill_color INK
+    pdf.move_cursor_to(top - 120)
 
-    pdf.table([ [ title, metadata ] ], width: pdf.bounds.width, cell_style: { borders: [], padding: 0, valign: :top }) do
-      columns(0).width = pdf.bounds.width - 250
-      columns(1).width = 250
+    return if rows.empty?
+
+    metadata = rows.each_slice(2).map do |pair|
+      pair.flat_map { |label, value| [ { content: label == "Customer Reference" ? "REFERENCE" : label.upcase,
+                                       font_style: :bold, text_color: MUTED }, value.to_s ] }
+          .tap { |row| row.concat([ "", "" ]) if row.length == 2 }
     end
-    pdf.move_down 20
+    pdf.table(metadata, width: pdf.bounds.width, cell_style: { size: 8.5, padding: [ 5, 7 ], borders: [ :bottom ],
+                                                           border_color: LINE, text_color: INK, valign: :top }) do
+      columns(0).width = 105
+      columns(1).width = (pdf.bounds.width / 2) - 105
+      columns(2).width = 110
+      columns(3).width = (pdf.bounds.width / 2) - 110
+    end
+    pdf.move_down 22
   end
 
   def parties(pdf)
@@ -115,11 +135,12 @@ class InvoicePdfGenerator
       billing["phone"]
     ])
 
-    pdf.table([ [ bill_to, remit_to ] ], width: pdf.bounds.width, cell_style: { border_color: "E5E7EB", padding: [ 12, 14 ], size: 10, background_color: PANEL, valign: :top }) do
+    pdf.table([ [ bill_to, remit_to ] ], width: pdf.bounds.width, cell_style: { borders: [], padding: [ 0, 18, 0, 0 ],
+                                                                              size: 10, text_color: INK, valign: :top }) do
       columns(0).width = pdf.bounds.width / 2
       columns(1).width = pdf.bounds.width / 2
     end
-    pdf.move_down 20
+    pdf.move_down 24
   end
 
   def labeled_block(label, lines)
@@ -155,9 +176,13 @@ class InvoicePdfGenerator
     rate_width = 78
     amount_width = 80
 
-    pdf.table(rows, header: true, width: table_width, cell_style: { size: 9, padding: [ 9, 8 ], border_color: "E5E7EB" }) do
-      row(0).background_color = "ECFDF5"
-      row(0).text_color = "064E3B"
+    pdf.table(rows, header: true, width: table_width, cell_style: { size: 9, padding: [ 11, 9 ],
+                                                                   borders: [ :bottom ], border_color: LINE,
+                                                                   text_color: INK }) do
+      row(0).background_color = NAVY
+      row(0).text_color = "FFFFFF"
+      row(0).borders = []
+      (1...rows.length).each { |index| row(index).background_color = PANEL if index.even? }
       columns(0).width = table_width - date_width - quantity_width - rate_width - amount_width
       if include_service_date
         columns(1).width = date_width
@@ -187,12 +212,14 @@ class InvoicePdfGenerator
     summary_rows = [ [ "Subtotal", subtotal ] ]
     summary_rows << [ discount_label, "-#{discount}" ] if BigDecimal((invoice_data["discount_amount"] || 0).to_s).positive?
     summary_rows << [ "TOTAL DUE", total ]
-    summary_table = pdf.make_table(summary_rows, width: 152, cell_style: { size: 9, padding: [ 3, 0 ], borders: [] }) do
-      columns(0).width = 82
-      columns(1).width = 70
+    summary_table = pdf.make_table(summary_rows, width: 190, cell_style: { size: 9.5, padding: [ 5, 0 ],
+                                                                            borders: [], text_color: INK }) do
+      columns(0).width = 105
+      columns(1).width = 85
       columns(1).align = :right
       row(summary_rows.length - 1).font_style = :bold
-      row(summary_rows.length - 1).size = 10
+      row(summary_rows.length - 1).size = 11
+      row(summary_rows.length - 1).text_color = NAVY
     end
     payment_text = visible_payment_instructions
     terms = invoice_data["payment_terms"].presence
@@ -200,25 +227,25 @@ class InvoicePdfGenerator
     if payment_text.present? || terms.present?
       pdf.table(
         [ [
-          { content: payment_block(payment_text, terms) },
+          { content: payment_block(payment_text, terms), text_color: INK },
           summary_table
         ] ],
         width: pdf.bounds.width,
-        cell_style: { border_color: LINE, padding: [ 14, 14 ], size: 10, valign: :top }
+        cell_style: { borders: [], padding: [ 18, 18 ], size: 9.5, valign: :top }
       ) do
-        columns(0).width = pdf.bounds.width - 180
-        columns(1).width = 180
+        columns(0).width = pdf.bounds.width - 226
+        columns(1).width = 226
         columns(0).background_color = PANEL
         columns(1).background_color = ACCENT_SOFT
         columns(0).valign = :top
         columns(1).valign = :top
       end
     else
-      pdf.bounding_box([ pdf.bounds.right - 180, pdf.cursor ], width: 180) do
+      pdf.bounding_box([ pdf.bounds.right - 226, pdf.cursor ], width: 226) do
         pdf.table(
           [ [ summary_table ] ],
-          width: 180,
-          cell_style: { border_color: LINE, padding: [ 14, 14 ], size: 10, background_color: ACCENT_SOFT, valign: :top }
+          width: 226,
+          cell_style: { borders: [], padding: [ 18, 18 ], size: 9.5, background_color: ACCENT_SOFT, valign: :top }
         )
       end
     end
@@ -254,13 +281,16 @@ class InvoicePdfGenerator
     generated_at = snapshot["generated_at"].presence
     note = billing["footer_note"].presence || "Thank you for your business."
     timestamp_label = invoice_data["status"] == "draft" ? "Draft preview" : "Issued"
-    footer_text = [ note, generated_at && "#{timestamp_label} #{format_timestamp(generated_at)}" ].compact.join(" | ")
+    footer_text = [ note, generated_at && "#{timestamp_label} #{format_timestamp(generated_at)}" ].compact.join("  |  ")
 
     pdf.repeat(:all) do
       pdf.canvas do
         pdf.bounding_box([ PAGE_MARGIN, 34 ], width: pdf.page.dimensions[2] - (PAGE_MARGIN * 2), height: 14) do
-          pdf.fill_color "9CA3AF"
-          pdf.text footer_text, size: 8, align: :center
+          pdf.stroke_color LINE
+          pdf.stroke_horizontal_rule
+          pdf.move_down 5
+          pdf.fill_color MUTED
+          pdf.text footer_text, size: 7.5, align: :center
           pdf.fill_color INK
         end
       end
