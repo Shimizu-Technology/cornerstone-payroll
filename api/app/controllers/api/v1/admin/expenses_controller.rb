@@ -160,6 +160,7 @@ module Api
         end
 
         def filter_payment_status(rows, status)
+          rows = rows.active
           payment_total = "(SELECT COALESCE(SUM(ep.amount), 0) FROM expense_payments ep " \
                           "WHERE ep.expense_id = expenses.id AND ep.reversed_at IS NULL)"
           balance = "expenses.total_amount - #{payment_total}"

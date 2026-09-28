@@ -35,6 +35,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
+import { invoiceSendState, type SendState } from '@/lib/invoice-send-state';
 import {
   invoiceBillingProfilesApi,
   invoiceReceivablesApi,
@@ -159,7 +160,6 @@ const statusLabel = (status: InvoiceStatus) => ({
   archived: 'Archived',
 }[status]);
 
-type SendState = 'not_sent' | 'scheduled' | 'failed' | 'provider_accepted' | 'recorded_delivery';
 const sendStateLabel: Record<SendState, string> = {
   not_sent: 'Needs sending', scheduled: 'Email pending', failed: 'Send failed',
   provider_accepted: 'Provider accepted', recorded_delivery: 'Delivery recorded',
@@ -169,14 +169,6 @@ const sendStateStyle: Record<SendState, string> = {
   failed: 'bg-red-50 text-red-800', provider_accepted: 'bg-emerald-50 text-emerald-800',
   recorded_delivery: 'bg-emerald-50 text-emerald-800',
 };
-
-function invoiceSendState(invoice: Invoice, schedules: InvoiceSendSchedule[]): SendState {
-  const related = schedules.filter((schedule) => schedule.invoice_id === invoice.id && schedule.status !== 'cancelled');
-  if (related.some((schedule) => schedule.status === 'failed')) return 'failed';
-  if (related.some((schedule) => ['pending', 'queued', 'sending'].includes(schedule.status))) return 'scheduled';
-  if (related.some((schedule) => schedule.status === 'sent')) return 'provider_accepted';
-  return invoice.sent_at ? 'recorded_delivery' : 'not_sent';
-}
 
 const money = (value?: number | null, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -363,8 +355,8 @@ export function InvoiceCenter() {
     const needle = search.trim().toLowerCase();
     const matchesSearch = !needle || [invoice.invoice_number, invoice.recipient_name, invoice.billing_profile_name, invoice.customer_reference]
       .some((value) => value?.toLowerCase().includes(needle));
-    const matchesSend = sendFilter === 'all' || (invoice.base_status === 'open'
-      && invoice.balance_due > 0 && invoiceSendState(invoice, sendSchedules) === sendFilter);
+    const matchesSend = sendFilter === 'all' || (invoiceSendState(invoice, sendSchedules) === sendFilter
+      && (sendFilter !== 'not_sent' || (invoice.base_status === 'open' && invoice.balance_due > 0)));
     return matchesStatus && matchesSearch && matchesSend;
   }), [invoices, search, statusFilter, sendFilter, sendSchedules]);
 
@@ -743,7 +735,7 @@ export function InvoiceCenter() {
       setDetailAction(null);
       setEditingSendScheduleId(null);
     }, editingSendScheduleId ? 'Scheduled email updated.' : sendMode === 'now'
-      ? 'Invoice email queued. Provider acceptance will appear in the delivery history.'
+      ? 'Send request saved. Check email status for provider acceptance or a failure.'
       : 'Invoice email scheduled. A provider acceptance will be recorded when it sends.');
   };
 
@@ -896,7 +888,7 @@ export function InvoiceCenter() {
               <div className="divide-y divide-neutral-100">
                 {filteredInvoices.map((invoice) => (
                   <button key={invoice.id} type="button" onClick={() => openDetails(invoice.id)} className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-neutral-50 sm:grid-cols-[minmax(0,1fr)_130px_130px_28px] sm:items-center">
-                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{invoice.base_status === 'open' && <Badge className={sendStateStyle[invoiceSendState(invoice, sendSchedules)]}>{sendStateLabel[invoiceSendState(invoice, sendSchedules)]}</Badge>}{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{(invoice.base_status === 'open' && invoice.balance_due > 0 || invoiceSendState(invoice, sendSchedules) !== 'not_sent') && <Badge className={sendStateStyle[invoiceSendState(invoice, sendSchedules)]}>{sendStateLabel[invoiceSendState(invoice, sendSchedules)]}</Badge>}{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Balance</p><p className={`font-semibold ${invoice.status === 'overdue' ? 'text-amber-700' : 'text-neutral-900'}`}>{money(invoice.balance_due, invoice.currency)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Invoice total</p><p className="font-medium text-neutral-700">{money(invoice.total_amount, invoice.currency)}</p></div>
                     <Eye className="h-4 w-4 text-neutral-400" />
