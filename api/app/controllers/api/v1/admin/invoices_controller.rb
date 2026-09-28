@@ -363,7 +363,7 @@ module Api
             discount_value: discount_value,
             created_by: current_user,
             updated_by: current_user,
-            source_metadata: { original_filename: params[:file]&.original_filename }
+            source_metadata: { original_filename: params[:file]&.original_filename, gross_subtotal: subtotal.to_s("F") }
           )
           invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: subtotal, position: 0)
           invoice

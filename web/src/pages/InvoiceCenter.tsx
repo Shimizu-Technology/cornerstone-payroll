@@ -98,7 +98,10 @@ interface ImportForm {
   delivery_channel: string;
 }
 
-const dateOnly = () => new Date().toISOString().slice(0, 10);
+const dateOnly = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), description: '', quantity: 1, rate: 0, position: 0 });
 const emptyDraft = (): DraftForm => ({
   invoice_billing_profile_id: '',
@@ -265,6 +268,11 @@ export function InvoiceCenter() {
       setSendSchedules([]);
       setSummary(null);
       setSelected(null);
+      setBusy(false);
+      setPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
       setDraft(emptyDraft());
       setImportForm(emptyImport());
       setEditingDraftId(null);
@@ -515,17 +523,19 @@ export function InvoiceCenter() {
 
   const previewSelected = async () => {
     if (!selected) return;
+    const organizationId = loadedOrganizationId.current;
     setBusy(true);
     try {
       const data = selected.status === 'draft'
         ? await invoicesApi.previewPdf(selected.id)
         : await invoicesApi.downloadArtifact(selected.id, 'inline');
+      if (organizationId !== loadedOrganizationId.current) return;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(data.blob));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to preview invoice');
+      if (organizationId === loadedOrganizationId.current) setError(requestError instanceof Error ? requestError.message : 'Unable to preview invoice');
     } finally {
-      setBusy(false);
+      if (organizationId === loadedOrganizationId.current) setBusy(false);
     }
   };
 

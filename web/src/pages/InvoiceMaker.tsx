@@ -330,6 +330,8 @@ export function InvoiceMaker() {
       setBillingProfiles([]);
       setChatSessions([]);
       setActiveChatSession(null);
+      setChatBusy(false);
+      setChatError(null);
       setCreatedChatInvoice(null);
       setOptimisticChatMessages([]);
       setChatImages([]);
@@ -680,7 +682,7 @@ export function InvoiceMaker() {
         const value = Number(invoiceForm.discount_value);
         if (invoiceForm.discount_value.trim() === '' || !Number.isFinite(value) || value < 0) throw new Error('Enter a valid discount');
         if (invoiceForm.discount_type === 'percent' && value > 100) throw new Error('Percentage discount cannot exceed 100%');
-        if (invoiceForm.discount_type === 'amount' && value > invoiceSubtotal) throw new Error('Fixed discount cannot exceed the subtotal');
+        if (invoiceForm.discount_type === 'amount' && value > roundInvoiceCurrency(invoiceSubtotal)) throw new Error('Fixed discount cannot exceed the subtotal');
       }
 
       const response = invoiceForm.id
@@ -790,21 +792,23 @@ export function InvoiceMaker() {
   };
 
   const startChatSession = async () => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
+      if (generation !== scopeGenerationRef.current) return null;
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => [response.invoice_chat_session, ...current]);
       setInvoiceMode('ai');
       return response.invoice_chat_session;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
       return null;
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
@@ -848,25 +852,29 @@ export function InvoiceMaker() {
   };
 
   const loadChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.get(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setActiveChatSession(response.invoice_chat_session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const archiveChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.delete(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setChatSessions((current) => {
         const next = current.map((session) => session.id === sessionId ? response.invoice_chat_session : session);
         return showArchivedChatSessions ? next : next.filter((session) => !session.archived);
@@ -876,33 +884,37 @@ export function InvoiceMaker() {
         setCreatedChatInvoice(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to archive assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to archive assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const restoreChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.restore(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setChatSessions((current) => current.map((session) => session.id === sessionId ? response.invoice_chat_session : session));
       setActiveChatSession(response.invoice_chat_session);
       setCreatedChatInvoice(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restore assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to restore assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const restoreChatPreview = async (messageId: number) => {
     if (!activeChatSession) return;
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.restorePreview(activeChatSession.id, messageId);
+      if (generation !== scopeGenerationRef.current) return;
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => current.map((session) => (
         session.id === response.invoice_chat_session.id ? response.invoice_chat_session : session
@@ -911,15 +923,17 @@ export function InvoiceMaker() {
       setSuccess('AI preview restored.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restore preview');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to restore preview');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const sendChatMessage = async () => {
     const content = chatInput.trim() || (chatImages.length > 0 ? 'Please create an invoice from the attached file.' : '');
     if (!content) return;
+    const generation = scopeGenerationRef.current;
+    const currentScope = () => generation === scopeGenerationRef.current;
 
     setChatBusy(true);
     setError(null);
@@ -983,9 +997,11 @@ export function InvoiceMaker() {
       let session = activeChatSession;
       if (!session) {
         const createResponse = await invoiceChatSessionsApi.create({ title: content.slice(0, 60) });
+        if (!currentScope()) return;
         session = createResponse.invoice_chat_session;
         createdSessionId = session.id;
       }
+      if (!currentScope()) return;
       setActiveChatSession(session);
       if (!currentSessionId) {
         setChatSessions((current) => [
@@ -997,6 +1013,7 @@ export function InvoiceMaker() {
         )));
       }
       const response = await invoiceChatSessionsApi.message(session.id, content, attachments);
+      if (!currentScope()) return;
       removePendingMessages();
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => {
@@ -1004,8 +1021,10 @@ export function InvoiceMaker() {
         return [response.invoice_chat_session, ...withoutSession];
       });
     } catch (err) {
+      if (!currentScope()) return;
       if (createdSessionId) {
         await invoiceChatSessionsApi.delete(createdSessionId).catch(() => undefined);
+        if (!currentScope()) return;
         setActiveChatSession(null);
         setChatSessions((current) => current.filter((session) => session.id !== createdSessionId));
       }
@@ -1018,19 +1037,23 @@ export function InvoiceMaker() {
       setChatImages(attachments);
       setChatError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
     } finally {
-      removePendingMessages();
-      setChatBusy(false);
-      window.setTimeout(() => chatInputRef.current?.focus(), 0);
+      if (currentScope()) {
+        removePendingMessages();
+        setChatBusy(false);
+        window.setTimeout(() => chatInputRef.current?.focus(), 0);
+      }
     }
   };
 
   const createInvoiceFromPreview = async () => {
     if (!activeChatSession) return;
+    const generation = scopeGenerationRef.current;
 
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
+      if (generation !== scopeGenerationRef.current) return;
       setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
       upsertInvoice(response.invoice);
@@ -1038,9 +1061,9 @@ export function InvoiceMaker() {
       setSuccess('Invoice created from AI preview.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 

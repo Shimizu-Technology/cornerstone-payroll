@@ -26,6 +26,16 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     invoice.reload
   end
 
+  it "rejects a blank recurrence time zone without raising" do
+    source = issued_invoice
+    recurrence = InvoiceRecurrence.new(organization: source.organization, source_invoice: source,
+                                       start_on: Date.current, next_on: Date.current, interval_unit: "month",
+                                       interval_count: 1, due_after_days: 30, time_zone: nil)
+
+    expect(recurrence).not_to be_valid
+    expect(recurrence.errors[:time_zone]).to include("is invalid")
+  end
+
   it "creates a separate draft for each due occurrence without duplicate numbers or drift" do
     source = issued_invoice
     post "/api/v1/admin/invoice_recurrences", params: {
@@ -280,6 +290,21 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
 
     expect(schedule.reload.status).to eq("queued")
     expect(InvoiceSendJob).to have_received(:perform_later).with(schedule.id).once
+  end
+
+  it "does not requeue a schedule while its Solid Queue job is waiting" do
+    source = issued_invoice
+    schedule = InvoiceSendSchedule.create!(organization: source.organization, invoice: source,
+                                           recipients: [ "customer@example.com" ], send_at: 15.minutes.ago,
+                                           status: "queued")
+    schedule.update_columns(updated_at: 11.minutes.ago)
+    SolidQueue::Job.create!(class_name: "InvoiceSendJob", queue_name: "default",
+                            arguments: InvoiceSendJob.new(schedule.id).serialize)
+    expect(InvoiceSendJob).not_to receive(:perform_later)
+
+    InvoiceSendDispatchJob.new.perform
+
+    expect(schedule.reload.status).to eq("queued")
   end
 
   it "refuses a retry after the provider idempotency window expires" do
