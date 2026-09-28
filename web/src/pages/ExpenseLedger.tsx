@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine, CircleDollarSign, FileText, Plus, Receipt, Search, Upload, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -57,10 +57,8 @@ function StatusLabel({ status }: { status: Expense['payment_status'] }) {
 
 export function ExpenseLedger() {
   const { user } = useAuth();
-  const { activeCompany } = useCompany();
-  const organizationId = user?.role === 'super_admin'
-    ? activeCompany?.organization_id || user.organization_id
-    : user?.organization_id;
+  const { activeOrganizationId, activeOrganizationName } = useCompany();
+  const organizationId = activeOrganizationId || user?.organization_id;
   const [selectedOrganization, setSelectedOrganization] = useState<{ id: number; name: string } | null>(null);
   useEffect(() => {
     if (!organizationId || organizationId === user?.organization_id || user?.role !== 'super_admin') return;
@@ -72,9 +70,9 @@ export function ExpenseLedger() {
     });
     return () => { active = false; };
   }, [organizationId, user?.organization_id, user?.role]);
-  const organizationName = organizationId === user?.organization_id
+  const organizationName = activeOrganizationName || (organizationId === user?.organization_id
     ? user?.organization_name
-    : selectedOrganization && selectedOrganization.id === organizationId ? selectedOrganization.name : undefined;
+    : selectedOrganization && selectedOrganization.id === organizationId ? selectedOrganization.name : undefined);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<ExpenseVendor[]>([]);
@@ -84,6 +82,7 @@ export function ExpenseLedger() {
   const [vendorFilter, setVendorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [form, setForm] = useState<ExpenseForm>(emptyExpense);
@@ -101,13 +100,20 @@ export function ExpenseLedger() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const detailRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const load = useCallback(async (nextPage = 1) => {
     if (!organizationId) return;
     const sequence = ++requestSequence.current;
     try {
       const [expenseData, vendorData] = await Promise.all([
-        expensesApi.list({ page: nextPage, per_page: 50, vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter) }),
+        expensesApi.list({ page: nextPage, per_page: 50, vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter),
+          q: debouncedSearch || undefined, status: statusFilter === 'all' ? undefined : statusFilter }),
         expenseVendorsApi.list(),
       ]);
       if (sequence !== requestSequence.current) return;
@@ -122,7 +128,7 @@ export function ExpenseLedger() {
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [organizationId, vendorFilter]);
+  }, [organizationId, vendorFilter, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     setExpenses([]);
@@ -133,14 +139,7 @@ export function ExpenseLedger() {
     setLoading(true);
     void load(1);
     return () => { requestSequence.current += 1; };
-  }, [organizationId, vendorFilter, load]);
-
-  const visible = useMemo(() => expenses.filter((expense) => {
-    if (statusFilter !== 'all' && expense.payment_status !== statusFilter) return false;
-    const query = search.trim().toLowerCase();
-    return !query || [expense.vendor_name, expense.reference_number, expense.description, expense.category]
-      .some((value) => value?.toLowerCase().includes(query));
-  }), [expenses, search, statusFilter]);
+  }, [organizationId, vendorFilter, debouncedSearch, statusFilter, load]);
   const summaryMoney = (field: 'balance_due' | 'amount_paid') => summary?.currencies.length
     ? summary.currencies.map((entry) => `${entry.currency} ${money(entry[field], entry.currency)}`).join(' · ')
     : money(0);
@@ -189,7 +188,13 @@ export function ExpenseLedger() {
     setNotice('Expense recorded. Add its receipt and payment evidence in the detail panel.');
   });
 
-  const openExpense = (id: number) => run(async () => { await refreshSelected(id); });
+  const openExpense = (id: number) => run(async () => {
+    await refreshSelected(id);
+    if (window.innerWidth < 1280) {
+      window.requestAnimationFrame(() => detailRef.current?.scrollIntoView({ block: 'start',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }));
+    }
+  });
 
   const savePayment = () => run(async () => {
     if (!selected) return;
@@ -232,7 +237,11 @@ export function ExpenseLedger() {
       <Header title="Expense Ledger" description="Track vendor bills, receipts, and what has actually been paid for this organization."
         contextLabel="Organization" contextValue={organizationName}
         actions={<>
-          <Button variant="outline" onClick={() => void run(async () => downloadBlob(await expensesApi.export({ vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter) }), 'expenses.csv'))} disabled={busy}>
+          <Button variant="outline" onClick={() => void run(async () => downloadBlob(await expensesApi.export({
+            vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter),
+            q: debouncedSearch || undefined,
+            status: statusFilter === 'all' ? undefined : statusFilter,
+          }), 'expenses.csv'))} disabled={busy}>
             <ArrowDownToLine className="mr-2 h-4 w-4" />Export CSV
           </Button>
           <Button variant="secondary" onClick={() => setShowVendorForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Vendor</Button>
@@ -246,10 +255,10 @@ export function ExpenseLedger() {
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>}
         {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
 
-        <section className="grid gap-3 sm:grid-cols-3" aria-label="Expense summary for the selected vendor">
-          <SummaryCard label="Open balance" value={summaryMoney('balance_due')} note="Across the selected vendor" icon={<CircleDollarSign className="h-5 w-5" />} />
-          <SummaryCard label="Payments recorded" value={summaryMoney('amount_paid')} note="Across the selected vendor" icon={<Receipt className="h-5 w-5" />} />
-          <SummaryCard label="Overdue bills" value={String(summary?.overdue_count || 0)} note="Across the selected vendor" icon={<FileText className="h-5 w-5" />} />
+        <section className="grid gap-3 sm:grid-cols-3" aria-label="Expense summary for current filters">
+          <SummaryCard label="Open balance" value={summaryMoney('balance_due')} note="Matching expenses" icon={<CircleDollarSign className="h-5 w-5" />} />
+          <SummaryCard label="Payments recorded" value={summaryMoney('amount_paid')} note="Matching expenses" icon={<Receipt className="h-5 w-5" />} />
+          <SummaryCard label="Overdue bills" value={String(summary?.overdue_count || 0)} note="Matching expenses" icon={<FileText className="h-5 w-5" />} />
         </section>
 
         {showVendorForm && <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-label="Add vendor">
@@ -279,16 +288,18 @@ export function ExpenseLedger() {
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
           <section className="min-w-0 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm" aria-label="Expenses">
             <div className="flex flex-col gap-3 border-b border-neutral-200 p-4 sm:flex-row sm:items-center">
-              <div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-neutral-400" /><Input className="pl-9" placeholder="Search this page" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search expenses on this page" /></div>
+              <div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-neutral-400" /><Input className="pl-9" placeholder="Search all expenses" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search all expenses" /></div>
               <select className={inputClass + ' mt-0 sm:w-48'} value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)} aria-label="Filter by vendor"><option value="all">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select>
-              <select className={inputClass + ' mt-0 sm:w-36'} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter this page by status"><option value="all">All on this page</option><option value="open">Open</option><option value="partial">Partial</option><option value="overdue">Overdue</option><option value="paid">Paid</option></select>
+              <select className={inputClass + ' mt-0 sm:w-36'} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter expenses by status"><option value="all">All statuses</option><option value="open">Open</option><option value="partial">Partial</option><option value="overdue">Overdue</option><option value="paid">Paid</option></select>
             </div>
-            {loading ? <p className="p-8 text-sm text-neutral-500">Loading expenses…</p> : visible.length === 0 ? <p className="p-8 text-sm text-neutral-500">No matching expenses. Add a vendor and record the first bill to begin tracking costs.</p> :
-              <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500"><tr><th className="px-4 py-3">Date / vendor</th><th className="px-4 py-3">Category</th><th className="px-4 py-3 text-right">Total</th><th className="px-4 py-3 text-right">Balance</th><th className="px-4 py-3">Status</th></tr></thead><tbody className="divide-y divide-neutral-100">{visible.map((expense) => <tr key={expense.id} className={selected?.id === expense.id ? 'bg-primary-50' : 'hover:bg-neutral-50'}><td className="px-4 py-3"><button className="text-left font-semibold text-neutral-950 hover:text-primary-700 focus-visible:outline-none focus-visible:underline" onClick={() => void openExpense(expense.id)}>{expense.vendor_name}</button><div className="text-xs text-neutral-500">{expense.expense_on}{expense.reference_number ? ` · ${expense.reference_number}` : ''}</div></td><td className="px-4 py-3 text-neutral-700">{expense.category}</td><td className="px-4 py-3 text-right tabular-nums">{money(expense.total_amount, expense.currency)}</td><td className="px-4 py-3 text-right font-semibold tabular-nums">{money(expense.balance_due, expense.currency)}</td><td className="px-4 py-3"><StatusLabel status={expense.payment_status} /></td></tr>)}</tbody></table></div>}
+            {loading ? <p className="p-8 text-sm text-neutral-500">Loading expenses…</p> : expenses.length === 0 ? <p className="p-8 text-sm text-neutral-500">No matching expenses. Clear the filters or add the first expense.</p> : <>
+              <div className="divide-y divide-neutral-100 sm:hidden">{expenses.map((expense) => <button key={expense.id} type="button" onClick={() => void openExpense(expense.id)} className="w-full space-y-2 px-4 py-4 text-left hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500" aria-label={`Open expense from ${expense.vendor_name} on ${expense.expense_on}, ${expense.reference_number || `record ${expense.id}`}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{expense.vendor_name}</p><p className="mt-1 truncate text-xs text-neutral-500">{expense.expense_on} · {expense.category}</p></div><StatusLabel status={expense.payment_status} /></div><div className="flex justify-between gap-3 text-sm"><span className="text-neutral-500">Total {money(expense.total_amount, expense.currency)}</span><span className="font-semibold text-neutral-900">Due {money(expense.balance_due, expense.currency)}</span></div></button>)}</div>
+              <div className="hidden overflow-x-auto sm:block"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500"><tr><th className="px-4 py-3">Date / vendor</th><th className="px-4 py-3">Category</th><th className="px-4 py-3 text-right">Total</th><th className="px-4 py-3 text-right">Balance</th><th className="px-4 py-3">Status</th></tr></thead><tbody className="divide-y divide-neutral-100">{expenses.map((expense) => <tr key={expense.id} className={selected?.id === expense.id ? 'bg-primary-50' : 'hover:bg-neutral-50'}><td className="px-4 py-3"><button className="text-left font-semibold text-neutral-950 hover:text-primary-700 focus-visible:outline-none focus-visible:underline" onClick={() => void openExpense(expense.id)}>{expense.vendor_name}</button><div className="text-xs text-neutral-500">{expense.expense_on}{expense.reference_number ? ` · ${expense.reference_number}` : ''}</div></td><td className="px-4 py-3 text-neutral-700">{expense.category}</td><td className="px-4 py-3 text-right tabular-nums">{money(expense.total_amount, expense.currency)}</td><td className="px-4 py-3 text-right font-semibold tabular-nums">{money(expense.balance_due, expense.currency)}</td><td className="px-4 py-3"><StatusLabel status={expense.payment_status} /></td></tr>)}</tbody></table></div>
+            </>}
             <div className="flex items-center justify-between border-t border-neutral-200 px-4 py-3 text-xs text-neutral-500"><span>{totalCount} expenses · page {page} of {Math.max(1, Math.ceil(totalCount / 50))}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy || page <= 1} onClick={() => { setLoading(true); void load(page - 1); }}>Previous</Button><Button size="sm" variant="outline" disabled={busy || page * 50 >= totalCount} onClick={() => { setLoading(true); void load(page + 1); }}>Next</Button></div></div>
           </section>
 
-          <aside className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm xl:sticky xl:top-28" aria-label="Expense details">
+          <aside ref={detailRef} className="scroll-mt-4 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm xl:sticky xl:top-28" aria-label="Expense details">
             {!selected ? <div className="py-10 text-center"><Receipt className="mx-auto h-8 w-8 text-neutral-300" /><h2 className="mt-3 font-semibold text-neutral-900">Select an expense</h2><p className="mt-1 text-sm text-neutral-500">Payment history and original receipts appear here.</p></div> : <>
               <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-widest text-primary-700">Vendor bill</p><h2 className="mt-1 text-xl font-bold text-neutral-950">{selected.vendor_name}</h2><p className="mt-1 text-sm text-neutral-500">{selected.description}</p></div><StatusLabel status={selected.payment_status} /></div>
               <dl className="mt-5 grid grid-cols-2 gap-3 border-y border-neutral-200 py-4 text-sm"><div><dt className="text-neutral-500">Total</dt><dd className="font-semibold tabular-nums">{money(selected.total_amount, selected.currency)}</dd></div><div><dt className="text-neutral-500">Still due</dt><dd className="font-semibold tabular-nums">{money(selected.balance_due, selected.currency)}</dd></div><div><dt className="text-neutral-500">Expense date</dt><dd>{selected.expense_on}</dd></div><div><dt className="text-neutral-500">Due date</dt><dd>{selected.due_on || '—'}</dd></div></dl>

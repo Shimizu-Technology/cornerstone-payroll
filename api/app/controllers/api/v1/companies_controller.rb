@@ -6,7 +6,7 @@ module Api
       def index
         return render json: { error: "Not authenticated" }, status: :unauthorized unless current_user
 
-        companies = Company.where(id: current_user.accessible_company_ids)
+        companies = Company.includes(:organization).where(id: current_user.accessible_company_ids)
                            .yield_self { |scope| params[:active].present? ? scope.where(active: ActiveModel::Type::Boolean.new.cast(params[:active])) : scope }
                            .order(:name)
         company_ids = companies.pluck(:id)
@@ -23,7 +23,7 @@ module Api
           end,
           can_manage_clients: current_user.organization_admin?,
           can_switch_company: current_user.accessible_company_ids.size > 1,
-          current_company_id: current_company_id
+          current_company_id: company_ids.include?(current_company_id) ? current_company_id : company_ids.first
         }
       end
 
@@ -33,6 +33,7 @@ module Api
         {
           id: company.id,
           organization_id: company.organization_id,
+          organization_name: company.organization&.name,
           name: company.name,
           active: company.active,
           active_employees: active_employee_counts.fetch(company.id, 0),

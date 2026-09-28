@@ -18,7 +18,8 @@ module Api
           raise ArgumentError, "An issued PDF is required" unless invoice.primary_artifact&.content_type == "application/pdf"
 
           recipients = InvoiceSendSchedule.normalize_recipients(params[:recipients].presence || invoice.invoice_recipient.email)
-          send_at = Time.iso8601(params.require(:send_at))
+          send_now = ActiveModel::Type::Boolean.new.cast(params[:send_now])
+          send_at = send_now ? Time.current : Time.iso8601(params.require(:send_at))
           schedule = InvoiceSendSchedule.transaction do
             row = InvoiceSendSchedule.create!(
               organization: invoice.organization,
@@ -30,6 +31,15 @@ module Api
             InvoiceEvent.record!(invoice: invoice, event_type: "email_scheduled", actor: current_user,
                                  metadata: { send_schedule_id: row.id, send_at: send_at.iso8601, recipients: recipients })
             row
+          end
+          if send_now
+            begin
+              InvoiceSendJob.perform_later(schedule.id)
+            rescue StandardError => e
+              # The pending schedule remains durable. The minute dispatcher will
+              # pick it up when the queue is available again.
+              Rails.logger.error("Immediate invoice email enqueue failed for schedule #{schedule.id}: #{e.class}: #{e.message}")
+            end
           end
           render json: { invoice_send_schedule: payload(schedule) }, status: :created
         rescue ActiveRecord::RecordInvalid => e

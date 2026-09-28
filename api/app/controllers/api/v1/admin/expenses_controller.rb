@@ -22,6 +22,8 @@ module Api
           }
         rescue Date::Error
           render json: { error: "Date filters must use YYYY-MM-DD" }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def show
@@ -120,6 +122,8 @@ module Api
           send_data csv, type: "text/csv", filename: "expenses-#{Date.current.iso8601}.csv", disposition: "attachment"
         rescue Date::Error
           render json: { error: "Date filters must use YYYY-MM-DD" }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -144,7 +148,31 @@ module Api
           rows = rows.where("expense_on >= ?", Date.iso8601(params[:from])) if params[:from].present?
           rows = rows.where("expense_on <= ?", Date.iso8601(params[:to])) if params[:to].present?
           rows = rows.active unless ActiveModel::Type::Boolean.new.cast(params[:include_voided])
+          if params[:q].present?
+            query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:q].to_s.strip.first(200))}%"
+            rows = rows.joins(:expense_vendor).where(
+              "expense_vendors.name ILIKE :query OR expenses.reference_number ILIKE :query OR " \
+              "expenses.description ILIKE :query OR expenses.category ILIKE :query", query: query
+            )
+          end
+          rows = filter_payment_status(rows, params[:status]) if params[:status].present?
           rows
+        end
+
+        def filter_payment_status(rows, status)
+          rows = rows.active
+          payment_total = "(SELECT COALESCE(SUM(ep.amount), 0) FROM expense_payments ep " \
+                          "WHERE ep.expense_id = expenses.id AND ep.reversed_at IS NULL)"
+          balance = "expenses.total_amount - #{payment_total}"
+          case status
+          when "paid" then rows.where("#{balance} = 0")
+          when "overdue" then rows.where("#{balance} > 0 AND expenses.due_on < ?", Date.current)
+          when "partial" then rows.where("#{payment_total} > 0 AND #{balance} > 0 AND " \
+                                          "(expenses.due_on IS NULL OR expenses.due_on >= ?)", Date.current)
+          when "open" then rows.where("#{payment_total} = 0 AND " \
+                                       "(expenses.due_on IS NULL OR expenses.due_on >= ?)", Date.current)
+          else raise ArgumentError, "Unknown expense status"
+          end
         end
 
         def expense_params
