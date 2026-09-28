@@ -312,6 +312,17 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       )
     end
 
+    it "blocks an invoice assistant session in another organization" do
+      other_organization = create(:organization)
+      create(:invoice_chat_session, organization: other_organization, company: payroll_company)
+
+      get "/api/v1/admin/organizations/company_transfer_preview",
+          params: { company_id: payroll_company.id, billing_profile_id: profile.id }
+      expect(response.parsed_body.dig("transfer", "blockers")).to include(
+        "Company has an invoice assistant session in another organization"
+      )
+    end
+
     it "limits both transfer actions to platform admins" do
       allow_any_instance_of(Api::V1::Admin::OrganizationsController).to receive(:current_user).and_return(org_admin)
       get "/api/v1/admin/organizations/company_transfer_preview", params: { company_id: payroll_company.id }

@@ -116,6 +116,7 @@ class OrganizationCompanyTransfer
     issues << "Source organization needs a different primary company for staff" unless source.primary_company_id && source.primary_company_id != company.id
     issues << "Selected billing profile does not belong to the source organization" if billing_profile && billing_profile.organization_id != source.id
     issues << "Company has an invoice in another organization" if Invoice.where(company_id: company.id).where.not(organization_id: source.id).exists?
+    issues << "Company has an invoice assistant session in another organization" if InvoiceChatSession.where(company_id: company.id).where.not(organization_id: source.id).exists?
     issues << "Selected billing profile has invoices assigned to another company" if selected_invoices.where.not(company_id: [ nil, company.id ]).exists?
     issues << "A linked test workspace must be resolved first" if Company.where(migration_source_company_id: company.id).exists?
     issues << "Client user has assignments to other companies" if CompanyAssignment.where(user_id: home_users.where(role: %w[client employee]).select(:id)).where.not(company_id: company.id).exists?
