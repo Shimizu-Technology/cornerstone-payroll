@@ -414,6 +414,44 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(event.fetch("occurred_at")).to start_with("2026-07-15T09:47:00")
   end
 
+  it "corrects a manual delivery time while preserving the original audit event" do
+    invoice = issue_invoice(total: 125)
+    post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: {
+      channel: "email", recipient: "customer@example.com", delivered_at: "2026-09-20T20:23:00+10:00"
+    }
+    expect(response).to have_http_status(:ok), response.body
+    delivery = invoice.deliveries.sole
+    original_event = invoice.events.find_by!(event_type: "delivery_recorded")
+
+    patch "/api/v1/admin/invoices/#{invoice.id}/deliveries/#{delivery.id}", params: {
+      delivered_at: "2026-09-20T10:23:00+10:00", reason: "Corrected browser time zone conversion"
+    }
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(delivery.reload.delivered_at.iso8601).to eq("2026-09-20T00:23:00Z")
+    expect(invoice.reload.sent_at).to eq(delivery.delivered_at)
+    expect(original_event.reload.occurred_at.iso8601).to eq("2026-09-20T10:23:00Z")
+    correction = invoice.events.find_by!(event_type: "delivery_corrected")
+    expect(correction.metadata).to include("delivery_id" => delivery.id, "reason" => "Corrected browser time zone conversion")
+  end
+
+  it "does not allow a manual correction to provider delivery evidence" do
+    invoice = issue_invoice(total: 125)
+    post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: { channel: "email" }
+    delivery = invoice.deliveries.sole
+    invoice.events.find_by!(event_type: "delivery_recorded").update_columns(metadata: {
+      delivery_id: delivery.id, send_schedule_id: 42
+    })
+
+    patch "/api/v1/admin/invoices/#{invoice.id}/deliveries/#{delivery.id}", params: {
+      delivered_at: "2026-09-20T10:23:00+10:00", reason: "Wrong time"
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Provider deliveries cannot be corrected manually")
+    expect(invoice.events.where(event_type: "delivery_corrected")).to be_empty
+  end
+
   it "tracks partial and final payments, rejects overpayment, and reverses without deleting evidence" do
     invoice = issue_invoice(total: 300)
 

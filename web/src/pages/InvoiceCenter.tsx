@@ -171,6 +171,11 @@ const formatDate = (value?: string | null) => {
 };
 
 const formatDateTime = (value?: string | null) => value ? new Date(value).toLocaleString() : '—';
+const localTimeToIso = (value: string) => {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error('Enter a valid date and time');
+  return date.toISOString();
+};
 const localDateTimeInput = (value: string) => {
   const date = new Date(value);
   const offset = date.getTimezoneOffset() * 60_000;
@@ -227,6 +232,7 @@ export function InvoiceCenter() {
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [detailAction, setDetailAction] = useState<DetailAction>(null);
+  const [correctingDeliveryId, setCorrectingDeliveryId] = useState<number | null>(null);
   const [draft, setDraft] = useState<DraftForm>(emptyDraft);
   const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
   const [importForm, setImportForm] = useState<ImportForm>(emptyImport);
@@ -507,7 +513,7 @@ export function InvoiceCenter() {
       discount_value: importForm.discount_type === 'none' ? undefined : Number(importForm.discount_value),
       customer_reference: importForm.customer_reference || undefined,
       notes: importForm.notes || undefined,
-      delivered_at: importForm.delivered_at || undefined,
+      delivered_at: importForm.delivered_at ? localTimeToIso(importForm.delivered_at) : undefined,
       delivery_channel: importForm.delivery_channel,
     });
     setImportForm(emptyImport());
@@ -581,13 +587,27 @@ export function InvoiceCenter() {
       const response = await invoicesApi.recordDelivery(selected.id, {
         channel: String(form.get('channel')),
         recipient: String(form.get('recipient') || '') || undefined,
-        delivered_at: String(form.get('delivered_at') || '') || undefined,
+        delivered_at: form.get('delivered_at') ? localTimeToIso(String(form.get('delivered_at'))) : undefined,
         provider_reference: String(form.get('provider_reference') || '') || undefined,
         notes: String(form.get('notes') || '') || undefined,
       });
       applyInvoice(response.invoice);
       setDetailAction(null);
     }, 'Delivery evidence recorded.');
+  };
+
+  const submitDeliveryCorrection = async (event: React.FormEvent<HTMLFormElement>, deliveryId: number) => {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    await run(async () => {
+      const response = await invoicesApi.correctDelivery(selected.id, deliveryId, {
+        delivered_at: localTimeToIso(String(form.get('delivered_at'))),
+        reason: String(form.get('reason')).trim(),
+      });
+      applyInvoice(response.invoice);
+      setCorrectingDeliveryId(null);
+    }, 'Delivery time corrected with an audit record.');
   };
 
   const submitCredit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1010,8 +1030,22 @@ export function InvoiceCenter() {
                   {!selectedSendSchedules.length && <p className="py-2 text-sm text-neutral-500">No email is scheduled for this invoice.</p>}
                 </div>
               </div>
-              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><MailCheck className="h-4 w-4" />Delivery history</h3><span className="text-xs text-neutral-400">Newest first</span></div><div className="mt-3 space-y-2">{deliveryHistory.map((delivery) => <div key={delivery.id} className="rounded-lg bg-neutral-50 p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{delivery.channel.replaceAll('_', ' ')}</p><span className="text-xs text-neutral-400">{formatDateTime(delivery.delivered_at)}</span></div><p className="mt-1 text-neutral-600">To {delivery.recipient || 'Recipient not recorded'}</p>{delivery.provider_reference && <p className="mt-1 text-xs text-neutral-500">Reference: {delivery.provider_reference}</p>}{delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}<p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p></div>)}{!deliveryHistory.length && <p className="py-3 text-sm text-neutral-500">No delivery has been recorded.</p>}</div></div>
-              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}</div></div>; })}</div></div>
+              <div className="rounded-xl border border-neutral-200 p-4">
+                <div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><MailCheck className="h-4 w-4" />Delivery history</h3><span className="text-xs text-neutral-400">Newest first</span></div>
+                <div className="mt-3 space-y-2">{deliveryHistory.map((delivery) => <div key={delivery.id} className="rounded-lg bg-neutral-50 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{delivery.channel.replaceAll('_', ' ')}</p><span className="text-xs text-neutral-400">{formatDateTime(delivery.delivered_at)}</span></div>
+                  <p className="mt-1 text-neutral-600">To {delivery.recipient || 'Recipient not recorded'}</p>
+                  {delivery.provider_reference && <p className="mt-1 text-xs text-neutral-500">Reference: {delivery.provider_reference}</p>}
+                  {delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}
+                  <p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p>
+                  {delivery.correctable && (correctingDeliveryId === delivery.id ? <form onSubmit={(event) => submitDeliveryCorrection(event, delivery.id)} className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className="text-xs font-medium">Corrected local time<Input required name="delivered_at" type="datetime-local" defaultValue={localDateTimeInput(delivery.delivered_at)} className="mt-1" /></label>
+                    <label className="text-xs font-medium">Reason<Input required name="reason" placeholder="For example, corrected time zone" className="mt-1" /></label>
+                    <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={busy}>Save correction</Button><Button type="button" variant="ghost" onClick={() => setCorrectingDeliveryId(null)}>Cancel</Button></div>
+                  </form> : <button type="button" className="mt-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline" onClick={() => setCorrectingDeliveryId(delivery.id)}>Correct time</button>)}
+                </div>)}{!deliveryHistory.length && <p className="py-3 text-sm text-neutral-500">No delivery has been recorded.</p>}</div>
+              </div>
+              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}{event.event_type === 'delivery_corrected' && <p className="text-xs text-neutral-500">Changed from {formatDateTime(String(event.metadata.original_delivered_at))} to {formatDateTime(String(event.metadata.corrected_delivered_at))}. Reason: {String(event.metadata.reason)}</p>}</div></div>; })}</div></div>
             </div>
           </div>
         </div>

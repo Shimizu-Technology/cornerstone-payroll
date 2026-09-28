@@ -7,6 +7,7 @@ module Api
         before_action :require_admin!
         before_action :set_invoice, only: %i[
           show update destroy update_status preview_pdf generate_pdf issue download_artifact record_delivery
+          correct_delivery
         ]
 
         def index
@@ -216,6 +217,33 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def correct_delivery
+          delivery = @invoice.deliveries.find(params[:delivery_id])
+          corrected_time = Time.zone.parse(params.require(:delivered_at))
+          reason = params.require(:reason).to_s.strip
+          raise ArgumentError, "Corrected delivery time is invalid" if corrected_time.blank?
+          raise ArgumentError, "Explain why the delivery time changed" if reason.blank?
+          raise ArgumentError, "Provider deliveries cannot be corrected manually" if @invoice.events.where(event_type: "delivery_recorded").any? { |event| event.metadata["delivery_id"].to_i == delivery.id && event.metadata["send_schedule_id"].present? }
+
+          Invoice.transaction do
+            @invoice.lock!
+            delivery.lock!
+            original_time = delivery.delivered_at
+            raise ArgumentError, "The delivery time has not changed" if corrected_time == original_time
+            delivery.update!(delivered_at: corrected_time)
+            @invoice.update!(sent_at: corrected_time, updated_by: current_user) if @invoice.sent_at == original_time
+            InvoiceEvent.record!(invoice: @invoice, event_type: "delivery_corrected", actor: current_user,
+                                 metadata: { delivery_id: delivery.id, original_delivered_at: original_time.iso8601,
+                                             corrected_delivered_at: corrected_time.iso8601, reason: reason })
+          end
+
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError, ActionController::ParameterMissing => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 

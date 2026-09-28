@@ -4484,6 +4484,7 @@ export interface InvoiceDelivery {
   notes?: string | null;
   artifact_id?: number | null;
   recorded_by_name?: string | null;
+  correctable?: boolean;
   created_at: string;
 }
 
@@ -4713,6 +4714,8 @@ export const invoicesApi = {
     api.getBlobWithParams(`/admin/invoices/${id}/download_artifact`, { disposition }),
   recordDelivery: (id: number, data: { channel: string; recipient?: string; delivered_at?: string; provider_reference?: string; notes?: string }) =>
     api.post<{ invoice: Invoice }>(`/admin/invoices/${id}/record_delivery`, data),
+  correctDelivery: (invoiceId: number, deliveryId: number, data: { delivered_at: string; reason: string }) =>
+    api.patch<{ invoice: Invoice }>(`/admin/invoices/${invoiceId}/deliveries/${deliveryId}`, data),
   recordPayment: (id: number, data: { amount: number; received_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
     api.post<{ payment_id: number; invoice: Invoice }>(`/admin/invoices/${id}/payments`, data),
   reversePayment: (invoiceId: number, paymentId: number, reason: string) =>
