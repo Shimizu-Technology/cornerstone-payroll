@@ -11,6 +11,15 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
+      namespace :finance do
+        get :context, to: "access#context"
+        get :overview, to: "access#overview"
+        get :invoices, to: "access#invoices"
+        get "invoices/:id", to: "access#invoice"
+        get :expenses, to: "access#expenses"
+        get "expenses/:id", to: "access#expense"
+      end
+
       namespace :integrations do
         namespace :aire do
           post :events, to: "events#create"
@@ -495,6 +504,7 @@ Rails.application.routes.draw do
 
         # Invoice Center and bounded accounts receivable
         resources :finance_books, only: [:index, :create, :update]
+        resources :finance_api_tokens, only: [:index, :create, :destroy]
         resource :finance_overview, only: [:show]
         resources :invoice_billing_profiles, except: [:new, :edit] do
           member do

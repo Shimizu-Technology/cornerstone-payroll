@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { ArrowDownLeft, ArrowUpRight, Clock3, RefreshCw } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Clock3, KeyRound, RefreshCw } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { FinanceBookSelector, useFinanceBook } from '@/contexts/FinanceBookContext';
@@ -52,9 +52,10 @@ export function FinanceOverview() {
       actions={<Button variant="outline" onClick={() => setRefresh((value) => value + 1)} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>} />
     <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <FinanceBookSelector disabled={loading} />
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <Link to="/tools/invoices" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage invoices <ArrowUpRight className="h-4 w-4" /></Link>
         <Link to="/tools/expenses" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage expenses <ArrowUpRight className="h-4 w-4" /></Link>
+        <Link to="/tools/finance/agent-access" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Agent access <KeyRound className="h-4 w-4" /></Link>
       </div>
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
       {loading || switchingBook ? <p role="status" className="text-sm text-neutral-600">Loading this book’s finances…</p>
