@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_014000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_015000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1184,6 +1184,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_014000) do
     t.datetime "updated_at", null: false
     t.index ["annual_tax_config_id", "filing_status"], name: "idx_filing_status_configs_unique", unique: true
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
+  create_table "finance_api_tokens", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.datetime "expires_at", null: false
+    t.bigint "finance_book_id", null: false
+    t.datetime "last_used_at"
+    t.string "name", null: false
+    t.bigint "organization_id", null: false
+    t.datetime "revoked_at"
+    t.string "scopes", default: ["read"], null: false, array: true
+    t.string "token_digest", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_finance_api_tokens_on_created_by_id"
+    t.index ["finance_book_id", "revoked_at"], name: "index_finance_api_tokens_on_finance_book_id_and_revoked_at"
+    t.index ["finance_book_id"], name: "index_finance_api_tokens_on_finance_book_id"
+    t.index ["organization_id"], name: "index_finance_api_tokens_on_organization_id"
+    t.index ["token_digest"], name: "index_finance_api_tokens_on_token_digest", unique: true
   end
 
   create_table "finance_books", force: :cascade do |t|
@@ -3532,6 +3551,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_014000) do
   add_foreign_key "expenses", "expense_vendors", column: ["expense_vendor_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_expenses_expense_vendor_id_book_scope", deferrable: :deferred
   add_foreign_key "expenses", "finance_books"
   add_foreign_key "expenses", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expenses_book_organization"
+  add_foreign_key "finance_api_tokens", "finance_books"
+  add_foreign_key "finance_api_tokens", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_tokens_book_organization"
+  add_foreign_key "finance_api_tokens", "organizations"
+  add_foreign_key "finance_api_tokens", "users", column: "created_by_id"
   add_foreign_key "finance_books", "companies"
   add_foreign_key "finance_books", "companies", column: ["company_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_books_company_id_book_scope", deferrable: :deferred
   add_foreign_key "finance_books", "organizations", on_delete: :cascade

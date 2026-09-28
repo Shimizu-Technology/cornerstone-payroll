@@ -5861,6 +5861,27 @@ export const financeOverviewApi = {
   show: (asOf?: string): Promise<FinanceOverview> => api.get<FinanceOverview>('/admin/finance_overview', asOf ? { as_of: asOf } : undefined),
 };
 
+export interface FinanceApiToken {
+  id: number;
+  organization_id: number;
+  finance_book_id: number;
+  name: string;
+  scopes: string[];
+  expires_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export const financeApiTokensApi = {
+  list: (): Promise<{ finance_book_id: number; tokens: FinanceApiToken[] }> =>
+    api.get('/admin/finance_api_tokens'),
+  create: (name: string): Promise<{ token: FinanceApiToken; secret: string }> =>
+    api.post('/admin/finance_api_tokens', { name }),
+  revoke: (id: number): Promise<{ token: FinanceApiToken }> =>
+    api.delete(`/admin/finance_api_tokens/${id}`),
+};
+
 export const expenseVendorsApi = {
   list: (active = false) => api.get<{ expense_vendors: ExpenseVendor[] }>('/admin/expense_vendors', { active }),
   create: (data: { name: string; email?: string; notes?: string }) =>
