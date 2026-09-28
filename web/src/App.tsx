@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
+import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
@@ -349,9 +350,9 @@ function AppRoutes() {
         <Route path="payroll-fields" element={<ManagerOnlyRoute><PayrollFields /></ManagerOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
-        <Route path="tools/invoices" element={<AdminOnlyRoute><InvoiceCenter /></AdminOnlyRoute>} />
-        <Route path="tools/expenses" element={<AdminOnlyRoute><ExpenseLedger /></AdminOnlyRoute>} />
-        <Route path="tools/invoices/assistant" element={<AdminOnlyRoute><InvoiceMaker /></AdminOnlyRoute>} />
+        <Route path="tools/invoices" element={<AdminOnlyRoute><FinanceBookGate><InvoiceCenter /></FinanceBookGate></AdminOnlyRoute>} />
+        <Route path="tools/expenses" element={<AdminOnlyRoute><FinanceBookGate><ExpenseLedger /></FinanceBookGate></AdminOnlyRoute>} />
+        <Route path="tools/invoices/assistant" element={<AdminOnlyRoute><FinanceBookGate><InvoiceMaker /></FinanceBookGate></AdminOnlyRoute>} />
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/organizations" element={<SuperAdminOnlyRoute><Organizations /></SuperAdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />

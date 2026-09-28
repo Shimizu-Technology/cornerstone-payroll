@@ -12,7 +12,7 @@ module Api
         end
 
         def create
-          invoice = Invoice.find_by(id: params.require(:invoice_id), organization_id: current_organization_id)
+          invoice = Invoice.find_by(id: params.require(:invoice_id), finance_book_id: current_finance_book.id)
           return render json: { error: "Invoice not found" }, status: :not_found unless invoice
           raise ArgumentError, "Only unpaid open invoices can be scheduled for email" unless invoice.open? && invoice.balance_due.positive?
           raise ArgumentError, "An issued PDF is required" unless invoice.primary_artifact&.content_type == "application/pdf"
@@ -23,6 +23,7 @@ module Api
           schedule = InvoiceSendSchedule.transaction do
             row = InvoiceSendSchedule.create!(
               organization: invoice.organization,
+              finance_book: current_finance_book,
               invoice: invoice,
               created_by: current_user,
               recipients: recipients,
@@ -92,7 +93,7 @@ module Api
         private
 
         def scoped
-          InvoiceSendSchedule.where(organization_id: current_organization_id)
+          InvoiceSendSchedule.where(finance_book_id: current_finance_book.id)
         end
 
         def payload(row)

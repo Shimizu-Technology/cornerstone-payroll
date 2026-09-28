@@ -42,6 +42,7 @@ module Api
           end
 
           expense = scope.new(attrs)
+          expense.finance_book = current_finance_book
           expense.created_by = current_user
           expense.updated_by = current_user
           expense.save!
@@ -138,7 +139,7 @@ module Api
         end
 
         def scope
-          Expense.where(organization_id: current_organization_id)
+          Expense.where(organization_id: current_organization_id, finance_book_id: current_finance_book.id)
         end
 
         def filtered_scope

@@ -9,7 +9,7 @@ module Api
         before_action :set_profile, only: [ :show, :update, :destroy, :upload_logo, :remove_logo ]
 
         def index
-          profiles = current_organization.invoice_billing_profiles.ordered
+          profiles = current_finance_book.invoice_billing_profiles.ordered
           profiles = profiles.active if ActiveModel::Type::Boolean.new.cast(params[:active])
 
           render json: { invoice_billing_profiles: profiles.map { |profile| profile_payload(profile) } }
@@ -20,7 +20,7 @@ module Api
         end
 
         def create
-          profile = current_organization.invoice_billing_profiles.build(profile_attributes)
+          profile = current_finance_book.invoice_billing_profiles.build(profile_attributes.merge(organization: current_organization))
 
           if profile.save
             render json: { invoice_billing_profile: profile_payload(profile) }, status: :created
@@ -68,7 +68,7 @@ module Api
         private
 
         def set_profile
-          @profile = current_organization.invoice_billing_profiles.find_by(id: params[:id])
+          @profile = current_finance_book.invoice_billing_profiles.find_by(id: params[:id])
           return if @profile
 
           render json: { error: "Invoice billing profile not found" }, status: :not_found

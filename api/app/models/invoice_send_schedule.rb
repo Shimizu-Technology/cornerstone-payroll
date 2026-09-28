@@ -7,10 +7,12 @@ class InvoiceSendSchedule < ApplicationRecord
   belongs_to :organization
   belongs_to :invoice
   belongs_to :created_by, class_name: "User", optional: true
+  include FinanceBookOwned
 
   validates :status, inclusion: { in: STATUSES }
   validates :send_at, presence: true
   validate :invoice_belongs_to_organization
+  validate :invoice_belongs_to_book
   validate :recipients_are_valid
 
   scope :due, ->(at = Time.current) { where(status: "pending").where("send_at <= ?", at) }
@@ -54,6 +56,16 @@ class InvoiceSendSchedule < ApplicationRecord
   private_class_method :advisory_lock_binds
 
   private
+
+  def finance_book_parent
+    invoice
+  end
+
+  def invoice_belongs_to_book
+    return if invoice.blank? || finance_book.blank? || invoice.finance_book_id == finance_book_id
+
+    errors.add(:invoice, "must belong to the same financial book")
+  end
 
   def invoice_belongs_to_organization
     return if invoice.blank? || organization.blank? || invoice.organization_id == organization_id

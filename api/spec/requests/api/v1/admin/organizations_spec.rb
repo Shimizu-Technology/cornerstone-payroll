@@ -221,12 +221,17 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       expect(response).to have_http_status(:created), response.body
 
       destination = Organization.find_by!(slug: "shimizu-technology")
+      destination_book = destination.finance_books.find_by!(is_default: true)
       expect(destination.primary_company_id).to eq(payroll_company.id)
+      expect(destination_book.company_id).to eq(payroll_company.id)
       expect(payroll_company.reload.organization_id).to eq(destination.id)
       expect(pay_period.reload.company_id).to eq(payroll_company.id)
       expect(invoice.reload.organization_id).to eq(destination.id)
+      expect(invoice.finance_book_id).to eq(destination_book.id)
       expect(invoice.invoice_recipient.reload.organization_id).to eq(destination.id)
+      expect(invoice.invoice_recipient.finance_book_id).to eq(destination_book.id)
       expect(profile.reload.organization_id).to eq(destination.id)
+      expect(profile.finance_book_id).to eq(destination_book.id)
       expect(profile.legal_name).to eq("Shimizu Technology LLC")
       expect(client_user.reload.organization_id).to eq(destination.id)
       expect(CompanyAssignment.where(company_id: payroll_company.id)).to be_empty

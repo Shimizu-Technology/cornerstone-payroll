@@ -291,10 +291,8 @@ class InvoicePdfGenerator
   end
 
   def footer(pdf)
-    generated_at = snapshot["generated_at"].presence
     note = billing["footer_note"].presence || "Thank you for your business."
-    timestamp_label = invoice_data["status"] == "draft" ? "Draft preview" : "Issued"
-    footer_text = [ note, generated_at && "#{timestamp_label} #{format_timestamp(generated_at)}" ].compact.join("  |  ")
+    footer_text = invoice_data["status"] == "draft" ? "#{note}  |  Draft preview" : note
 
     pdf.repeat(:all) do
       pdf.canvas do
@@ -326,12 +324,6 @@ class InvoicePdfGenerator
 
     Date.parse(value.to_s).strftime("%m/%d/%Y")
   rescue Date::Error
-    value.to_s
-  end
-
-  def format_timestamp(value)
-    Time.iso8601(value.to_s).utc.strftime("%m/%d/%Y %I:%M %p UTC")
-  rescue ArgumentError
     value.to_s
   end
 

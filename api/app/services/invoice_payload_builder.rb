@@ -16,6 +16,7 @@ class InvoicePayloadBuilder
     payload = {
       id: invoice.id,
       organization_id: invoice.organization_id,
+      finance_book_id: invoice.finance_book_id,
       company_id: invoice.company_id,
       invoice_recipient_id: invoice.invoice_recipient_id,
       invoice_billing_profile_id: invoice.invoice_billing_profile_id,

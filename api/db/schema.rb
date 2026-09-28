@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_013000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -446,16 +446,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.string "zip"
     t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
     t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
+    t.index ["id", "organization_id"], name: "index_companies_on_id_and_organization_id", unique: true
     t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"
     t.index ["migration_source_batch_id"], name: "index_companies_on_migration_source_batch_id"
-    t.index ["migration_source_company_id", "test_workspace_purpose"], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL) AND ((test_workspace_purpose)::text = ANY ((ARRAY['migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying])::text[])))"
+    t.index ["migration_source_company_id", "test_workspace_purpose"], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL) AND ((test_workspace_purpose)::text = ANY (ARRAY[('migration_rehearsal'::character varying)::text, ('training_replay'::character varying)::text, ('backup_snapshot'::character varying)::text])))"
     t.index ["migration_source_company_id"], name: "index_companies_on_migration_source_company_id"
     t.index ["name"], name: "index_companies_on_name"
     t.index ["organization_id"], name: "index_companies_on_organization_id"
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
-    t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying, 'migration_rehearsal'::character varying, 'training_replay'::character varying, 'backup_snapshot'::character varying]::text[]))", name: "companies_test_workspace_purpose_check"
+    t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -1133,11 +1134,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.string "email"
+    t.bigint "finance_book_id", null: false
     t.string "name", null: false
     t.text "notes"
     t.bigint "organization_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["organization_id", "name"], name: "index_expense_vendors_on_organization_id_and_name", unique: true
+    t.index ["finance_book_id", "name"], name: "index_expense_vendors_on_finance_book_id_and_name", unique: true
+    t.index ["finance_book_id"], name: "index_expense_vendors_on_finance_book_id"
+    t.index ["id", "finance_book_id"], name: "index_expense_vendors_on_id_and_finance_book_id", unique: true
     t.index ["organization_id"], name: "index_expense_vendors_on_organization_id"
   end
 
@@ -1150,6 +1154,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.date "due_on"
     t.date "expense_on", null: false
     t.bigint "expense_vendor_id", null: false
+    t.bigint "finance_book_id", null: false
     t.bigint "organization_id", null: false
     t.string "reference_number"
     t.string "source_key"
@@ -1160,9 +1165,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "voided_at"
     t.index ["created_by_id"], name: "index_expenses_on_created_by_id"
     t.index ["expense_vendor_id"], name: "index_expenses_on_expense_vendor_id"
+    t.index ["finance_book_id", "source_key"], name: "index_expenses_on_book_and_source_key", unique: true, where: "(source_key IS NOT NULL)"
+    t.index ["finance_book_id"], name: "index_expenses_on_finance_book_id"
     t.index ["organization_id", "due_on"], name: "index_expenses_on_organization_id_and_due_on"
     t.index ["organization_id", "expense_on"], name: "index_expenses_on_organization_id_and_expense_on"
-    t.index ["organization_id", "source_key"], name: "index_expenses_on_organization_id_and_source_key", unique: true, where: "(source_key IS NOT NULL)"
     t.index ["organization_id"], name: "index_expenses_on_organization_id"
     t.index ["updated_by_id"], name: "index_expenses_on_updated_by_id"
     t.check_constraint "currency::text ~ '^[A-Z]{3}$'::text", name: "check_expense_currency"
@@ -1177,6 +1183,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "updated_at", null: false
     t.index ["annual_tax_config_id", "filing_status"], name: "idx_filing_status_configs_unique", unique: true
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
+  create_table "finance_books", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.bigint "company_id"
+    t.datetime "created_at", null: false
+    t.boolean "is_default", default: false, null: false
+    t.string "kind", default: "organization", null: false
+    t.string "legal_name", null: false
+    t.string "name", null: false
+    t.bigint "organization_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_finance_books_on_company_id", unique: true, where: "(company_id IS NOT NULL)"
+    t.index ["id", "organization_id"], name: "index_finance_books_on_id_and_organization_id", unique: true
+    t.index ["organization_id", "is_default"], name: "index_finance_books_one_default_per_organization", unique: true, where: "(is_default = true)"
+    t.index ["organization_id", "name"], name: "index_finance_books_on_organization_id_and_name", unique: true
+    t.index ["organization_id"], name: "index_finance_books_on_organization_id"
+    t.check_constraint "kind::text = 'organization'::text OR company_id IS NOT NULL", name: "finance_books_client_has_company"
+    t.check_constraint "kind::text = ANY (ARRAY['organization'::character varying::text, 'client'::character varying::text])", name: "finance_books_kind_check"
   end
 
   create_table "form500_filings", force: :cascade do |t|
@@ -1697,6 +1722,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "created_at", null: false
     t.text "default_payment_terms"
     t.string "email"
+    t.bigint "finance_book_id", null: false
     t.text "footer_note"
     t.string "invoice_prefix"
     t.boolean "is_default", default: false, null: false
@@ -1712,9 +1738,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.string "remit_to"
     t.datetime "updated_at", null: false
     t.string "website"
-    t.index ["organization_id", "is_default"], name: "index_invoice_billing_profiles_one_default_per_org", unique: true, where: "(is_default = true)"
+    t.index ["finance_book_id", "is_default"], name: "index_invoice_billing_profiles_one_default_per_book", unique: true, where: "(is_default = true)"
+    t.index ["finance_book_id", "name"], name: "index_invoice_billing_profiles_on_finance_book_id_and_name", unique: true
+    t.index ["finance_book_id"], name: "index_invoice_billing_profiles_on_finance_book_id"
+    t.index ["id", "finance_book_id"], name: "index_invoice_billing_profiles_on_id_and_finance_book_id", unique: true
     t.index ["logo_storage_key"], name: "index_invoice_billing_profiles_on_logo_storage_key", unique: true
-    t.index ["organization_id", "name"], name: "index_invoice_billing_profiles_on_organization_id_and_name", unique: true
     t.index ["organization_id"], name: "index_invoice_billing_profiles_on_organization_id"
   end
 
@@ -1740,6 +1768,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.bigint "created_by_id"
     t.jsonb "current_preview", default: {}, null: false
     t.integer "current_preview_version", default: 0, null: false
+    t.bigint "finance_book_id", null: false
     t.bigint "invoice_id"
     t.bigint "invoice_recipient_id"
     t.bigint "organization_id", null: false
@@ -1750,6 +1779,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.index ["company_id", "archived", "updated_at"], name: "idx_invoice_chat_sessions_on_company_archive_updated"
     t.index ["company_id"], name: "index_invoice_chat_sessions_on_company_id"
     t.index ["created_by_id"], name: "index_invoice_chat_sessions_on_created_by_id"
+    t.index ["finance_book_id"], name: "index_invoice_chat_sessions_on_finance_book_id"
     t.index ["invoice_id"], name: "index_invoice_chat_sessions_on_invoice_id"
     t.index ["invoice_recipient_id"], name: "index_invoice_chat_sessions_on_invoice_recipient_id"
     t.index ["organization_id", "archived", "updated_at"], name: "idx_invoice_chat_sessions_on_org_archive_updated"
@@ -1877,6 +1907,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "created_at", null: false
     t.decimal "default_rate", precision: 12, scale: 2
     t.string "email"
+    t.bigint "finance_book_id", null: false
     t.string "invoice_prefix"
     t.string "name", null: false
     t.text "notes"
@@ -1886,6 +1917,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "name"], name: "index_invoice_recipients_on_company_id_and_name"
     t.index ["company_id"], name: "index_invoice_recipients_on_company_id"
+    t.index ["finance_book_id"], name: "index_invoice_recipients_on_finance_book_id"
+    t.index ["id", "finance_book_id"], name: "index_invoice_recipients_on_id_and_finance_book_id", unique: true
     t.index ["organization_id", "name"], name: "index_invoice_recipients_on_org_name"
     t.index ["organization_id"], name: "index_invoice_recipients_on_organization_id"
   end
@@ -1896,6 +1929,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.bigint "created_by_id"
     t.integer "due_after_days", default: 30, null: false
     t.date "ends_on"
+    t.bigint "finance_book_id", null: false
     t.integer "interval_count", default: 1, null: false
     t.string "interval_unit", null: false
     t.date "next_on", null: false
@@ -1907,6 +1941,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.datetime "updated_at", null: false
     t.index ["active", "next_on"], name: "index_invoice_recurrences_on_active_and_next_on"
     t.index ["created_by_id"], name: "index_invoice_recurrences_on_created_by_id"
+    t.index ["finance_book_id"], name: "index_invoice_recurrences_on_finance_book_id"
     t.index ["organization_id"], name: "index_invoice_recurrences_on_organization_id"
     t.index ["source_invoice_id"], name: "index_active_invoice_recurrences_on_source", unique: true, where: "(active = true)"
     t.index ["source_invoice_id"], name: "index_invoice_recurrences_on_source_invoice_id"
@@ -1918,8 +1953,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.integer "attempts", default: 0, null: false
     t.datetime "claimed_at"
     t.datetime "created_at", null: false
-    t.datetime "first_claimed_at"
     t.bigint "created_by_id"
+    t.bigint "finance_book_id", null: false
+    t.datetime "first_claimed_at"
     t.bigint "invoice_id", null: false
     t.text "last_error"
     t.bigint "organization_id", null: false
@@ -1934,6 +1970,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
     t.index ["created_by_id"], name: "index_invoice_send_schedules_on_created_by_id"
+    t.index ["finance_book_id"], name: "index_invoice_send_schedules_on_finance_book_id"
     t.index ["invoice_id"], name: "index_invoice_send_schedules_on_invoice_id"
     t.index ["organization_id"], name: "index_invoice_send_schedules_on_organization_id"
     t.index ["status", "send_at"], name: "index_invoice_send_schedules_on_status_and_send_at"
@@ -1953,6 +1990,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.date "due_date"
     t.text "email_body"
     t.string "email_subject"
+    t.bigint "finance_book_id", null: false
     t.datetime "generated_at"
     t.bigint "invoice_billing_profile_id", null: false
     t.date "invoice_date", null: false
@@ -1982,6 +2020,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.index ["company_id", "status"], name: "index_invoices_on_company_id_and_status"
     t.index ["company_id"], name: "index_invoices_on_company_id"
     t.index ["created_by_id"], name: "index_invoices_on_created_by_id"
+    t.index ["finance_book_id"], name: "index_invoices_on_finance_book_id"
+    t.index ["id", "finance_book_id"], name: "index_invoices_on_id_and_finance_book_id", unique: true
     t.index ["invoice_billing_profile_id", "invoice_number"], name: "index_invoices_on_billing_profile_invoice_number", unique: true
     t.index ["invoice_billing_profile_id", "status", "due_date"], name: "idx_invoices_on_profile_status_due_date"
     t.index ["invoice_billing_profile_id"], name: "index_invoices_on_invoice_billing_profile_id"
@@ -3486,6 +3526,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.index ["marked_ready_by_id"], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
+  add_foreign_key "expense_vendors", "finance_books"
+  add_foreign_key "expense_vendors", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expense_vendors_book_organization"
+  add_foreign_key "expenses", "expense_vendors", column: ["expense_vendor_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_expenses_expense_vendor_id_book_scope", deferrable: :deferred
+  add_foreign_key "expenses", "finance_books"
+  add_foreign_key "expenses", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expenses_book_organization"
+  add_foreign_key "finance_books", "companies"
+  add_foreign_key "finance_books", "companies", column: ["company_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_books_company_id_book_scope", deferrable: :deferred
+  add_foreign_key "finance_books", "organizations", on_delete: :cascade
+  add_foreign_key "invoice_billing_profiles", "finance_books"
+  add_foreign_key "invoice_billing_profiles", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_billing_profiles_book_organization"
+  add_foreign_key "invoice_chat_sessions", "finance_books"
+  add_foreign_key "invoice_chat_sessions", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_chat_sessions_book_organization"
+  add_foreign_key "invoice_chat_sessions", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_recipient_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoice_chat_sessions", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoice_recipients", "finance_books"
+  add_foreign_key "invoice_recipients", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recipients_book_organization"
+  add_foreign_key "invoice_recurrences", "finance_books"
+  add_foreign_key "invoice_recurrences", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recurrences_book_organization"
+  add_foreign_key "invoice_recurrences", "invoices", column: ["source_invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_recurrences_source_invoice_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoice_send_schedules", "finance_books"
+  add_foreign_key "invoice_send_schedules", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_send_schedules_book_organization"
+  add_foreign_key "invoice_send_schedules", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_send_schedules_invoice_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoices", "finance_books"
+  add_foreign_key "invoices", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoices_book_organization"
+  add_foreign_key "invoices", "invoice_billing_profiles", column: ["invoice_billing_profile_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_billing_profile_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoices", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_recipient_id_book_scope", deferrable: :deferred
   add_foreign_key "aire_payroll_acknowledgements", "time_tracking_imports"
   add_foreign_key "aire_payroll_calendar_periods", "companies", on_delete: :restrict
   add_foreign_key "aire_payroll_calendar_periods", "pay_periods", column: ["pay_period_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_aire_calendar_periods_pay_period_tenant"

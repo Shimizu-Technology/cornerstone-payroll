@@ -8,6 +8,7 @@ module Api
 
         before_action :require_staff_access!
         before_action :enforce_finance_context!
+        before_action :enforce_finance_book_context!
         before_action :enforce_company_access!
         before_action :enforce_test_workspace_access!
         before_action :enforce_test_workspace_safety!
@@ -46,6 +47,34 @@ module Api
           if raw_organization_id && company.organization_id != raw_organization_id.to_i
             render json: { error: "Company does not belong to the selected organization" }, status: :unprocessable_entity
           end
+        end
+
+        def enforce_finance_book_context!
+          return unless finance_request?
+          return if controller_path == "api/v1/admin/finance_books"
+
+          books = FinanceBook.active.where(organization_id: current_organization_id)
+          raw_id = request.headers["X-Finance-Book-Id"].presence
+          if raw_id.blank?
+            return render json: { error: "Select a financial book" }, status: :unprocessable_entity unless books.one?
+
+            @current_finance_book = books.first
+          else
+            unless raw_id.to_s.match?(/\A[1-9]\d*\z/)
+              return render json: { error: "Invalid financial book context" }, status: :unprocessable_entity
+            end
+            @current_finance_book = books.find_by(id: raw_id.to_i)
+            return render json: { error: "Financial book not found" }, status: :not_found unless @current_finance_book
+          end
+
+          if @current_finance_book.company_id && !current_user.can_access_company?(@current_finance_book.company_id)
+            return render json: { error: "You do not have access to this financial book" }, status: :forbidden
+          end
+          response.set_header("X-Effective-Finance-Book-Id", @current_finance_book.id.to_s)
+        end
+
+        def current_finance_book
+          @current_finance_book
         end
 
         # Allow organization admins, managers, and accountants to access the admin namespace.

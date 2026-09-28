@@ -76,7 +76,7 @@ RSpec.describe InvoicePdfGenerator do
     text = reader_for(invoice).pages.first.text
 
     expect(text).to include("Draft preview")
-    expect(text).to include("UTC")
+    expect(text).not_to include("UTC")
     expect(text).not_to include("Issued")
   end
 

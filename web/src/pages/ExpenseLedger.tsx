@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
 import { expenseVendorsApi, expensesApi, organizationsApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
 
 type ExpenseForm = {
@@ -234,7 +235,7 @@ export function ExpenseLedger() {
 
   return (
     <div className="min-h-screen bg-[#f8f7f4]">
-      <Header title="Expense Ledger" description="Track vendor bills, receipts, and what has actually been paid for this organization."
+      <Header title="Expense Ledger" description="Track vendor bills, receipts, and what has actually been paid for this book."
         contextLabel="Organization" contextValue={organizationName}
         actions={<>
           <Button variant="outline" onClick={() => void run(async () => downloadBlob(await expensesApi.export({
@@ -249,6 +250,7 @@ export function ExpenseLedger() {
         </>} />
 
       <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <FinanceBookSelector disabled={busy || loading} />
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
           Record payments from bank, card, or processor evidence. An invoice or receipt alone does not prove that a bill was paid.
         </div>

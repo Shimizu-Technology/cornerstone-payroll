@@ -42,7 +42,7 @@ module Api
         private
 
         def set_invoice
-          @invoice = Invoice.find_by(id: params[:invoice_id], organization_id: current_organization_id)
+          @invoice = Invoice.find_by(id: params[:invoice_id], finance_book_id: current_finance_book.id)
           return if @invoice
 
           render json: { error: "Invoice not found" }, status: :not_found

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 class InvoiceReceivablesSummary
-  def initialize(organization:, billing_profile_id: nil, as_of: Date.current)
-    @organization = organization
+  def initialize(finance_book:, billing_profile_id: nil, as_of: Date.current)
+    @finance_book = finance_book
     @billing_profile_id = billing_profile_id
     @as_of = as_of
   end
@@ -32,12 +32,12 @@ class InvoiceReceivablesSummary
 
   private
 
-  attr_reader :organization, :billing_profile_id, :as_of
+  attr_reader :finance_book, :billing_profile_id, :as_of
 
   def invoices
     # Archiving controls list visibility only. It must never make an issued,
     # unpaid receivable disappear from financial totals.
-    scope = Invoice.where(organization: organization)
+    scope = Invoice.where(finance_book: finance_book)
     scope = scope.where(invoice_billing_profile_id: billing_profile_id) if billing_profile_id.present?
     scope
   end

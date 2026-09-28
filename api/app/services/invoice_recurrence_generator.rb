@@ -33,6 +33,7 @@ class InvoiceRecurrenceGenerator
         original = source.snapshot.fetch("invoice")
         invoice = Invoice.new(
           organization: recurrence.organization,
+          finance_book: recurrence.finance_book,
           company: source.company,
           invoice_billing_profile: source.invoice_billing_profile,
           invoice_recipient: source.invoice_recipient,

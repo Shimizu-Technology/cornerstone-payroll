@@ -4,6 +4,7 @@ class Organization < ApplicationRecord
   STATUSES = %w[active inactive].freeze
 
   has_many :companies, dependent: :restrict_with_error
+  has_many :finance_books, dependent: :restrict_with_error
   has_many :users, dependent: :restrict_with_error
   has_many :printer_profiles, dependent: :destroy
   has_many :user_printer_profile_selections, dependent: :destroy
@@ -26,6 +27,7 @@ class Organization < ApplicationRecord
   belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug
+  after_create :create_default_finance_book!
   after_update_commit :disconnect_cable_users_after_deactivation, if: :saved_change_to_status?
 
   validates :name, presence: true
@@ -56,6 +58,10 @@ class Organization < ApplicationRecord
   end
 
   private
+
+  def create_default_finance_book!
+    finance_books.create!(name: name, legal_name: name, kind: "organization", is_default: true)
+  end
 
   def disconnect_cable_users_after_deactivation
     return if active?

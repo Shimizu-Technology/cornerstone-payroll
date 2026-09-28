@@ -99,7 +99,7 @@ class ApplicationController < ActionController::API
   end
 
   def finance_request?
-    controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense")
+    controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_book")
   end
 
   def current_organization_id

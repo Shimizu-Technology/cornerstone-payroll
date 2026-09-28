@@ -68,6 +68,44 @@ describe('ApiClient company identity', (): void => {
     expect(new Headers(fetchMock.mock.calls[1][1]?.headers).has('X-Organization-Id')).toBe(false);
   });
 
+  it('sends the selected book on finance JSON, upload, and download requests', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    apiClient.setActiveOrganizationId(2);
+    apiClient.setActiveFinanceBookId(9);
+    await apiClient.get('/admin/invoices');
+    await apiClient.postForm('/admin/expenses/1/upload_artifact', new FormData());
+    await apiClient.getBlob('/admin/invoices/1/download_artifact');
+    await apiClient.get('/admin/companies');
+
+    for (const call of fetchMock.mock.calls.slice(0, 3)) {
+      const headers = new Headers(call[1]?.headers);
+      expect(headers.get('X-Organization-Id')).toBe('2');
+      expect(headers.get('X-Finance-Book-Id')).toBe('9');
+    }
+    expect(new Headers(fetchMock.mock.calls[3][1]?.headers).has('X-Finance-Book-Id')).toBe(false);
+  });
+
+  it('keeps the initiating finance book while auth token resolution is pending', async (): Promise<void> => {
+    let releaseToken: (() => void) | undefined;
+    const tokenReleased = new Promise<string | null>((resolve) => {
+      releaseToken = () => resolve('test-token');
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    setAuthTokenProvider(() => tokenReleased);
+    apiClient.setActiveOrganizationId(2);
+    apiClient.setActiveFinanceBookId(9);
+    const pendingRequest = apiClient.post('/admin/invoices', { invoice: {} });
+    apiClient.setActiveFinanceBookId(10);
+    releaseToken?.();
+    await pendingRequest;
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Finance-Book-Id')).toBe('9');
+  });
+
   it('honors an explicit company override and permits company-neutral requests', async (): Promise<void> => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (): Promise<Response> => (
       new Response(JSON.stringify({ ok: true }), {

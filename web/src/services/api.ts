@@ -33,6 +33,7 @@ class ApiClient {
   private authTokenProvider: (() => Promise<string | null>) | null = null;
   private activeCompanyId: number | null = null;
   private activeOrganizationId: number | null = null;
+  private activeFinanceBookId: number | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -55,13 +56,20 @@ class ApiClient {
   }
 
   setActiveOrganizationId(organizationId: number | null) {
+    if (this.activeOrganizationId !== organizationId) this.activeFinanceBookId = null;
     this.activeOrganizationId = organizationId;
   }
 
+  setActiveFinanceBookId(financeBookId: number | null) {
+    this.activeFinanceBookId = financeBookId;
+  }
+
   private financeHeaders(endpoint: string): Record<string, string> {
-    return this.activeOrganizationId && /^\/admin\/(invoice|expense)/.test(endpoint)
-      ? { 'X-Organization-Id': String(this.activeOrganizationId) }
-      : {};
+    if (!/^\/admin\/(invoice|expense|finance_books)/.test(endpoint)) return {};
+    return {
+      ...(this.activeOrganizationId ? { 'X-Organization-Id': String(this.activeOrganizationId) } : {}),
+      ...(this.activeFinanceBookId ? { 'X-Finance-Book-Id': String(this.activeFinanceBookId) } : {}),
+    };
   }
 
   getAuthToken(): string | null {
@@ -346,6 +354,7 @@ export const setAuthTokenProvider = (provider: (() => Promise<string | null>) | 
   api.setAuthTokenProvider(provider);
 export const getAuthToken = () => api.getResolvedAuthToken();
 export const getActiveCompanyId = () => api.getActiveCompanyId();
+export const setActiveFinanceBookId = (financeBookId: number | null) => api.setActiveFinanceBookId(financeBookId);
 export const getApiBaseUrl = () => API_BASE_URL;
 
 // ========================================
@@ -4648,6 +4657,25 @@ export interface InvoiceChatSession {
   created_at: string;
   updated_at: string;
 }
+
+export interface FinanceBook {
+  id: number;
+  organization_id: number;
+  company_id: number | null;
+  name: string;
+  legal_name: string;
+  kind: 'organization' | 'client';
+  is_default: boolean;
+  active?: boolean;
+}
+
+export const financeBooksApi = {
+  list: () => api.get<{ finance_books: FinanceBook[]; effective_finance_book_id: number | null }>('/admin/finance_books'),
+  create: (data: { name: string; legal_name: string; kind: FinanceBook['kind']; company_id?: number }) =>
+    api.post<{ finance_book: FinanceBook }>('/admin/finance_books', { finance_book: data }),
+  update: (id: number, data: { name: string; legal_name: string }) =>
+    api.patch<{ finance_book: FinanceBook }>(`/admin/finance_books/${id}`, { finance_book: data }),
+};
 
 export const invoiceRecipientsApi = {
   list: (params?: { active?: boolean }) =>

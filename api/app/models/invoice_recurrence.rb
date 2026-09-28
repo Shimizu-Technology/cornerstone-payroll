@@ -7,6 +7,7 @@ class InvoiceRecurrence < ApplicationRecord
   belongs_to :source_invoice, class_name: "Invoice"
   belongs_to :created_by, class_name: "User", optional: true
   has_many :generated_invoices, class_name: "Invoice", dependent: :restrict_with_error
+  include FinanceBookOwned
 
   validates :interval_unit, inclusion: { in: INTERVAL_UNITS }
   validates :interval_count, numericality: { only_integer: true, greater_than: 0 }
@@ -15,6 +16,7 @@ class InvoiceRecurrence < ApplicationRecord
   validate :valid_time_zone
   validates :source_invoice_id, uniqueness: { conditions: -> { where(active: true) }, message: "already has an active recurrence" }, if: :active?
   validate :source_belongs_to_organization
+  validate :source_belongs_to_book
   validate :ends_after_start
 
   scope :due, ->(today = Date.current) { where(active: true).where("next_on <= ?", today) }
@@ -42,6 +44,16 @@ class InvoiceRecurrence < ApplicationRecord
   end
 
   private
+
+  def finance_book_parent
+    source_invoice
+  end
+
+  def source_belongs_to_book
+    return if source_invoice.blank? || finance_book.blank? || source_invoice.finance_book_id == finance_book_id
+
+    errors.add(:source_invoice, "must belong to the same financial book")
+  end
 
   def source_belongs_to_organization
     return if source_invoice.blank? || organization.blank? || source_invoice.organization_id == organization_id

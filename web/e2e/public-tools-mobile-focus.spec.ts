@@ -11,6 +11,7 @@ async function mockTools(page: Page) {
     else if (path.endsWith('/admin/non_employee_checks')) body = { non_employee_checks: [] };
     else if (path.endsWith('/admin/pay_periods')) body = { pay_periods: [] };
     else if (path.endsWith('/admin/invoices')) body = { invoices: [] };
+    else if (path.endsWith('/admin/finance_books')) body = { finance_books: [{ id: 1, organization_id: 1, company_id: null, name: 'Review firm', legal_name: 'Review firm', kind: 'organization', is_default: true, active: true }], effective_finance_book_id: 1 };
     else if (path.endsWith('/admin/invoice_recipients')) body = { invoice_recipients: [] };
     else if (path.endsWith('/admin/invoice_billing_profiles')) body = { invoice_billing_profiles: [] };
     else if (path.endsWith('/admin/invoice_chat_sessions') && method === 'GET') body = { invoice_chat_sessions: [] };
