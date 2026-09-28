@@ -70,6 +70,10 @@ class InvoicePayloadBuilder
   attr_reader :invoice, :detailed, :as_of
 
   def detail_payload
+    events = invoice.events.to_a
+    provider_delivery_ids = events.filter_map do |event|
+      event.metadata["delivery_id"].to_i if event.event_type == "delivery_recorded" && event.metadata["send_schedule_id"].present?
+    end
     {
       notes: invoice.notes,
       payment_terms: invoice.payment_terms,
@@ -82,8 +86,8 @@ class InvoicePayloadBuilder
       artifacts: invoice.artifacts.order(:created_at, :id).map { |artifact| artifact_payload(artifact) },
       payments: invoice.payments.map { |payment| payment_payload(payment) },
       credit_notes: invoice.credit_notes.map { |credit| credit_payload(credit) },
-      deliveries: invoice.deliveries.map { |delivery| delivery_payload(delivery) },
-      events: invoice.events.map { |event| event_payload(event) }
+      deliveries: invoice.deliveries.map { |delivery| delivery_payload(delivery, provider_delivery_ids: provider_delivery_ids) },
+      events: events.map { |event| event_payload(event) }
     }
   end
 
@@ -193,7 +197,7 @@ class InvoicePayloadBuilder
     }
   end
 
-  def delivery_payload(delivery)
+  def delivery_payload(delivery, provider_delivery_ids:)
     {
       id: delivery.id,
       channel: delivery.channel,
@@ -203,6 +207,7 @@ class InvoicePayloadBuilder
       notes: delivery.notes,
       artifact_id: delivery.invoice_artifact_id,
       recorded_by_name: delivery.recorded_by&.name,
+      correctable: !provider_delivery_ids.include?(delivery.id),
       created_at: delivery.created_at
     }
   end

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { expenseVendorsApi, expensesApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
+import { expenseVendorsApi, expensesApi, organizationsApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
 
 type ExpenseForm = {
   expense_vendor_id: string;
@@ -61,6 +61,20 @@ export function ExpenseLedger() {
   const organizationId = user?.role === 'super_admin'
     ? activeCompany?.organization_id || user.organization_id
     : user?.organization_id;
+  const [selectedOrganization, setSelectedOrganization] = useState<{ id: number; name: string } | null>(null);
+  useEffect(() => {
+    if (!organizationId || organizationId === user?.organization_id || user?.role !== 'super_admin') return;
+    let active = true;
+    void organizationsApi.get(organizationId).then((response) => {
+      if (active) setSelectedOrganization({ id: organizationId, name: response.data.name });
+    }).catch(() => {
+      if (active) setSelectedOrganization(null);
+    });
+    return () => { active = false; };
+  }, [organizationId, user?.organization_id, user?.role]);
+  const organizationName = organizationId === user?.organization_id
+    ? user?.organization_name
+    : selectedOrganization && selectedOrganization.id === organizationId ? selectedOrganization.name : undefined;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<ExpenseVendor[]>([]);
@@ -216,7 +230,7 @@ export function ExpenseLedger() {
   return (
     <div className="min-h-screen bg-[#f8f7f4]">
       <Header title="Expense Ledger" description="Track vendor bills, receipts, and what has actually been paid for this organization."
-        contextLabel="Organization" contextValue={activeCompany?.name || user?.organization_name || undefined}
+        contextLabel="Organization" contextValue={organizationName}
         actions={<>
           <Button variant="outline" onClick={() => void run(async () => downloadBlob(await expensesApi.export({ vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter) }), 'expenses.csv'))} disabled={busy}>
             <ArrowDownToLine className="mr-2 h-4 w-4" />Export CSV
