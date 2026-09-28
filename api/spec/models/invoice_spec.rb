@@ -3,12 +3,51 @@
 require "rails_helper"
 
 RSpec.describe Invoice, type: :model do
+  it "uses the recorded gross subtotal when an imported invoice has no line items" do
+    invoice = build(:invoice, origin: "imported", total_amount: "0.14", discount_type: "percent",
+                    discount_value: "50", source_metadata: { "gross_subtotal" => "0.29" })
+
+    expect(invoice.subtotal_amount).to eq(0.29.to_d)
+    expect(invoice.discount_amount).to eq(0.15.to_d)
+    expect(invoice.total_amount).to eq(0.14.to_d)
+  end
+
   it "calculates total amount from line items" do
     invoice = build(:invoice, :with_line_item)
     invoice.line_items.build(description: "Bookkeeping", quantity: 1.5, rate: 80, position: 1)
 
     expect(invoice).to be_valid
     expect(invoice.total_amount).to eq(420)
+  end
+
+  it "applies fixed and percent discounts before issuing, then freezes the discount" do
+    invoice = create(:invoice, :with_line_item, discount_type: "percent", discount_value: 10)
+    expect(invoice).to have_attributes(subtotal_amount: 300.to_d, discount_amount: 30.to_d, total_amount: 270.to_d)
+
+    invoice.update!(discount_type: "amount", discount_value: 40)
+    expect(invoice.reload).to have_attributes(discount_amount: 40.to_d, total_amount: 260.to_d)
+
+    invoice.issue!(actor: nil)
+    expect(invoice.snapshot.dig("invoice", "discount_amount")).to eq("40.0")
+    expect { invoice.update!(discount_value: 50) }.to raise_error(ActiveRecord::RecordInvalid)
+  end
+
+  it "rejects discounts beyond the subtotal or 100 percent" do
+    invoice = build(:invoice, :with_line_item, discount_type: "amount", discount_value: 301)
+    expect(invoice).not_to be_valid
+    expect(invoice.errors[:discount_value]).to include("cannot exceed the subtotal")
+
+    invoice.discount_type = "percent"
+    invoice.discount_value = 101
+    expect(invoice).not_to be_valid
+    expect(invoice.errors[:discount_value]).to include("cannot exceed 100 percent")
+  end
+
+  it "rejects discount precision that would change after database storage" do
+    invoice = build(:invoice, :with_line_item, discount_type: "percent", discount_value: "1.005")
+
+    expect(invoice).not_to be_valid
+    expect(invoice.errors[:discount_value]).to include("cannot have more than two decimal places")
   end
 
   it "requires line items when issued" do

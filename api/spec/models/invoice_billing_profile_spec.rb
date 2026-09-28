@@ -12,6 +12,19 @@ RSpec.describe InvoiceBillingProfile do
   end
 
   describe ".ensure_default_for!" do
+    it "refreshes only the previous generated footer on an existing default" do
+      organization = create(:organization)
+      legacy = create(:invoice_billing_profile, organization: organization, is_default: true,
+                       footer_note: described_class::LEGACY_DEFAULT_FOOTER)
+
+      expect(described_class.ensure_default_for!(organization)).to eq(legacy)
+      expect(legacy.reload.footer_note).to eq(described_class::DEFAULT_FOOTER)
+
+      legacy.update!(footer_note: "Custom remittance note")
+      described_class.ensure_default_for!(organization)
+      expect(legacy.reload.footer_note).to eq("Custom remittance note")
+    end
+
     it "promotes an existing active profile when no active default exists" do
       organization = create(:organization)
       profile = create(:invoice_billing_profile, organization: organization, is_default: false)

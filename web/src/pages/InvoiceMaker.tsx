@@ -19,6 +19,7 @@ import {
   type Invoice,
   type InvoiceBillingProfile,
   type InvoiceBillingProfilePayload,
+  type InvoiceDiscountType,
   type InvoiceLineItem,
   type InvoicePayload,
   type InvoiceRecipient,
@@ -27,6 +28,7 @@ import {
   type InvoiceTemplateType,
 } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
+import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 
 type DraftLineItem = InvoiceLineItem & {
   local_id: string;
@@ -49,6 +51,9 @@ interface InvoiceFormState {
   invoice_recipient_id: string;
   invoice_number: string;
   invoice_date: string;
+  due_date: string;
+  discount_type: InvoiceDiscountType;
+  discount_value: string;
   service_period_start: string;
   service_period_end: string;
   notes: string;
@@ -111,6 +116,9 @@ const emptyInvoiceForm = (): InvoiceFormState => ({
   invoice_recipient_id: '',
   invoice_number: '',
   invoice_date: today(),
+  due_date: '',
+  discount_type: 'none',
+  discount_value: '',
   service_period_start: '',
   service_period_end: '',
   notes: '',
@@ -254,6 +262,7 @@ export function InvoiceMaker() {
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
+  const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -280,10 +289,12 @@ export function InvoiceMaker() {
   const [createdChatInvoice, setCreatedChatInvoice] = useState<Invoice | null>(null);
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
+  const scopeGenerationRef = useRef(0);
+  const requestedCompanyIdRef = useRef<number | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (generation = scopeGenerationRef.current) => {
     setLoading(true);
     setError(null);
     try {
@@ -293,6 +304,7 @@ export function InvoiceMaker() {
         invoiceBillingProfilesApi.list({ active: true }),
         invoiceChatSessionsApi.list({ include_archived: showArchivedChatSessions }),
       ]);
+      if (generation !== scopeGenerationRef.current) return;
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
       setBillingProfiles(billingProfileResponse.invoice_billing_profiles);
@@ -306,14 +318,32 @@ export function InvoiceMaker() {
       });
       setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invoices');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load invoices');
     } finally {
-      setLoading(false);
+      if (generation === scopeGenerationRef.current) setLoading(false);
     }
   }, [showArchivedChatSessions]);
 
   useEffect(() => {
-    loadData();
+    const generation = ++scopeGenerationRef.current;
+    if (requestedCompanyIdRef.current !== activeCompanyId) {
+      requestedCompanyIdRef.current = activeCompanyId;
+      setInvoices([]);
+      setRecipients([]);
+      setBillingProfiles([]);
+      setChatSessions([]);
+      setActiveChatSession(null);
+      setChatBusy(false);
+      setChatError(null);
+      setCreatedChatInvoice(null);
+      setOptimisticChatMessages([]);
+      setChatImages([]);
+      setChatAttachmentPreviews([]);
+      setPreviewUrl(null);
+      setInvoiceForm(emptyInvoiceForm());
+      savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
+    }
+    void loadData(generation);
   }, [loadData, activeCompanyId]);
 
   useEffect(() => {
@@ -346,10 +376,17 @@ export function InvoiceMaker() {
     [invoiceForm.line_items]
   );
 
-  const invoiceTotal = useMemo(
+  const invoiceSubtotal = useMemo(
     () => activeLineItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0), 0),
     [activeLineItems]
   );
+  const discountInput = Number(invoiceForm.discount_value || 0);
+  const invoiceDiscount = invoiceForm.discount_type === 'none' || !Number.isFinite(discountInput)
+    ? 0
+    : invoiceForm.discount_type === 'percent'
+      ? invoicePercentDiscount(invoiceSubtotal, discountInput)
+      : discountInput;
+  const invoiceTotal = Math.max(0, roundInvoiceCurrency(invoiceSubtotal - invoiceDiscount));
 
   const selectedRecipient = useMemo(
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
@@ -389,6 +426,9 @@ export function InvoiceMaker() {
     invoice_billing_profile_id: state.invoice_billing_profile_id ? Number(state.invoice_billing_profile_id) : undefined,
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
+    due_date: state.due_date || null,
+    discount_type: state.discount_type,
+    discount_value: state.discount_type === 'none' ? 0 : Number(state.discount_value || 0),
     service_period_start: state.service_period_start || null,
     service_period_end: state.service_period_end || null,
     notes: state.notes.trim() || null,
@@ -450,6 +490,9 @@ export function InvoiceMaker() {
       invoice_recipient_id: String(invoice.invoice_recipient_id),
       invoice_number: invoice.invoice_number || '',
       invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date || '',
+      discount_type: invoice.discount_type || 'none',
+      discount_value: invoice.discount_type === 'none' ? '' : String(invoice.discount_value ?? ''),
       service_period_start: invoice.service_period_start || '',
       service_period_end: invoice.service_period_end || '',
       notes: invoice.notes || '',
@@ -521,6 +564,9 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       invoice_number: '',
       invoice_date: preview.invoice_date || today(),
+      due_date: '',
+      discount_type: 'none',
+      discount_value: '',
       service_period_start: preview.service_period_start || '',
       service_period_end: preview.service_period_end || '',
       notes: preview.notes || '',
@@ -549,11 +595,13 @@ export function InvoiceMaker() {
 
   const loadInvoice = async (id: number) => {
     setError(null);
+    const generation = scopeGenerationRef.current;
     try {
       const response = await invoicesApi.get(id);
+      if (generation !== scopeGenerationRef.current) return;
       hydrateInvoiceForm(response.invoice);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invoice');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load invoice');
     }
   };
 
@@ -581,7 +629,7 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'Cornerstone Payroll'}`.trim()
+        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'your business'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
@@ -636,6 +684,12 @@ export function InvoiceMaker() {
       const payload = buildPayload();
       if (!payload.invoice_recipient_id) throw new Error('Bill To recipient is required');
       if (!payload.invoice_date) throw new Error('Invoice date is required');
+      if (invoiceForm.discount_type !== 'none') {
+        const value = Number(invoiceForm.discount_value);
+        if (invoiceForm.discount_value.trim() === '' || !Number.isFinite(value) || value < 0) throw new Error('Enter a valid discount');
+        if (invoiceForm.discount_type === 'percent' && value > 100) throw new Error('Percentage discount cannot exceed 100%');
+        if (invoiceForm.discount_type === 'amount' && value > roundInvoiceCurrency(invoiceSubtotal)) throw new Error('Fixed discount cannot exceed the subtotal');
+      }
 
       const response = invoiceForm.id
         ? await invoicesApi.update(invoiceForm.id, payload, markDraft)
@@ -744,21 +798,23 @@ export function InvoiceMaker() {
   };
 
   const startChatSession = async () => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
+      if (generation !== scopeGenerationRef.current) return null;
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => [response.invoice_chat_session, ...current]);
       setInvoiceMode('ai');
       return response.invoice_chat_session;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
       return null;
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
@@ -802,25 +858,29 @@ export function InvoiceMaker() {
   };
 
   const loadChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     setChatError(null);
     setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.get(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setActiveChatSession(response.invoice_chat_session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to load assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const archiveChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.delete(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setChatSessions((current) => {
         const next = current.map((session) => session.id === sessionId ? response.invoice_chat_session : session);
         return showArchivedChatSessions ? next : next.filter((session) => !session.archived);
@@ -830,33 +890,37 @@ export function InvoiceMaker() {
         setCreatedChatInvoice(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to archive assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to archive assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const restoreChatSession = async (sessionId: number) => {
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.restore(sessionId);
+      if (generation !== scopeGenerationRef.current) return;
       setChatSessions((current) => current.map((session) => session.id === sessionId ? response.invoice_chat_session : session));
       setActiveChatSession(response.invoice_chat_session);
       setCreatedChatInvoice(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restore assistant session');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to restore assistant session');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const restoreChatPreview = async (messageId: number) => {
     if (!activeChatSession) return;
+    const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.restorePreview(activeChatSession.id, messageId);
+      if (generation !== scopeGenerationRef.current) return;
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => current.map((session) => (
         session.id === response.invoice_chat_session.id ? response.invoice_chat_session : session
@@ -865,15 +929,17 @@ export function InvoiceMaker() {
       setSuccess('AI preview restored.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to restore preview');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to restore preview');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
   const sendChatMessage = async () => {
     const content = chatInput.trim() || (chatImages.length > 0 ? 'Please create an invoice from the attached file.' : '');
     if (!content) return;
+    const generation = scopeGenerationRef.current;
+    const currentScope = () => generation === scopeGenerationRef.current;
 
     setChatBusy(true);
     setError(null);
@@ -937,9 +1003,11 @@ export function InvoiceMaker() {
       let session = activeChatSession;
       if (!session) {
         const createResponse = await invoiceChatSessionsApi.create({ title: content.slice(0, 60) });
+        if (!currentScope()) return;
         session = createResponse.invoice_chat_session;
         createdSessionId = session.id;
       }
+      if (!currentScope()) return;
       setActiveChatSession(session);
       if (!currentSessionId) {
         setChatSessions((current) => [
@@ -951,6 +1019,7 @@ export function InvoiceMaker() {
         )));
       }
       const response = await invoiceChatSessionsApi.message(session.id, content, attachments);
+      if (!currentScope()) return;
       removePendingMessages();
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => {
@@ -958,8 +1027,10 @@ export function InvoiceMaker() {
         return [response.invoice_chat_session, ...withoutSession];
       });
     } catch (err) {
+      if (!currentScope()) return;
       if (createdSessionId) {
         await invoiceChatSessionsApi.delete(createdSessionId).catch(() => undefined);
+        if (!currentScope()) return;
         setActiveChatSession(null);
         setChatSessions((current) => current.filter((session) => session.id !== createdSessionId));
       }
@@ -972,19 +1043,23 @@ export function InvoiceMaker() {
       setChatImages(attachments);
       setChatError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
     } finally {
-      removePendingMessages();
-      setChatBusy(false);
-      window.setTimeout(() => chatInputRef.current?.focus(), 0);
+      if (currentScope()) {
+        removePendingMessages();
+        setChatBusy(false);
+        window.setTimeout(() => chatInputRef.current?.focus(), 0);
+      }
     }
   };
 
   const createInvoiceFromPreview = async () => {
     if (!activeChatSession) return;
+    const generation = scopeGenerationRef.current;
 
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
+      if (generation !== scopeGenerationRef.current) return;
       setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
       upsertInvoice(response.invoice);
@@ -992,9 +1067,9 @@ export function InvoiceMaker() {
       setSuccess('Invoice created from AI preview.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
+      if (generation === scopeGenerationRef.current) setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
     } finally {
-      setChatBusy(false);
+      if (generation === scopeGenerationRef.current) setChatBusy(false);
     }
   };
 
@@ -1096,6 +1171,7 @@ export function InvoiceMaker() {
   });
 
   const editBillingProfile = (profile: InvoiceBillingProfile) => {
+    setBillingLogoFile(null);
     setBillingProfileForm({
       id: profile.id,
       name: profile.name,
@@ -1124,16 +1200,37 @@ export function InvoiceMaker() {
       const response = billingProfileForm.id
         ? await invoiceBillingProfilesApi.update(billingProfileForm.id, payload)
         : await invoiceBillingProfilesApi.create(payload);
+      setBillingProfileForm((current) => ({ ...current, id: response.invoice_billing_profile.id }));
+      if (billingLogoFile) {
+        await invoiceBillingProfilesApi.uploadLogo(response.invoice_billing_profile.id, billingLogoFile);
+      }
       await loadData();
       setInvoiceForm((current) => current.invoice_billing_profile_id
         ? current
         : { ...current, invoice_billing_profile_id: String(response.invoice_billing_profile.id), payment_terms: current.payment_terms || response.invoice_billing_profile.default_payment_terms || '' });
       setBillingProfileForm(emptyBillingProfileForm());
+      setBillingLogoFile(null);
       setShowBillingProfileForm(false);
       setSuccess('Billing profile saved.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save billing profile');
+    } finally {
+      setBillingProfileSaving(false);
+    }
+  };
+
+  const removeBillingLogo = async () => {
+    if (!billingProfileForm.id) return;
+    setBillingProfileSaving(true);
+    setError(null);
+    try {
+      await invoiceBillingProfilesApi.removeLogo(billingProfileForm.id);
+      setBillingLogoFile(null);
+      await loadData();
+      setSuccess('Logo removed from future invoices. Issued PDFs are unchanged.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove logo');
     } finally {
       setBillingProfileSaving(false);
     }
@@ -1334,6 +1431,7 @@ export function InvoiceMaker() {
             variant="outline"
             onClick={() => {
               setBillingProfileForm(emptyBillingProfileForm());
+              setBillingLogoFile(null);
               setShowBillingProfileForm((value) => !value);
             }}
           >
@@ -1359,6 +1457,29 @@ export function InvoiceMaker() {
             </div>
             <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
             <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            <div className="rounded-xl border border-neutral-200 bg-white p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-neutral-900"><ImagePlus className="h-4 w-4 text-primary-700" />Invoice logo</div>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-500">Optional PNG or JPEG, up to 1 MB. It appears on new PDF previews and issued invoices. Existing issued PDFs keep their original appearance.</p>
+              <label className="mt-3 block text-sm font-medium text-neutral-700">Choose logo
+                <input type="file" accept="image/png,image/jpeg" className="mt-1 block w-full text-sm" onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  if (file && (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 1_048_576)) {
+                    setError('Choose a PNG or JPEG logo that is 1 MB or smaller.');
+                    setBillingLogoFile(null);
+                    return;
+                  }
+                  setError(null);
+                  setBillingLogoFile(file);
+                }} />
+              </label>
+              {billingLogoFile && <p className="mt-2 text-xs text-neutral-600">Ready to upload: {billingLogoFile.name}</p>}
+              {billingProfileForm.id && billingProfiles.find((profile) => profile.id === billingProfileForm.id)?.has_logo && (
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-neutral-100 pt-3 text-xs text-neutral-600">
+                  <span>Logo attached to this sender</span>
+                  <Button type="button" size="sm" variant="outline" disabled={billingProfileSaving} onClick={removeBillingLogo}>Remove logo</Button>
+                </div>
+              )}
+            </div>
             <label className="flex items-center gap-2 text-sm text-neutral-600">
               <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
               Use as default profile
@@ -1597,6 +1718,10 @@ export function InvoiceMaker() {
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
                   <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-neutral-700">Due Date</span>
+                  <Input type="date" min={invoiceForm.invoice_date} value={invoiceForm.due_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, due_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                </label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period Start</span>
@@ -1613,7 +1738,7 @@ export function InvoiceMaker() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
                   <div className="flex items-center justify-between gap-3 sm:justify-start">
-                    <span className="text-sm font-medium text-neutral-700">{currency(invoiceTotal)}</span>
+                    <span className="text-sm font-medium text-neutral-700">{currency(invoiceSubtotal)}</span>
                     <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
                       <Plus className="mr-1.5 h-4 w-4" />
                       Line
@@ -1666,6 +1791,30 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-4">
+                <h3 className="text-sm font-semibold text-neutral-900">Discount</h3>
+                <p className="mt-1 text-xs text-neutral-500">Applied to the subtotal when this draft is issued.</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">Type</span>
+                    <select value={invoiceForm.discount_type} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_type: event.target.value as InvoiceDiscountType, discount_value: '' }))} disabled={selectedInvoiceReadOnly} className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500">
+                      <option value="none">No discount</option>
+                      <option value="percent">Percentage</option>
+                      <option value="amount">Fixed amount</option>
+                    </select>
+                  </label>
+                  {invoiceForm.discount_type !== 'none' && <label className="space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">{invoiceForm.discount_type === 'percent' ? 'Percent off' : 'Amount off'}</span>
+                    <Input type="number" min="0" max={invoiceForm.discount_type === 'percent' ? 100 : Math.max(0, invoiceSubtotal)} step="0.01" value={invoiceForm.discount_value} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_value: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                  </label>}
+                </div>
+                <dl className="mt-4 space-y-1.5 border-t border-neutral-200 pt-3 text-sm">
+                  <div className="flex justify-between gap-3"><dt className="text-neutral-600">Subtotal</dt><dd className="font-medium">{currency(invoiceSubtotal)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-neutral-600">Discount{invoiceForm.discount_type === 'percent' && invoiceForm.discount_value ? ` (${invoiceForm.discount_value}%)` : ''}</dt><dd className="font-medium">−{currency(invoiceDiscount)}</dd></div>
+                  <div className="flex justify-between gap-3 border-t border-neutral-200 pt-2 font-semibold"><dt>Total</dt><dd>{currency(invoiceTotal)}</dd></div>
+                </dl>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">

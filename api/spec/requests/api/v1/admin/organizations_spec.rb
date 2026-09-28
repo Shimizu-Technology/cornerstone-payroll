@@ -67,6 +67,23 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         .and_return({ success: false, error: "Clerk API not configured" })
     end
 
+    it "creates an organization and primary company without inviting an admin" do
+      expect {
+        post "/api/v1/admin/organizations", params: {
+          organization: { name: "Shimizu Technology", primary_company_name: "Shimizu Technology" }
+        }
+      }.to change(Organization, :count).by(1)
+        .and change(Company, :count).by(1)
+        .and change(User, :count).by(0)
+
+      expect(response).to have_http_status(:created)
+      organization = Organization.find_by!(name: "Shimizu Technology")
+      expect(organization.primary_company).to have_attributes(name: "Shimizu Technology")
+      expect(response.parsed_body).to include("admin_user" => nil, "invitation_sent" => false,
+                                               "invitation_error" => nil)
+    end
+
+
     it "creates an organization, primary company, and first org admin" do
       expect {
         post "/api/v1/admin/organizations",

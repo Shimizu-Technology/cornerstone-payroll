@@ -20,7 +20,7 @@ class ApplicationController < ActionController::API
   def set_current_context
     authenticated_user = current_user
     Current.user = authenticated_user if authenticated_user.is_a?(User)
-    Current.organization_id = authenticated_user.organization_id if authenticated_user.is_a?(User)
+    Current.organization_id = current_organization_id if authenticated_user.is_a?(User)
     Current.company_id = current_company_id if authenticated_user.is_a?(User)
     Current.request_id = request.request_id
     Current.ip_address = request.remote_ip
@@ -85,11 +85,15 @@ class ApplicationController < ActionController::API
   end
 
   def current_organization
-    current_user&.organization
+    if current_user&.super_admin? && controller_path.start_with?("api/v1/admin/invoice")
+      current_company&.organization || current_user.organization
+    else
+      current_user&.organization
+    end
   end
 
   def current_organization_id
-    current_user&.organization_id
+    current_organization&.id
   end
 
   def current_company

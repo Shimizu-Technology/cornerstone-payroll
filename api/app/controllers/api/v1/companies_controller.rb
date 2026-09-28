@@ -32,6 +32,7 @@ module Api
       def company_summary(company, total_employee_counts:, active_employee_counts:)
         {
           id: company.id,
+          organization_id: company.organization_id,
           name: company.name,
           active: company.active,
           active_employees: active_employee_counts.fetch(company.id, 0),

@@ -3411,6 +3411,7 @@ export const printerProfilesApi = {
 // ============================================================
 export interface CompanyListItem {
   id: number;
+  organization_id: number;
   name: string;
   active: boolean;
   active_employees: number;
@@ -4261,6 +4262,7 @@ export const generalTransmittalsApi = {
 // ============================================================
 export type InvoiceStatus = 'draft' | 'open' | 'partially_paid' | 'paid' | 'overdue' | 'voided' | 'uncollectible' | 'generated' | 'sent' | 'archived';
 export type InvoiceOrigin = 'native' | 'imported';
+export type InvoiceDiscountType = 'none' | 'percent' | 'amount';
 export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
 
 export interface InvoiceBillingProfile {
@@ -4277,6 +4279,9 @@ export interface InvoiceBillingProfile {
   invoice_prefix?: string | null;
   remit_to?: string | null;
   footer_note?: string | null;
+  has_logo?: boolean;
+  logo_content_type?: string | null;
+  logo_byte_size?: number | null;
   active: boolean;
   is_default: boolean;
   created_at?: string;
@@ -4328,6 +4333,10 @@ export interface Invoice {
   origin: InvoiceOrigin;
   service_period_start?: string | null;
   service_period_end?: string | null;
+  discount_type: InvoiceDiscountType;
+  discount_value: number;
+  subtotal_amount: number;
+  discount_amount: number;
   total_amount: number;
   amount_paid: number;
   credit_total: number;
@@ -4386,6 +4395,8 @@ export interface InvoicePayload {
   customer_reference?: string | null;
   service_period_start?: string | null;
   service_period_end?: string | null;
+  discount_type?: InvoiceDiscountType;
+  discount_value?: number;
   notes?: string | null;
   payment_terms?: string | null;
   email_subject?: string | null;
@@ -4459,6 +4470,36 @@ export interface InvoiceEvent {
   occurred_at: string;
   actor_name?: string | null;
   metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface InvoiceRecurrence {
+  id: number;
+  organization_id: number;
+  source_invoice_id: number;
+  start_on: string;
+  next_on: string;
+  ends_on?: string | null;
+  interval_unit: 'week' | 'month';
+  interval_count: number;
+  occurrence_index: number;
+  due_after_days: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface InvoiceSendSchedule {
+  id: number;
+  organization_id: number;
+  invoice_id: number;
+  recipients: string[];
+  send_at: string;
+  status: 'pending' | 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
+  attempts: number;
+  provider_reference?: string | null;
+  last_error?: string | null;
+  claimed_at?: string | null;
+  sent_at?: string | null;
   created_at: string;
 }
 
@@ -4589,6 +4630,13 @@ export const invoiceBillingProfilesApi = {
     api.post<{ invoice_billing_profile: InvoiceBillingProfile }>('/admin/invoice_billing_profiles', { invoice_billing_profile: data }),
   update: (id: number, data: InvoiceBillingProfilePayload) =>
     api.patch<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`, { invoice_billing_profile: data }),
+  uploadLogo: (id: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.postForm<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}/logo`, form);
+  },
+  removeLogo: (id: number) =>
+    api.delete<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}/logo`),
   delete: (id: number) =>
     api.delete<{ message: string; invoice_billing_profile?: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`),
 };
@@ -4623,6 +4671,9 @@ export const invoicesApi = {
     invoice_date: string;
     due_date?: string;
     total_amount: number;
+    subtotal_amount?: number;
+    discount_type?: InvoiceDiscountType;
+    discount_value?: number;
     customer_reference?: string;
     notes?: string;
     issued_at?: string;
@@ -4647,6 +4698,22 @@ export const invoicesApi = {
     api.post<{ credit_note_id: number; invoice: Invoice }>(`/admin/invoices/${id}/credit_notes`, data),
   voidCredit: (invoiceId: number, creditId: number, reason: string) =>
     api.post<{ invoice: Invoice }>(`/admin/invoices/${invoiceId}/credit_notes/${creditId}/void`, { reason }),
+};
+
+export const invoiceRecurrencesApi = {
+  list: () => api.get<{ invoice_recurrences: InvoiceRecurrence[] }>('/admin/invoice_recurrences'),
+  create: (data: { source_invoice_id: number; start_on: string; ends_on?: string | null; interval_unit: 'week' | 'month'; interval_count: number; due_after_days: number }) =>
+    api.post<{ invoice_recurrence: InvoiceRecurrence }>('/admin/invoice_recurrences', data),
+  update: (id: number, active: boolean) =>
+    api.patch<{ invoice_recurrence: InvoiceRecurrence }>(`/admin/invoice_recurrences/${id}`, { active }),
+};
+
+export const invoiceSendSchedulesApi = {
+  list: () => api.get<{ invoice_send_schedules: InvoiceSendSchedule[] }>('/admin/invoice_send_schedules'),
+  create: (data: { invoice_id: number; recipients: string[]; send_at: string }) =>
+    api.post<{ invoice_send_schedule: InvoiceSendSchedule }>('/admin/invoice_send_schedules', data),
+  update: (id: number, data: { recipients?: string[]; send_at?: string; cancel?: boolean; retry?: boolean }) =>
+    api.patch<{ invoice_send_schedule: InvoiceSendSchedule }>(`/admin/invoice_send_schedules/${id}`, data),
 };
 
 export const invoiceReceivablesApi = {
