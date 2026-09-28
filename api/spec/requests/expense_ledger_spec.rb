@@ -122,6 +122,22 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(Expense.where(organization: company.organization).count).to eq(1)
   end
 
+  it "marks a partially paid past-due expense overdue and rejects non-finite payments" do
+    vendor = create_vendor
+    expense = create_expense(vendor: vendor)
+    expense.update!(due_on: Date.yesterday)
+    post "/api/v1/admin/expenses/#{expense.id}/payments", params: {
+      amount: "20.00", paid_on: Date.current.iso8601, payment_method: "card"
+    }
+    expect(response).to have_http_status(:created)
+    expect(expense.reload.payment_status).to eq("overdue")
+
+    post "/api/v1/admin/expenses/#{expense.id}/payments", params: {
+      amount: "Infinity", paid_on: Date.current.iso8601, payment_method: "card"
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   it "uses the selected organization for a platform owner's expense workspace and audit trail" do
     other_org = create(:organization, name: "Shimizu Technology")
     other_company = create(:company, organization: other_org, name: "Shimizu Technology")

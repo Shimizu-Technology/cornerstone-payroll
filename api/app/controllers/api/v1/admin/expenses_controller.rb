@@ -33,8 +33,7 @@ module Api
           source_key = attrs[:source_key].presence
           if source_key && (existing = scope.find_by(source_key: source_key))
             candidate = scope.new(attrs)
-            comparable = %i[expense_vendor_id category description expense_on due_on total_amount currency reference_number]
-            unless comparable.all? { |field| existing.public_send(field) == candidate.public_send(field) }
+            unless same_expense?(existing, candidate)
               return render json: { error: "Source key already belongs to a different expense" }, status: :conflict
             end
             return render json: { expense: ExpensePayloadBuilder.call(existing, detailed: true), already_exists: true }
@@ -48,7 +47,12 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
-          render json: { error: "An expense with that source key already exists" }, status: :conflict
+          existing = source_key && scope.find_by(source_key: source_key)
+          if existing && same_expense?(existing, scope.new(attrs))
+            render json: { expense: ExpensePayloadBuilder.call(existing, detailed: true), already_exists: true }
+          else
+            render json: { error: "An expense with that source key already exists" }, status: :conflict
+          end
         end
 
         def update
@@ -119,6 +123,11 @@ module Api
         end
 
         private
+
+        def same_expense?(existing, candidate)
+          comparable = %i[expense_vendor_id category description expense_on due_on total_amount currency reference_number]
+          comparable.all? { |field| existing.public_send(field) == candidate.public_send(field) }
+        end
 
         def set_expense
           @expense = scope.includes(:expense_vendor, :expense_payments, :expense_artifacts).find(params[:id])

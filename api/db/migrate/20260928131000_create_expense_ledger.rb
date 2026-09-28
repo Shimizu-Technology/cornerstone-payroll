@@ -51,6 +51,12 @@ class CreateExpenseLedger < ActiveRecord::Migration[8.0]
     end
     add_index :expense_payments, [ :expense_id, :reversed_at ]
     add_check_constraint :expense_payments, "amount > 0", name: "check_expense_payment_positive"
+    add_check_constraint :expense_payments,
+      "(reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL) OR (reversed_at IS NOT NULL AND reversal_reason IS NOT NULL)",
+      name: "check_expense_payment_reversal_fields"
+    add_check_constraint :expense_payments,
+      "payment_method IN ('cash','check','ach','card','wire','other')",
+      name: "check_expense_payment_method"
 
     create_table :expense_artifacts do |t|
       t.references :organization, null: false, foreign_key: true

@@ -1125,6 +1125,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_28_131000) do
     t.index ["recorded_by_id"], name: "index_expense_payments_on_recorded_by_id"
     t.index ["reversed_by_id"], name: "index_expense_payments_on_reversed_by_id"
     t.check_constraint "amount > 0::numeric", name: "check_expense_payment_positive"
+    t.check_constraint "((reversed_at IS NULL) AND (reversed_by_id IS NULL) AND (reversal_reason IS NULL)) OR ((reversed_at IS NOT NULL) AND (reversal_reason IS NOT NULL))", name: "check_expense_payment_reversal_fields"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'other'::character varying]::text[])", name: "check_expense_payment_method"
   end
 
   create_table "expense_vendors", force: :cascade do |t|

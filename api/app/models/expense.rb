@@ -32,8 +32,8 @@ class Expense < ApplicationRecord
   def payment_status
     return "voided" if voided?
     return "paid" if balance_due.zero?
-    return "partial" if amount_paid.positive?
     return "overdue" if due_on.present? && due_on < Date.current
+    return "partial" if amount_paid.positive?
 
     "open"
   end

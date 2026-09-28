@@ -7,6 +7,7 @@ class ExpensePaymentService
       raise ArgumentError, "Voided expenses cannot receive payments" if expense.voided?
 
       amount = BigDecimal(amount.to_s)
+      raise ArgumentError, "Payment must be a positive amount in cents" unless amount.finite?
       raise ArgumentError, "Payment must be a positive amount in cents" unless amount.positive? && amount == amount.round(2)
       raise ArgumentError, "Payment exceeds the remaining balance" if amount > expense.balance_due
 
