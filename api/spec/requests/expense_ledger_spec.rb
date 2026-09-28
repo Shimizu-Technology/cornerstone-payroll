@@ -68,6 +68,87 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(response.parsed_body.dig("summary", "currencies", 0, "balance_due")).to eq("20.0")
   end
 
+  it "records a paid purchase atomically and safely retries the same source key" do
+    vendor = create_vendor
+    request = {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                 expense_on: "2026-09-28", total_amount: "120.00", source_key: "purchase-42" },
+      payment: { paid_on: "2026-09-28", payment_method: "card", reference_number: "statement-42" }
+    }
+
+    post "/api/v1/admin/expenses", params: request
+    expect(response).to have_http_status(:created), response.body
+    expense_id = response.parsed_body.dig("expense", "id")
+    expect(response.parsed_body.dig("expense", "payment_status")).to eq("paid")
+    expect(response.parsed_body.dig("expense", "balance_due")).to eq("0.0")
+    expect(Expense.find(expense_id).expense_payments.active.count).to eq(1)
+
+    post "/api/v1/admin/expenses", params: request
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["already_exists"]).to be(true)
+    expect(Expense.count).to eq(1)
+    expect(ExpensePayment.count).to eq(1)
+
+    post "/api/v1/admin/expenses", params: request.deep_merge(payment: { reference_number: "different-statement" })
+    expect(response).to have_http_status(:conflict)
+
+    post "/api/v1/admin/expenses", params: request.except(:payment)
+    expect(response).to have_http_status(:conflict)
+  end
+
+  it "requires a stable source key for a paid purchase" do
+    vendor = create_vendor
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                 expense_on: "2026-09-28", total_amount: "120.00" },
+      payment: { paid_on: "2026-09-28", payment_method: "card", reference_number: "statement-42" }
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(Expense.count).to eq(0)
+    expect(ExpensePayment.count).to eq(0)
+  end
+
+  it "rejects malformed paid-purchase payment details without inserting records" do
+    vendor = create_vendor
+    expense = { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                expense_on: "2026-09-28", total_amount: "120.00", source_key: "malformed-42" }
+    [ [ "invalid" ], { paid_on: [ "2026-09-28" ], payment_method: "card", reference_number: "statement-42" } ].each do |payment|
+      post "/api/v1/admin/expenses", params: { expense: expense, payment: payment }
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+    expect(Expense.count).to eq(0)
+    expect(ExpensePayment.count).to eq(0)
+  end
+
+  it "accepts an original bill retry after a later payment" do
+    vendor = create_vendor
+    expense = create_expense(vendor: vendor, source_key: "bill-42")
+    post "/api/v1/admin/expenses/#{expense.id}/payments", params: {
+      amount: "120.00", paid_on: "2026-09-29", payment_method: "ach", reference_number: "ach-42"
+    }
+    expect(response).to have_http_status(:created)
+
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Annual subscription",
+                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: "120.00", source_key: "bill-42" }
+    }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["already_exists"]).to be(true)
+    expect(response.parsed_body.dig("expense", "payment_status")).to eq("paid")
+  end
+
+  it "rolls back a paid purchase when the payment evidence is invalid" do
+    vendor = create_vendor
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid subscription",
+                 expense_on: "2026-09-28", total_amount: "120.00", source_key: "invalid-payment-42" },
+      payment: { paid_on: "2026-09-28", payment_method: "unknown", reference_number: "statement-42" }
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(Expense.count).to eq(0)
+    expect(ExpensePayment.count).to eq(0)
+  end
+
   it "rejects overpayment, payment edits, and voiding an expense with recorded payments" do
     vendor = create_vendor
     expense = create_expense(vendor: vendor)

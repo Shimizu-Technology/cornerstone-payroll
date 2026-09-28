@@ -495,6 +495,7 @@ Rails.application.routes.draw do
 
         # Invoice Center and bounded accounts receivable
         resources :finance_books, only: [:index, :create, :update]
+        resource :finance_overview, only: [:show]
         resources :invoice_billing_profiles, except: [:new, :edit] do
           member do
             post :logo, action: :upload_logo

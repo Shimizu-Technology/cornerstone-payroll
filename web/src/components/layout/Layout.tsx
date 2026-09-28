@@ -16,7 +16,7 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 export function Layout() {
   const { activeCompany, activeCompanyId, activeOrganizationName } = useCompany();
   const location = useLocation();
-  const financePage = location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
+  const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
   const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
     || Boolean(activeCompany?.test_workspace_sealed_at);
   const outlet = useOutlet();
