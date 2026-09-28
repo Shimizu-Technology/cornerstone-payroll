@@ -287,7 +287,7 @@ class InvoicePdfGenerator
   end
 
   def format_timestamp(value)
-    Time.zone.parse(value.to_s).strftime("%m/%d/%Y %I:%M %p")
+    Time.iso8601(value.to_s).utc.strftime("%m/%d/%Y %I:%M %p UTC")
   rescue ArgumentError
     value.to_s
   end
