@@ -38,6 +38,7 @@ class FinanceApiToken < ApplicationRecord
     revoked_at.nil? && expires_at.future? && organization.active? && finance_book.active? && scopes.include?("read") &&
       created_by.payroll_access_allowed? && StaffRolePolicy.allowed?(created_by, :manage_organization) &&
       (created_by.super_admin? || created_by.organization_id == organization_id) &&
+      (finance_book.kind != "personal" || finance_book.owner_user_id == created_by_id) &&
       (finance_book.company_id.nil? || created_by.can_access_company?(finance_book.company_id))
   end
 

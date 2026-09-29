@@ -7,19 +7,25 @@ module Api
         before_action :require_admin!
 
         def index
-          books = FinanceBook.active.where(organization_id: current_organization_id).ordered
+          books = FinanceBook.active.accessible_to(current_user).where(organization_id: current_organization_id).ordered
           books = books.select { |book| book.company_id.nil? || current_user.can_access_company?(book.company_id) }
           render json: {
             organization_id: current_organization_id,
             effective_finance_book_id: books.one? ? books.first.id : nil,
             finance_books: books.map do |book|
-              book.as_json(only: %i[id organization_id company_id name legal_name kind is_default active])
+              payload(book)
             end
           }
         end
 
         def create
           attributes = params.require(:finance_book).permit(:name, :legal_name, :kind, :company_id)
+          if attributes[:kind] == "personal"
+            unless current_user.super_admin? || current_organization_id == current_user.organization_id
+              return render json: { error: "You do not have access to a personal book in this organization" }, status: :forbidden
+            end
+            attributes[:owner_user] = current_user
+          end
           if attributes[:company_id].present?
             company = Company.find_by(id: attributes[:company_id], organization_id: current_organization_id)
             return render json: { error: "Client company not found" }, status: :not_found unless company
@@ -34,7 +40,7 @@ module Api
         end
 
         def update
-          book = current_organization.finance_books.find(params[:id])
+          book = current_organization.finance_books.accessible_to(current_user).find(params[:id])
           if book.company_id && !current_user.can_access_company?(book.company_id)
             return render json: { error: "You do not have access to this financial book" }, status: :forbidden
           end

@@ -4665,7 +4665,7 @@ export interface FinanceBook {
   company_id: number | null;
   name: string;
   legal_name: string;
-  kind: 'organization' | 'client';
+  kind: 'organization' | 'client' | 'personal';
   is_default: boolean;
   active?: boolean;
 }
