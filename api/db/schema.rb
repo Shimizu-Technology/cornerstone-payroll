@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1232,14 +1232,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_020000) do
     t.string "legal_name", null: false
     t.string "name", null: false
     t.bigint "organization_id", null: false
+    t.bigint "owner_user_id"
     t.datetime "updated_at", null: false
     t.index ["company_id"], name: "index_finance_books_on_company_id", unique: true, where: "(company_id IS NOT NULL)"
     t.index ["id", "organization_id"], name: "index_finance_books_on_id_and_organization_id", unique: true
     t.index ["organization_id", "is_default"], name: "index_finance_books_one_default_per_organization", unique: true, where: "(is_default = true)"
-    t.index ["organization_id", "name"], name: "index_finance_books_on_organization_id_and_name", unique: true
+    t.index ["organization_id", "name"], name: "index_finance_books_on_organization_id_and_name", unique: true, where: "((kind)::text <> 'personal'::text)"
+    t.index ["organization_id", "owner_user_id"], name: "index_finance_books_one_personal_per_user", unique: true, where: "((kind)::text = 'personal'::text)"
     t.index ["organization_id"], name: "index_finance_books_on_organization_id"
-    t.check_constraint "kind::text = 'organization'::text OR company_id IS NOT NULL", name: "finance_books_client_has_company"
-    t.check_constraint "kind::text = ANY (ARRAY['organization'::character varying::text, 'client'::character varying::text])", name: "finance_books_kind_check"
+    t.index ["owner_user_id"], name: "index_finance_books_on_owner_user_id"
+    t.check_constraint "kind::text = 'client'::text AND company_id IS NOT NULL AND owner_user_id IS NULL OR kind::text = 'organization'::text AND owner_user_id IS NULL OR kind::text = 'personal'::text AND company_id IS NULL AND owner_user_id IS NOT NULL AND is_default = false", name: "finance_books_owner_shape_check"
+    t.check_constraint "kind::text = ANY (ARRAY['organization'::character varying, 'client'::character varying, 'personal'::character varying]::text[])", name: "finance_books_kind_check"
   end
 
   create_table "form500_filings", force: :cascade do |t|
@@ -3584,6 +3587,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_020000) do
   add_foreign_key "finance_books", "companies"
   add_foreign_key "finance_books", "companies", column: ["company_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_books_company_id_book_scope", deferrable: :deferred
   add_foreign_key "finance_books", "organizations", on_delete: :cascade
+  add_foreign_key "finance_books", "users", column: "owner_user_id"
   add_foreign_key "invoice_billing_profiles", "finance_books"
   add_foreign_key "invoice_billing_profiles", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_billing_profiles_book_organization"
   add_foreign_key "invoice_chat_sessions", "finance_books"

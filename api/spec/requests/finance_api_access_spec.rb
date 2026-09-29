@@ -112,6 +112,21 @@ RSpec.describe "Book-scoped finance API access", type: :request do
     expect(response).to have_http_status(:unauthorized)
   end
 
+  it "invalidates a personal book key if its creator no longer owns the book" do
+    personal_book = company.organization.finance_books.create!(name: "Personal", legal_name: actor.name,
+                                                                kind: "personal", owner_user: actor)
+    _token, secret = FinanceApiToken.issue!(finance_book: personal_book, actor: actor, name: "Personal agent")
+    personal_headers = scope_headers.merge("X-Finance-Book-Id" => personal_book.id.to_s,
+                                            "Authorization" => "Bearer #{secret}")
+    get "/api/v1/finance/context", headers: personal_headers
+    expect(response).to have_http_status(:ok)
+
+    new_owner = create(:user, company: company, organization: company.organization, role: "admin")
+    personal_book.update_column(:owner_user_id, new_owner.id)
+    get "/api/v1/finance/context", headers: personal_headers
+    expect(response).to have_http_status(:unauthorized)
+  end
+
   describe "draft invoice writes" do
     let!(:recipient) { create(:invoice_recipient, company: company, organization: company.organization, finance_book: book) }
     let!(:profile) { create(:invoice_billing_profile, organization: company.organization, finance_book: book) }

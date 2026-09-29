@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
-import { expenseVendorsApi, expensesApi, organizationsApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
+import { FinanceBookSelector, useFinanceBook } from '@/contexts/FinanceBookContext';
+import { expenseVendorsApi, expensesApi, type BlobDownload, type Expense, type ExpenseSummary, type ExpenseVendor } from '@/services/api';
 
 type ExpenseForm = {
   source_key: string;
@@ -60,22 +60,9 @@ function StatusLabel({ status }: { status: Expense['payment_status'] }) {
 
 export function ExpenseLedger() {
   const { user } = useAuth();
-  const { activeOrganizationId, activeOrganizationName } = useCompany();
+  const { activeOrganizationId } = useCompany();
+  const { activeBook } = useFinanceBook();
   const organizationId = activeOrganizationId || user?.organization_id;
-  const [selectedOrganization, setSelectedOrganization] = useState<{ id: number; name: string } | null>(null);
-  useEffect(() => {
-    if (!organizationId || organizationId === user?.organization_id || user?.role !== 'super_admin') return;
-    let active = true;
-    void organizationsApi.get(organizationId).then((response) => {
-      if (active) setSelectedOrganization({ id: organizationId, name: response.data.name });
-    }).catch(() => {
-      if (active) setSelectedOrganization(null);
-    });
-    return () => { active = false; };
-  }, [organizationId, user?.organization_id, user?.role]);
-  const organizationName = activeOrganizationName || (organizationId === user?.organization_id
-    ? user?.organization_name
-    : selectedOrganization && selectedOrganization.id === organizationId ? selectedOrganization.name : undefined);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<ExpenseVendor[]>([]);
@@ -255,7 +242,7 @@ export function ExpenseLedger() {
   return (
     <div className="min-h-screen bg-[#f8f7f4]">
       <Header title="Bills & Purchases" description="See what you owe, what you paid, and the original documents in this book." mobileSticky={false}
-        contextLabel="Organization" contextValue={organizationName}
+        contextLabel="Financial book" contextValue={activeBook.name}
         actions={<>
           <Button variant="outline" onClick={() => void run(async () => downloadBlob(await expensesApi.export({
             vendor_id: vendorFilter === 'all' ? undefined : Number(vendorFilter),
