@@ -86,4 +86,22 @@ describe('FinanceBookGate', () => {
     expect(await screen.findByText('Current book ID: 3')).toBeTruthy();
     expect(createBook).toHaveBeenCalledWith({ name: 'Available Client', legal_name: 'Available Client LLC', kind: 'client', company_id: 7 });
   });
+
+  it('creates a private personal book in the same finance switcher', async () => {
+    auth.mockReturnValue({ user: { id: 42, name: 'Leon Shimizu', organization_id: 7, role: 'org_admin' } });
+    createBook.mockResolvedValue({ finance_book: { id: 3, organization_id: 7, company_id: null,
+      name: 'Personal', legal_name: 'Leon Shimizu', kind: 'personal', is_default: false } });
+    render(<FinanceBookGate><FinanceBookSelector /><CurrentBook /></FinanceBookGate>);
+    await screen.findByText('Current book ID: 1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add financial book' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Book type' }), { target: { value: 'personal' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Book name' }), { target: { value: 'Personal' } });
+    expect(screen.queryByRole('textbox', { name: 'Legal name' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Create book' }));
+
+    expect(await screen.findByText('Current book ID: 3')).toBeTruthy();
+    expect(screen.getByText('Private to you. Personal balances stay separate from organization reports.')).toBeTruthy();
+    expect(createBook).toHaveBeenCalledWith({ name: 'Personal', legal_name: 'Leon Shimizu', kind: 'personal' });
+  });
 });

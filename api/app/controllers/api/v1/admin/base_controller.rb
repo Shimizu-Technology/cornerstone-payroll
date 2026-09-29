@@ -53,7 +53,7 @@ module Api
           return unless finance_request?
           return if controller_path == "api/v1/admin/finance_books"
 
-          books = FinanceBook.active.where(organization_id: current_organization_id)
+          books = FinanceBook.active.accessible_to(current_user).where(organization_id: current_organization_id)
           raw_id = request.headers["X-Finance-Book-Id"].presence
           if raw_id.blank?
             return render json: { error: "Select a financial book" }, status: :unprocessable_entity unless books.one?

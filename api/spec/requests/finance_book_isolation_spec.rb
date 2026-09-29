@@ -86,4 +86,45 @@ RSpec.describe "Financial book isolation", type: :request do
     expect(response).to have_http_status(:not_found)
     expect(expense.expense_payments.count).to eq(0)
   end
+
+  it "keeps a personal book private from other staff in the same organization" do
+    post "/api/v1/admin/finance_books", headers: { "X-Organization-Id" => company.organization_id.to_s },
+         params: { finance_book: { name: "My personal finances", legal_name: actor.name, kind: "personal" } }
+    expect(response).to have_http_status(:created), response.body
+    personal_book = FinanceBook.find(response.parsed_body.dig("finance_book", "id"))
+    expect(personal_book).to have_attributes(owner_user_id: actor.id, company_id: nil, kind: "personal")
+
+    get "/api/v1/admin/finance_books", headers: { "X-Organization-Id" => company.organization_id.to_s }
+    expect(response.parsed_body.fetch("finance_books").map { |row| row.fetch("id") }).to include(personal_book.id)
+
+    other_staff = create(:user, company: company, organization: company.organization, role: "admin")
+    other_personal_book = company.organization.finance_books.create!(name: "My personal finances", legal_name: other_staff.name,
+                                                                      kind: "personal", owner_user: other_staff)
+    [ Api::V1::Admin::FinanceBooksController, Api::V1::Admin::ExpensesController ].each do |controller|
+      allow_any_instance_of(controller).to receive(:current_user).and_return(other_staff)
+    end
+    get "/api/v1/admin/finance_books", headers: { "X-Organization-Id" => company.organization_id.to_s }
+    expect(response.parsed_body.fetch("finance_books").map { |row| row.fetch("id") }).not_to include(personal_book.id)
+    expect(response.parsed_body.fetch("finance_books").map { |row| row.fetch("id") }).to include(other_personal_book.id)
+
+    get "/api/v1/admin/expenses", headers: headers_for(personal_book)
+    expect(response).to have_http_status(:not_found)
+    patch "/api/v1/admin/finance_books/#{personal_book.id}",
+          headers: { "X-Organization-Id" => company.organization_id.to_s },
+          params: { finance_book: { name: "Taken over" } }
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "lets a platform admin keep a private book in a selected organization outside their home organization" do
+    home_organization = create(:organization)
+    home_company = create(:company, organization: home_organization)
+    platform_admin = create(:user, company: home_company, organization: home_organization, role: "super_admin")
+    allow_any_instance_of(Api::V1::Admin::FinanceBooksController).to receive(:current_user).and_return(platform_admin)
+
+    post "/api/v1/admin/finance_books", headers: { "X-Organization-Id" => company.organization_id.to_s },
+         params: { finance_book: { name: "My personal finances", legal_name: platform_admin.name, kind: "personal" } }
+    expect(response).to have_http_status(:created), response.body
+    expect(FinanceBook.find(response.parsed_body.dig("finance_book", "id")))
+      .to have_attributes(organization_id: company.organization_id, owner_user_id: platform_admin.id)
+  end
 end

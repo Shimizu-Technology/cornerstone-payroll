@@ -116,7 +116,7 @@ export function useFinanceBook() {
 
 export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }) {
   const { user } = useAuth();
-  const { companies } = useCompany();
+  const { companies, activeOrganizationId } = useCompany();
   const { books, activeBook, switchBook, createBook } = useFinanceBook();
   const [showSetup, setShowSetup] = useState(false);
   const [name, setName] = useState('');
@@ -126,16 +126,17 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canManage = ['super_admin', 'org_admin', 'admin'].includes(user?.role || '');
+  const canCreatePersonal = canManage && (user?.role === 'super_admin' || activeOrganizationId === user?.organization_id);
   const eligibleCompanies = companies.filter((company) => company.organization_id === activeBook.organization_id
     && !company.test_workspace && !books.some((book) => book.company_id === company.id));
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    if (!name.trim() || !legalName.trim()) { setError('Enter a book name and legal name.'); return; }
+    if (!name.trim() || (kind !== 'personal' && !legalName.trim())) { setError('Enter a book name and legal name.'); return; }
     if (kind === 'client' && !companyId) { setError('Choose a client company.'); return; }
     setSaving(true);
     try {
-      await createBook({ name: name.trim(), legal_name: legalName.trim(), kind,
+      await createBook({ name: name.trim(), legal_name: kind === 'personal' ? (user?.name || 'Personal') : legalName.trim(), kind,
         ...(kind === 'client' ? { company_id: Number(companyId) } : {}) });
       setShowSetup(false);
     } catch (createError) {
@@ -150,7 +151,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Financial book</p>
         <p className="truncate text-sm font-semibold text-neutral-950">{activeBook.name}</p>
-        <p className="text-xs text-neutral-600">Invoices, expenses, and payments in this book stay together.</p>
+        <p className="text-xs text-neutral-600">{activeBook.kind === 'personal' ? 'Private to you. Personal balances stay separate from organization reports.' : 'Invoices, expenses, and payments in this book stay together.'}</p>
       </div>
       <div className="flex w-full flex-col gap-2 sm:w-72">
       {books.length > 1 && <label className="text-xs font-semibold text-neutral-700">
@@ -162,7 +163,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
           disabled={disabled || saving}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:opacity-60"
         >
-          {books.map((book) => <option key={book.id} value={book.id}>{book.name}{book.kind === 'organization' ? ' · Organization' : ' · Client'}</option>)}
+          {books.map((book) => <option key={book.id} value={book.id}>{book.name}{book.kind === 'personal' ? ' · Private' : book.kind === 'organization' ? ' · Organization' : ' · Client'}</option>)}
         </select>
       </label>}
       {canManage && <button type="button" onClick={() => { setShowSetup((value) => !value); setError(null); }} disabled={disabled || saving}
@@ -172,11 +173,11 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
       </div>
     </section>
     {showSetup && canManage && <form onSubmit={(event) => void submit(event)} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Add financial book">
-      <div><h2 className="font-semibold text-neutral-950">Add financial book</h2><p className="text-sm text-neutral-600">Choose whose invoices and expenses this book will hold.</p></div>
+      <div><h2 className="font-semibold text-neutral-950">Add financial book</h2><p className="text-sm text-neutral-600">Choose whose finances this book will hold. A personal book is visible only to you.</p></div>
       {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm font-medium">Book type<select value={kind} onChange={(event) => { setKind(event.target.value as FinanceBook['kind']); setCompanyId(''); }} disabled={saving}
-          className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3"><option value="client">Client company</option><option value="organization">Organization</option></select></label>
+          className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3"><option value="client">Client company</option><option value="organization">Organization</option>{canCreatePersonal && !books.some((book) => book.kind === 'personal') && <option value="personal">Private personal</option>}</select></label>
         {kind === 'client' && <label className="text-sm font-medium">Client company<select required value={companyId} onChange={(event) => {
           setCompanyId(event.target.value);
           const company = eligibleCompanies.find((candidate) => candidate.id === Number(event.target.value));
@@ -186,10 +187,10 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
           }
         }} disabled={saving}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3"><option value="">Choose company</option>{eligibleCompanies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>}
-        <label className="text-sm font-medium">Book name<input required value={name} onChange={(event) => setName(event.target.value)} disabled={saving} placeholder="Client bookkeeping"
+        <label className="text-sm font-medium">Book name<input required value={name} onChange={(event) => setName(event.target.value)} disabled={saving} placeholder={kind === 'personal' ? 'Personal' : 'Client bookkeeping'}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3" /></label>
-        <label className="text-sm font-medium">Legal name<input required value={legalName} onChange={(event) => setLegalName(event.target.value)} disabled={saving} placeholder="Legal entity name"
-          className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3" /></label>
+        {kind !== 'personal' && <label className="text-sm font-medium">Legal name<input required value={legalName} onChange={(event) => setLegalName(event.target.value)} disabled={saving} placeholder="Legal entity name"
+          className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3" /></label>}
       </div>
       {kind === 'client' && eligibleCompanies.length === 0 && <p className="text-sm text-neutral-600">All eligible clients already have books in this organization.</p>}
       <Button type="submit" disabled={saving || disabled || (kind === 'client' && eligibleCompanies.length === 0)}>{saving ? 'Creating…' : 'Create book'}</Button>
