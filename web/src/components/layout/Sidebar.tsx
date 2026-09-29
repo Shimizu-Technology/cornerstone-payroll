@@ -83,7 +83,7 @@ const toolsNavigation: NavItem[] = [
   { name: 'Transmittal Builder', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Finance Overview', href: '/tools/finance', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Invoice Center', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Expense Ledger', href: '/tools/expenses', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Bills & Purchases', href: '/tools/expenses', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const clientSettingsNavigation: NavItem[] = [
