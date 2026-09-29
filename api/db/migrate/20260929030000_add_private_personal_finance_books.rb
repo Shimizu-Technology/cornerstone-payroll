@@ -19,6 +19,10 @@ class AddPrivatePersonalFinanceBooks < ActiveRecord::Migration[8.1]
   end
 
   def down
+    if select_value("SELECT 1 FROM finance_books WHERE kind = 'personal' LIMIT 1")
+      raise ActiveRecord::IrreversibleMigration, "Move or remove personal book data before reverting this migration"
+    end
+
     remove_index :finance_books, name: "index_finance_books_on_organization_id_and_name"
     add_index :finance_books, [ :organization_id, :name ], unique: true
     remove_index :finance_books, name: "index_finance_books_one_personal_per_user"

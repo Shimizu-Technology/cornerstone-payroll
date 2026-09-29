@@ -187,7 +187,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
           }
         }} disabled={saving}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3"><option value="">Choose company</option>{eligibleCompanies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>}
-        <label className="text-sm font-medium">Book name<input required value={name} onChange={(event) => setName(event.target.value)} disabled={saving} placeholder="Client bookkeeping"
+        <label className="text-sm font-medium">Book name<input required value={name} onChange={(event) => setName(event.target.value)} disabled={saving} placeholder={kind === 'personal' ? 'Personal' : 'Client bookkeeping'}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3" /></label>
         {kind !== 'personal' && <label className="text-sm font-medium">Legal name<input required value={legalName} onChange={(event) => setLegalName(event.target.value)} disabled={saving} placeholder="Legal entity name"
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3" /></label>}
