@@ -55,6 +55,7 @@ RSpec.describe "Organization expense ledger", type: :request do
     }
     expect(response).to have_http_status(:created), response.body
     expect(response.parsed_body.dig("expense", "payment_status")).to eq("paid")
+    expect(response.parsed_body.dig("expense", "entry_kind")).to eq("bill")
 
     get "/api/v1/admin/expenses"
     expect(response.parsed_body.dig("summary", "currencies", 0, "balance_due")).to eq("0.0")
@@ -80,6 +81,7 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(response).to have_http_status(:created), response.body
     expense_id = response.parsed_body.dig("expense", "id")
     expect(response.parsed_body.dig("expense", "payment_status")).to eq("paid")
+    expect(response.parsed_body.dig("expense", "entry_kind")).to eq("purchase")
     expect(response.parsed_body.dig("expense", "balance_due")).to eq("0.0")
     expect(Expense.find(expense_id).expense_payments.active.count).to eq(1)
 
@@ -106,6 +108,40 @@ RSpec.describe "Organization expense ledger", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(Expense.count).to eq(0)
     expect(ExpensePayment.count).to eq(0)
+  end
+
+  it "filters bills and paid purchases across the list and CSV export" do
+    vendor = create_vendor
+    bill = create_expense(vendor: vendor, source_key: "bill-kind")
+    post "/api/v1/admin/expenses", params: {
+      expense: { expense_vendor_id: vendor.id, category: "Software", description: "Paid purchase",
+                 expense_on: "2026-09-28", total_amount: "35.00", source_key: "purchase-kind" },
+      payment: { paid_on: "2026-09-28", payment_method: "card", reference_number: "statement-kind" }
+    }
+    expect(response).to have_http_status(:created)
+    purchase_id = response.parsed_body.dig("expense", "id")
+
+    get "/api/v1/admin/expenses", params: { kind: "bill" }
+    expect(response.parsed_body.fetch("expenses").map { |row| row.fetch("id") }).to eq([ bill.id ])
+    expect(response.parsed_body.dig("summary", "currencies", 0, "balance_due")).to eq("120.0")
+
+    get "/api/v1/admin/expenses", params: { kind: "purchase" }
+    expect(response.parsed_body.fetch("expenses").map { |row| row.fetch("id") }).to eq([ purchase_id ])
+    expect(response.parsed_body.dig("summary", "currencies", 0, "balance_due")).to eq("0.0")
+
+    get "/api/v1/admin/expenses/export", params: { kind: "purchase" }
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("kind", "purchase", "Paid purchase")
+    expect(response.body).not_to include("Annual subscription")
+
+    payment_id = Expense.find(purchase_id).expense_payments.first.id
+    post "/api/v1/admin/expenses/#{purchase_id}/payments/#{payment_id}/reverse", params: { reason: "Statement correction" }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("expense", "entry_kind")).to eq("purchase")
+    expect(response.parsed_body.dig("expense", "payment_status")).to eq("open")
+
+    get "/api/v1/admin/expenses", params: { kind: "unknown" }
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "rejects malformed paid-purchase payment details without inserting records" do

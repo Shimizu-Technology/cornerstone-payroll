@@ -8,16 +8,17 @@ interface HeaderProps {
   actions?: React.ReactNode;
   contextLabel?: string;
   contextValue?: string;
+  mobileSticky?: boolean;
 }
 
-export function Header({ title, description, subtitle, actions, contextLabel, contextValue }: HeaderProps) {
+export function Header({ title, description, subtitle, actions, contextLabel, contextValue, mobileSticky = true }: HeaderProps) {
   const helperText = description ?? subtitle;
   const { activeCompany } = useCompany();
   const displayedContext = contextValue || activeCompany?.name;
   const displayedLabel = contextValue ? contextLabel || 'Workspace' : 'Client';
 
   return (
-    <div className="sticky top-0 z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8">
+    <div className={`${mobileSticky ? 'sticky top-0' : 'sm:sticky sm:top-0'} z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-2">

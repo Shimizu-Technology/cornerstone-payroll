@@ -5820,6 +5820,7 @@ export interface Expense {
   reference_number?: string | null;
   source_key?: string | null;
   category: string;
+  entry_kind: 'bill' | 'purchase';
   description: string;
   expense_on: string;
   due_on?: string | null;
@@ -5892,7 +5893,7 @@ export const expenseVendorsApi = {
 };
 
 export const expensesApi = {
-  list: (params?: { page?: number; per_page?: number; vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string }) =>
+  list: (params?: { page?: number; per_page?: number; vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string; kind?: 'bill' | 'purchase' }): Promise<{ expenses: Expense[]; meta: { page: number; per_page: number; total_count: number }; summary: ExpenseSummary }> =>
     api.get<{ expenses: Expense[]; meta: { page: number; per_page: number; total_count: number }; summary: ExpenseSummary }>('/admin/expenses', params),
   show: (id: number) => api.get<{ expense: Expense }>(`/admin/expenses/${id}`),
   create: (data: {
@@ -5913,7 +5914,7 @@ export const expensesApi = {
   },
   downloadArtifact: (id: number, artifactId: number) =>
     api.getBlobWithParams(`/admin/expenses/${id}/artifacts/${artifactId}`),
-  export: (params?: { vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string }) =>
+  export: (params?: { vendor_id?: number; category?: string; from?: string; to?: string; include_voided?: boolean; q?: string; status?: string; kind?: 'bill' | 'purchase' }): Promise<BlobDownload> =>
     api.getBlobWithParams('/admin/expenses/export', params),
 };
 

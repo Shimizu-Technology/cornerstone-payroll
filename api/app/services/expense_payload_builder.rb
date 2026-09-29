@@ -11,6 +11,7 @@ class ExpensePayloadBuilder
       reference_number: expense.reference_number,
       source_key: expense.source_key,
       category: expense.category,
+      entry_kind: expense.payment_included_at_creation? ? "purchase" : "bill",
       description: expense.description,
       expense_on: expense.expense_on,
       due_on: expense.due_on,
