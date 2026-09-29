@@ -58,6 +58,7 @@ Rack::Attack counters and Clerk JWKS use a bounded in-process memory store. This
 - [ ] R2 is private, lifecycle/versioning policy is documented, and a generated payroll document remains available after an application redeploy.
 - [ ] Solid Queue, Cache, and Cable schemas are installed; a queued job survives a web-process restart.
 - [ ] Production schema preparation runs only in the serialized pre-deploy phase, uses `db:safe_prepare` with every required direct `MIGRATION_*_DATABASE_URL`, and cannot run from a web/worker entrypoint or continue through a pooled migration. Kamal direct migration URLs are scoped to its one-off pre-deploy container and are absent from long-lived runtime configuration.
+- [ ] Before creating any private personal finance book, confirm the API web and worker services run the owner-scoped finance-book revision from PR #275 or newer. Once a personal book exists, do not manually roll either service back to an earlier revision: older organization-scoped code lacks the owner check. Recover by rolling forward to a compatible revision. If rollback below that revision is unavoidable, first move or remove personal book data under a reviewed recovery plan; the migration itself refuses to roll back while personal books exist.
 - [ ] Email delivery, bounce/error reporting, and sender-domain authentication are verified.
 - [ ] Database backups are encrypted; restore to an isolated environment has been timed and verified.
 - [ ] Object-storage backup/recovery has been exercised.
