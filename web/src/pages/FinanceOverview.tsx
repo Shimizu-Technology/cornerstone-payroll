@@ -54,7 +54,7 @@ export function FinanceOverview() {
       <FinanceBookSelector disabled={loading} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Link to="/tools/invoices" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage invoices <ArrowUpRight className="h-4 w-4" /></Link>
-        <Link to="/tools/expenses" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage expenses <ArrowUpRight className="h-4 w-4" /></Link>
+        <Link to="/tools/expenses" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage bills & purchases <ArrowUpRight className="h-4 w-4" /></Link>
         <Link to="/tools/finance/agent-access" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Agent access <KeyRound className="h-4 w-4" /></Link>
       </div>
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}

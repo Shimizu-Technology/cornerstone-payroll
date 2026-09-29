@@ -124,12 +124,13 @@ module Api
         def export
           rows = filtered_scope.includes(:expense_vendor, :expense_payments)
           csv = CSV.generate do |file|
-            file << %w[date vendor reference category description currency total paid balance status due_date]
+            file << %w[date vendor reference category description currency total paid balance status due_date kind]
             rows.find_each do |expense|
               file << [ expense.expense_on, safe_csv(expense.expense_vendor.name), safe_csv(expense.reference_number),
                         safe_csv(expense.category), safe_csv(expense.description), expense.currency,
                         expense.total_amount.to_s("F"), expense.amount_paid.to_s("F"), expense.balance_due.to_s("F"),
-                        expense.payment_status, expense.due_on ]
+                        expense.payment_status, expense.due_on,
+                        expense.payment_included_at_creation? ? "purchase" : "bill" ]
             end
           end
           send_data csv, type: "text/csv", filename: "expenses-#{Date.current.iso8601}.csv", disposition: "attachment"
@@ -188,6 +189,12 @@ module Api
 
         def filtered_scope
           rows = scope
+          rows = case params[:kind]
+          when nil, "" then rows
+          when "bill" then rows.where(payment_included_at_creation: false)
+          when "purchase" then rows.where(payment_included_at_creation: true)
+          else raise ArgumentError, "Unknown expense kind"
+          end
           rows = rows.where(expense_vendor_id: params[:vendor_id]) if params[:vendor_id].present?
           rows = rows.where(category: params[:category]) if params[:category].present?
           rows = rows.where("expense_on >= ?", Date.iso8601(params[:from])) if params[:from].present?
