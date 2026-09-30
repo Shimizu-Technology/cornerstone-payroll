@@ -588,6 +588,19 @@ RSpec.describe "QuickBooks historical YTD bridge" do
       "adjustment_ids" => [ adjustment.id ],
       "adjustment_deltas" => include("gross_pay" => "100.0")
     )
+    expect(revised.preview_summary.fetch("adjustments")).to contain_exactly(
+      include(
+        "id" => adjustment.id,
+        "historical_paycheck_id" => paycheck.id,
+        "historical_pay_period_id" => paycheck.historical_pay_period_id,
+        "effective_pay_date" => paycheck.pay_date.iso8601,
+        "kind" => "correction",
+        "reason" => "Correct source wage classification",
+        "gross_pay" => "100.0",
+        "filing_review_state" => "no_amendment_required",
+        "downstream_impact_acknowledged" => false
+      )
+    )
     expect(revised.reconciliation_summary).to include("passed" => true)
 
     QuickbooksHistory::YtdBridgeApplyService.new(

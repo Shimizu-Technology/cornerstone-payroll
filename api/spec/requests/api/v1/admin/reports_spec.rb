@@ -618,6 +618,42 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "returns structured YTD bridge recovery details when historical adjustments make the applied bridge stale" do
+      batch, period, paycheck = create_locked_historical_paycheck(
+        employee: employee,
+        suffix: "stale-quarterly-bridge",
+        pay_date: Date.new(2026, 5, 15)
+      )
+      bootstrap = create(:historical_client_bootstrap, company: company, historical_import_batch: batch, status: "applied")
+      bridge = HistoricalYtdBridge.create!(
+        company: company,
+        historical_import_batch: batch,
+        historical_client_bootstrap: bootstrap,
+        status: "applied",
+        plan_digest: Digest::SHA256.hexdigest("stale-quarterly-bridge"),
+        preview_summary: {
+          "through_period_end" => period.end_date.iso8601,
+          "through_pay_date" => paycheck.pay_date.iso8601,
+          "adjustment_digest" => "digest-before-adjustment"
+        },
+        reconciliation_summary: { "passed" => true },
+        applied_at: Time.current,
+        applied_by: admin_user,
+        apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body).to include(
+        "error_code" => "historical_ytd_bridge_stale",
+        "historical_import_batch_ids" => [ batch.id ],
+        "recovery_path" => "/historical-payroll"
+      )
+      expect(response.parsed_body.fetch("error")).to match(/not represented by the latest historical YTD bridge/)
+      expect(bridge.reload).to be_applied
+    end
   end
 
   describe "GET /api/v1/admin/reports/quarterly_compliance_packet official PDFs" do
@@ -1577,6 +1613,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         employer_social_security_tax: 77.50,
         employer_medicare_tax: 18.13,
         employer_retirement_match: 40.00,
+        employer_roth_retirement_match: 10.00,
         loan_deduction: 25.00,
         loan_payment: 75.00,
         total_deductions: 275.63,
@@ -1598,8 +1635,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "bonus" => 100.0,
         "straight_loan_deductions" => 25.0,
         "installment_loan_payments" => 50.0,
-        "employer_contributions" => 40.0,
-        "employer_payroll_cost" => 1_385.63
+        "employer_social_security_tax" => 77.5,
+        "employer_medicare_tax" => 18.13,
+        "other_employer_taxes" => 0.0,
+        "employer_taxes_total" => 95.63,
+        "employer_traditional_401k_match" => 40.0,
+        "employer_roth_401k_match" => 10.0,
+        "other_employer_contributions" => 0.0,
+        "employer_contributions" => 50.0,
+        "employer_taxes_and_contributions_total" => 145.63,
+        "employer_payroll_cost" => 1_395.63
       )
       expect(employee_row.fetch("custom_deductions_total").to_f).to eq(40.00)
       expect(employee_row.fetch("total_deductions").to_f).to eq(275.63)
@@ -1611,8 +1656,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "bonus" => 100.0,
         "straight_loan_deductions" => 25.0,
         "installment_loan_payments" => 50.0,
-        "employer_contributions" => 40.0,
-        "employer_payroll_cost" => 1_385.63
+        "employer_social_security_tax" => 77.5,
+        "employer_medicare_tax" => 18.13,
+        "employer_taxes_total" => 95.63,
+        "employer_traditional_401k_match" => 40.0,
+        "employer_roth_401k_match" => 10.0,
+        "other_employer_contributions" => 0.0,
+        "employer_contributions" => 50.0,
+        "employer_taxes_and_contributions_total" => 145.63,
+        "employer_payroll_cost" => 1_395.63
       )
     end
 
@@ -2159,6 +2211,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         employee.id, unpaid_employee.id, zero_item_employee.id, zero_net_employee.id, inactive_employee.id
       )
       expect(default_report.dig("employee_visibility", "active_zero_pay_count")).to eq(2)
+      zero_item_row = default_report.fetch("employees").find { |row| row.fetch("employee_id") == zero_item_employee.id }
+      expect(zero_item_row).to include(
+        "other_employer_contributions" => 15.0,
+        "employer_contributions" => 15.0,
+        "employer_taxes_and_contributions_total" => 15.0,
+        "employer_payroll_cost" => 15.0
+      )
 
       get "/api/v1/admin/reports/ytd_summary", params: { year: 2026, include_zero_pay: false }
       expect(response).to have_http_status(:ok)
@@ -2181,13 +2240,30 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/ytd_summary_csv", params: params
       expect(response).to have_http_status(:ok)
       expect(response.headers.fetch("Content-Disposition")).to include("_exclude_zero_pay.csv")
-      csv_names = CSV.parse(response.body, headers: true).map { |row| row.fetch("Employee Name") }
+      csv = CSV.parse(response.body, headers: true)
+      expect(csv.headers).to include(
+        "Employer Social Security",
+        "Employer Medicare",
+        "Employer Traditional 401(k) Match",
+        "Employer Roth 401(k) Match",
+        "Employer Contributions",
+        "Employer Payroll Cost"
+      )
+      csv_names = csv.map { |row| row.fetch("Employee Name") }
       expect(csv_names).to include(employee.full_name, zero_net_employee.full_name, inactive_employee.full_name)
       expect(csv_names).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
 
       get "/api/v1/admin/reports/ytd_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
+      expect(workbook.sheet("Payroll Summary").row(1)).to include(
+        "Employer Social Security",
+        "Employer Medicare",
+        "Employer Traditional 401(k) Match",
+        "Employer Roth 401(k) Match",
+        "Employer Contributions",
+        "Employer Payroll Cost"
+      )
       names = workbook.sheet("Payroll Summary").column(3)
       expect(names).to include(employee.full_name, zero_net_employee.full_name, inactive_employee.full_name)
       expect(names).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
@@ -2199,6 +2275,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
       expect(pdf_text).to include(employee.full_name, zero_net_employee.full_name)
+      expect(pdf_text).to include("Employer Social", "Security", "Medicare")
+      expect(pdf_text).to include("Employer Traditional 401(k)", "Employer Roth 401(k) Match")
       expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
     end
   end

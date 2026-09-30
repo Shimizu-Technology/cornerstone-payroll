@@ -30,7 +30,7 @@ module HistoricalPayroll
     end
 
     def adjustments
-      scope = HistoricalPaycheckAdjustment.includes(:historical_paycheck, :events)
+      scope = HistoricalPaycheckAdjustment.includes({ historical_paycheck: :historical_pay_period }, :events)
                                            .where(company_id: @company_id)
       scope = scope.where(historical_paycheck_id: source_paychecks.select(:id)) if @batch
       scope.chronological
