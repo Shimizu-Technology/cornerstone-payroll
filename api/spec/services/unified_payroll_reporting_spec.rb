@@ -3,31 +3,33 @@
 require "rails_helper"
 
 RSpec.describe UnifiedPayrollReporting do
-  FinancialRow = Struct.new(
-    :hours_total,
-    :hours_breakdown,
-    :gross_pay,
-    :earnings_breakdown,
-    :employer_contributions,
-    :total_payroll_cost,
-    :federal_income_tax,
-    :social_security_tax,
-    :medicare_tax,
-    :pretax_deduction_breakdown,
-    :after_tax_deduction_breakdown,
-    :employer_taxes,
-    :employer_tax_breakdown,
-    :employer_contribution_breakdown,
-    :employee_taxes,
-    :after_tax_deductions,
-    :pretax_deductions,
-    :net_pay,
-    keyword_init: true
-  )
+  let(:financial_row_class) do
+    Struct.new(
+      :hours_total,
+      :hours_breakdown,
+      :gross_pay,
+      :earnings_breakdown,
+      :employer_contributions,
+      :total_payroll_cost,
+      :federal_income_tax,
+      :social_security_tax,
+      :medicare_tax,
+      :pretax_deduction_breakdown,
+      :after_tax_deduction_breakdown,
+      :employer_taxes,
+      :employer_tax_breakdown,
+      :employer_contribution_breakdown,
+      :employee_taxes,
+      :after_tax_deductions,
+      :pretax_deductions,
+      :net_pay,
+      keyword_init: true
+    )
+  end
 
   describe "historical employer cost classification" do
     it "separates employer taxes, 401(k) matches, and unclassified contributions across source and adjustments" do
-      source = FinancialRow.new(
+      source = financial_row_class.new(
         hours_total: 40,
         hours_breakdown: [],
         gross_pay: 1_000,
@@ -54,7 +56,7 @@ RSpec.describe UnifiedPayrollReporting do
         pretax_deductions: 0,
         net_pay: 823.50
       )
-      adjustment = FinancialRow.new(
+      adjustment = financial_row_class.new(
         hours_total: 4,
         hours_breakdown: [],
         gross_pay: 100,
@@ -98,7 +100,7 @@ RSpec.describe UnifiedPayrollReporting do
     end
 
     it "keeps an ambiguous historical employer tax in the other-tax bucket" do
-      source = FinancialRow.new(
+      source = financial_row_class.new(
         hours_total: 0,
         hours_breakdown: [],
         gross_pay: 100,
