@@ -4,6 +4,14 @@ require "rails_helper"
 
 RSpec.describe TimeTrackingSource do
   describe "validations" do
+    it "assigns a stable external connection UUID" do
+      source = create(:time_tracking_source)
+
+      expect(source.connection_uuid).to match(described_class::UUID_PATTERN)
+      expect { create(:time_tracking_source, connection_uuid: source.connection_uuid) }
+        .to raise_error(ActiveRecord::RecordInvalid, /Connection uuid has already been taken/i)
+    end
+
     it "requires an HTTP or HTTPS base URL with a host" do
       source = described_class.new(
         company: create(:company),

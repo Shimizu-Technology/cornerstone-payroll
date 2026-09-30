@@ -62,13 +62,15 @@ module Api
             return
           end
 
-          payload = TimeTracking::Client.new(@source).time_summary(
+          client = TimeTracking::Client.new(@source)
+          payload = client.time_summary(
             start_date: test_connection_date,
             end_date: test_connection_date
           )
+          identity = TimeTracking::ConnectionIdentity.verify_and_pin!(source: @source, payload: payload)
           cockpit_ready = if @source.source_type == "aire_services"
             begin
-              TimeTracking::Client.new(@source).payroll_cockpit_employees(per_page: 1).key?("employees")
+              client.payroll_cockpit_employees(per_page: 1).key?("employees")
             rescue TimeTracking::Client::Error
               false
             end
@@ -83,10 +85,17 @@ module Api
             generated_at: payload["generated_at"],
             employee_count: Array(payload["employees"]).size,
             summary: payload["summary"] || {},
+            identity_verified: !identity.legacy,
+            connection_uuid: @source.connection_uuid,
+            source_instance_id: identity.source_instance_id,
+            source_protocol: identity.protocol,
+            source_protocol_version: identity.protocol_version,
+            source_capabilities: identity.capabilities,
+            identity_verified_at: @source.identity_verified_at,
             cockpit_ready: cockpit_ready,
             delegation_token_configured: @source.delegation_for(current_user).present?
           }
-        rescue TimeTracking::Client::Error, ArgumentError, SocketError, SystemCallError, Timeout::Error,
+        rescue TimeTracking::Client::Error, TimeTracking::ConnectionIdentity::Error, ArgumentError, SocketError, SystemCallError, Timeout::Error,
                Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
           render json: { ok: false, error: "Connection test failed: #{e.message}" }, status: :unprocessable_entity
         end
@@ -193,6 +202,13 @@ module Api
             active: source.active,
             shared_secret_configured: source.shared_secret_configured?,
             delegation_token_configured: source.delegation_for(current_user).present?,
+            connection_uuid: source.connection_uuid,
+            identity_verified: source.remote_identity_pinned?,
+            source_instance_id: source.expected_source_instance_id,
+            source_protocol: source.source_protocol,
+            source_protocol_version: source.source_protocol_version,
+            source_capabilities: source.source_capabilities,
+            identity_verified_at: source.identity_verified_at,
             last_synced_at: source.last_synced_at,
             created_at: source.created_at,
             updated_at: source.updated_at
