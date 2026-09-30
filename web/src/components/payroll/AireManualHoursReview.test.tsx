@@ -77,11 +77,11 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('Manual AIRE hours check')).toBeTruthy();
+    expect(await screen.findByText('Live AIRE readiness')).toBeTruthy();
     expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
-    expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
+    expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
-    expect(screen.getByText(/there is no separate “mark paid” step in AIRE/i)).toBeTruthy();
+    expect(screen.getByText(/carries its exact entry links through calculation/i)).toBeTruthy();
   });
 
   it('updates the match result immediately as Payroll hours change', async () => {
@@ -119,7 +119,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Update needed')).toBeTruthy();
-    expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
+    expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
   });
 
   it('counts negative corrections that need attention without double-counting exclusions', async () => {
@@ -153,7 +153,7 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/Recording each check as issued automatically marks/i);
+    await screen.findByText(/reports check preparation and delivery back to AIRE/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
@@ -170,7 +170,7 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('The manual check could not load.')).toBeTruthy();
-    expect(screen.getByText(/You can still process payroll manually/i)).toBeTruthy();
+    expect(await screen.findByText('The live AIRE preview could not load.')).toBeTruthy();
+    expect(screen.getByText(/Refresh before using AIRE hours for payroll/i)).toBeTruthy();
   });
 });

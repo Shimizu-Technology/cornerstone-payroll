@@ -44,11 +44,13 @@ Negative correction lines require an explicit acknowledgement and operator note.
 ## Operator workflow
 
 1. Confirm the matching pay period exists in Cornerstone and has the intended legal workweek.
-2. Open the draft pay period and choose **Import Time Tracking**.
-3. Retrieve the finalized AIRE batch.
-4. Review the batch ID, cutoff, contract, checksum, employee matches, Cornerstone earning-rate mappings, carryovers/corrections, and exclusions.
-5. Resolve any unmapped employee or earning dimension.
-6. Apply the finalized batch, then calculate payroll normally.
+2. Before cutoff, use **Live AIRE readiness** to resolve employee links, approvals, missing punches, and held time. Treat these totals as a changing preview.
+3. After cutoff and batch verification, select **Review and add AIRE hours** on the pay-period page. Cornerstone opens the configured AIRE source and retrieves the matching batch automatically.
+4. Review the batch ID, cutoff, contract, checksum, employee matches, Cornerstone earning-rate mappings, carryovers, corrections, and exclusions.
+5. Resolve every unmapped employee or earning dimension.
+6. Select **Add AIRE Hours to Payroll**, then select **Calculate Payroll** on the pay-period page.
+
+The general **Import Time Tracking** action remains available for another configured provider or an exceptional operator path. AIRE's normal workflow does not require choosing the source and retrieving the batch separately.
 
 An empty finalized batch is valid and may be applied so Cornerstone retains evidence that the period was reviewed and contained no payable hours.
 
