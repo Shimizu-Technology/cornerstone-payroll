@@ -26,9 +26,12 @@ start_date = Date.iso8601(aire.fetch("start_date"))
 end_date = Date.iso8601(aire.fetch("end_date"))
 pay_date = Date.iso8601(aire.fetch("pay_date"))
 cutoff_at = Time.iso8601(aire.fetch("cutoff_at"))
+previous_end_date = start_date - 1.day
+previous_start_date = previous_end_date.day == 15 ? previous_end_date.beginning_of_month : previous_end_date.change(day: 16)
+previous_pay_date = cutoff_at.to_date - 7.days
 next_start_date = end_date + 1.day
 next_end_date = next_start_date.day == 16 ? next_start_date.end_of_month : next_start_date.change(day: 15)
-next_pay_date = next_end_date + 7.days
+next_pay_date = [ next_end_date + 7.days, pay_date + 8.days ].max
 
 fixture = ApplicationRecord.transaction do
   organization = Organization.create!(
@@ -81,6 +84,8 @@ fixture = ApplicationRecord.transaction do
     notes: "Confirmed for the isolated AIRE certification",
     effective_on: start_date.beginning_of_year,
     payroll_cutoff_days_before: 7,
+    time_tracking_cutoff_rule: "after_previous_regular_payday",
+    time_tracking_cutoff_days: 7,
     payroll_cutoff_at_minutes: (cutoff_at.hour * 60) + cutoff_at.min
   )
   department = Department.create!(company: company, name: "Certification Operations")
@@ -147,6 +152,16 @@ fixture = ApplicationRecord.transaction do
     source_user_id: aire.fetch("employee_id").to_s,
     source_user_uuid: aire.fetch("employee_uuid")
   )
+  previous_pay_period = PayPeriod.create!(
+    company: company,
+    company_pay_schedule: schedule,
+    company_workweek: workweek,
+    start_date: previous_start_date,
+    end_date: previous_end_date,
+    pay_date: previous_pay_date,
+    status: "draft",
+    notes: "Synthetic previous regular payroll for target-run cutoff certification; never production"
+  )
   pay_period = PayPeriod.create!(
     company: company,
     company_pay_schedule: schedule,
@@ -175,6 +190,8 @@ fixture = ApplicationRecord.transaction do
     employee_id: employee.id,
     employee_wage_rate_id: wage_rate.id,
     source_id: source.id,
+    previous_pay_period_id: previous_pay_period.id,
+    previous_regular_pay_date: previous_pay_date.iso8601,
     pay_period_id: pay_period.id,
     next_pay_period_id: next_pay_period.id,
     start_date: start_date.iso8601,

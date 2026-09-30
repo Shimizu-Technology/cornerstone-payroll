@@ -80,6 +80,64 @@ RSpec.describe AirePayrollCalendar::Publisher do
     expect(first.calendar_period.publications.count).to eq(1)
   end
 
+  it "publishes a configurable pay-date cutoff without requiring a previous payroll" do
+    schedule.update!(time_tracking_cutoff_days: 5)
+
+    result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+
+    expect(result.publication.payload).to include(
+      "schema_version" => "2.0",
+      "cutoff_rule" => "before_pay_date",
+      "cutoff_days" => 5,
+      "cutoff_at" => "2026-10-20T17:00:00+10:00"
+    )
+    expect(result.publication.payload).not_to have_key("previous_regular_pay_date")
+    expect(result.publication.payload).not_to have_key("cutoff_days_before")
+  end
+
+  it "locks seven days after the adjacent regular scheduled payday for the target run" do
+    schedule.update!(time_tracking_cutoff_rule: "after_previous_regular_payday", time_tracking_cutoff_days: 7)
+    previous = create(
+      :pay_period,
+      company: company,
+      company_pay_schedule: schedule,
+      company_workweek: workweek,
+      start_date: Date.new(2026, 9, 16),
+      end_date: Date.new(2026, 9, 30),
+      pay_date: Date.new(2026, 10, 10)
+    )
+    create(
+      :pay_period,
+      company: company,
+      company_pay_schedule: schedule,
+      company_workweek: workweek,
+      start_date: Date.new(2026, 9, 16),
+      end_date: Date.new(2026, 9, 30),
+      pay_date: Date.new(2026, 10, 20),
+      cycle: "supplemental",
+      corrects_pay_period: previous
+    )
+
+    result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+
+    expect(result.publication.payload).to include(
+      "schema_version" => "2.0",
+      "cutoff_rule" => "after_previous_regular_payday",
+      "cutoff_days" => 7,
+      "previous_regular_pay_date" => "2026-10-10",
+      "cutoff_at" => "2026-10-17T17:00:00+10:00"
+    )
+    expect(result.publication.payload).not_to have_key("cutoff_days_before")
+  end
+
+  it "requires an unambiguous previous regular period for the new cutoff rule" do
+    schedule.update!(time_tracking_cutoff_rule: "after_previous_regular_payday")
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    end.to raise_error(AirePayrollCalendar::Contract::Error, /adjacent previous regular payroll period/)
+  end
+
   it "appends the next revision when dates change before cutoff" do
     first = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
     first.publication.update!(delivery_status: "delivered", delivered_at: now)

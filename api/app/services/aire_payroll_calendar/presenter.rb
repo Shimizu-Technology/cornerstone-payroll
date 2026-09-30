@@ -84,7 +84,7 @@ module AirePayrollCalendar
       return @eligibility_error if @eligibility_error
       return unless missed_unpublished_cutoff
 
-      "This period's seven-day cutoff passed before it was published. Create a correction or supplemental run instead."
+      "This period's time-tracking cutoff passed before it was published. Create a correction or supplemental run instead."
     end
 
     def eligibility_code(missed_unpublished_cutoff)

@@ -3798,6 +3798,8 @@ export interface CompanyPayScheduleSetting {
   pay_date_rule: 'manual' | 'days_after_period_end';
   pay_date_offset_days?: number | null;
   payroll_cutoff_days_before: number;
+  time_tracking_cutoff_rule: 'before_pay_date' | 'after_previous_regular_payday';
+  time_tracking_cutoff_days: number;
   payroll_cutoff_at_minutes: number;
   timezone: string;
   source: ScheduleSource;
@@ -3832,7 +3834,7 @@ export const payScheduleSettingsApi = {
   get: () => api.get<PayScheduleSettingsResponse>('/admin/pay_schedule_settings'),
   update: (data: {
     effective_on: string;
-    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'payroll_cutoff_days_before' | 'payroll_cutoff_at_minutes' | 'timezone' | 'notes'>;
+    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'payroll_cutoff_days_before' | 'payroll_cutoff_at_minutes' | 'time_tracking_cutoff_rule' | 'time_tracking_cutoff_days' | 'timezone' | 'notes'>;
     workweek: Pick<CompanyWorkweekSetting, 'starts_on_weekday' | 'starts_at_minutes' | 'timezone' | 'notes'>;
   }) => api.put<PayScheduleSettingsResponse>('/admin/pay_schedule_settings', { pay_schedule_settings: data }),
 };
