@@ -69,4 +69,17 @@ RSpec.describe R2StorageService do
 
     expect { described_class.new }.to raise_error(R2StorageService::ConfigurationError, /R2 not configured/)
   end
+
+  it "requires explicit Active Storage selection for staging local storage" do
+    allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("DEPLOYMENT_ENV").and_return("staging")
+    allow(ENV).to receive(:[]).with("R2_STORAGE_BACKEND").and_return("local")
+    allow(ENV).to receive(:[]).with("ACTIVE_STORAGE_SERVICE").and_return(nil)
+    allow(ENV).to receive(:[]).with("R2_ACCOUNT_ID").and_return(nil)
+    allow(ENV).to receive(:[]).with("R2_ACCESS_KEY_ID").and_return(nil)
+    allow(ENV).to receive(:[]).with("R2_SECRET_ACCESS_KEY").and_return(nil)
+
+    expect { described_class.new }.to raise_error(R2StorageService::ConfigurationError, /R2 not configured/)
+  end
 end
