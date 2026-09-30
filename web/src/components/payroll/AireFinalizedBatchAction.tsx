@@ -1,42 +1,69 @@
-import { ArrowRight, CheckCircle2, Clock3, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import type { AirePayrollCalendarState, PayPeriodStatus } from '@/types';
+import type { AirePayrollCalendarState, AirePayrollRecord, PayPeriodStatus } from '@/types';
 
 type Props = {
   batch: NonNullable<AirePayrollCalendarState['finalized_batch']>;
   payPeriodStatus: PayPeriodStatus;
-  aireRecordLinked: boolean;
+  aireRecord?: AirePayrollRecord | null;
   onReview: () => void;
 };
 
 const hours = (value: unknown) => Number(value || 0).toFixed(2);
 
-export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecordLinked, onReview }: Props) {
+export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, onReview }: Props) {
   const summary = batch.summary || {};
   const employeeCount = Number(summary.employee_count || 0);
   const exclusionCount = Number(summary.exclusion_count || 0);
   const committed = payPeriodStatus === 'committed';
+  const aireRecordLinked = Boolean(aireRecord);
+  const lineStatus = aireRecord?.payable_line_status;
+  const attentionLines = lineStatus?.needs_attention.line_count || 0;
+  const unpaidLines = (lineStatus?.in_payroll.line_count || 0) + (lineStatus?.payment_pending.line_count || 0);
+  const allLinesPaid = Boolean(lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count);
+  const linkedTitle = attentionLines > 0
+    ? 'AIRE payment needs attention'
+    : committed && allLinesPaid
+      ? 'AIRE hours are paid'
+      : committed && unpaidLines > 0
+        ? 'AIRE hours are linked; payment evidence is pending'
+        : 'AIRE hours are in this payroll';
+  const linkedBadge = attentionLines > 0 ? 'Needs attention' : committed && allLinesPaid ? 'Paid' : committed && unpaidLines > 0 ? 'Payment pending' : 'Added';
+  const linkedBadgeTone = attentionLines > 0 || (committed && unpaidLines > 0) ? 'warning' : 'success';
+  const linkedNeedsReview = aireRecordLinked && (attentionLines > 0 || (committed && unpaidLines > 0));
 
   return (
-    <Card className={`overflow-hidden ${aireRecordLinked ? 'border-success-200' : 'border-primary-200'}`}>
+    <Card className={`overflow-hidden ${linkedNeedsReview ? 'border-warning-200' : aireRecordLinked ? 'border-success-200' : 'border-primary-200'}`}>
       <CardContent className="p-0">
-        <div className={`flex flex-col gap-5 px-5 py-5 sm:px-6 lg:flex-row lg:items-start lg:justify-between ${aireRecordLinked ? 'bg-success-50/70' : 'bg-primary-50/70'}`}>
+        <div className={`flex flex-col gap-5 px-5 py-5 sm:px-6 lg:flex-row lg:items-start lg:justify-between ${linkedNeedsReview ? 'bg-warning-50/70' : aireRecordLinked ? 'bg-success-50/70' : 'bg-primary-50/70'}`}>
           <div className="flex max-w-3xl items-start gap-4">
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${aireRecordLinked ? 'bg-success-100 text-success-800' : 'bg-primary-100 text-primary-800'}`}>
-              {aireRecordLinked ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> : <ShieldCheck className="h-5 w-5" aria-hidden="true" />}
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${linkedNeedsReview ? 'bg-warning-100 text-warning-900' : aireRecordLinked ? 'bg-success-100 text-success-800' : 'bg-primary-100 text-primary-800'}`}>
+              {attentionLines > 0
+                ? <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+                : linkedNeedsReview
+                  ? <Clock3 className="h-5 w-5" aria-hidden="true" />
+                  : aireRecordLinked
+                    ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+                    : <ShieldCheck className="h-5 w-5" aria-hidden="true" />}
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display text-lg font-bold text-neutral-950">
-                  {aireRecordLinked ? 'AIRE hours are in this payroll' : 'AIRE hours are ready to add'}
+                  {aireRecordLinked ? linkedTitle : 'AIRE hours are ready to add'}
                 </h3>
-                <Badge variant={aireRecordLinked ? 'success' : 'info'}>{aireRecordLinked ? 'Added' : 'Verified batch'}</Badge>
+                <Badge variant={aireRecordLinked ? linkedBadgeTone : 'info'}>{aireRecordLinked ? linkedBadge : 'Verified batch'}</Badge>
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-700">
                 {aireRecordLinked
-                  ? 'Cornerstone saved the exact AIRE cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
+                  ? attentionLines > 0
+                    ? 'Cornerstone retained the exact affected AIRE lines. Review the check or payment history before deciding what to do next.'
+                    : committed && allLinesPaid
+                      ? 'Cornerstone has delivery or settlement evidence for every linked payable line in this AIRE batch.'
+                      : committed && unpaidLines > 0
+                        ? 'The exact AIRE lines are linked to this completed payroll. Prepared checks and committed payroll records remain unpaid until delivery or settlement is recorded.'
+                        : 'Cornerstone saved the exact AIRE cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
                   : committed
                     ? 'Review the locked AIRE batch and link it to this completed payroll. Cornerstone will verify every mapped employee without changing the payroll.'
                     : 'Review the locked AIRE batch once, add its hours to this payroll, then select Calculate Payroll. No hours need to be typed again.'}
@@ -72,12 +99,33 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecordLin
           </div>
         </div>
 
+        {aireRecordLinked && lineStatus && lineStatus.line_count > 0 && (
+          <div className="grid divide-y divide-neutral-200 border-t border-neutral-200 bg-neutral-50 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+            {([
+              ['In payroll', lineStatus.in_payroll, 'Committed without delivery evidence'],
+              ['Prepared', lineStatus.payment_pending, 'Payment prepared; delivery pending'],
+              ['Paid', lineStatus.paid, 'Delivery or settlement recorded'],
+              ['Attention', lineStatus.needs_attention, 'Failed, voided, or missing evidence'],
+            ] as const).map(([label, bucket, detail]) => (
+              <div key={label} className="px-5 py-4 sm:px-6">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
+                <p className="mt-2 font-display text-lg font-bold text-neutral-950">{hours(bucket.total_hours)} hrs</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">{bucket.line_count} line{bucket.line_count === 1 ? '' : 's'} · {detail}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-start gap-3 border-t border-neutral-200 bg-neutral-50 px-5 py-4 text-xs leading-5 text-neutral-600 sm:px-6">
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
           <p>
             {aireRecordLinked
               ? committed
-                ? 'Check preparation and delivery are reported back to AIRE automatically. Delivery or settlement establishes paid status.'
+                ? attentionLines > 0
+                  ? 'The payment history remains preserved. Failed and voided payments require an explicit follow-up; they are never turned back into new unpaid hours automatically.'
+                  : allLinesPaid
+                    ? 'Paid means Cornerstone recorded check delivery or deposit settlement and sent that exact status back to AIRE.'
+                    : 'Check preparation and delivery are reported back to AIRE automatically. Delivery or settlement establishes paid status.'
                 : 'Next: select Calculate Payroll. Adding the batch records hours in payroll; it does not mark anyone paid.'
               : 'Held entries stay visible in AIRE and Cornerstone and are not added to this payroll.'}
           </p>
