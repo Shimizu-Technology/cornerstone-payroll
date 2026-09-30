@@ -51,6 +51,13 @@ const source = {
   last_synced_at: null,
 };
 
+const otherSource = {
+  ...source,
+  id: 8,
+  name: 'Field Time Clock',
+  source_type: 'custom' as const,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.listSources.mockResolvedValue({ time_tracking_sources: [source] });
@@ -109,5 +116,29 @@ describe('TimeTrackingImportModal guided AIRE review', () => {
     expect(await screen.findByText('Review AIRE hours for this payroll')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Retrieve Finalized Batch' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Add AIRE Hours to Payroll' })).toBeTruthy();
+  });
+
+  it('keeps the first configured provider for the general import action', async () => {
+    apiMocks.listSources.mockResolvedValue({ time_tracking_sources: [otherSource, source] });
+
+    render(
+      <TimeTrackingImportModal
+        open
+        onClose={vi.fn()}
+        payPeriod={payPeriod}
+        employees={[]}
+        onImportComplete={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Field Time Clock')).toBeTruthy();
+    expect(apiMocks.preview).not.toHaveBeenCalled();
+    screen.getByRole('button', { name: 'Fetch Hours' }).click();
+
+    await waitFor(() => expect(apiMocks.preview).toHaveBeenCalledWith(payPeriod.id, {
+      source_id: otherSource.id,
+      start_date: payPeriod.start_date,
+      end_date: payPeriod.end_date,
+    }));
   });
 });

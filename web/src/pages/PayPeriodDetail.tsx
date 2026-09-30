@@ -3597,7 +3597,9 @@ export function PayPeriodDetail({
         payPeriod={payPeriod}
         employees={employees}
         onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
-        initialSourceId={payPeriod.time_tracking?.aire_calendar?.source_id}
+        initialSourceId={timeTrackingAutoPreview
+          ? payPeriod.time_tracking?.aire_calendar?.source_id
+          : undefined}
         autoPreview={timeTrackingAutoPreview}
       />
 
