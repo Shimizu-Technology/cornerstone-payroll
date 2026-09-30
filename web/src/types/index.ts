@@ -660,6 +660,19 @@ export interface AirePayrollCockpitMapping {
   status: 'mapped' | 'unmapped' | 'inactive' | 'not_required';
   employee_id?: number;
   employee_name?: string;
+  suggestions?: Array<{
+    employee_id: number;
+    employee_name: string;
+    email?: string | null;
+    basis: 'same_email_and_name' | 'same_email' | 'same_name';
+  }>;
+}
+
+export interface AirePayrollEmployeeOption {
+  employee_id: number;
+  employee_name: string;
+  email?: string | null;
+  employment_type: string;
 }
 
 export interface AirePayrollCockpitEmployee {
@@ -789,9 +802,11 @@ export interface AirePayrollCockpitOverview {
   carryovers: Record<string, number>;
   employees: AirePayrollCockpitEmployee[];
   employee_pagination: AirePayrollPagination;
+  payroll_employee_options: AirePayrollEmployeeOption[];
   command_access: {
     can_read: boolean;
     can_command: boolean;
+    can_manage_mappings: boolean;
     delegation_configured: boolean;
     account_link_configured?: boolean;
     legacy_delegation_configured?: boolean;
