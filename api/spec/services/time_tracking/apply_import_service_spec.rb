@@ -307,6 +307,12 @@ RSpec.describe TimeTracking::ApplyImportService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      TimeTrackingEmployeeMapping.create!(
+        company: company,
+        time_tracking_source: source,
+        employee: employee,
+        source_user_id: "source-1"
+      )
       fetch_start = TimeTracking::OvertimeCalculator.fetch_start_for(
         pay_period.start_date,
         workweek_start_weekday: 0

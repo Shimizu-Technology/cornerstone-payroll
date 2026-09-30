@@ -244,7 +244,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Promoted payroll is recorded but unpaid')).toBeTruthy();
     expect(screen.getByText(/without recalculating pay or adding YTD/)).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Prepare checks for payment' }));
-    expect(screen.getByText((_, element) => element?.tagName === 'P' && element.textContent === '1 paper check totaling $500.00')).toBeTruthy();
+    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent === '1 paper check totaling $500.00')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Date to print on checks'), { target: { value: '2026-09-22' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /has not been paid/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Assign check numbers' }));

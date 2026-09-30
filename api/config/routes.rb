@@ -277,6 +277,7 @@ Rails.application.routes.draw do
             get :time_entries
             get :exceptions
             get :settlement_cases
+            post :employee_mapping, action: :confirm_employee_mapping
             post :finalize
             post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
             post "time_entries/:time_entry_id/overtime_approval", action: :approve_time_entry_overtime, as: :time_entry_overtime_approval

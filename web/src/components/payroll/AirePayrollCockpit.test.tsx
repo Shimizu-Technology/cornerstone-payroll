@@ -26,11 +26,30 @@ const apiMocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   publish: vi.fn(),
   retry: vi.fn(),
+  confirmEmployeeMapping: vi.fn(),
+}));
+
+const routerMocks = vi.hoisted(() => ({
+  locationState: null as { aireMappingNotice?: string } | null,
+  navigate: vi.fn(),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ isManager: true }),
 }));
+
+vi.mock('@/contexts/CompanyContext', () => ({
+  useCompany: () => ({ activeCompanyId: 1 }),
+}));
+
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual<typeof import('react-router')>('react-router');
+  return {
+    ...actual,
+    useLocation: () => ({ pathname: '/companies/1/pay-periods/17', search: '', hash: '', state: routerMocks.locationState, key: 'test' }),
+    useNavigate: () => routerMocks.navigate,
+  };
+});
 
 vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error {
@@ -50,6 +69,7 @@ vi.mock('@/services/api', () => ({
     finalizeAirePayrollPeriod: apiMocks.finalize,
     publishAireCalendar: apiMocks.publish,
     retryAireCalendarDelivery: apiMocks.retry,
+    confirmAireEmployeeMapping: apiMocks.confirmEmployeeMapping,
   },
 }));
 
@@ -151,7 +171,8 @@ function fixtures(canCommand = true) {
       cornerstone: timeEntry.employee.cornerstone,
     }],
     employee_pagination: { current_page: 1, per_page: 100, total_count: 1, total_pages: 1, truncated: false },
-    command_access: { can_read: true, can_command: canCommand, delegation_configured: canCommand },
+    payroll_employee_options: [],
+    command_access: { can_read: true, can_command: canCommand, can_manage_mappings: true, delegation_configured: canCommand },
     routing_options: [{
       external_pay_period_id: 'cb55b145-0dbc-4211-96d3-eb63fa7c5278',
       pay_period_id: 18,
@@ -246,12 +267,22 @@ function mockLoads(canCommand = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routerMocks.locationState = null;
   mockLoads();
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
   apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
   apiMocks.routeSettlement.mockResolvedValue({ settlement_case: { ...fixtures().settlements.settlement_cases[0], status: 'scheduled', version: 3 } });
   apiMocks.finalize.mockResolvedValue({ result: { status: 'finalized', payroll_batch_id: 'AIRE-PAY-1' } });
+  apiMocks.confirmEmployeeMapping.mockResolvedValue({
+    employee_mapping: {
+      source_user_id: '91',
+      source_user_uuid: timeEntry.employee.payroll_integration_id,
+      employee_id: 7,
+      employee_name: 'Malia Cruz',
+      status: 'mapped',
+    },
+  });
 });
 
 afterEach(() => cleanup());
@@ -267,6 +298,55 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getAllByText('Mapped').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting approval').length).toBeGreaterThan(0);
     expect(apiMocks.entries).toHaveBeenCalledWith(17, { page: 1 });
+  });
+
+  it('shows an identity suggestion without auto-linking and saves only an explicit confirmation', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.employees[0] = {
+      ...data.overview.employees[0],
+      cornerstone: {
+        status: 'unmapped',
+        employee_id: undefined,
+        employee_name: undefined,
+        suggestions: [{ employee_id: 7, employee_name: 'Malia Cruz', email: 'malia@example.com', basis: 'same_email_and_name' }],
+      },
+    };
+    data.overview.payroll_employee_options = [{ employee_id: 7, employee_name: 'Malia Cruz', email: 'malia@example.com', employment_type: 'hourly' }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+
+    render(
+      <MemoryRouter>
+        <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
+      </MemoryRouter>
+    );
+    await screen.findByText('AIRE payroll workspace');
+    await user.click(screen.getByRole('button', { name: /Team 1/i }));
+
+    expect(screen.getByText('Not mapped')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Link payroll employee' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Suggested:/)).toBeTruthy();
+    expect((within(dialog).getByLabelText('Payroll employee') as HTMLSelectElement).value).toBe('7');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm link' }));
+
+    await waitFor(() => expect(apiMocks.confirmEmployeeMapping).toHaveBeenCalledWith(17, {
+      source_user_id: '91',
+      source_user_uuid: timeEntry.employee.payroll_integration_id,
+      employee_id: 7,
+    }));
+  });
+
+  it('shows a payroll profile mapping failure after returning to the AIRE workspace', async () => {
+    routerMocks.locationState = {
+      aireMappingNotice: 'The payroll profile was created, but AIRE could not be linked. Link the new employee from the payroll team list.',
+    };
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('The payroll profile was created, but AIRE could not be linked.');
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/companies/1/pay-periods/17', { replace: true, state: null });
   });
 
   it('requires the operator to explain an approval and sends the source version', async () => {

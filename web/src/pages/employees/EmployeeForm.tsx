@@ -14,7 +14,7 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
@@ -246,6 +246,11 @@ export function EmployeeForm() {
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
+  const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
+  const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
+  const aireSourceUserUuid = searchParams.get('aire_source_user_uuid') || '';
+  const aireFirstName = searchParams.get('first_name') || '';
+  const aireLastName = searchParams.get('last_name') || '';
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -500,7 +505,10 @@ export function EmployeeForm() {
 
   useEffect(() => {
     setLoadedEmployee(null);
-    setForm({ ...initialFormData });
+    setForm({
+      ...initialFormData,
+      ...(!isEditing ? { first_name: aireFirstName, last_name: aireLastName } : {}),
+    });
     setInitialSsn('');
     setStoredSsnLastFour(null);
     setInitialEmploymentType('hourly');
@@ -542,7 +550,7 @@ export function EmployeeForm() {
       departmentsRequestIdRef.current += 1;
       quickPayrollFieldRequestIdRef.current += 1;
     };
-  }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
+  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -992,6 +1000,7 @@ export function EmployeeForm() {
       let savedEmployeeId: number;
       let portalNotice: string | null = null;
       let portalChangeRequestId: number | null = null;
+      let aireMappingNotice: string | null = null;
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
         const updateData = { ...employeePayload };
@@ -1086,16 +1095,40 @@ export function EmployeeForm() {
         }
       }
 
+      if (!isClient && !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid) {
+        const parsedPayPeriodId = Number(airePayPeriodId);
+        if (!Number.isInteger(parsedPayPeriodId) || parsedPayPeriodId <= 0) {
+          aireMappingNotice = 'The payroll profile was created, but the AIRE link expired. Link the new employee from the payroll team list.';
+        } else {
+          try {
+            await payPeriodsApi.confirmAireEmployeeMapping(parsedPayPeriodId, {
+              source_user_id: aireSourceUserId,
+              source_user_uuid: aireSourceUserUuid,
+              employee_id: savedEmployeeId,
+            });
+          } catch {
+            aireMappingNotice = 'The payroll profile was created, but AIRE could not be linked. Link the new employee from the payroll team list.';
+          }
+          if (!isCurrentSubmission()) return;
+        }
+      }
+
       if (!isCurrentSubmission()) return;
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
+        : !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid
+          ? returnTo
         : isEditing
           ? returnTo
           : isClient
             ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
             : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
       navigate(saveDestination, {
-        state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
+        state: portalNotice
+          ? { portalNotice, selectedRequestId: portalChangeRequestId }
+          : aireMappingNotice
+            ? { aireMappingNotice }
+            : null,
       });
     } catch (err) {
       if (!isCurrentSubmission()) return;

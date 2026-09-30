@@ -98,6 +98,19 @@ RSpec.describe TimeTracking::Client do
       expect(entries_stub).to have_been_requested.once
     end
 
+    it "reads one AIRE employee identity for an explicit payroll link" do
+      employee_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/employees/91")
+        .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
+        .to_return(
+          status: 200,
+          body: { employee: { id: "91", payroll_integration_id: SecureRandom.uuid } }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect(client_for(source).payroll_cockpit_employee(employee_id: 91)).to include("employee")
+      expect(employee_stub).to have_been_requested.once
+    end
+
     it "clamps cockpit pagination at the supported boundaries" do
       lower_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/time_entries")
         .with(query: hash_including("external_pay_period_id" => external_id, "page" => "1", "per_page" => "1"))
@@ -479,12 +492,15 @@ RSpec.describe TimeTracking::Client do
       }
     end
 
-    it "rejects unsafe period, time entry, and settlement identifiers before a request" do
+    it "rejects unsafe period, employee, time entry, and settlement identifiers before a request" do
       request = stub_request(:any, %r{time\.example\.com})
 
       expect do
         client_for(source).payroll_cockpit_period(external_pay_period_id: "../period")
       end.to raise_error(TimeTracking::Client::Error, /Invalid payroll calendar period ID/)
+      expect do
+        client_for(source).payroll_cockpit_employee(employee_id: "../91")
+      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE employee ID/)
       expect do
         client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
           .approve_payroll_time_entry(

@@ -112,6 +112,16 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     TimeTracking::BatchImportPreviewService.new(pay_period: pay_period, source: source).call
   end
 
+  def confirm_mapping!(company:, source:, employee:, source_user_uuid: nil)
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: "aire-user-1",
+      source_user_uuid: source_user_uuid
+    )
+  end
+
   it "requires a written acknowledgement and calculates a correction with Cornerstone's wage rate" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
@@ -219,6 +229,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     source_user_uuid = SecureRandom.uuid
     payload.fetch("employees").first["source_user_uuid"] = source_user_uuid
     payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: source_user_uuid)
     import = preview_import(pay_period: pay_period, source: source, payload: payload)
 
     results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
@@ -603,6 +614,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "overtime_hours" => 0.0
       }
     ]
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
     allow(AirePayrollStatusSyncJob).to receive(:perform_later).and_raise(StandardError, "queue unavailable")
 
@@ -680,6 +692,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "regular_hours" => -2.0,
       "overtime_hours" => 0.0
     }
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ]))
 
     results = described_class.new(
@@ -722,6 +735,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "regular_hours" => 10.0
       )
     ]
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
     row = import.processed_payload.fetch("rows").first
 

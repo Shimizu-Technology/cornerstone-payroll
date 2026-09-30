@@ -3,6 +3,15 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::BatchImportPreviewService do
+  def confirm_mapping!(company:, source:, employee:, source_user_id: "aire-user-1")
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: source_user_id
+    )
+  end
+
   def finalized_payload(start_date:, end_date:, batch_id: "AIRE-PAY-TEST-001", employees: nil, exclusions: [])
     employees ||= [
       {
@@ -108,6 +117,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
   it "stores verified batch provenance, payable dimensions, and unpaid exclusions" do
     company, _workweek, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
+    confirm_mapping!(company: company, source: source, employee: employee)
     rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
     exclusion = {
       "source_time_entry_id" => "202",
@@ -155,6 +165,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
   it "accepts a zero-hour adjustment without category or rate dimensions" do
     company, _workweek, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    confirm_mapping!(company: company, source: source, employee: employee)
     zero_adjustment = {
       "source_time_entry_id" => "zero-101",
       "line_key" => "zero-net",
@@ -208,6 +219,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
   it "allows legacy uncategorized payable entries when previewing a committed payroll for reconciliation" do
     company, _workweek, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    confirm_mapping!(company: company, source: source, employee: employee)
     payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
     payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
     payload["issues"]["missing_category_count"] = 1
@@ -230,7 +242,8 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
 
   it "keeps legacy uncategorized payable entries blocked for an open payroll import" do
     company, _workweek, pay_period, source = setup_records
-    create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    confirm_mapping!(company: company, source: source, employee: employee)
     payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
     payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
     payload["issues"]["missing_category_count"] = 1

@@ -3,6 +3,15 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::ImportPreviewService do
+  def confirm_mapping!(company:, source:, employee:, source_user_id: "aire-1")
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: source_user_id
+    )
+  end
+
   def confirm_workweek!(company, starts_on_weekday: 1, starts_at_minutes: 0, confirmed: true)
     CompanyWorkweek.create!(
       company: company,
@@ -66,6 +75,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -115,6 +125,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -162,6 +173,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -209,6 +221,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [

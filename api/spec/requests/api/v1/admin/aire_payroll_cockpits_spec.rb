@@ -175,13 +175,91 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
   end
 
   it "marks unknown AIRE identities as unmapped" do
+    suggestion = create(
+      :employee,
+      company: company,
+      department: create(:department, company: company),
+      first_name: "Aire",
+      last_name: "Employee",
+      email: "employee@example.com"
+    )
     allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
     allow(client).to receive(:payroll_cockpit_employees).and_return(employee_payload)
 
     get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
 
-    expect(response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone", "status"))
-      .to eq("unmapped")
+    mapping = response.parsed_body.dig("aire_payroll_cockpit", "employees", 0, "cornerstone")
+    expect(mapping.fetch("status")).to eq("unmapped")
+    expect(mapping.fetch("suggestions")).to contain_exactly(
+      include(
+        "employee_id" => suggestion.id,
+        "employee_name" => suggestion.full_name,
+        "basis" => "same_email_and_name"
+      )
+    )
+    expect(response.parsed_body.dig("aire_payroll_cockpit", "payroll_employee_options")).to include(
+      include("employee_id" => suggestion.id, "employee_name" => suggestion.full_name)
+    )
+  end
+
+  it "verifies and saves an explicit AIRE employee link" do
+    employee_uuid = SecureRandom.uuid
+    target = create(:employee, company: company, department: create(:department, company: company))
+    allow(client).to receive(:payroll_cockpit_employee).with(employee_id: "91").and_return(
+      "employee" => {
+        "id" => "91",
+        "payroll_integration_id" => employee_uuid,
+        "full_name" => "Aire Employee",
+        "email" => "employee@example.com",
+        "active" => true,
+        "time_tracking_enabled" => true
+      }
+    )
+
+    expect do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping", params: {
+        source_user_id: "91",
+        source_user_uuid: employee_uuid,
+        employee_id: target.id
+      }
+    end.to change(TimeTrackingEmployeeMapping, :count).by(1)
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("employee_mapping")).to include(
+      "source_user_id" => "91",
+      "source_user_uuid" => employee_uuid,
+      "employee_id" => target.id,
+      "employee_name" => target.full_name,
+      "status" => "mapped"
+    )
+    expect(AuditLog.order(:id).last).to have_attributes(
+      user_id: admin.id,
+      company_id: company.id,
+      action: "time_tracking_employee_mapping#confirmed",
+      record_type: "TimeTrackingEmployeeMapping"
+    )
+  end
+
+  it "rejects a stale AIRE UUID instead of linking it by name or email" do
+    returned_uuid = SecureRandom.uuid
+    target = create(:employee, company: company, department: create(:department, company: company))
+    allow(client).to receive(:payroll_cockpit_employee).with(employee_id: "91").and_return(
+      "employee" => {
+        "id" => "91",
+        "payroll_integration_id" => returned_uuid,
+        "full_name" => "Aire Employee",
+        "email" => target.email
+      }
+    )
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/employee_mapping", params: {
+      source_user_id: "91",
+      source_user_uuid: SecureRandom.uuid,
+      employee_id: target.id
+    }
+
+    expect(response).to have_http_status(:conflict)
+    expect(TimeTrackingEmployeeMapping.count).to eq(0)
   end
 
   it "maps an incomplete AIRE payload to a bad gateway response" do
