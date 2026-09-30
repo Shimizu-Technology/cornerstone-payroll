@@ -49,7 +49,7 @@ type Props = {
   payPeriodId: number;
   payPeriodStatus?: import('@/types').PayPeriodStatus;
   payrollHours?: Record<string, { regular: number; overtime: number }>;
-  aireRecordLinked?: boolean;
+  aireRecord?: import('@/types').AirePayrollRecord | null;
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
   onReviewFinalizedBatch?: () => void;
@@ -293,7 +293,7 @@ export function AirePayrollCockpit({
   payPeriodId,
   payPeriodStatus = 'draft',
   payrollHours = {},
-  aireRecordLinked = false,
+  aireRecord = null,
   calendar,
   onRefresh,
   onReviewFinalizedBatch = () => undefined,
@@ -618,7 +618,7 @@ export function AirePayrollCockpit({
         <AireFinalizedBatchAction
           batch={verifiedBatch}
           payPeriodStatus={payPeriodStatus}
-          aireRecordLinked={aireRecordLinked}
+          aireRecord={aireRecord}
           onReview={onReviewFinalizedBatch}
         />
       ) : (
@@ -626,7 +626,7 @@ export function AirePayrollCockpit({
           payPeriodId={payPeriodId}
           payPeriodStatus={payPeriodStatus}
           payrollHours={payrollHours}
-          aireRecordLinked={aireRecordLinked}
+          aireRecordLinked={Boolean(aireRecord)}
         />
       )}
 
