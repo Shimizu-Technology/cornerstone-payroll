@@ -474,7 +474,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
       expect(acknowledgement).to have_attributes(
         payment_reference: "7001",
-        source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment"
+        source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment:flight-current"
       )
       expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
     end
