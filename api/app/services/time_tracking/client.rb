@@ -233,7 +233,7 @@ module TimeTracking
       )
     end
 
-    def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, payment_method: nil, payment_reference: nil, metadata: {})
+    def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, contract_version: nil, source_line_key: nil, source_kind: nil, total_hours: nil, regular_hours: nil, overtime_hours: nil, payment_method: nil, payment_reference: nil, metadata: {})
       request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
@@ -247,6 +247,12 @@ module TimeTracking
           external_payroll_item_id: external_payroll_item_id,
           source_time_entry_id: source_time_entry_id,
           source_user_uuid: source_user_uuid,
+          contract_version: contract_version,
+          source_line_key: source_line_key,
+          source_kind: source_kind,
+          total_hours: total_hours,
+          regular_hours: regular_hours,
+          overtime_hours: overtime_hours,
           payment_method: payment_method,
           payment_reference: payment_reference,
           metadata: metadata

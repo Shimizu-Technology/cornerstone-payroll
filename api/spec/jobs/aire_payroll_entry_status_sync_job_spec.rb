@@ -61,6 +61,12 @@ RSpec.describe AirePayrollEntryStatusSyncJob, type: :job do
       external_payroll_item_id: item.id.to_s,
       source_time_entry_id: "1508",
       source_user_uuid: source_user_uuid,
+      contract_version: "2.0",
+      source_line_key: "flight:3000",
+      source_kind: "current",
+      total_hours: "8.0",
+      regular_hours: "8.0",
+      overtime_hours: "0.0",
       payment_method: "paper_check",
       payment_reference: "5001",
       metadata: {
