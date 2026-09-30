@@ -573,8 +573,13 @@ module TimeTracking
     end
 
     def validate_source_identity!(payload)
-      return if @source.source_type == "custom"
+      validate_declared_source_type!(payload) unless @source.source_type == "custom"
+      ConnectionIdentity.validate!(source: @source, payload: payload)
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
+    end
 
+    def validate_declared_source_type!(payload)
       raise Error, "#{@source.name} response omitted source identity" if payload["source"].blank?
 
       returned_source = payload["source"].to_s

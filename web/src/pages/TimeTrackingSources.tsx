@@ -58,7 +58,10 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   const cockpit = result.cockpit_ready === true
     ? ' The AIRE payroll workspace is available.'
     : result.cockpit_ready === false ? ' The AIRE payroll workspace is unavailable.' : '';
-  return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}${cockpit}`;
+  const identity = result.identity_verified
+    ? ' The source installation identity is verified.'
+    : ' This source uses the legacy contract without an installation identity.';
+  return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}${identity}${cockpit}`;
 }
 
 type TimeTrackingSourcesProps = {
@@ -161,6 +164,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
 
   const editing = form.id != null;
   const activeSource = sources.find((source) => source.active) || null;
+  const selectedSource = sources.find((source) => source.id === form.id) || null;
 
   const showSuccess = (message: string) => {
     if (successTimerRef.current) window.clearTimeout(successTimerRef.current);
@@ -306,6 +310,16 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     setSuccess(null);
     try {
       const result = await timeTrackingSourcesApi.testConnection(source.id);
+      setSources((previous) => previous.map((item) => item.id === source.id ? {
+        ...item,
+        identity_verified: Boolean(result.identity_verified),
+        connection_uuid: result.connection_uuid || item.connection_uuid,
+        source_instance_id: result.source_instance_id,
+        source_protocol: result.source_protocol,
+        source_protocol_version: result.source_protocol_version,
+        source_capabilities: result.source_capabilities || [],
+        identity_verified_at: result.identity_verified_at || item.identity_verified_at,
+      } : item));
       showSuccess(summarizeTestResult(result));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connection test failed. Check the backend URL, deploy status, and shared secret.');
@@ -368,6 +382,27 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                 />
               </label>
+
+              {editing && selectedSource && (
+                  <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 lg:col-span-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-neutral-950">Source installation identity</p>
+                      <Badge variant={selectedSource.identity_verified ? 'success' : 'warning'}>
+                        {selectedSource.identity_verified ? 'Verified' : 'Test required'}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      {selectedSource.identity_verified
+                        ? 'Payroll is locked to this source installation. If the backend URL starts responding as a different installation, imports stop for review.'
+                        : 'Select Test connection after saving. Payroll will verify and remember the exact source installation automatically.'}
+                    </p>
+                    {selectedSource.identity_verified && selectedSource.source_capabilities?.length > 0 && (
+                      <p className="mt-2 text-xs leading-5 text-neutral-500">
+                        Verified contract {selectedSource.source_protocol_version}: {selectedSource.source_capabilities.length} supported feature{selectedSource.source_capabilities.length === 1 ? '' : 's'}.
+                      </p>
+                    )}
+                  </div>
+              )}
 
               <label className="block text-sm font-medium text-gray-700">
                 Source system
@@ -526,6 +561,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                     <p className="mt-2 text-xs text-neutral-500">Last sync: {source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
+                      <Badge variant={source.identity_verified ? 'success' : 'warning'}>{source.identity_verified ? 'Source verified' : 'Test source'}</Badge>
                       {source.source_type === 'aire_services' && (
                         <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
                           {source.id === form.id && accountLink?.connected ? 'My AIRE account connected' : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
@@ -564,6 +600,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                           <div className="flex flex-col gap-1">
                             <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
                             {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
+                            <Badge variant={source.identity_verified ? 'success' : 'warning'}>{source.identity_verified ? 'Source verified' : 'Test source'}</Badge>
                             {source.source_type === 'aire_services' && (
                               <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
                                 {source.id === form.id && accountLink?.connected

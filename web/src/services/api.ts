@@ -915,6 +915,13 @@ export interface TimeTrackingSource {
   active: boolean;
   shared_secret_configured: boolean;
   delegation_token_configured: boolean;
+  connection_uuid: string;
+  identity_verified: boolean;
+  source_instance_id?: string | null;
+  source_protocol?: string | null;
+  source_protocol_version?: string | null;
+  source_capabilities: string[];
+  identity_verified_at?: string | null;
   last_synced_at: string | null;
 }
 
@@ -934,6 +941,13 @@ export interface TimeTrackingSourceTestResponse {
   generated_at?: string;
   employee_count?: number;
   summary?: Record<string, unknown>;
+  identity_verified?: boolean;
+  connection_uuid?: string;
+  source_instance_id?: string | null;
+  source_protocol?: string | null;
+  source_protocol_version?: string | null;
+  source_capabilities?: string[];
+  identity_verified_at?: string | null;
   cockpit_ready?: boolean;
   delegation_token_configured?: boolean;
   error?: string;

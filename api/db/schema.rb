@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_01_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3404,17 +3404,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_010000) do
     t.boolean "active", default: true, null: false
     t.string "base_url", null: false
     t.bigint "company_id", null: false
+    t.uuid "connection_uuid", default: -> { "gen_random_uuid()" }, null: false
     t.datetime "created_at", null: false
+    t.string "expected_source_instance_id"
+    t.datetime "identity_verified_at"
     t.datetime "last_synced_at"
     t.string "name", null: false
     t.text "shared_secret"
+    t.jsonb "source_capabilities", default: [], null: false
+    t.string "source_protocol"
+    t.string "source_protocol_version"
     t.string "source_type", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "name"], name: "index_time_tracking_sources_on_company_id_and_name", unique: true
     t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
     t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
     t.index ["company_id"], name: "index_time_tracking_sources_one_active_per_company", unique: true, where: "(active = true)"
+    t.index ["connection_uuid"], name: "index_time_tracking_sources_on_connection_uuid", unique: true
     t.index ["id", "company_id"], name: "idx_time_tracking_sources_tenant_key", unique: true
+    t.check_constraint "expected_source_instance_id IS NULL AND source_protocol IS NULL AND source_protocol_version IS NULL AND identity_verified_at IS NULL OR expected_source_instance_id IS NOT NULL AND source_protocol IS NOT NULL AND source_protocol_version IS NOT NULL AND identity_verified_at IS NOT NULL", name: "time_tracking_sources_identity_complete"
+    t.check_constraint "jsonb_typeof(source_capabilities) = 'array'::text", name: "time_tracking_sources_capabilities_array"
   end
 
   create_table "timecards", force: :cascade do |t|

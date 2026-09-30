@@ -37,6 +37,13 @@ const source = {
   active: true,
   shared_secret_configured: true,
   delegation_token_configured: false,
+  connection_uuid: '3b7b6e19-d047-4c3f-a449-f98ea7d49f4b',
+  identity_verified: false,
+  source_instance_id: null,
+  source_protocol: null,
+  source_protocol_version: null,
+  source_capabilities: [],
+  identity_verified_at: null,
   last_synced_at: null,
 };
 
@@ -100,5 +107,34 @@ describe('TimeTrackingSources AIRE account connection', () => {
 
     expect(apiMocks.disconnectAireAccountLink).toHaveBeenCalledWith(4);
     expect(await screen.findByText('Connect once—no token copying or routine renewal')).toBeTruthy();
+  });
+
+  it('tests and pins the source installation without asking for an identifier', async () => {
+    const user = userEvent.setup();
+    apiMocks.getAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
+    apiMocks.testConnection.mockResolvedValue({
+      ok: true,
+      message: 'Connected to AIRE.',
+      source: 'aire_services',
+      employee_count: 3,
+      identity_verified: true,
+      connection_uuid: source.connection_uuid,
+      source_instance_id: '642b5fd9-53ed-4798-b69b-fe354fe70334',
+      source_protocol: 'shimizu_time_payroll',
+      source_protocol_version: '1.0',
+      source_capabilities: ['time_summary_v1', 'finalized_batch_v2'],
+      identity_verified_at: '2026-10-01T01:00:00Z',
+      cockpit_ready: true,
+    });
+
+    render(<TimeTrackingSources />);
+
+    expect(await screen.findAllByText('Test required')).not.toHaveLength(0);
+    await user.click(screen.getAllByRole('button', { name: 'Test connection' })[0]);
+
+    expect(apiMocks.testConnection).toHaveBeenCalledWith(4);
+    expect(await screen.findAllByText('Verified')).not.toHaveLength(0);
+    expect(screen.getByText(/source installation identity is verified/i)).toBeTruthy();
+    expect(screen.getByText(/Verified contract 1.0: 2 supported features/i)).toBeTruthy();
   });
 });
