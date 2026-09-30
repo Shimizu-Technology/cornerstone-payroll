@@ -16,6 +16,8 @@ The pay-period page presents:
 
 Ordinary clock and kiosk entries need no extra payroll approval. Manual and manually corrected entries remain held until an authorized AIRE administrator approves them. Time that is not eligible at cutoff is not lost or silently moved: AIRE records why it was excluded and carries it forward for the next available payroll.
 
+Before cutoff, the payroll page labels the AIRE totals as a live readiness preview. It is useful for resolving mappings, approvals, missing punches, and held time, but it is not the locked payroll input. Once Cornerstone verifies AIRE's immutable cutoff batch, the live preview becomes one **Review and add AIRE hours** action. That action opens the configured AIRE source directly, while retaining the employee and earning-type review gates. After the operator adds the batch, the page points to **Calculate Payroll**. No AIRE hours need to be typed or retrieved through a separate source-selection step.
+
 ## Trust and operator identity
 
 Read requests use the client connection's shared secret. Commands also require a durable link between the signed-in Cornerstone operator and an active AIRE administrator.
@@ -64,6 +66,8 @@ Each command UUID identifies one logical approval, denial, or finalization decis
 This phase does not add direct editing of punches, missing-punch repair, or a new supplemental-payroll decision model. Those require the correction/case workflow planned next. The cockpit shows those facts and their carryover state now; it does not make an unsafe row edit look like a complete payroll correction.
 
 Finalizing AIRE time does not calculate Cornerstone payroll, issue checks, pay liabilities, or mark wages paid. Direct deposit remains outside scope.
+
+Preparing a linked check and delivering or settling it are separate states. Cornerstone reports both events to AIRE automatically. A prepared check does not make the source hours paid; delivery or settlement establishes paid status.
 
 ## Release checks
 
