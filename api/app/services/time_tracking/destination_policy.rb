@@ -34,6 +34,13 @@ module TimeTracking
       ff00::/8
     ].map { |cidr| IPAddr.new(cidr) }.freeze
 
+    STAGING_PRIVATE_NETWORKS = %w[
+      10.0.0.0/8
+      172.16.0.0/12
+      192.168.0.0/16
+      fc00::/7
+    ].map { |cidr| IPAddr.new(cidr) }.freeze
+
     def self.allowed_hosts(env: ENV)
       env.fetch("TIME_TRACKING_ALLOWED_HOSTS", "")
         .split(",")
@@ -70,6 +77,8 @@ module TimeTracking
 
       return uri unless enforce_production
 
+      return uri if staging_private_destination?(uri)
+
       raise Error, "must use HTTPS in production" unless uri.scheme == "https"
       raise Error, "must use the standard HTTPS port in production" unless uri.port == 443
 
@@ -86,6 +95,7 @@ module TimeTracking
       raise Error, "host did not resolve to an address" if addresses.empty?
 
       return addresses if local_destination_allowed?(uri)
+      return validate_staging_private_addresses!(addresses) if staging_private_destination?(uri)
 
       parsed_addresses = addresses.map do |address|
         IPAddr.new(address).tap do |ip|
@@ -101,6 +111,30 @@ module TimeTracking
     end
 
     private
+
+    def staging_private_destination?(uri)
+      return false unless @environment == "production"
+      return false unless @env["DEPLOYMENT_ENV"] == "staging"
+      return false unless @env["ALLOW_PRIVATE_INTEGRATION_HTTP"] == "true"
+      return false unless uri.scheme == "http" && uri.port == 3000
+
+      self.class.allowed_hosts(env: @env).include?(normalized_host(uri))
+    end
+
+    public :staging_private_destination?
+
+    def validate_staging_private_addresses!(addresses)
+      parsed = addresses.map do |address|
+        IPAddr.new(address).tap do |ip|
+          unless STAGING_PRIVATE_NETWORKS.any? { |network| network.include?(ip) }
+            raise Error, "staging integration host must resolve only to a private container address"
+          end
+        end
+      rescue IPAddr::InvalidAddressError
+        raise Error, "host resolved to an invalid address"
+      end
+      parsed.map(&:to_s).sort
+    end
 
     def production?
       @environment == "production"
