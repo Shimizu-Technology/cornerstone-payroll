@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
@@ -296,6 +296,7 @@ export function AirePayrollCockpit({
   onRefresh,
 }: Props) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [overview, setOverview] = useState<AirePayrollCockpitOverview | null>(null);
   const [timeEntries, setTimeEntries] = useState<AirePayrollTimeEntriesResponse | null>(null);
@@ -342,6 +343,14 @@ export function AirePayrollCockpit({
     setEmployeePage(1);
     setSettlementPage(1);
   }, [payPeriodId]);
+
+  useEffect(() => {
+    const notice = (location.state as { aireMappingNotice?: string } | null)?.aireMappingNotice;
+    if (!notice) return;
+
+    setCommandError(notice);
+    navigate(currentAppPath(location.pathname, location.search), { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate]);
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;

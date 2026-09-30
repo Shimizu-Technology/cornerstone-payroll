@@ -1124,9 +1124,11 @@ export function EmployeeForm() {
             ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
             : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
       navigate(saveDestination, {
-        state: portalNotice || aireMappingNotice
-          ? { portalNotice: portalNotice || aireMappingNotice, selectedRequestId: portalChangeRequestId }
-          : null,
+        state: portalNotice
+          ? { portalNotice, selectedRequestId: portalChangeRequestId }
+          : aireMappingNotice
+            ? { aireMappingNotice }
+            : null,
       });
     } catch (err) {
       if (!isCurrentSubmission()) return;

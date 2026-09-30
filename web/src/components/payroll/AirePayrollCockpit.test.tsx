@@ -29,6 +29,11 @@ const apiMocks = vi.hoisted(() => ({
   confirmEmployeeMapping: vi.fn(),
 }));
 
+const routerMocks = vi.hoisted(() => ({
+  locationState: null as { aireMappingNotice?: string } | null,
+  navigate: vi.fn(),
+}));
+
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ isManager: true }),
 }));
@@ -41,7 +46,8 @@ vi.mock('react-router', async () => {
   const actual = await vi.importActual<typeof import('react-router')>('react-router');
   return {
     ...actual,
-    useLocation: () => ({ pathname: '/companies/1/pay-periods/17', search: '', hash: '', state: null, key: 'test' }),
+    useLocation: () => ({ pathname: '/companies/1/pay-periods/17', search: '', hash: '', state: routerMocks.locationState, key: 'test' }),
+    useNavigate: () => routerMocks.navigate,
   };
 });
 
@@ -261,6 +267,7 @@ function mockLoads(canCommand = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routerMocks.locationState = null;
   mockLoads();
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
@@ -329,6 +336,17 @@ describe('AirePayrollCockpit', () => {
       source_user_uuid: timeEntry.employee.payroll_integration_id,
       employee_id: 7,
     }));
+  });
+
+  it('shows a payroll profile mapping failure after returning to the AIRE workspace', async () => {
+    routerMocks.locationState = {
+      aireMappingNotice: 'The payroll profile was created, but AIRE could not be linked. Link the new employee from the payroll team list.',
+    };
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('The payroll profile was created, but AIRE could not be linked.');
+    expect(routerMocks.navigate).toHaveBeenCalledWith('/companies/1/pay-periods/17', { replace: true, state: null });
   });
 
   it('requires the operator to explain an approval and sends the source version', async () => {
