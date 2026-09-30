@@ -13,6 +13,8 @@ interface Props {
   payPeriod: PayPeriod;
   employees: Employee[];
   onImportComplete: () => void;
+  initialSourceId?: number;
+  autoPreview?: boolean;
 }
 
 type Step = 'select' | 'review' | 'done';
@@ -82,7 +84,15 @@ function withReconciliationErrors(
   };
 }
 
-export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
+export function TimeTrackingImportModal({
+  open,
+  onClose,
+  payPeriod,
+  employees,
+  onImportComplete,
+  initialSourceId,
+  autoPreview = false,
+}: Props) {
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select');
@@ -106,6 +116,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const autoPreviewAttemptedRef = useRef(false);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -175,6 +186,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setAppliedCount(0);
     setRoundingExceptionCount(0);
     setAppliedThisSession(false);
+    autoPreviewAttemptedRef.current = false;
     setSources([]);
     setSourceId('');
     setSourcesLoading(true);
@@ -187,8 +199,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         const eligible = payPeriod.status === 'committed'
           ? active.filter((source) => source.source_type === 'aire_services')
           : active;
+        const preferred = eligible.find((source) => source.id === initialSourceId);
         setSources(eligible);
-        setSourceId(eligible[0]?.id || '');
+        setSourceId(preferred?.id || eligible[0]?.id || '');
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load time tracking sources');
@@ -200,7 +213,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     return () => {
       cancelled = true;
     };
-  }, [open, payPeriod.id, payPeriod.company_id, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
+  }, [initialSourceId, open, payPeriod.id, payPeriod.company_id, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.id === sourceId) || null,
@@ -329,6 +342,17 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     }
   };
 
+  const handlePreviewRef = useRef(handlePreview);
+  handlePreviewRef.current = handlePreview;
+
+  useEffect(() => {
+    if (!open || !autoPreview || sourcesLoading || step !== 'select' || !selectedSource || autoPreviewAttemptedRef.current) return;
+    if (initialSourceId && selectedSource.id !== initialSourceId) return;
+
+    autoPreviewAttemptedRef.current = true;
+    void handlePreviewRef.current();
+  }, [autoPreview, initialSourceId, open, selectedSource, sourcesLoading, step]);
+
   const handleApply = async () => {
     if (!preview) return;
     setLoading(true);
@@ -407,7 +431,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-4 sm:px-8 sm:py-6">
           <div>
             <h2 id="time-import-title" className="text-lg font-semibold tracking-tight text-neutral-950 sm:text-xl">
-              {isFinalizedBatch ? 'Review finalized AIRE batch' : 'Import time tracking'}
+              {isFinalizedBatch ? 'Review AIRE hours for this payroll' : 'Import time tracking'}
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-neutral-600">
               {isFinalizedBatch
@@ -831,7 +855,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             <div className="py-10 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success-600" aria-hidden="true" />
               <h3 className="mt-4 text-lg font-semibold text-neutral-950">
-                {!appliedThisSession && alreadyApplied ? 'This finalized batch was already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Finalized batch applied' : 'Time tracking imported'}
+                {!appliedThisSession && alreadyApplied ? 'These AIRE hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'AIRE hours added to payroll' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
                 {!appliedThisSession && alreadyApplied
@@ -869,7 +893,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           {step === 'review' && (
             <>
               <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
-              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link AIRE Record' : isFinalizedBatch ? 'Apply Finalized Batch' : 'Apply Import'}</Button>
+              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link AIRE Record' : isFinalizedBatch ? 'Add AIRE Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}
           {step === 'done' && <Button onClick={onClose}>Close</Button>}

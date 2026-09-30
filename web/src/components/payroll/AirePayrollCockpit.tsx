@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
+import { AireFinalizedBatchAction } from './AireFinalizedBatchAction';
 import { AireManualHoursReview } from './AireManualHoursReview';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,6 +52,7 @@ type Props = {
   aireRecordLinked?: boolean;
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
+  onReviewFinalizedBatch?: () => void;
 };
 
 type View = 'timecards' | 'exceptions' | 'held_time' | 'team' | 'history';
@@ -294,6 +296,7 @@ export function AirePayrollCockpit({
   aireRecordLinked = false,
   calendar,
   onRefresh,
+  onReviewFinalizedBatch = () => undefined,
 }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -597,6 +600,9 @@ export function AirePayrollCockpit({
   const renderedEntries = view === 'exceptions' ? exceptions?.time_exceptions : timeEntries?.time_entries;
   const periodCanFinalize = overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
   const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
+  const verifiedBatch = calendar.finalized_batch?.verification_status === 'verified'
+    ? calendar.finalized_batch
+    : null;
   const visibleError = commandError || refreshError;
   const correctionCategories = correction?.entry.available_time_categories
     ?? (correction?.entry.category ? [correction.entry.category] : []);
@@ -608,12 +614,21 @@ export function AirePayrollCockpit({
         await load();
       }} />
 
-      <AireManualHoursReview
-        payPeriodId={payPeriodId}
-        payPeriodStatus={payPeriodStatus}
-        payrollHours={payrollHours}
-        aireRecordLinked={aireRecordLinked}
-      />
+      {verifiedBatch ? (
+        <AireFinalizedBatchAction
+          batch={verifiedBatch}
+          payPeriodStatus={payPeriodStatus}
+          aireRecordLinked={aireRecordLinked}
+          onReview={onReviewFinalizedBatch}
+        />
+      ) : (
+        <AireManualHoursReview
+          payPeriodId={payPeriodId}
+          payPeriodStatus={payPeriodStatus}
+          payrollHours={payrollHours}
+          aireRecordLinked={aireRecordLinked}
+        />
+      )}
 
       {calendar.external_pay_period_id && cockpitPublished && (
         <Card className="overflow-hidden">

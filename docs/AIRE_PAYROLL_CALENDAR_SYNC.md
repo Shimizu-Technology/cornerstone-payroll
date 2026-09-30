@@ -1,6 +1,6 @@
 # Cornerstone–AIRE payroll calendar sync
 
-**Contract version:** `1.0`
+**Contract versions:** `1.0` for the preserved pay-date-relative policy; `2.0` for an explicit cutoff rule and prior regular payday
 
 **Business timezone:** `Pacific/Guam`
 
@@ -12,7 +12,7 @@
 - **Status:** Merged to `main`; production deployment and operator verification remain release gates.
 - **Pull request:** [#190](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/190)
 - **Final merge commit:** `3ffb8f7475f0e34f73ed31980ed2007f33c20c33`
-- **Code-complete scope:** Effective-dated T-7 settings, versioned calendar publication and retry, authenticated and idempotent finalization-event receipt, authoritative Batch v2 verification, durable evidence, role-aware UI state, and automated dispatchers.
+- **Code-complete scope:** Effective-dated cutoff settings, versioned calendar publication and retry, authenticated and idempotent finalization-event receipt, authoritative Batch v2 verification, durable evidence, role-aware UI state, and automated dispatchers.
 - **Evidence still required:** Deployment migration evidence and a dated production operator test with Cornerstone and AIRE.
 - **Changed risks:** The two applications now share versioned period identity, cutoff, and batch evidence. Clock skew, stale publications, tenant mismatch, payload drift, or an unavailable peer must fail visibly without changing payroll.
 - **Next release gate:** Deploy both compatible sides, verify one synthetic future period end to end, then promote the Cornerstone AIRE payroll cockpit described in `AIRE_PAYROLL_COCKPIT.md`.
@@ -22,7 +22,9 @@ This contract lets Chels schedule AIRE payroll from Cornerstone without making e
 ## Policy enforced by the contract
 
 - AIRE regular payroll is semimonthly: the 1st–15th and the 16th–last day of the month.
-- The cutoff is seven calendar days before the pay date in Guam. The cutoff time is an explicit, effective-dated company setting; the default is 5:00 PM.
+- AIRE's cutoff is seven calendar days after the adjacent previous regular scheduled payday in Guam. Adjustment runs and individual check-delivery dates do not reset it.
+- The rule, day count, and local cutoff time are explicit effective-dated company settings. Other businesses may use the simple pay-date-relative rule without requiring an open-ended rules engine.
+- A target run using the prior-payday rule must have exactly one adjacent previous regular run. Missing or ambiguous history blocks publication instead of guessing.
 - Normal clock and kiosk entries are eligible without another approval. Manual or manually corrected time must be approved in AIRE before cutoff.
 - Late, open, unapproved, denied, and otherwise ineligible time remains visible with its reason. It is not silently deleted or added to the locked batch.
 - Publishing a calendar does not import time, calculate payroll, issue a check, or mark wages paid.
@@ -33,7 +35,7 @@ This contract lets Chels schedule AIRE payroll from Cornerstone without making e
 
 1. A manager or admin confirms Cornerstone's effective-dated pay schedule, legal workweek, and cutoff time.
 2. Cornerstone creates a versioned publication and sends it to AIRE with a stable external period ID and idempotency key.
-3. AIRE validates the semimonthly dates and Guam T-7 rule, retains the revision, and owns autonomous finalization from that point forward.
+3. AIRE validates the semimonthly dates and the published cutoff rule, prior regular payday, and resulting Guam timestamp; it retains the revision and owns autonomous finalization from that point forward.
 4. At cutoff, AIRE creates one immutable Batch v2 and one durable `payroll_batch.finalized` outbox event in the same transaction.
 5. Cornerstone receives the event idempotently, checks that it belongs to the latest delivered calendar revision, and fetches the authoritative Batch v2 from AIRE.
 6. Cornerstone validates the full batch, checksum, totals, issues, period dates, and source identity before showing **Batch verified**.
@@ -50,9 +52,9 @@ The pay-run UI uses these authenticated staff endpoints:
 
 Accountants may read the state. Publishing, revising, and manually retrying delivery require the existing client-configuration permission.
 
-The manual-review endpoint remains available when the local pay period predates calendar publication. It reads AIRE's current payable regular, overtime, and carryover hours for the exact local period dates, decorates employees with their Cornerstone mappings, and never changes either system. The pay-run page compares those totals with the operator's unsaved manual entries and identifies the exact adjustments and excluded hours before calculation. If AIRE is unavailable, manual payroll remains usable and the comparison shows a bounded warning.
+The manual-review endpoint supplies the **Live AIRE readiness** view before cutoff. It reads AIRE's current payable regular, overtime, and carryover hours for the exact local period dates, decorates employees with their Cornerstone mappings, and never changes either system. The view helps the operator resolve differences before cutoff and clearly identifies itself as changing data. Once the immutable batch is verified, it is replaced by the locked batch action so current AIRE state cannot be mistaken for the payroll input.
 
-After the operator calculates, approves, and commits the run, they link the finalized AIRE batch before printing checks. Recording the checks as issued is the payment action: Cornerstone sends AIRE the corresponding payment acknowledgement automatically. There is no separate manual “mark paid” action in AIRE for a regular linked batch.
+The operator selects **Review and add AIRE hours**, reviews employee and earning mappings, and adds the verified batch before calculating payroll. Cornerstone then retains the exact AIRE entry links through calculation and commitment. Check preparation and delivery or settlement are reported to AIRE automatically as separate states; only delivery or settlement establishes paid status. There is no separate manual “mark paid” action in AIRE for a regular linked batch.
 
 AIRE sends finalization events to this service endpoint:
 
