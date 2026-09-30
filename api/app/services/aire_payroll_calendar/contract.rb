@@ -24,7 +24,12 @@ module AirePayrollCalendar
     def payload
       validate!
       schedule = pay_schedule
-      cutoff_date = pay_period.pay_date - schedule.payroll_cutoff_days_before
+      previous_pay_date = previous_regular_pay_date if schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
+      cutoff_date = if previous_pay_date
+                      previous_pay_date + schedule.time_tracking_cutoff_days
+                    else
+                      pay_period.pay_date - schedule.time_tracking_cutoff_days
+                    end
       cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
       cutoff_at = Time.find_zone!(TIME_ZONE).local(
         cutoff_date.year,
@@ -33,15 +38,23 @@ module AirePayrollCalendar
         cutoff_hour,
         cutoff_minute
       )
-      {
-        "schema_version" => SCHEMA_VERSION,
+      legacy_policy = schedule.time_tracking_cutoff_rule == "before_pay_date" && schedule.time_tracking_cutoff_days == CUTOFF_DAYS_BEFORE
+      fields = {
+        "schema_version" => legacy_policy ? SCHEMA_VERSION : "2.0",
         "start_date" => pay_period.start_date.iso8601,
         "end_date" => pay_period.end_date.iso8601,
         "pay_date" => pay_period.pay_date.iso8601,
         "cutoff_at" => cutoff_at.iso8601,
-        "time_zone" => TIME_ZONE,
-        "cutoff_days_before" => schedule.payroll_cutoff_days_before
+        "time_zone" => TIME_ZONE
       }
+      if legacy_policy
+        fields["cutoff_days_before"] = CUTOFF_DAYS_BEFORE
+      else
+        fields["cutoff_rule"] = schedule.time_tracking_cutoff_rule
+        fields["cutoff_days"] = schedule.time_tracking_cutoff_days
+        fields["previous_regular_pay_date"] = previous_pay_date.iso8601 if previous_pay_date
+      end
+      fields
     end
 
     def validate!
@@ -58,6 +71,11 @@ module AirePayrollCalendar
         fail_contract!("Confirm a semimonthly pay schedule before publishing this period to AIRE.", "pay_schedule_confirmation_required")
       end
       fail_contract!("AIRE payroll cutoff must remain seven calendar days before pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      previous_regular_pay_date if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
+      if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday" &&
+         previous_regular_pay_date + pay_schedule.time_tracking_cutoff_days >= pay_period.pay_date
+        fail_contract!("The time-tracking lock must fall before this payroll's pay date.", "cutoff_after_payday")
+      end
       fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless pay_period.resolved_company_workweek&.confirmed?
       fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
       fail_contract!("The pay date must be after the period end", "pay_date_invalid") unless pay_period.pay_date > pay_period.end_date
@@ -66,6 +84,27 @@ module AirePayrollCalendar
     end
 
     private
+
+    def previous_regular_pay_date
+      return @previous_regular_pay_date if defined?(@previous_regular_pay_date)
+
+      candidates = PayPeriod.where(
+        company_id: pay_period.company_id,
+        end_date: pay_period.start_date - 1.day,
+        cycle: "regular",
+        run_purpose: "regular",
+        correction_status: nil,
+        parallel_run: false
+      ).where.not(id: pay_period.id).limit(2).pluck(:pay_date)
+      if candidates.length != 1
+        fail_contract!("Enter the adjacent previous regular payroll period before publishing this calendar.", "previous_regular_payday_required")
+      end
+      date = candidates.first
+      unless date && date < pay_period.pay_date
+        fail_contract!("The previous regular payday must precede this payroll's pay date.", "previous_regular_payday_invalid")
+      end
+      @previous_regular_pay_date = date
+    end
 
     def confirmed_semimonthly_schedule?
       schedule = pay_schedule

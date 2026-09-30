@@ -7,6 +7,7 @@ class CompanyPaySchedule < ApplicationRecord
   SOURCES = %w[operator_confirmed production_inferred legacy_system_default].freeze
   CONFIRMATION_STATUSES = %w[confirmed needs_confirmation].freeze
   PAYROLL_CUTOFF_DAYS_BEFORE = 7
+  TIME_TRACKING_CUTOFF_RULES = %w[before_pay_date after_previous_regular_payday].freeze
 
   belongs_to :company
   belongs_to :confirmed_by, class_name: "User", optional: true
@@ -28,6 +29,9 @@ class CompanyPaySchedule < ApplicationRecord
             inclusion: { in: [ PAYROLL_CUTOFF_DAYS_BEFORE ] }
   validates :payroll_cutoff_at_minutes,
             numericality: { only_integer: true, greater_than_or_equal_to: 0, less_than_or_equal_to: 1_439 }
+  validates :time_tracking_cutoff_rule, inclusion: { in: TIME_TRACKING_CUTOFF_RULES }
+  validates :time_tracking_cutoff_days,
+            numericality: { only_integer: true, greater_than_or_equal_to: 0, less_than_or_equal_to: 31 }
   validate :ends_on_not_before_effective_on
   validate :automatic_period_rule_has_weekday
   validate :biweekly_rule_has_aligned_anchor
