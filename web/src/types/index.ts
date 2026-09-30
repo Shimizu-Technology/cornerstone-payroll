@@ -587,8 +587,31 @@ export interface AirePayrollRecord {
     cornerstone_overtime_hours: string;
     total_difference_hours: string;
   }>;
+  payable_line_status?: {
+    line_count: number;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+    in_payroll: AirePayableLineStatusBucket;
+    payment_pending: AirePayableLineStatusBucket;
+    paid: AirePayableLineStatusBucket;
+    needs_attention: AirePayableLineStatusBucket;
+    held: { entry_count: number; total_hours: number };
+    synchronization: {
+      pending_event_count: number;
+      failed_event_count: number;
+      last_confirmed_at?: string | null;
+    };
+  };
   source_processing_status?: string | null;
   source_processing_synced_at?: string | null;
+}
+
+export interface AirePayableLineStatusBucket {
+  line_count: number;
+  total_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
 }
 
 export type AirePayrollCutoffState =

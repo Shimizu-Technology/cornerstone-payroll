@@ -18,6 +18,8 @@ Ordinary clock and kiosk entries need no extra payroll approval. Manual and manu
 
 Before cutoff, the payroll page labels the AIRE totals as a live readiness preview. It is useful for resolving mappings, approvals, missing punches, and held time, but it is not the locked payroll input. Once Cornerstone verifies AIRE's immutable cutoff batch, the live preview becomes one **Review and add AIRE hours** action. That action opens the configured AIRE source directly, while retaining the employee and earning-type review gates. After the operator adds the batch, the page points to **Calculate Payroll**. No AIRE hours need to be typed or retrieved through a separate source-selection step.
 
+After the batch is linked, Cornerstone summarizes the exact saved payable lines as **In payroll**, **Prepared**, **Paid**, or **Attention**. The status uses the latest local event for each line. A committed line without delivery evidence remains in payroll, a prepared or printed check remains prepared, recorded delivery or settlement is paid, and failed, voided, or missing lifecycle evidence needs attention. Held entries remain separate. This same evidence appears in **View AIRE Record**, including any AIRE delivery error that is retrying. The page never infers payment from gross totals, payroll commitment, or check printing.
+
 ## Trust and operator identity
 
 Read requests use the client connection's shared secret. Commands also require a durable link between the signed-in Cornerstone operator and an active AIRE administrator.
@@ -65,7 +67,7 @@ Each command UUID identifies one logical approval, denial, or finalization decis
 
 This phase does not add direct editing of punches, missing-punch repair, or a new supplemental-payroll decision model. Those require the correction/case workflow planned next. The cockpit shows those facts and their carryover state now; it does not make an unsafe row edit look like a complete payroll correction.
 
-Finalizing AIRE time does not calculate Cornerstone payroll, issue checks, pay liabilities, or mark wages paid. Direct deposit remains outside scope.
+Finalizing AIRE time does not calculate Cornerstone payroll, issue checks, pay liabilities, or mark wages paid. Direct-deposit initiation and settlement recording remain outside this workflow, so a linked direct-deposit item stays pending until Cornerstone has explicit settlement evidence.
 
 Preparing a linked check and delivering or settling it are separate states. Cornerstone reports both events to AIRE automatically. A prepared check does not make the source hours paid; delivery or settlement establishes paid status.
 
