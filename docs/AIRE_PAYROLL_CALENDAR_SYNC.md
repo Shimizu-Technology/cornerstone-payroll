@@ -52,7 +52,7 @@ The pay-run UI uses these authenticated staff endpoints:
 
 Accountants may read the state. Publishing, revising, and manually retrying delivery require the existing client-configuration permission.
 
-The manual-review endpoint supplies the **Live AIRE readiness** view before cutoff. It reads AIRE's current payable regular, overtime, and carryover hours for the exact local period dates, decorates employees with their Cornerstone mappings, and never changes either system. The view helps the operator resolve differences before cutoff and clearly identifies itself as changing data. Once the immutable batch is verified, it is replaced by the locked batch action so current AIRE state cannot be mistaken for the payroll input.
+The manual-review endpoint supplies the **Live AIRE readiness** view before cutoff. It reads AIRE's current payable regular, overtime, and carryover hours for the exact local period dates, decorates employees with their Cornerstone mappings, and never changes either system. The page labels it as a live, non-mutating preview that may reflect later AIRE activity. Once the immutable batch is verified, it is replaced by the locked batch action so current AIRE state cannot be mistaken for the payroll input.
 
 The operator selects **Review and add AIRE hours**, reviews employee and earning mappings, and adds the verified batch before calculating payroll. Cornerstone then retains the exact AIRE entry links through calculation and commitment. Check preparation and delivery or settlement are reported to AIRE automatically as separate states; only delivery or settlement establishes paid status. There is no separate manual “mark paid” action in AIRE for a regular linked batch.
 

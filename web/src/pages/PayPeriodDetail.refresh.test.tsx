@@ -14,6 +14,10 @@ const apiMocks = vi.hoisted(() => ({
   runPayroll: vi.fn(),
 }));
 
+const componentMocks = vi.hoisted(() => ({
+  timeTrackingImport: vi.fn(),
+}));
+
 vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
@@ -34,9 +38,24 @@ vi.mock('@/components/payroll/ChecksPanel', () => ({
 vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => null }));
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', () => ({ PayrollFinalRecordPanel: () => null }));
-vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({ TimeTrackingImportModal: () => null }));
+vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
+  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number }) => {
+    componentMocks.timeTrackingImport(props);
+    return props.open ? (
+      <div
+        data-testid="time-tracking-import-modal"
+        data-auto-preview={String(Boolean(props.autoPreview))}
+        data-source-id={props.initialSourceId ?? ''}
+      />
+    ) : null;
+  },
+}));
 vi.mock('@/components/payroll/AirePayrollRecordsDialog', () => ({ AirePayrollRecordsDialog: () => null }));
-vi.mock('@/components/payroll/AirePayrollCockpit', () => ({ AirePayrollCockpit: () => null }));
+vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
+  AirePayrollCockpit: ({ onReviewFinalizedBatch }: { onReviewFinalizedBatch?: () => void }) => (
+    <button type="button" onClick={onReviewFinalizedBatch}>Review verified AIRE batch</button>
+  ),
+}));
 vi.mock('@/components/payroll/PayrollLiabilityPanel', () => ({ PayrollLiabilityPanel: () => null }));
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({ UnifiedCheckPrintDialog: () => null }));
 
@@ -54,6 +73,53 @@ const initialPayPeriod = {
 } as unknown as PayPeriod;
 
 afterEach(cleanup);
+
+it('reserves the AIRE source preference for the guided verified-batch review', async () => {
+  vi.clearAllMocks();
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  const payPeriod = {
+    ...initialPayPeriod,
+    status: 'draft',
+    time_tracking: {
+      active_source_types: ['custom', 'aire_services'],
+      linked_aire_records: [],
+      aire_calendar: {
+        enabled: true,
+        source_id: 12,
+        source_name: 'AIRE Services',
+        eligible: true,
+        cutoff_state: 'scheduled',
+        needs_revision: false,
+        can_publish: false,
+        can_retry: false,
+      },
+    },
+  } as unknown as PayPeriod;
+
+  render(
+    <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <Routes>
+        <Route path="/companies/:companyId/pay-runs/:id/:tab" element={
+          <PayPeriodDetail initialPayPeriod={payPeriod} />
+        } />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Import Time Tracking' }));
+
+  const modal = await screen.findByTestId('time-tracking-import-modal');
+  expect(modal.getAttribute('data-auto-preview')).toBe('false');
+  expect(modal.getAttribute('data-source-id')).toBe('');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Review verified AIRE batch' }));
+  await waitFor(() => {
+    expect(modal.getAttribute('data-auto-preview')).toBe('true');
+    expect(modal.getAttribute('data-source-id')).toBe('12');
+  });
+});
 
 it('reloads processing data and its check list when a sibling tab changes checks', async () => {
   vi.clearAllMocks();
