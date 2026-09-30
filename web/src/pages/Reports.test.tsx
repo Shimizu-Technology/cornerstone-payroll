@@ -4,9 +4,9 @@ import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
-import type { YtdSummaryReport } from '@/services/api';
+import { ApiError, type YtdSummaryReport } from '@/services/api';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
-import { PayrollRegisterPanel, Reports, YtdSummaryPanel } from './Reports';
+import { PayrollRegisterPanel, QuarterlyCompliancePacketPanel, Reports, YtdSummaryPanel } from './Reports';
 
 function renderReportPanel(panel: ReactNode) {
   return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
@@ -14,14 +14,25 @@ function renderReportPanel(panel: ReactNode) {
 
 const apiMocks = vi.hoisted(() => ({
   ytdSummary: vi.fn(),
+  quarterlyCompliancePacket: vi.fn(),
   payrollHistoryList: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
-  reportsApi: { ytdSummary: apiMocks.ytdSummary },
+  reportsApi: {
+    ytdSummary: apiMocks.ytdSummary,
+    quarterlyCompliancePacket: apiMocks.quarterlyCompliancePacket,
+  },
   payrollHistoryApi: { list: apiMocks.payrollHistoryList },
   employeesApi: {},
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    data?: unknown;
+
+    constructor(message: string, _status: number, _details?: unknown, data?: unknown) {
+      super(message);
+      this.data = data;
+    }
+  },
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
@@ -80,7 +91,14 @@ const report = {
     bonus: 100,
     straight_loan_deductions: 25,
     installment_loan_payments: 50,
+    employer_social_security_tax: 120,
+    employer_medicare_tax: 30,
+    employer_taxes_total: 150,
+    employer_traditional_401k_match: 75,
+    employer_roth_401k_match: 0,
+    other_employer_contributions: 0,
     employer_contributions: 75,
+    employer_taxes_and_contributions_total: 225,
     employer_payroll_cost: 2_325,
     withholding_tax: 200,
     social_security_tax: 130.2,
@@ -97,7 +115,14 @@ const report = {
     bonus: 100,
     straight_loan_deductions: 25,
     installment_loan_payments: 50,
+    employer_social_security_tax: 120,
+    employer_medicare_tax: 30,
+    employer_taxes_total: 150,
+    employer_traditional_401k_match: 75,
+    employer_roth_401k_match: 0,
+    other_employer_contributions: 0,
     employer_contributions: 75,
+    employer_taxes_and_contributions_total: 225,
     employer_payroll_cost: 2_325,
     withholding_tax: 200,
     social_security_tax: 130.2,
@@ -133,7 +158,11 @@ describe('YtdSummaryPanel', () => {
     expect(screen.getByText('Other native loans (named or recurring)').nextElementSibling?.textContent).toBe('$50.00');
     expect(screen.getByText('Bonus (in gross)').nextElementSibling?.textContent).toBe('$100.00');
     expect(screen.getByText('Pre-tax 401(k) (in deductions)').nextElementSibling?.textContent).toBe('$84.00');
-    expect(screen.getByText('Employer Contributions').nextElementSibling?.textContent).toBe('$75.00');
+    expect(screen.getByText('Employer Social Security').nextElementSibling?.textContent).toBe('$120.00');
+    expect(screen.getByText('Employer Medicare').nextElementSibling?.textContent).toBe('$30.00');
+    expect(screen.getByText('Employer Traditional 401(k) Match').nextElementSibling?.textContent).toBe('$75.00');
+    expect(screen.getByText('Employer Contributions Total').nextElementSibling?.textContent).toBe('$75.00');
+    expect(screen.getByText('Employer Taxes and Contributions Total').nextElementSibling?.textContent).toBe('$225.00');
     expect(screen.getByText('Employer Payroll Cost').nextElementSibling?.textContent).toBe('$2,325.00');
 
     const compactRow = screen.getByText('Test Employee').closest('tr');
@@ -304,6 +333,34 @@ describe('YtdSummaryPanel', () => {
     expect(employeeRow?.textContent).toContain('$15.75');
     expect(employeeRow?.textContent).toContain('$5.75');
     expect(employeeRow?.textContent).not.toContain('NaN');
+  });
+});
+
+describe('QuarterlyCompliancePacketPanel', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('links a stale historical bridge error to the recovery workflow', async () => {
+    apiMocks.quarterlyCompliancePacket.mockRejectedValue(new ApiError(
+      'Locked QuickBooks history has adjustments that are not represented by the latest historical YTD bridge',
+      422,
+      undefined,
+      {
+        error_code: 'historical_ytd_bridge_stale',
+        historical_import_batch_ids: [19],
+        recovery_path: '/historical-payroll',
+      },
+    ));
+    renderReportPanel(<QuarterlyCompliancePacketPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('prepare the next YTD bridge revision');
+    expect(screen.getByRole('link', { name: 'Review historical YTD bridge' }).getAttribute('href')).toBe('/historical-payroll');
   });
 });
 

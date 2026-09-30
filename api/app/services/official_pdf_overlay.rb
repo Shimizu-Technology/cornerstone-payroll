@@ -17,7 +17,12 @@ class OfficialPdfOverlay
     output = CombinePDF.new
 
     (page_count || template.pages.length).times do |index|
-      base_page = template.pages[index] || template.pages[0]
+      # CombinePDF pages are mutable. Reusing template.pages[0] for a
+      # multi-page form causes every overlay to accumulate on the same page
+      # object, so each output page ends up containing every employee page.
+      # Reload the single-page template for each fallback page so every
+      # overlay has an independent base object.
+      base_page = template.pages[index] || load_template!.pages.first
       output << base_page
       output.pages[index] << overlay.pages[index]
     end

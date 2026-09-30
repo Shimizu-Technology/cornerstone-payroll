@@ -1803,7 +1803,15 @@ export function YtdSummaryPanel() {
                       <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
                       <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
                       <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
-                      <TotalBox label="Employer Contributions" value={report.company_totals.employer_contributions ?? 0} />
+                      <TotalBox label="Employer Social Security" value={report.company_totals.employer_social_security_tax ?? 0} />
+                      <TotalBox label="Employer Medicare" value={report.company_totals.employer_medicare_tax ?? 0} />
+                      <TotalBox label="Other Employer Taxes" value={report.company_totals.other_employer_taxes ?? 0} />
+                      <TotalBox label="Employer Taxes Total" value={report.company_totals.employer_taxes_total ?? 0} />
+                      <TotalBox label="Employer Traditional 401(k) Match" value={report.company_totals.employer_traditional_401k_match ?? 0} />
+                      <TotalBox label="Employer Roth 401(k) Match" value={report.company_totals.employer_roth_401k_match ?? 0} />
+                      <TotalBox label="Other Employer Contributions" value={report.company_totals.other_employer_contributions ?? 0} />
+                      <TotalBox label="Employer Contributions Total" value={report.company_totals.employer_contributions ?? 0} />
+                      <TotalBox label="Employer Taxes and Contributions Total" value={report.company_totals.employer_taxes_and_contributions_total ?? 0} />
                     </div>
                     <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
                   </details>
@@ -1856,7 +1864,12 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Historical Loans (unclassified)</th>
                     <th className="py-2 pr-4 text-right font-medium">Health Insurance</th>
                     <th className="py-2 pr-4 text-right font-medium">401(k) After Tax (source pre-tax)</th>
-                    <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer SS</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Medicare</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer 401(k)</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Roth 401(k)</th>
+                    <th className="py-2 pr-4 text-right font-medium">Other Employer Contrib.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Contrib. Total</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Cost</th>
                     </>}
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
@@ -1898,6 +1911,11 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.historical_loan_deductions_unclassified ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.health_insurance_deductions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_social_security_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_medicare_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_traditional_401k_match ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_roth_401k_match ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.other_employer_contributions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_contributions ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.employer_payroll_cost ?? 0)}</td>
                       </>}
@@ -1910,7 +1928,7 @@ export function YtdSummaryPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={8 + (showCategoryColumns ? 16 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-gray-400">
+                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -2329,7 +2347,7 @@ function EmployerLiabilityPanel() {
 
 // ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
 
-function QuarterlyCompliancePacketPanel() {
+export function QuarterlyCompliancePacketPanel() {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
@@ -2344,12 +2362,29 @@ function QuarterlyCompliancePacketPanel() {
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bridgeRecoveryPath, setBridgeRecoveryPath] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
   const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
+
+  function handlePacketError(err: unknown) {
+    setError(extractErrorMessage(err));
+    if (err instanceof ApiError && typeof err.data === 'object' && err.data !== null) {
+      const payload = err.data as { error_code?: unknown; recovery_path?: unknown };
+      if (
+        (payload.error_code === 'historical_ytd_bridge_stale' || payload.error_code === 'historical_ytd_bridge_required') &&
+        typeof payload.recovery_path === 'string'
+      ) {
+        setBridgeRecoveryPath(payload.recovery_path);
+        return;
+      }
+    }
+    setBridgeRecoveryPath(null);
+  }
 
   async function loadReport() {
     setLoading(true);
     setError(null);
+    setBridgeRecoveryPath(null);
     setReport(null);
     try {
       const res = await reportsApi.quarterlyCompliancePacket(year, quarter);
@@ -2364,7 +2399,7 @@ function QuarterlyCompliancePacketPanel() {
         setCanRecordFilingResponsibility(false);
       }
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setLoading(false);
     }
@@ -2373,11 +2408,12 @@ function QuarterlyCompliancePacketPanel() {
   async function downloadXlsx() {
     setExportingXlsx(true);
     setError(null);
+    setBridgeRecoveryPath(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketXlsx(year, quarter);
       triggerDownload(blob, filename || `quarterly_compliance_packet_${year}_q${quarter}.xlsx`);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setExportingXlsx(false);
     }
@@ -2386,11 +2422,12 @@ function QuarterlyCompliancePacketPanel() {
   async function downloadPdf() {
     setExportingPdf(true);
     setError(null);
+    setBridgeRecoveryPath(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketPdf(year, quarter);
       previewPdf({ blob, filename: filename || `quarterly_compliance_review_packet_draft_${year}_q${quarter}.pdf`, title: 'Quarterly compliance packet preview' });
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setExportingPdf(false);
     }
@@ -2399,11 +2436,12 @@ function QuarterlyCompliancePacketPanel() {
   async function downloadSwicaAscii() {
     setExportingSwica(true);
     setError(null);
+    setBridgeRecoveryPath(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketSwicaAscii(year, quarter);
       triggerDownload(blob, filename || `swica_wage_records_draft_${year}_q${quarter}.txt`);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setExportingSwica(false);
     }
@@ -2412,6 +2450,7 @@ function QuarterlyCompliancePacketPanel() {
   async function updateTask(task: QuarterlyComplianceTask, updates: Partial<QuarterlyComplianceTask>) {
     setSavingTaskId(task.id);
     setError(null);
+    setBridgeRecoveryPath(null);
     try {
       const res = await reportsApi.updateQuarterlyComplianceTask(task.id, updates);
       setReport((current) => {
@@ -2425,7 +2464,7 @@ function QuarterlyCompliancePacketPanel() {
         };
       });
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setSavingTaskId(null);
     }
@@ -2434,11 +2473,12 @@ function QuarterlyCompliancePacketPanel() {
   async function startWorkflow() {
     setStartingWorkflow(true);
     setError(null);
+    setBridgeRecoveryPath(null);
     try {
       const res = await reportsApi.startQuarterlyCompliancePacketWorkflow(year, quarter);
       setReport(res.report);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      handlePacketError(err);
     } finally {
       setStartingWorkflow(false);
     }
@@ -2488,7 +2528,7 @@ function QuarterlyCompliancePacketPanel() {
               <select
                 id="qcp-year"
                 value={year}
-                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); setCanRecordFilingResponsibility(false); }}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); setBridgeRecoveryPath(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
@@ -2500,7 +2540,7 @@ function QuarterlyCompliancePacketPanel() {
               <select
                 id="qcp-quarter"
                 value={quarter}
-                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); setCanRecordFilingResponsibility(false); }}
+                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); setBridgeRecoveryPath(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
@@ -2515,7 +2555,13 @@ function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <p>{error}</p>
+            {bridgeRecoveryPath && <div className="mt-2">
+              <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
+              <Link to={bridgeRecoveryPath} className="mt-2 inline-block font-semibold text-primary-700 underline underline-offset-2">Review historical YTD bridge</Link>
+            </div>}
+          </div>}
         </CardContent>
       </Card>
 

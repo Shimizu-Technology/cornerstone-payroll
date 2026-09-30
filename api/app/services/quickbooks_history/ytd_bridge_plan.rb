@@ -43,7 +43,10 @@ module QuickbooksHistory
         "batch_id" => batch.id,
         "bundle_digest" => batch.bundle_digest,
         "balances" => balances,
-        "summary" => summary,
+        # Adjustment rows are display evidence. Keep them outside the plan
+        # digest so adding richer review detail does not manufacture a new YTD
+        # revision when the underlying ledger and balances are unchanged.
+        "summary" => summary.except("adjustments"),
         "reconciliation" => reconciliation,
         "warnings" => warnings,
         "errors" => errors.uniq
@@ -263,7 +266,23 @@ module QuickbooksHistory
         "adjustment_deltas" => serialize_totals(ledger.adjustment_totals),
         "adjusted_totals" => serialize_totals(ledger.adjusted_totals),
         "adjustment_ids" => ledger.adjustments.pluck(:id),
+        "adjustments" => ledger.adjustments.map { |adjustment| serialize_adjustment(adjustment) },
         "adjustment_digest" => ledger.adjustment_digest
+      }
+    end
+
+    def serialize_adjustment(adjustment)
+      {
+        "id" => adjustment.id,
+        "historical_paycheck_id" => adjustment.historical_paycheck_id,
+        "historical_pay_period_id" => adjustment.historical_paycheck.historical_pay_period_id,
+        "effective_pay_date" => adjustment.effective_pay_date.iso8601,
+        "kind" => adjustment.kind,
+        "reason" => adjustment.reason,
+        "gross_pay" => adjustment.gross_pay.to_d.to_s("F"),
+        "net_pay" => adjustment.net_pay.to_d.to_s("F"),
+        "filing_review_state" => adjustment.filing_review_state,
+        "downstream_impact_acknowledged" => adjustment.downstream_impact_acknowledged?
       }
     end
 

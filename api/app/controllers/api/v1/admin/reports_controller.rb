@@ -1596,6 +1596,16 @@ module Api
           [ report, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
+        rescue HistoricalPayrollFilingSource::BridgeValidationError => e
+          [ nil, render(
+            json: {
+              error: e.message,
+              error_code: e.code,
+              historical_import_batch_ids: e.historical_import_batch_ids,
+              recovery_path: "/historical-payroll"
+            },
+            status: :unprocessable_entity
+          ) ]
         rescue ArgumentError => e
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
         end
@@ -2054,6 +2064,7 @@ module Api
           custom_totals = custom_ytd_totals_for_items(items)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
           retirement_totals = payroll_summary_retirement_totals(items)
+          employer_cost_totals = payroll_summary_employer_cost_totals(items)
 
           row = {
             employee_id: employee.id,
@@ -2087,8 +2098,7 @@ module Api
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
             source_labeled_after_tax_401k_in_pretax_bucket: 0,
-            employer_contributions: items.sum { |item| employer_contributions_total(item) },
-            employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
+            **employer_cost_totals,
             total_deductions: custom_totals[:total_deductions],
             custom_deductions_total: custom_totals[:custom_deductions_total],
             net_pay: items.sum { |item| item.net_pay.to_f }
@@ -2102,6 +2112,7 @@ module Api
         def payroll_period_company_totals(items, period, historical_paychecks = [], historical_adjustments = [], unified: nil)
           treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
           retirement_totals = payroll_summary_retirement_totals(items)
+          employer_cost_totals = payroll_summary_employer_cost_totals(items)
 
           row = {
             year: period.year,
@@ -2116,8 +2127,7 @@ module Api
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
             source_labeled_after_tax_401k_in_pretax_bucket: 0,
-            employer_contributions: items.sum { |item| employer_contributions_total(item) },
-            employer_payroll_cost: items.sum { |item| employer_payroll_cost(item) },
+            **employer_cost_totals,
             custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
             payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
             payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
@@ -2692,6 +2702,35 @@ module Api
           items.each_with_object({ retirement: BigDecimal("0"), roth_retirement: BigDecimal("0") }) do |item, totals|
             PayrollRetirementTotals.for_item(item).each { |key, amount| totals[key] += amount }
           end
+        end
+
+        def payroll_summary_employer_cost_totals(items)
+          employer_social_security_tax = items.sum(0.to_d) { |item| item.employer_social_security_tax.to_d }
+          employer_medicare_tax = items.sum(0.to_d) { |item| item.employer_medicare_tax.to_d }
+          employer_contributions = items.sum(0.to_d) { |item| employer_contributions_total(item).to_d }
+          contribution_entries = items.flat_map do |item|
+            quickbooks_report_data_for(item).deduction_contribution_entries_for_item(item)
+          end.select { |entry| entry.company_amount.to_f.nonzero? }
+          employer_traditional_401k_match = contribution_entries
+            .select { |entry| entry.reporting_group == PayrollReportingGroups::GROUP_401K_PRE_TAX }
+            .sum(0.to_d) { |entry| entry.company_amount.to_d }
+          employer_roth_401k_match = contribution_entries
+            .select { |entry| entry.reporting_group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }
+            .sum(0.to_d) { |entry| entry.company_amount.to_d }
+          employer_taxes_total = employer_social_security_tax + employer_medicare_tax
+
+          {
+            employer_social_security_tax: employer_social_security_tax.round(2).to_f,
+            employer_medicare_tax: employer_medicare_tax.round(2).to_f,
+            other_employer_taxes: 0.0,
+            employer_taxes_total: employer_taxes_total.round(2).to_f,
+            employer_traditional_401k_match: employer_traditional_401k_match.round(2).to_f,
+            employer_roth_401k_match: employer_roth_401k_match.round(2).to_f,
+            other_employer_contributions: (employer_contributions - employer_traditional_401k_match - employer_roth_401k_match).round(2).to_f,
+            employer_contributions: employer_contributions.round(2).to_f,
+            employer_taxes_and_contributions_total: (employer_taxes_total + employer_contributions).round(2).to_f,
+            employer_payroll_cost: items.sum(0.to_d) { |item| employer_payroll_cost(item).to_d }.round(2).to_f
+          }
         end
 
         # These saved additions are independent of the one-time bonus column.
@@ -3870,7 +3909,9 @@ module Api
             "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
             "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
             "401(k) After Tax Label in Source Pre-Tax Bucket",
-            "Employer Contributions", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
+            "Employer Social Security", "Employer Medicare", "Other Employer Taxes", "Employer Taxes Total",
+            "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match", "Other Employer Contributions",
+            "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
           ] + component_columns.map { |column| "Breakdown Already Included - #{column[:label]}" } + provisional_column ]
           Array(report[:employees]).each do |emp|
@@ -3881,7 +3922,10 @@ module Api
               emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
               emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
               emp[:historical_loan_deductions_unclassified], emp[:health_insurance_deductions], emp[:source_labeled_after_tax_401k_in_pretax_bucket],
-              emp[:employer_contributions], emp[:employer_payroll_cost], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
+              emp[:employer_social_security_tax], emp[:employer_medicare_tax], emp[:other_employer_taxes], emp[:employer_taxes_total],
+              emp[:employer_traditional_401k_match], emp[:employer_roth_401k_match], emp[:other_employer_contributions],
+              emp[:employer_contributions], emp[:employer_taxes_and_contributions_total], emp[:employer_payroll_cost],
+              emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
               *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] },
               *(provisional_column.empty? ? [] : [ "TEST ONLY — calculated, not paid" ])

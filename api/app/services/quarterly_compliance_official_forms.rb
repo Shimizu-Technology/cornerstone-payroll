@@ -499,9 +499,9 @@ module QuarterlyComplianceOfficialForms
       draw_text_box(pdf, [ 168, y - 17, 360, y ], employee[:name], size: 7)
       draw_text_box(pdf, [ 365, y - 15, 522, y ], "", size: 6.5)
       draw_text_box(pdf, [ 365, y - 32, 522, y - 17 ], "", size: 6.5)
-      draw_text_box(pdf, [ 526, y - 17, 626, y ], employee[:status].to_s.first&.upcase || "A", size: 7, align: :center)
-      draw_text_box(pdf, [ 630, y - 17, 750, y ], money_string(employee[:swica_wages]), size: 7, align: :right)
-      draw_text_box(pdf, [ 754, y - 17, 870, y ], money_string(employee[:guam_withholding]), size: 7, align: :right)
+      draw_text_box(pdf, [ 630, y - 17, 750, y ], employee[:status].to_s.first&.upcase || "A", size: 7, align: :center)
+      draw_text_box(pdf, [ 754, y - 17, 870, y ], money_string(employee[:swica_wages]), size: 7, align: :right)
+      draw_text_box(pdf, [ 874, y - 17, 1004, y ], money_string(employee[:guam_withholding]), size: 7, align: :right)
     end
 
     def employee_ssn(employee)
