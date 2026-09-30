@@ -7,6 +7,16 @@
 # returns consume dated ledger entries and deliberately exclude opening summaries,
 # which cannot be assigned to a filing quarter without paycheck-level evidence.
 class HistoricalPayrollFilingSource
+  class BridgeValidationError < ArgumentError
+    attr_reader :code, :historical_import_batch_ids
+
+    def initialize(message, code:, historical_import_batch_ids:)
+      super(message)
+      @code = code
+      @historical_import_batch_ids = historical_import_batch_ids
+    end
+  end
+
   HistoricalRecord = Data.define(
     :key, :record_type, :record_id, :historical_pay_period_id,
     :employee_id, :pay_date, :period_start, :period_end,
@@ -35,7 +45,11 @@ class HistoricalPayrollFilingSource
   def validate!(range:)
     missing_bridges = locked_batches(range: range).reject { |batch| batch.latest_applied_historical_ytd_bridge }
     if missing_bridges.any?
-      raise ArgumentError, "Locked QuickBooks history requires an applied historical YTD bridge before it can be used for filing preparation"
+      raise BridgeValidationError.new(
+        "Locked QuickBooks history requires an applied historical YTD bridge before it can be used for filing preparation",
+        code: "historical_ytd_bridge_required",
+        historical_import_batch_ids: missing_bridges.map(&:id)
+      )
     end
 
     stale_batches = eligible_batch_bridges(range: range).filter_map do |batch, bridge|
@@ -43,7 +57,11 @@ class HistoricalPayrollFilingSource
       batch if expected_digest.blank? || expected_digest != HistoricalPayroll::Ledger.new(batch: batch).adjustment_digest
     end
     if stale_batches.any?
-      raise ArgumentError, "Locked QuickBooks history has adjustments that are not represented by the latest historical YTD bridge"
+      raise BridgeValidationError.new(
+        "Locked QuickBooks history has adjustments that are not represented by the latest historical YTD bridge",
+        code: "historical_ytd_bridge_stale",
+        historical_import_batch_ids: stale_batches.map(&:id)
+      )
     end
 
     self

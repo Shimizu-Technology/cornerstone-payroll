@@ -1625,7 +1625,17 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="text-sm font-semibold">{ytdBridge.reconciliation_summary.passed ? 'Every tax and wage total matches to the cent' : 'The opening balances do not reconcile'}</p>
                     <p className="mt-1 text-sm leading-6">{ytdBridge.reconciliation_summary.checks.filter((check) => check.passed).length}/{ytdBridge.reconciliation_summary.checks.length} employee-allocation checks passed across {ytdBridge.preview_summary.tax_years.join(', ') || 'no tax years'}.</p>
                   </div>
-                  {(ytdBridge.preview_summary.adjustment_ids?.length || 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Reviewed historical adjustments included</p><p className="mt-1 leading-6">Revision {ytdBridge.revision} includes {ytdBridge.preview_summary.adjustment_ids?.length} append-only ledger {ytdBridge.preview_summary.adjustment_ids?.length === 1 ? 'entry' : 'entries'} with a gross change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.gross_pay || '0')} and net change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.net_pay || '0')}. The original source snapshots remain unchanged.</p></div>}
+                  {(ytdBridge.preview_summary.adjustment_ids?.length || 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Reviewed historical adjustments included</p>
+                    <p className="mt-1 leading-6">Revision {ytdBridge.revision} includes {ytdBridge.preview_summary.adjustment_ids?.length} append-only ledger {ytdBridge.preview_summary.adjustment_ids?.length === 1 ? 'entry' : 'entries'} with a gross change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.gross_pay || '0')} and net change of {dollars(ytdBridge.preview_summary.adjustment_deltas?.net_pay || '0')}. The original source snapshots remain unchanged.</p>
+                    {(ytdBridge.preview_summary.adjustments?.length || 0) > 0 && <ul className="mt-3 space-y-2 border-t border-amber-200 pt-3">
+                      {ytdBridge.preview_summary.adjustments?.map((adjustment) => <li key={adjustment.id} className="rounded-lg bg-white/70 px-3 py-2">
+                        <p className="font-medium">Adjustment #{adjustment.id} · {shortDate(adjustment.effective_pay_date)} · {adjustment.kind.replaceAll('_', ' ')}</p>
+                        <p className="mt-1 leading-5">{adjustment.reason}</p>
+                        <p className="mt-1 text-xs">Gross {dollars(adjustment.gross_pay)} · Net {dollars(adjustment.net_pay)} · Filing review {adjustment.filing_review_state.replaceAll('_', ' ')} · Downstream impact {adjustment.downstream_impact_acknowledged ? 'acknowledged' : 'not required or pending'}</p>
+                      </li>)}
+                    </ul>}
+                  </div>}
                   {ytdBridge.warnings.length > 0 && (
                     <div role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
                       <p className="font-semibold">{ytdBridge.status === 'applied' ? 'Accepted source limitations in these active balances' : 'Source limitations to review before activation'}</p>

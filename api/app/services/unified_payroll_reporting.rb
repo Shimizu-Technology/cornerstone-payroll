@@ -2,6 +2,8 @@
 
 class UnifiedPayrollReporting
   SOURCE_STATEMENT = "QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source."
+  EMPLOYER_SOCIAL_SECURITY = /\A(?:SS|Social Security(?: Employer)?|Employer Social Security)\z/i
+  EMPLOYER_MEDICARE = /\A(?:Med|Medicare(?: Employer)?|Employer Medicare)\z/i
 
   def initialize(company_id:, period:)
     @company_id = Integer(company_id)
@@ -44,7 +46,15 @@ class UnifiedPayrollReporting
       historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
       health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
       source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
+      employer_social_security_tax: row.fetch(:employer_social_security_tax, 0).to_f + totals[:employer_social_security_tax],
+      employer_medicare_tax: row.fetch(:employer_medicare_tax, 0).to_f + totals[:employer_medicare_tax],
+      other_employer_taxes: row.fetch(:other_employer_taxes, 0).to_f + totals[:other_employer_taxes],
+      employer_taxes_total: row.fetch(:employer_taxes_total, 0).to_f + totals[:employer_taxes_total],
+      employer_traditional_401k_match: row.fetch(:employer_traditional_401k_match, 0).to_f + totals[:employer_traditional_401k_match],
+      employer_roth_401k_match: row.fetch(:employer_roth_401k_match, 0).to_f + totals[:employer_roth_401k_match],
+      other_employer_contributions: row.fetch(:other_employer_contributions, 0).to_f + totals[:other_employer_contributions],
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
+      employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
@@ -70,7 +80,15 @@ class UnifiedPayrollReporting
       historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
       health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
       source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
+      employer_social_security_tax: row.fetch(:employer_social_security_tax, 0).to_f + totals[:employer_social_security_tax],
+      employer_medicare_tax: row.fetch(:employer_medicare_tax, 0).to_f + totals[:employer_medicare_tax],
+      other_employer_taxes: row.fetch(:other_employer_taxes, 0).to_f + totals[:other_employer_taxes],
+      employer_taxes_total: row.fetch(:employer_taxes_total, 0).to_f + totals[:employer_taxes_total],
+      employer_traditional_401k_match: row.fetch(:employer_traditional_401k_match, 0).to_f + totals[:employer_traditional_401k_match],
+      employer_roth_401k_match: row.fetch(:employer_roth_401k_match, 0).to_f + totals[:employer_roth_401k_match],
+      other_employer_contributions: row.fetch(:other_employer_contributions, 0).to_f + totals[:other_employer_contributions],
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
+      employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
       withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
@@ -250,12 +268,25 @@ class UnifiedPayrollReporting
 
   def historical_totals(paychecks, adjustments = [])
     rows = paychecks + adjustments
+    employer_taxes_total = sum(rows, :employer_taxes)
+    employer_social_security_tax = component_sum(rows, :employer_tax_breakdown, EMPLOYER_SOCIAL_SECURITY)
+    employer_medicare_tax = component_sum(rows, :employer_tax_breakdown, EMPLOYER_MEDICARE)
+    employer_contribution_totals = historical_employer_contribution_totals(rows)
+    employer_contributions = sum(rows, :employer_contributions)
     {
       total_hours: sum(rows, :hours_total),
       total_overtime_hours: component_sum(paychecks, :hours_breakdown, /\A(?:OT|Overtime(?: Pay)?)\z/i),
       gross_pay: sum(rows, :gross_pay),
       bonus: component_sum(rows, :earnings_breakdown, /bonus/i),
-      employer_contributions: sum(rows, :employer_contributions),
+      employer_social_security_tax: employer_social_security_tax,
+      employer_medicare_tax: employer_medicare_tax,
+      other_employer_taxes: (employer_taxes_total - employer_social_security_tax - employer_medicare_tax).round(2),
+      employer_taxes_total: employer_taxes_total,
+      employer_traditional_401k_match: employer_contribution_totals[:traditional_401k],
+      employer_roth_401k_match: employer_contribution_totals[:roth_401k],
+      other_employer_contributions: (employer_contributions - employer_contribution_totals[:traditional_401k] - employer_contribution_totals[:roth_401k]).round(2),
+      employer_contributions: employer_contributions,
+      employer_taxes_and_contributions_total: (employer_taxes_total + employer_contributions).round(2),
       employer_payroll_cost: sum(rows, :total_payroll_cost),
       withholding_tax: sum(rows, :federal_income_tax),
       social_security_tax: sum(rows, :social_security_tax),
@@ -288,6 +319,23 @@ class UnifiedPayrollReporting
         component[:label].to_s.match?(pattern) ? amount : 0.to_d
       end
     end.to_f
+  end
+
+  def historical_employer_contribution_totals(rows)
+    totals = { traditional_401k: 0.to_d, roth_401k: 0.to_d }
+    rows.each do |row|
+      Array(row.employer_contribution_breakdown).each do |entry|
+        component = entry.to_h.with_indifferent_access
+        amount = BigDecimal(component[:amount].to_s, exception: false) || 0.to_d
+        group = PayrollReportingGroups.infer_retirement_group(
+          label: component[:label],
+          tax_treatment: "employer_contribution"
+        )
+        totals[:traditional_401k] += amount if group == PayrollReportingGroups::GROUP_401K_PRE_TAX
+        totals[:roth_401k] += amount if group == PayrollReportingGroups::GROUP_401K_AFTER_TAX
+      end
+    end
+    totals.transform_values(&:to_f)
   end
 
   def regular_period_count(paychecks)
