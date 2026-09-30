@@ -14,6 +14,6 @@ Cornerstone stores staging-only generated artifacts in its persistent `payroll_s
 
 The seed fixture follows the current target-run cutoff contract: the upcoming run locks seven calendar days after the previous adjacent regular payday. It creates a finalized period for reconciliation and an upcoming period for the connected payroll workflow. All fixture people and identifiers are synthetic.
 
-The LaunchAgent checks every three minutes for successful `staging-v2` workflow runs. A temporary GitHub lookup failure leaves the current containers running. Backups run before deployment and at least daily, retain 14 days, and include both PostgreSQL databases and both upload volumes.
+The LaunchAgent checks every three minutes for successful `staging-v2` workflow runs. A temporary GitHub lookup failure leaves the current containers running. A commit pair that fails its deployment health check is held until either commit changes, preventing repeated backups and failed deploy loops; an operator can rerun `deploy.sh` directly after correcting an external problem. Backups run before deployment and at least daily, retain 14 days, and include both PostgreSQL databases and both upload volumes.
 
 Never point this stack at production data, production Clerk instances, or the existing staging databases and volumes.

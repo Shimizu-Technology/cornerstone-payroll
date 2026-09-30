@@ -53,6 +53,7 @@ done
 if [[ "${healthy}" == "1" ]]; then
   printf '%s\n' "${payroll_sha}" > "${state_dir}/deployed-payroll-sha"
   printf '%s\n' "${aire_sha}" > "${state_dir}/deployed-aire-sha"
+  rm -f "${state_dir}/failed-sha-pair"
   echo "AIRE + Cornerstone staging v2 deployed payroll=${payroll_sha} aire=${aire_sha}."
   exit 0
 fi
@@ -64,4 +65,5 @@ if [[ "${previous_payroll_sha}" =~ ^[0-9a-f]{40}$ && "${previous_aire_sha}" =~ ^
   export AIRE_IMAGE_TAG="${previous_aire_sha}"
   compose up -d --remove-orphans
 fi
+printf '%s %s\n' "${payroll_sha}" "${aire_sha}" > "${state_dir}/failed-sha-pair"
 exit 1

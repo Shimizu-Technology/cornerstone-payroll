@@ -30,6 +30,10 @@ deployed_aire_sha="$(cat "${state_dir}/deployed-aire-sha" 2>/dev/null || true)"
 if [[ "${payroll_sha}" == "${deployed_payroll_sha}" && "${aire_sha}" == "${deployed_aire_sha}" ]]; then
   exit 0
 fi
+failed_pair="$(cat "${state_dir}/failed-sha-pair" 2>/dev/null || true)"
+if [[ "${failed_pair}" == "${payroll_sha} ${aire_sha}" ]]; then
+  exit 0
+fi
 
 git -C "${SERVICE_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "The staging v2 service directory is not a Git checkout." >&2; exit 1; }
 if [[ -n "$(git -C "${SERVICE_DIR}" status --porcelain --untracked-files=no)" ]]; then
