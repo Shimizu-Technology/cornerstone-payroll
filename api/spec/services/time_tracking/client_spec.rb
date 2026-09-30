@@ -984,6 +984,41 @@ RSpec.describe TimeTracking::Client do
       expect(stub).to have_been_requested.once
     end
 
+    it "requires a finalized batch to match the pinned source installation" do
+      instance_id = SecureRandom.uuid
+      source.update!(
+        expected_source_instance_id: instance_id,
+        source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0",
+        source_capabilities: [ "finalized_batch_v2" ],
+        identity_verified_at: Time.current
+      )
+      integration = {
+        protocol: "shimizu_time_payroll",
+        protocol_version: "1.0",
+        source_instance_id: instance_id,
+        capabilities: [ "finalized_batch_v2" ]
+      }
+      stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/batches/AIRE-PAY-001")
+        .to_return(
+          { status: 200, body: { source: "aire_services", export: { integration: integration } }.to_json,
+            headers: { "Content-Type" => "application/json" } },
+          { status: 200, body: { source: "aire_services", export: { integration: integration.merge(source_instance_id: SecureRandom.uuid) } }.to_json,
+            headers: { "Content-Type" => "application/json" } },
+          { status: 200, body: { source: "aire_services", export: {} }.to_json,
+            headers: { "Content-Type" => "application/json" } }
+        )
+
+      expect(client_for(source).payroll_batch(batch_id: "AIRE-PAY-001").dig("export", "integration", "source_instance_id"))
+        .to eq(instance_id)
+      expect do
+        client_for(source).payroll_batch(batch_id: "AIRE-PAY-001")
+      end.to raise_error(TimeTracking::Client::Error, /installation identity changed/i)
+      expect do
+        client_for(source).payroll_batch(batch_id: "AIRE-PAY-001")
+      end.to raise_error(TimeTracking::Client::Error, /omitted its pinned installation identity/i)
+    end
+
     it "rejects unsafe batch identifiers before making a request" do
       request = stub_request(:get, %r{time\.example\.com})
 

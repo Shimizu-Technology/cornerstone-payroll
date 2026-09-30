@@ -172,8 +172,15 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     source = create(:time_tracking_source, company: company, source_type: "aire_services")
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    instance_id = SecureRandom.uuid
     allow(client).to receive(:time_summary).and_return(
       "source" => "aire_services",
+      "integration" => {
+        "protocol" => "shimizu_time_payroll",
+        "protocol_version" => "1.0",
+        "source_instance_id" => instance_id,
+        "capabilities" => %w[time_summary_v1 finalized_batch_v2]
+      },
       "generated_at" => Time.current.iso8601,
       "employees" => [],
       "summary" => {}
@@ -186,6 +193,18 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     post "/api/v1/admin/time_tracking_sources/#{source.id}/test_connection"
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to include("ok" => true, "cockpit_ready" => false)
+    expect(response.parsed_body).to include(
+      "ok" => true,
+      "cockpit_ready" => false,
+      "identity_verified" => true,
+      "source_instance_id" => instance_id,
+      "source_protocol" => "shimizu_time_payroll",
+      "source_capabilities" => %w[finalized_batch_v2 time_summary_v1]
+    )
+    expect(source.reload).to have_attributes(
+      expected_source_instance_id: instance_id,
+      source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0"
+    )
   end
 end
