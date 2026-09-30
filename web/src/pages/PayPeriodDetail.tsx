@@ -359,6 +359,7 @@ export function PayPeriodDetail({
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
+  const [timeTrackingAutoPreview, setTimeTrackingAutoPreview] = useState(false);
   const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
@@ -503,6 +504,7 @@ export function PayPeriodDetail({
     // new panel loads.
     setPayPeriod(null);
     setTimeTrackingImportOpen(false);
+    setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
     setPayrollItems([]);
     setNonEmployeeChecks([]);
@@ -1480,7 +1482,10 @@ export function PayPeriodDetail({
       {isCommitted && !isVoided && (
         <>
           {canLinkAireRecord && !hasLinkedAireRecord && (
-            <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+            <Button variant="outline" onClick={() => {
+              setTimeTrackingAutoPreview(false);
+              setTimeTrackingImportOpen(true);
+            }}>
               Link AIRE Record
             </Button>
           )}
@@ -1502,7 +1507,10 @@ export function PayPeriodDetail({
             </Button>
           )}
           {canImportTimeTracking && (
-            <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+            <Button variant="outline" onClick={() => {
+              setTimeTrackingAutoPreview(false);
+              setTimeTrackingImportOpen(true);
+            }}>
               Import Time Tracking
             </Button>
           )}
@@ -1798,6 +1806,10 @@ export function PayPeriodDetail({
             aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
+            onReviewFinalizedBatch={() => {
+              setTimeTrackingAutoPreview(true);
+              setTimeTrackingImportOpen(true);
+            }}
           />
         )}
 
@@ -3578,10 +3590,15 @@ export function PayPeriodDetail({
       <TimeTrackingImportModal
         key={`${payPeriod.company_id}-${payPeriod.id}`}
         open={timeTrackingImportOpen}
-        onClose={() => setTimeTrackingImportOpen(false)}
+        onClose={() => {
+          setTimeTrackingImportOpen(false);
+          setTimeTrackingAutoPreview(false);
+        }}
         payPeriod={payPeriod}
         employees={employees}
         onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+        initialSourceId={payPeriod.time_tracking?.aire_calendar?.source_id}
+        autoPreview={timeTrackingAutoPreview}
       />
 
       <AirePayrollRecordsDialog

@@ -288,6 +288,46 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AirePayrollCockpit', () => {
+  it('replaces the live preview with the verified batch action', async () => {
+    const user = userEvent.setup();
+    const onReviewFinalizedBatch = vi.fn();
+    const verifiedCalendar: AirePayrollCalendarState = {
+      ...calendar,
+      cutoff_state: 'batch_verified',
+      finalized_batch: {
+        event_id: 'event-17',
+        verification_status: 'verified',
+        verification_attempts: 1,
+        occurred_at: '2026-10-23T00:01:00+10:00',
+        verified_at: '2026-10-23T00:01:10+10:00',
+        payroll_batch_id: 'AIRE-PAY-17',
+        payroll_batch_checksum: 'checksum',
+        summary: {
+          employee_count: 4,
+          total_hours: 72.5,
+          regular_hours: 68.5,
+          overtime_hours: 4,
+          exclusion_count: 2,
+        },
+      },
+    };
+
+    render(
+      <AirePayrollCockpit
+        payPeriodId={17}
+        calendar={verifiedCalendar}
+        onRefresh={vi.fn()}
+        onReviewFinalizedBatch={onReviewFinalizedBatch}
+      />
+    );
+
+    expect(await screen.findByText('AIRE hours are ready to add')).toBeTruthy();
+    expect(screen.queryByText('Live AIRE readiness')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Review and add AIRE hours' }));
+    expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
+    expect(apiMocks.manualReview).not.toHaveBeenCalled();
+  });
+
   it('shows exact AIRE time, readiness, and mapping in one payroll workspace', async () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
