@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -76,28 +76,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_040000) do
 
   create_table "aire_payroll_entry_acknowledgements", force: :cascade do |t|
     t.bigint "check_event_id"
+    t.string "contract_version"
     t.datetime "created_at", null: false
     t.datetime "delivered_at"
     t.datetime "enqueued_at"
     t.string "event_id", null: false
     t.text "last_error"
     t.datetime "occurred_at", null: false
+    t.decimal "overtime_hours", precision: 8, scale: 2
     t.string "payment_method"
     t.string "payment_reference"
     t.bigint "payroll_item_id", null: false
+    t.decimal "regular_hours", precision: 8, scale: 2
     t.string "source_event_key", null: false
+    t.string "source_kind"
+    t.string "source_line_key"
     t.string "source_time_entry_id", null: false
     t.string "source_user_id", null: false
     t.uuid "source_user_uuid"
     t.string "status", null: false
     t.bigint "time_tracking_import_id", null: false
+    t.decimal "total_hours", precision: 8, scale: 2
     t.datetime "updated_at", null: false
     t.index ["check_event_id"], name: "index_aire_payroll_entry_acknowledgements_on_check_event_id"
     t.index ["delivered_at", "enqueued_at"], name: "idx_aire_entry_ack_dispatch"
     t.index ["event_id"], name: "index_aire_payroll_entry_acknowledgements_on_event_id", unique: true
     t.index ["payroll_item_id"], name: "index_aire_payroll_entry_acknowledgements_on_payroll_item_id"
     t.index ["source_event_key"], name: "idx_aire_entry_ack_unique_source_event", unique: true
+    t.index ["time_tracking_import_id", "source_time_entry_id", "source_line_key", "status"], name: "idx_aire_entry_ack_payable_line_status"
     t.index ["time_tracking_import_id"], name: "idx_on_time_tracking_import_id_95ff82b3b6"
+    t.check_constraint "contract_version IS NULL AND source_line_key IS NULL AND source_kind IS NULL AND total_hours IS NULL AND regular_hours IS NULL AND overtime_hours IS NULL OR contract_version::text = '2.0'::text AND source_line_key IS NOT NULL AND (source_kind::text = ANY (ARRAY['current'::character varying, 'carryover'::character varying, 'correction'::character varying]::text[])) AND total_hours IS NOT NULL AND regular_hours IS NOT NULL AND overtime_hours IS NOT NULL AND total_hours = (regular_hours + overtime_hours)", name: "aire_entry_ack_line_contract_shape"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying::text, 'committed'::character varying::text, 'payment_prepared'::character varying::text, 'payment_issued'::character varying::text, 'payment_failed'::character varying::text, 'payment_voided'::character varying::text])", name: "aire_payroll_entry_ack_status_check"
   end
 

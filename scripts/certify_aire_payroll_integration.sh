@@ -375,11 +375,21 @@ api_call 200 "record synthetic check delivery as the payment event" POST \
   export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
+      entry_acknowledgements = AirePayrollEntryAcknowledgement.order(:id).to_a
+      abort "entry acknowledgements are missing" if entry_acknowledgements.empty?
+      unless entry_acknowledgements.all? do |ack|
+        ack.contract_version == "2.0" &&
+          ack.source_line_key.present? &&
+          ack.source_kind.in?(TimeTrackingEntryAllocation::SOURCE_KINDS) &&
+          ack.total_hours == ack.regular_hours + ack.overtime_hours
+      end
+        abort "entry acknowledgements lost exact payable-line identity or hours"
+      end
       AirePayrollAcknowledgement.undelivered.order(:id).find_each { |ack| AirePayrollStatusSyncJob.perform_now(ack.id) }
       AirePayrollEntryAcknowledgement.undelivered.order(:id).find_each { |ack| AirePayrollEntryStatusSyncJob.perform_now(ack.id) }
       abort "batch acknowledgements remain" if AirePayrollAcknowledgement.undelivered.exists?
       abort "entry acknowledgements remain" if AirePayrollEntryAcknowledgement.undelivered.exists?
-      puts "PASS: imported, committed, and paid states reached AIRE"
+      puts "PASS: exact payable-line imported, committed, and paid states reached AIRE"
     '
 )
 
@@ -402,6 +412,17 @@ ruby -rjson -e '
   held=entries.count { |entry| entry.dig("lifecycle", "status") == "awaiting_approval" }
   abort "expected two paid source entries" unless paid == 2
   abort "expected one held source entry" unless held == 1
+  entries.select { |entry| entry.dig("lifecycle", "status") == "payment_issued" }.each do |entry|
+    settlement=entry.dig("lifecycle", "settlements")&.last
+    abort "paid entry is missing its settlement" unless settlement
+    abort "paid hours do not match the exact settlement" unless settlement.fetch("paid_hours").to_f == settlement.fetch("total_hours").to_f
+    abort "paid entry still has outstanding hours" unless settlement.fetch("outstanding_hours").to_f.zero?
+    lines=settlement.fetch("payable_lines")
+    abort "paid entry is missing payable-line receipts" if lines.empty?
+    unless lines.all? { |line| line.fetch("source_line_key").to_s.length.positive? && line.fetch("status") == "payment_issued" }
+      abort "paid entry payable-line receipts are incomplete"
+    end
+  end
 ' "$FINAL_ENTRIES"
 echo "PASS: four held hours remain visible and unpaid for the next available period"
 

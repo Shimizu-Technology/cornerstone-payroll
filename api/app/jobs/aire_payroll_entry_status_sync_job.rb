@@ -15,6 +15,19 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
     import = acknowledgement.time_tracking_import
     return unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
 
+    payable_line = if acknowledgement.contract_version.present?
+      {
+        contract_version: acknowledgement.contract_version,
+        source_line_key: acknowledgement.source_line_key,
+        source_kind: acknowledgement.source_kind,
+        total_hours: acknowledgement.total_hours.to_s,
+        regular_hours: acknowledgement.regular_hours.to_s,
+        overtime_hours: acknowledgement.overtime_hours.to_s
+      }
+    else
+      {}
+    end
+
     TimeTracking::Client.new(import.time_tracking_source).record_payroll_entry_processing_event(
       batch_id: import.external_batch_id,
       event_id: acknowledgement.event_id,
@@ -24,6 +37,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
       external_payroll_item_id: acknowledgement.payroll_item_id.to_s,
       source_time_entry_id: acknowledgement.source_time_entry_id,
       source_user_uuid: acknowledgement.source_user_uuid,
+      **payable_line,
       payment_method: acknowledgement.payment_method,
       payment_reference: acknowledgement.payment_reference,
       metadata: {

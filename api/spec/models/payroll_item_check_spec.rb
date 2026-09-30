@@ -162,6 +162,37 @@ RSpec.describe PayrollItem, type: :model do
       )
     end
 
+    it "records one durable receipt for each exact payable line" do
+      TimeTrackingEntryAllocation.create!(
+        company: company,
+        time_tracking_source: source,
+        time_tracking_import: time_tracking_import,
+        pay_period: pay_period,
+        payroll_item: item,
+        employee: employee,
+        source_user_id: allocation.source_user_id,
+        source_user_uuid: allocation.source_user_uuid,
+        source_time_entry_id: allocation.source_time_entry_id,
+        line_key: "training:3010",
+        source_kind: "correction",
+        original_work_date: pay_period.start_date,
+        category_snapshot: { "name" => "Training" },
+        total_hours: -2,
+        regular_hours: -2,
+        overtime_hours: 0
+      )
+
+      item.mark_printed!(user: admin_user)
+
+      receipts = item.aire_payroll_entry_acknowledgements.where(status: "payment_prepared").order(:source_line_key)
+      expect(receipts.pluck(:source_line_key, :source_kind, :total_hours)).to eq([
+        [ "flight:3000", "current", 8.to_d ],
+        [ "training:3010", "correction", -2.to_d ]
+      ])
+      expect(receipts.pluck(:source_event_key).uniq.length).to eq(2)
+      expect(receipts).to all(have_attributes(contract_version: "2.0"))
+    end
+
     it "records a void after delivery without erasing the earlier payment history" do
       item.mark_printed!(user: admin_user)
       item.mark_delivered!(
