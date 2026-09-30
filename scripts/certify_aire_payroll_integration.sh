@@ -111,6 +111,8 @@ WAGE_RATE_ID="$(json_value "$CORNERSTONE_FIXTURE" employee_wage_rate_id)"
 ADMIN_EMAIL="$(json_value "$CORNERSTONE_FIXTURE" admin_email)"
 START_DATE="$(json_value "$CORNERSTONE_FIXTURE" start_date)"
 END_DATE="$(json_value "$CORNERSTONE_FIXTURE" end_date)"
+PAY_DATE="$(json_value "$CORNERSTONE_FIXTURE" pay_date)"
+PREVIOUS_REGULAR_PAY_DATE="$(json_value "$CORNERSTONE_FIXTURE" previous_regular_pay_date)"
 MANUAL_APPROVE_ID="$(json_value "$AIRE_FIXTURE" approved_manual_entry_id)"
 MANUAL_HOLD_ID="$(json_value "$AIRE_FIXTURE" held_manual_entry_id)"
 AIRE_EMPLOYEE_ID="$(json_value "$AIRE_FIXTURE" employee_id)"
@@ -181,7 +183,7 @@ api_call() {
 }
 
 PUBLISH_RESPONSE="$TEMP_DIR/publish.json"
-api_call 201 "publish the T-7 calendar from Cornerstone to AIRE" POST \
+api_call 201 "publish the previous-regular-payday calendar from Cornerstone to AIRE" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_calendar/publish" "$PUBLISH_RESPONSE"
 NEXT_PUBLISH_RESPONSE="$TEMP_DIR/next-publish.json"
 api_call 201 "publish the next available AIRE payroll period" POST \
@@ -198,7 +200,25 @@ api_call 201 "publish the next available AIRE payroll period" POST \
         result = AirePayrollCalendar::Delivery.new(publication_id: publication.id).call
         abort "calendar delivery failed: #{result[:error]}" unless result.fetch(:status) == "delivered"
       end
-      puts "PASS: both published calendar periods reached AIRE"
+      puts "PASS: both versioned calendar periods reached AIRE"
+    '
+)
+(
+  cd "$AIRE_REPO_PATH/backend"
+  export PATH="$RBENV_ROOT/shims:$PATH"
+  export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+  RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
+    EXPECTED_PREVIOUS_REGULAR_PAY_DATE="$PREVIOUS_REGULAR_PAY_DATE" \
+    EXPECTED_CURRENT_PAY_DATE="$PAY_DATE" \
+    bundle exec rails runner '
+      periods = PayrollCalendarPeriod.order(:start_date).to_a
+      abort "expected two published calendar periods" unless periods.size == 2
+      abort "calendar contract did not use schema 2.0" unless periods.all? { |period| period.schema_version == "2.0" }
+      abort "calendar contract did not preserve the configured rule" unless periods.all? { |period| period.cutoff_rule == "after_previous_regular_payday" && period.cutoff_days == 7 }
+      expected_previous_dates = [ ENV.fetch("EXPECTED_PREVIOUS_REGULAR_PAY_DATE"), ENV.fetch("EXPECTED_CURRENT_PAY_DATE") ]
+      actual_previous_dates = periods.map { |period| period.previous_regular_pay_date.iso8601 }
+      abort "calendar contract lost the target-run payday association" unless actual_previous_dates == expected_previous_dates
+      puts "PASS: AIRE preserved each target run association with the previous regular payday cutoff"
     '
 )
 

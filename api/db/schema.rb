@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_29_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -492,6 +492,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_030000) do
     t.string "period_rule", default: "manual", null: false
     t.integer "period_start_weekday"
     t.string "source", default: "legacy_system_default", null: false
+    t.integer "time_tracking_cutoff_days", default: 7, null: false
+    t.string "time_tracking_cutoff_rule", default: "before_pay_date", null: false
     t.string "timezone", default: "Pacific/Guam", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "effective_on"], name: "idx_company_pay_schedules_effective", unique: true
@@ -509,6 +511,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_29_030000) do
     t.check_constraint "period_rule::text = ANY (ARRAY['manual'::character varying::text, 'weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text])", name: "company_pay_schedules_period_rule_check"
     t.check_constraint "period_start_weekday IS NULL OR period_start_weekday >= 0 AND period_start_weekday <= 6", name: "company_pay_schedules_weekday_check"
     t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying::text, 'production_inferred'::character varying::text, 'legacy_system_default'::character varying::text])", name: "company_pay_schedules_source_check"
+    t.check_constraint "time_tracking_cutoff_days >= 0 AND time_tracking_cutoff_days <= 31", name: "company_pay_schedules_time_cutoff_days_check"
+    t.check_constraint "time_tracking_cutoff_rule::text = ANY (ARRAY['before_pay_date'::character varying, 'after_previous_regular_payday'::character varying]::text[])", name: "company_pay_schedules_time_cutoff_rule_check"
   end
 
   create_table "company_workweeks", force: :cascade do |t|
