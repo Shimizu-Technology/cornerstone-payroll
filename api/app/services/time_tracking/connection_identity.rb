@@ -52,7 +52,7 @@ module TimeTracking
 
       protocol = integration["protocol"].to_s
       protocol_version = integration["protocol_version"].to_s
-      source_instance_id = integration["source_instance_id"].to_s
+      source_instance_id = integration["source_instance_id"].to_s.downcase
       capabilities = integration["capabilities"]
 
       raise Error, "#{source.name} uses unsupported integration protocol #{protocol.presence || 'unknown'}" unless protocol == PROTOCOL

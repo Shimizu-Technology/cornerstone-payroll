@@ -41,6 +41,18 @@ RSpec.describe TimeTracking::ConnectionIdentity do
     end.to raise_error(/installation identity changed/i)
   end
 
+  it "treats UUID letter casing as the same installation identity" do
+    uppercase_payload = payload.deep_dup
+    uppercase_payload["integration"]["source_instance_id"] = instance_id.upcase
+
+    described_class.verify_and_pin!(source: source, payload: uppercase_payload)
+
+    expect(source.reload.expected_source_instance_id).to eq(instance_id)
+    expect do
+      described_class.validate!(source: source, payload: payload)
+    end.not_to raise_error
+  end
+
   it "keeps legacy sources compatible until an identity has been pinned" do
     result = described_class.validate!(source: source, payload: {})
 
