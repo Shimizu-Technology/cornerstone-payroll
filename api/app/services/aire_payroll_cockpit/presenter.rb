@@ -15,6 +15,7 @@ module AirePayrollCockpit
         carryovers: period_payload.fetch("carryovers", {}),
         employees: employees_payload.fetch("employees", []).map { |employee| decorate_employee(employee) },
         employee_pagination: required(employees_payload, "pagination"),
+        payroll_employee_options: payroll_employee_options,
         command_access: command_access,
         routing_options: routing_options
       }
@@ -75,7 +76,8 @@ module AirePayrollCockpit
       employee.merge(
         "cornerstone" => mapping_payload(
           employee["payroll_integration_id"],
-          required: employee["time_tracking_enabled"] != false
+          required: employee["time_tracking_enabled"] != false,
+          source_employee: employee
         )
       )
     end
@@ -101,9 +103,13 @@ module AirePayrollCockpit
       )
     end
 
-    def mapping_payload(source_user_uuid, required:)
+    def mapping_payload(source_user_uuid, required:, source_employee: nil)
       mapping = mappings_by_uuid[TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)]
-      return { "status" => required ? "unmapped" : "not_required" } unless mapping
+      unless mapping
+        payload = { "status" => required ? "unmapped" : "not_required" }
+        payload["suggestions"] = suggestions_for(source_employee) if required && source_employee
+        return payload
+      end
 
       employee = mapping.employee
       {
@@ -118,6 +124,52 @@ module AirePayrollCockpit
         .includes(:employee)
         .where.not(source_user_uuid: nil)
         .index_by { |mapping| TimeTrackingEmployeeMapping.normalize_uuid(mapping.source_user_uuid) }
+    end
+
+    def payroll_employee_options
+      @payroll_employee_options ||= available_payroll_employees.map do |employee|
+        {
+          "employee_id" => employee.id,
+          "employee_name" => employee.full_name,
+          "email" => employee.email,
+          "employment_type" => employee.employment_type
+        }
+      end
+    end
+
+    def available_payroll_employees
+      @available_payroll_employees ||= begin
+        mapped_ids = @source.time_tracking_employee_mappings.where.not(source_user_uuid: nil).pluck(:employee_id)
+        Employee.active.where(company_id: @source.company_id).where.not(id: mapped_ids).order(:last_name, :first_name, :id).to_a
+      end
+    end
+
+    def suggestions_for(source_employee)
+      source_email = source_employee["email"].to_s.strip.downcase
+      source_name = normalize_name(source_employee["full_name"])
+      available_payroll_employees.filter_map do |employee|
+        same_email = source_email.present? && employee.email.to_s.strip.downcase == source_email
+        same_name = source_name.present? && normalize_name(employee.full_name) == source_name
+        next unless same_email || same_name
+
+        {
+          "employee_id" => employee.id,
+          "employee_name" => employee.full_name,
+          "email" => employee.email,
+          "basis" => suggestion_basis(same_email:, same_name:)
+        }
+      end
+    end
+
+    def normalize_name(value)
+      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
+    end
+
+    def suggestion_basis(same_email:, same_name:)
+      return "same_email_and_name" if same_email && same_name
+      return "same_email" if same_email
+
+      "same_name"
     end
   end
 end

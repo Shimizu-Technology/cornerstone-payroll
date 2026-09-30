@@ -652,7 +652,13 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                               <option key={employee.id} value={employee.id}>{[employee.first_name, employee.last_name].filter(Boolean).join(' ')}</option>
                             ))}
                           </select>
-                          <span className="mt-2 block text-xs font-normal text-neutral-500">{row.match_method} match · {Math.round((row.match_score || 0) * 100)}%</span>
+                          <span className="mt-2 block text-xs font-normal text-neutral-500">
+                            {row.match_method === 'saved_mapping'
+                              ? 'Confirmed saved link'
+                              : row.suggested_employee_name
+                                ? `Suggestion: ${row.suggested_employee_name} · same ${row.suggestion_method || 'identity'} · confirm before importing`
+                                : 'No confirmed payroll link'}
+                          </span>
                         </label>
                       </div>
 

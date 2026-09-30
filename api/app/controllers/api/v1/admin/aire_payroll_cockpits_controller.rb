@@ -79,6 +79,44 @@ module Api
           render_source_error(e)
         end
 
+        def confirm_employee_mapping
+          permitted = employee_mapping_params
+          source_employee = cockpit_client.payroll_cockpit_employee(
+            employee_id: permitted.fetch(:source_user_id)
+          ).fetch("employee")
+          requested_uuid = TimeTrackingEmployeeMapping.normalize_uuid(permitted.fetch(:source_user_uuid))
+          returned_uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_employee["payroll_integration_id"])
+          unless source_employee.fetch("id").to_s == permitted.fetch(:source_user_id).to_s && returned_uuid == requested_uuid
+            return render json: {
+              error: "AIRE employee identity changed. Refresh the team list before linking."
+            }, status: :conflict
+          end
+
+          employee = Employee.active.find_by!(id: permitted.fetch(:employee_id), company_id: current_company_id)
+          mapping = TimeTracking::EmployeeMappingService.new(
+            company: @pay_period.company,
+            source: @source,
+            employee: employee,
+            source_employee: source_employee,
+            actor: current_user
+          ).confirm!
+
+          render json: {
+            employee_mapping: {
+              source_user_id: mapping.source_user_id,
+              source_user_uuid: mapping.source_user_uuid,
+              employee_id: mapping.employee_id,
+              employee_name: mapping.employee.full_name,
+              status: "mapped"
+            }
+          }
+        rescue ActionController::ParameterMissing, KeyError, ArgumentError,
+               ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def approve_time_entry
           decision = command_params.fetch(:decision).to_s.downcase
           unless %w[approve deny].include?(decision)
@@ -283,6 +321,7 @@ module Api
           account_link_configured = account_link_connected?
           {
             can_read: true,
+            can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration),
             can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&
               (account_link_configured || delegation.present?),
             delegation_configured: account_link_configured || delegation.present?,
@@ -337,6 +376,10 @@ module Api
             :target_external_pay_period_id,
             :action_due_on
           )
+        end
+
+        def employee_mapping_params
+          params.permit(:source_user_id, :source_user_uuid, :employee_id)
         end
 
         def routing_options_payload

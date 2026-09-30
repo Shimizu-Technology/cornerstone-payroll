@@ -997,6 +997,9 @@ export interface TimeTrackingPreviewRow {
   employee_name: string | null;
   match_method: string;
   match_score: number;
+  suggested_employee_id?: number | null;
+  suggested_employee_name?: string | null;
+  suggestion_method?: 'email' | 'name' | null;
   regular_hours: number;
   overtime_hours: number;
   total_hours: number;
@@ -1184,6 +1187,18 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit/settlement_cases`,
       { ...params, per_page: 250 }
     ),
+  confirmAireEmployeeMapping: (
+    payPeriodId: number,
+    data: { source_user_id: string; source_user_uuid: string; employee_id: number }
+  ) => api.post<{
+    employee_mapping: {
+      source_user_id: string;
+      source_user_uuid: string;
+      employee_id: number;
+      employee_name: string;
+      status: 'mapped';
+    };
+  }>(`/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/employee_mapping`, data),
   reviewAireTimeEntry: (
     payPeriodId: number,
     timeEntryId: string,

@@ -117,6 +117,17 @@ module TimeTracking
       request_json(payroll_cockpit_uri("/employees", query), validate_source: false, surface_remote_error: true)
     end
 
+    def payroll_cockpit_employee(employee_id:)
+      normalized_id = employee_id.to_s
+      raise Error, "Invalid AIRE employee ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+
+      request_json(
+        payroll_cockpit_uri("/employees/#{normalized_id}"),
+        validate_source: false,
+        surface_remote_error: true
+      )
+    end
+
     def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
       query = {
         external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
