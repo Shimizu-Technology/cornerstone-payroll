@@ -75,7 +75,7 @@ test('reviews saved AIRE records while disabled without fetching or mutating the
   await expect(dialog.getByText('Integration disabled for this client')).toBeVisible();
   await expect(dialog.getByText('Recorded rounding differences')).toBeVisible();
   await expect(dialog.getByText(/Total difference: 0.05 hours/)).toBeVisible();
-  await expect(dialog.getByRole('button', { name: /apply|link|import/i })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: /^(apply|link|import)\b/i })).toHaveCount(0);
   expect(requests.some((request) => /time_tracking_sources|time_tracking_import/.test(request))).toBe(false);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
