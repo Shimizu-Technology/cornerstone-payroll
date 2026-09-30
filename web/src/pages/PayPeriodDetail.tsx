@@ -1117,6 +1117,10 @@ export function PayPeriodDetail({
   const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
   const canLinkAireRecord = isCommitted && !isVoided && activeTimeTrackingSources.includes('aire_services');
   const linkedAireRecords = payPeriod.time_tracking?.linked_aire_records || [];
+  const finalizedAireBatchId = payPeriod.time_tracking?.aire_calendar?.finalized_batch?.payroll_batch_id;
+  const currentAireRecord = finalizedAireBatchId
+    ? linkedAireRecords.find((record) => record.external_batch_id === finalizedAireBatchId) || null
+    : linkedAireRecords[0] || null;
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
@@ -1803,7 +1807,7 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
             payrollHours={hoursMap}
-            aireRecordLinked={Boolean(payPeriod.time_tracking.linked_aire_records.length)}
+            aireRecord={currentAireRecord}
             calendar={payPeriod.time_tracking.aire_calendar}
             onRefresh={() => loadPayPeriod(payPeriod.id, true)}
             onReviewFinalizedBatch={() => {
