@@ -484,7 +484,11 @@ module QuarterlyComplianceOfficialForms
         draw_text_box(pdf, w1_day_rect(month_index, day), money_string(row[:amount]), size: 6.8, align: :right)
       end
 
-      total = fields[:total_guam_withholding].presence || report.dig(:w1, :total_guam_withholding).to_f
+      total = if fields[:daily_liabilities].present? && fields[:total_guam_withholding].blank?
+        totals.values.sum
+      else
+        fields[:total_guam_withholding].presence || report.dig(:w1, :total_guam_withholding).to_f
+      end
       (1..3).each do |month_index|
         draw_text_box(pdf, MONTH_TOTAL_RECTS.fetch(month_index), money_string(totals[month_index]), size: 7, align: :right)
       end

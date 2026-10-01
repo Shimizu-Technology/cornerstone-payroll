@@ -142,6 +142,28 @@ RSpec.describe QuarterlyComplianceOfficialForms::W1 do
       [ described_class::QUARTER_TOTAL_RECT, "650.00", { size: 7, align: :right } ]
     )
   end
+
+  it "derives the quarter total from edited daily liabilities when no total override is provided" do
+    fields = {
+      daily_liabilities: [
+        { pay_date: "2026-07-03", amount: 100.0 },
+        { pay_date: "2026-09-25", amount: 300.0 }
+      ]
+    }
+    form = described_class.new(report: report, fields: fields)
+    draws = []
+    allow(form).to receive(:draw_text_box) do |_pdf, box, text, **options|
+      draws << [ box, text, options ]
+    end
+
+    form.send(:draw_page, Object.new, 1)
+
+    expect(draws).to include(
+      [ described_class::QUARTER_TOTAL_RECT, "400.00", { size: 7, align: :right } ],
+      [ described_class::TOTALS.fetch(:line1), "400.00", { size: 7, align: :right } ],
+      [ described_class::TOTALS.fetch(:line3), "400.00", { size: 7, align: :right } ]
+    )
+  end
 end
 
 RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
