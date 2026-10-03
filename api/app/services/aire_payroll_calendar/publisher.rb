@@ -81,6 +81,9 @@ module AirePayrollCalendar
     def validate_source!
       raise Error, "This client does not have an active AIRE Services source" unless @source.active? && @source.source_type == "aire_services"
       raise Error, "The AIRE source does not belong to this client" unless @source.company_id == @pay_period.company_id
+      unless @source.historical_reconciliation_complete?
+        raise Error, "Approve complete historical payroll reconciliation for this AIRE connection before publishing a calendar"
+      end
     end
 
     def find_or_create_calendar_period!

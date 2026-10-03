@@ -54,6 +54,17 @@ RSpec.describe AirePayrollCalendar::Publisher do
     allow(AirePayrollCalendarPublication).to receive(:dispatch_one!)
   end
 
+  it "blocks an existing source until its historical coverage is approved" do
+    source.update!(historical_reconciliation_required: true)
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    end.to raise_error(described_class::Error, /complete historical payroll reconciliation/)
+
+    expect(source.aire_payroll_calendar_periods).to be_empty
+    expect(AirePayrollCalendarPublication).not_to have_received(:dispatch_one!)
+  end
+
   it "creates one versioned T-7 Guam publication and queues delivery" do
     result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
 

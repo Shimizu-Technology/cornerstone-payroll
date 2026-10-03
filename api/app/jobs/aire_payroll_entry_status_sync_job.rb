@@ -40,6 +40,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
       **payable_line,
       payment_method: acknowledgement.payment_method,
       payment_reference: acknowledgement.payment_reference,
+      payment_effective_on: acknowledgement.payment_effective_on&.iso8601,
       metadata: {
         company_id: import.pay_period.company_id,
         pay_period_start: import.pay_period.start_date.iso8601,

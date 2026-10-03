@@ -27,9 +27,9 @@ module AirePayrollCalendar
       previous_pay_date = previous_regular_pay_date if schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
       cutoff_date = if previous_pay_date
                       previous_pay_date + schedule.time_tracking_cutoff_days
-                    else
+      else
                       pay_period.pay_date - schedule.time_tracking_cutoff_days
-                    end
+      end
       cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
       cutoff_at = Time.find_zone!(TIME_ZONE).local(
         cutoff_date.year,
