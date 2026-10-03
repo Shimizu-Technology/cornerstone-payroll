@@ -31,7 +31,7 @@ previous_start_date = previous_end_date.day == 15 ? previous_end_date.beginning_
 previous_pay_date = cutoff_at.to_date - 7.days
 next_start_date = end_date + 1.day
 next_end_date = next_start_date.day == 16 ? next_start_date.end_of_month : next_start_date.change(day: 15)
-next_pay_date = [ next_end_date + 7.days, pay_date + 8.days ].max
+next_pay_date = next_end_date.day == 15 ? next_end_date.end_of_month : next_end_date.next_month.change(day: 15)
 
 fixture = ApplicationRecord.transaction do
   organization = Organization.create!(
@@ -75,7 +75,7 @@ fixture = ApplicationRecord.transaction do
     company: company,
     frequency: "semimonthly",
     period_rule: "semimonthly",
-    pay_date_rule: "manual",
+    pay_date_rule: "semimonthly_15th_and_month_end",
     timezone: "Pacific/Guam",
     source: "operator_confirmed",
     confirmation_status: "confirmed",
@@ -86,7 +86,7 @@ fixture = ApplicationRecord.transaction do
     payroll_cutoff_days_before: 7,
     time_tracking_cutoff_rule: "after_previous_regular_payday",
     time_tracking_cutoff_days: 7,
-    payroll_cutoff_at_minutes: (cutoff_at.hour * 60) + cutoff_at.min
+    payroll_cutoff_at_minutes: 17 * 60
   )
   department = Department.create!(company: company, name: "Certification Operations")
   employee = Employee.create!(

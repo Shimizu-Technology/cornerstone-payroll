@@ -25,3 +25,11 @@ certification_use_ruby() {
   }
   export BUNDLE_GEMFILE="${application_dir}/Gemfile"
 }
+
+# Call only inside each Rails subshell, after selecting its pinned Ruby. Utility
+# Ruby commands in the parent shell keep the real clock and cannot load the shim.
+certification_use_clock() {
+  export RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$1"
+  export CERTIFICATION_CLOCK_FILE CERTIFICATION_POLICY_FIXTURE_PATH
+  export RUBYOPT="${RUBYOPT:+$RUBYOPT }-r${ROOT_DIR}/scripts/local_certification/clock.rb"
+}
