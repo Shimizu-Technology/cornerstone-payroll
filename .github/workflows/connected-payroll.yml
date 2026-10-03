@@ -39,6 +39,7 @@ jobs:
         run: |
           bash -n ops/staging-v2/*.sh scripts/certify_aire_payroll_integration.sh scripts/local_certification/runtime.sh
           python3 ops/staging-v2/test_pair_gate.py
+          python3 -m unittest discover -s ops/staging-v2 -p "test_public_aire_actions.py"
 
   certify:
     # Reusable workflows inherit the caller's workflow_dispatch event.
@@ -94,6 +95,8 @@ jobs:
       - name: Verify each candidate's exact-SHA quality and image workflows
         env:
           GH_TOKEN: ${{ github.token }}
+          # Public AIRE metadata is read without forwarding this repo-scoped token.
+          AIRE_ACTIONS_PUBLIC_READ: "true"
         run: gate/ops/staging-v2/verify-pair-certificate.sh --candidate-workflows-only "$PAYROLL_SHA" "$AIRE_SHA"
       - name: Read pinned Ruby versions
         id: versions

@@ -82,3 +82,5 @@ AIRE's revision-ledger migration captures current entry snapshots at migration t
 Run database readiness, queue checks, retained-artifact recovery, and source/target reconciliation on the migrated rehearsal. Keep workers and external deliveries disabled until that restored environment is isolated and ready. A successful synthetic certificate does not waive those checks or the named operator and recovery acceptance.
 
 Never point this stack at production data, production Clerk instances, or the existing staging databases and volumes.
+
+The reusable certification workflow sets `AIRE_ACTIONS_PUBLIC_READ=true` for AIRE’s public Actions metadata. The constrained REST reader sends no Payroll token to that repository; Payroll’s own evidence still uses its workflow token. Host deployment checks use the authenticated `gh` path by default. Both paths enforce the same exact revision, latest workflow attempt, quality jobs and API/web image publications, and hold deployment when evidence is unavailable.

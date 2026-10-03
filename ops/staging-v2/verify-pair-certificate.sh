@@ -15,15 +15,20 @@ done
 [[ -z "${requested_run_id}" || "${requested_run_id}" =~ ^[1-9][0-9]*$ ]] || exit 64
 
 repo="Shimizu-Technology/cornerstone-payroll"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/connected-payroll-certificate.XXXXXX")"
 trap 'rm -rf -- "${temporary_dir}"' EXIT
 
 verify_candidate_workflow() {
   local candidate_repo="$1" workflow="$2" sha="$3" expected_name="$4" attempt run_id
   local prefix="${temporary_dir}/${candidate_repo}"
-  gh run list --repo "Shimizu-Technology/${candidate_repo}" --workflow "${workflow}" \
-    --branch staging-v2 --event push --commit "${sha}" --limit 100 \
-    --json databaseId,headSha,createdAt > "${prefix}-runs.json"
+  if [[ "${candidate_repo}" == "aire-services" && "${AIRE_ACTIONS_PUBLIC_READ:-false}" == "true" ]]; then
+    python3 "${script_dir}/public_aire_actions.py" runs "${sha}" > "${prefix}-runs.json"
+  else
+    gh run list --repo "Shimizu-Technology/${candidate_repo}" --workflow "${workflow}" \
+      --branch staging-v2 --event push --commit "${sha}" --limit 100 \
+      --json databaseId,headSha,createdAt > "${prefix}-runs.json"
+  fi
   run_id="$(python3 - "${prefix}-runs.json" "${sha}" <<'PY'
 import json, sys
 runs = json.load(open(sys.argv[1]))
@@ -34,7 +39,11 @@ if not matches or not isinstance(matches[0].get("databaseId"), int) or matches[0
 print(matches[0]["databaseId"])
 PY
 )"
-  gh api "repos/Shimizu-Technology/${candidate_repo}/actions/runs/${run_id}" > "${prefix}-run.json"
+  if [[ "${candidate_repo}" == "aire-services" && "${AIRE_ACTIONS_PUBLIC_READ:-false}" == "true" ]]; then
+    python3 "${script_dir}/public_aire_actions.py" run "${run_id}" > "${prefix}-run.json"
+  else
+    gh api "repos/Shimizu-Technology/${candidate_repo}/actions/runs/${run_id}" > "${prefix}-run.json"
+  fi
   attempt="$(python3 - "${prefix}-run.json" "${sha}" "${workflow}" "${expected_name}" "${run_id}" <<'PY'
 import json, sys
 run = json.load(open(sys.argv[1]))
@@ -49,8 +58,12 @@ if not isinstance(attempt, int) or attempt < 1:
 print(attempt)
 PY
 )"
-  gh api --paginate --slurp \
-    "repos/Shimizu-Technology/${candidate_repo}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > "${prefix}-jobs.json"
+  if [[ "${candidate_repo}" == "aire-services" && "${AIRE_ACTIONS_PUBLIC_READ:-false}" == "true" ]]; then
+    python3 "${script_dir}/public_aire_actions.py" jobs "${run_id}" "${attempt}" > "${prefix}-jobs.json"
+  else
+    gh api --paginate --slurp \
+      "repos/Shimizu-Technology/${candidate_repo}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > "${prefix}-jobs.json"
+  fi
   python3 - "${prefix}-jobs.json" "${candidate_repo}" <<'PY'
 import json, sys
 pages = json.load(open(sys.argv[1]))

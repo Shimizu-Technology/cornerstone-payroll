@@ -154,6 +154,37 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.deploy_log.exists())
 
+    def enable_public_reader(self):
+        self.environment["AIRE_ACTIONS_PUBLIC_READ"] = "true"
+        (self.ops / "public_aire_actions.py").write_text("""import json, os, sys
+model = json.load(open(os.environ['MOCK_MODEL']))
+row = model['candidates']['aire-services']
+if model.get('public_read_failure'):
+    sys.exit(1)
+if sys.argv[1] == 'runs':
+    print(json.dumps(row['runs']))
+elif sys.argv[1] == 'run':
+    print(json.dumps(row['run']))
+else:
+    print(json.dumps([{'jobs': row['jobs'][:4]}, {'jobs': row['jobs'][4:]}]))
+""")
+
+    def test_public_aire_evidence_preserves_exact_pair_and_image_checks(self):
+        self.enable_public_reader()
+        self.certify()
+        result = self.execute()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.deploy_log.exists())
+        self.deploy_log.unlink()
+        self.model['candidates']['aire-services']['jobs'][-1]['conclusion'] = 'failure'
+        self.assert_held()
+
+    def test_public_aire_read_failure_holds_deployment(self):
+        self.enable_public_reader()
+        self.certify()
+        self.model['public_read_failure'] = True
+        self.assert_held()
+
     def test_independently_green_repositories_without_certificate_are_held(self):
         self.assert_held()
 
