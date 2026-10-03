@@ -80,6 +80,11 @@ const paymentStatusLabels: Record<string, string> = {
 
 const paymentStatusLabel = (status: string) => paymentStatusLabels[status] || status.replaceAll('_', ' ');
 
+const historyTimestamp = (value: string): number => {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
 const groupPaymentHistory = (events: EntryProcessingEvent[]): PaymentHistoryGroup[] => {
   const groups = new Map<string, PaymentHistoryGroup>();
   events.forEach((event) => {
@@ -93,11 +98,12 @@ const groupPaymentHistory = (events: EntryProcessingEvent[]): PaymentHistoryGrou
       paymentMethod: event.payment_method,
       paymentReference: event.payment_reference,
     };
-    group.totalHours += Number(event.total_hours || 0);
+    const hours = Number(event.total_hours);
+    group.totalHours += Number.isFinite(hours) ? hours : 0;
     group.lineCount += 1;
     groups.set(key, group);
   });
-  return [...groups.values()].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+  return [...groups.values()].sort((left, right) => historyTimestamp(right.occurredAt) - historyTimestamp(left.occurredAt));
 };
 
 type EmployeeMappingTarget = {
@@ -464,7 +470,13 @@ export function AirePayrollCockpit({
     () => groupPaymentHistory(overview?.entry_processing_history || []),
     [overview?.entry_processing_history]
   );
-  const historyCount = paymentHistory.length + (overview?.processing_history.length || 0);
+  const batchHistory = useMemo(
+    () => [...(overview?.processing_history || [])].sort(
+      (left, right) => historyTimestamp(right.occurred_at) - historyTimestamp(left.occurred_at)
+    ),
+    [overview?.processing_history]
+  );
+  const historyCount = paymentHistory.length + batchHistory.length;
   const canCommand = overview?.command_access.can_command === true;
   const canManageMappings = overview?.command_access.can_manage_mappings === true;
 
@@ -1015,11 +1027,11 @@ export function AirePayrollCockpit({
                             </div>
                           </section>
                         )}
-                        {overview.processing_history.length > 0 && (
+                        {batchHistory.length > 0 && (
                           <section aria-labelledby="aire-batch-events-heading">
                             <h4 id="aire-batch-events-heading" className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Batch history</h4>
                             <div className="mt-3 space-y-3">
-                              {[...overview.processing_history].reverse().map((event) => (
+                              {batchHistory.map((event) => (
                                 <div key={event.event_id} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
                                   <History className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
                                   <div><p className="font-semibold text-neutral-950">{event.status.replaceAll('_', ' ')}</p><p className="mt-1 text-xs text-neutral-500">{formatGuamDateTime(event.occurred_at)}{event.external_system ? ` · ${event.external_system}` : ''}</p></div>
