@@ -203,7 +203,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
   end
 
   it "holds the release when AIRE changed an exact source entry" do
-    review.fetch("employees").first.fetch("adjustments").first["regular_hours"] = "6.20"
+    review.fetch("employees").first.fetch("adjustments").first["regular_hours"] = "6.00"
 
     expect { described_class.new(manifest: manifest, actor: actor).apply! }
       .to raise_error(described_class::Error, /changed or is no longer unpaid/)
@@ -270,8 +270,26 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(item.check_events.deliveries.count).to eq(0)
     manifest["finalized_batch_entries"] << manifest["finalized_batch_entries"].first.merge(
       "source_line_key" => "category:2", "regular_hours" => "3.00")
+    source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "2.0", identity_verified_at: Time.current)
+    source.update_column(:historical_reconciliation_required, true)
+    manifest["source_instance_id"] = source.expected_source_instance_id
+    manifest["history_through_work_date"] = period.end_date.iso8601
+    manifest["finalized_batch_entries"].each { |row| row["source_time_entry_version"] = 2 }
+    inventory_entry = { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.2 }
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "time_entries" => [ inventory_entry ],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
+    digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+    expect { described_class.new(manifest: manifest, actor: actor).apply!(
+      accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+      .to raise_error(described_class::Error, /without a verified disposition/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    inventory_entry["hours"] = 6.1
     allow(client).to receive(:record_payroll_entry_processing_event).and_return({ "ok" => true })
-    expect(described_class.new(manifest: manifest, actor: actor).apply!).to include(finalized_batch_entries: 2)
+    expect(described_class.new(manifest: manifest, actor: actor).apply!(
+      accepted_manifest_sha256: digest, release_owner: "Approved test owner")).to include(finalized_batch_entries: 2)
+    expect(source.historical_reconciliation_complete?).to be(true)
     expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_issued").pluck(:source_line_key).sort)
       .to eq(%w[category:1 category:2])
   end
@@ -286,8 +304,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"].first["source_time_entry_version"] = 2
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
-      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 },
-                          { "id" => "99", "source_user_uuid" => uuid, "version" => 3 } ],
+      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 },
+                          { "id" => "99", "source_user_uuid" => uuid, "version" => 3, "hours" => 2 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     rollout = described_class.new(manifest: manifest, actor: actor)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
@@ -301,10 +319,146 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(AireVerifiedHistoryRolloutReceipt.last.coverage_verified).to be(true)
   end
 
+  context "when separate issued checks cover parts of one historical source entry" do
+    let(:second_period) do
+      create(:pay_period, :committed, company: company, start_date: Date.new(2026, 8, 16),
+        end_date: Date.new(2026, 8, 31), pay_date: Date.new(2026, 9, 15))
+    end
+    let(:second_item) do
+      create(:payroll_item, :with_check, company: company, pay_period: second_period, employee: employee,
+        hours_worked: 3.05, overtime_hours: 0, pay_rate: 10, gross_pay: 30.5, net_pay: 25)
+    end
+    let(:already_issued) { true }
+    let(:inventory_entry) do
+      { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1,
+        "regular_hours" => 6.1, "overtime_hours" => 0 }
+    end
+
+    before do
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source.update_column(:historical_reconciliation_required, true)
+      item.update!(hours_worked: 3.05, gross_pay: 30.5, net_pay: 25)
+      manifest["source_instance_id"] = source.expected_source_instance_id
+      manifest["history_through_work_date"] = second_period.end_date.iso8601
+      manifest["delivered_checks"].first.merge!("regular_hours" => "3.05", "net_pay" => "25.00")
+      manifest["delivered_checks"] << manifest["delivered_checks"].first.merge(
+        "payroll_item_id" => second_item.id, "pay_period_id" => second_period.id, "check_number" => second_item.check_number)
+      manifest["issued_entries"].first.merge!("source_time_entry_version" => 2, "regular_hours" => "3.05")
+      manifest["issued_entries"] << manifest["issued_entries"].first.merge("payroll_item_id" => second_item.id)
+      (already_issued ? [ item, second_item ] : []).each_with_index do |paid_item, index|
+        TimeTrackingManualAllocation.create!(company: company, time_tracking_source: source,
+          pay_period: paid_item.pay_period, payroll_item: paid_item, employee: employee, created_by: actor,
+          source_user_uuid: uuid, source_time_entry_id: "41", source_time_entry_version: 2,
+          original_work_date: Date.new(2026, 8, 14), regular_hours: 3.05, overtime_hours: 0,
+          reconciliation_note: "Verified partial historical hours on this delivered check", status: "issued",
+          remote_allocation_id: (501 + index).to_s)
+      end
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+        "time_entries" => [ inventory_entry ],
+        "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
+    end
+
+    def apply_accepted_history
+      digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+      described_class.new(manifest: manifest, actor: actor).apply!(
+        accepted_manifest_sha256: digest, release_owner: "Approved test owner")
+    end
+
+    it "approves only the aggregate of both partial checks without creating duplicate allocations" do
+      expect(described_class.new(manifest: manifest, actor: actor).preview!).to include(history_coverage_verified: true)
+      expect { apply_accepted_history }.not_to change(TimeTrackingManualAllocation, :count)
+      expect(source.historical_reconciliation_complete?).to be(true)
+      expect(AireVerifiedHistoryRolloutReceipt.last.coverage_verified).to be(true)
+      expect(client).not_to have_received(:commit_payroll_manual_allocation)
+    end
+
+    context "when the partial check evidence has not been linked yet" do
+      let(:already_issued) { false }
+
+      it "creates both partial allocations and certifies their complete combined coverage" do
+        rollout = described_class.new(manifest: manifest, actor: actor)
+        allow(rollout).to receive(:pace_source_entry!)
+        digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+        expect { rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+          .to change(TimeTrackingManualAllocation, :count).by(2)
+        expect(TimeTrackingManualAllocation.where(status: "issued").sum(:regular_hours)).to eq(6.1)
+        expect(source.historical_reconciliation_complete?).to be(true)
+      end
+    end
+
+    it "holds incomplete evidence even though its source identity and version are covered" do
+      manifest["issued_entries"].pop
+      expect(described_class.new(manifest: manifest, actor: actor).preview!).to include(history_coverage_verified: false)
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /without a verified disposition/)
+      expect(source.historical_reconciliation_complete?).to be(false)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+      expect(item.check_events.deliveries.count).to eq(0)
+    end
+
+    it "holds an equal total with the wrong inventoried REG and OT split" do
+      inventory_entry.merge!("regular_hours" => 5.1, "overtime_hours" => 1)
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /without a verified disposition/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
+    it "requires complete finite total hours even if the optional split is unavailable" do
+      inventory_entry.delete("regular_hours")
+      inventory_entry.delete("overtime_hours")
+      [ nil, "NaN", "Infinity", -1, 6.09, 6.2 ].each do |invalid_hours|
+        inventory_entry["hours"] = invalid_hours
+        expect { apply_accepted_history }.to raise_error(described_class::Error, /without a verified disposition/)
+      end
+      inventory_entry["hours"] = 6.1
+      apply_accepted_history
+      expect(source.historical_reconciliation_complete?).to be(true)
+    end
+
+    it "holds completion when total hours drift in the fresh final source read" do
+      initial = { "time_entries" => [ inventory_entry ],
+        "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
+      changed = initial.deep_dup
+      changed["time_entries"].first.merge!("hours" => 6.2, "regular_hours" => 6.2)
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(initial, changed)
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /without a verified disposition/)
+      expect(source.historical_reconciliation_complete?).to be(false)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+      expect(TimeTrackingManualAllocation.where(status: "issued").count).to eq(2)
+    end
+
+    it "rejects conflicting versions or dates on an existing partial allocation" do
+      row = manifest["issued_entries"].last
+      row["source_time_entry_version"] = 3
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /conflicting payment evidence/)
+      row["source_time_entry_version"] = 2
+      row["original_work_date"] = "2026-08-13"
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /conflicting payment evidence/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
+    it "rejects issued local hours changed after preflight rather than certifying the old manifest" do
+      rollout = described_class.new(manifest: manifest, actor: actor)
+      allow(rollout).to receive(:apply_exact_entries!).and_wrap_original do |original|
+        original.call
+        TimeTrackingManualAllocation.find_by!(payroll_item: second_item).update!(regular_hours: 3)
+      end
+      digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+      expect { rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+        .to raise_error(described_class::Error, /Not all verified AIRE entries have issued payment evidence/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+      expect(source.historical_reconciliation_complete?).to be(false)
+    end
+
+    it "rejects duplicate evidence for the same payroll item and source entry" do
+      manifest["issued_entries"] << manifest["issued_entries"].first.deep_dup
+      expect { apply_accepted_history }.to raise_error(described_class::Error, /source entries contain duplicates/)
+    end
+  end
+
   it "rejects a historical inventory that omits rows from its advertised total" do
     manifest["history_through_work_date"] = period.end_date.iso8601
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
-      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 } ],
+      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     expect { described_class.new(manifest: manifest, actor: actor).preview! }
       .to raise_error(described_class::Error, /incomplete historical source inventory/)
@@ -318,10 +472,10 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"].first["source_time_entry_version"] = 2
-    initial = { "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 } ],
+    initial = { "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
     changed = initial.deep_dup
-    changed["time_entries"] << { "id" => "99", "source_user_uuid" => uuid, "version" => 0 }
+    changed["time_entries"] << { "id" => "99", "source_user_uuid" => uuid, "version" => 0, "hours" => 2 }
     changed["pagination"]["total_count"] = 2
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(initial, changed)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
@@ -362,7 +516,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       "batch_checksum" => import.external_batch_checksum, "source_instance_id" => source.expected_source_instance_id, "source_total_hours" => "6.10" } ]
     allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
       "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
-    allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [ { "id" => "41", "version" => 2, "source_user_uuid" => uuid } ],
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [ { "id" => "41", "version" => 2, "source_user_uuid" => uuid, "hours" => 6.1 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))

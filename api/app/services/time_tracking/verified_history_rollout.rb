@@ -84,7 +84,8 @@ module TimeTracking
         exact_entries: entries.length,
         historical_classification_cases: classification_cases.length,
         finalized_batch_entries: finalized_batch_entries.length,
-        new_source_entries_ignored: ignored_source_entry_count
+        new_source_entries_ignored: ignored_source_entry_count,
+        history_coverage_verified: history_scope_verified?
       }
     end
 
@@ -178,7 +179,7 @@ module TimeTracking
       raise Error, "AIRE rollout identity list contains duplicates" unless unique?(identities.map { |row| row.fetch("source_user_uuid") }) &&
         unique?(identities.map { |row| row.fetch("employee_id") })
       raise Error, "AIRE rollout check list contains duplicates" unless unique?(checks.map { |row| row.fetch("payroll_item_id") })
-      raise Error, "AIRE rollout source entries contain duplicates" unless unique?(entries.map { |row| row.fetch("source_time_entry_id") })
+      raise Error, "AIRE rollout source entries contain duplicates" unless unique?(entries.map { |row| [ row.fetch("payroll_item_id").to_i, row.fetch("source_time_entry_id").to_s ] })
       raise Error, "AIRE rollout finalized-batch entries contain duplicates" unless unique?(finalized_batch_entries.map { |row| [ row.fetch("payroll_item_id"), row.fetch("source_time_entry_id"), row["source_line_key"] ] })
       raise Error, "AIRE rollout classification cases contain duplicates" unless unique?(classification_cases.map { |row| row.fetch("payroll_item_id") })
       case_ids = classification_cases.flat_map { |row| row.fetch("source_time_entry_ids") }.map(&:to_s)
@@ -320,7 +321,8 @@ module TimeTracking
       paid = entries + finalized_batch_entries + classification_cases.flat_map do |row|
         row.fetch("source_entries").map { |entry| entry.merge("source_user_uuid" => row.fetch("source_user_uuid")) }
       end
-      paid_keys = paid.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row["source_time_entry_version"] ] }.uniq
+      paid_by_key = paid.group_by { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row["source_time_entry_version"] ] }
+      paid_keys = paid_by_key.keys
       unpaid = Array(manifest["reviewed_unpaid_entries"])
       held = Array(manifest["held_source_entries"])
       unpaid_keys = unpaid.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
@@ -330,10 +332,27 @@ module TimeTracking
       @history_inventory.all? do |row|
         key = [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ]
         next false unless dispositions.include?(key)
+        total = coverage_hours(row.fetch("hours"))
+        if paid_by_key.key?(key)
+          regular = paid_by_key.fetch(key).sum { |entry| coverage_hours(entry.fetch("regular_hours")) }
+          overtime = paid_by_key.fetch(key).sum { |entry| coverage_hours(entry.fetch("overtime_hours")) }
+          next false unless regular + overtime == total
+          if row.key?("regular_hours") || row.key?("overtime_hours")
+            next false unless regular == coverage_hours(row.fetch("regular_hours")) &&
+                              overtime == coverage_hours(row.fetch("overtime_hours"))
+          end
+        end
         !held_keys.include?(key) || row.dig("lifecycle", "status") == "payment_attested_pending_evidence"
       end
-    rescue KeyError
+    rescue KeyError, ArgumentError, TypeError
       false
+    end
+
+    def coverage_hours(value)
+      number = BigDecimal(value.to_s)
+      raise ArgumentError, "Historical hours must be finite and nonnegative" unless number.finite? && number >= 0
+
+      number
     end
 
     def validate_checks!
@@ -368,9 +387,11 @@ module TimeTracking
         item = PayrollItem.find(row.fetch("payroll_item_id"))
         raise Error, "AIRE rollout entry points to another employee" unless item.employee_id == identity.fetch("employee_id").to_i
         existing = TimeTrackingManualAllocation.where(time_tracking_source: @source,
-          source_time_entry_id: row.fetch("source_time_entry_id").to_s).where.not(status: "voided").first
+          payroll_item: item, source_time_entry_id: row.fetch("source_time_entry_id").to_s).where.not(status: "voided").first
         if existing
           unless existing.payroll_item_id == item.id && existing.source_user_uuid == uuid &&
+                 existing.original_work_date.iso8601 == row.fetch("original_work_date") &&
+                 (row["source_time_entry_version"].nil? || existing.source_time_entry_version == row["source_time_entry_version"]) &&
                  hours(existing.regular_hours) == hours(row.fetch("regular_hours")) &&
                  hours(existing.overtime_hours) == hours(row.fetch("overtime_hours"))
             raise Error, "AIRE entry #{row.fetch('source_time_entry_id')} has conflicting payment evidence"
@@ -379,8 +400,8 @@ module TimeTracking
         end
         adjustment = live_entry(item.pay_period, uuid, row.fetch("source_time_entry_id"))
         unless adjustment && adjustment["original_work_date"] == row.fetch("original_work_date") &&
-               hours(adjustment["regular_hours"]) == hours(row.fetch("regular_hours")) &&
-               hours(adjustment["overtime_hours"]) == hours(row.fetch("overtime_hours")) &&
+               hours(adjustment["regular_hours"]) >= hours(row.fetch("regular_hours")) &&
+               hours(adjustment["overtime_hours"]) >= hours(row.fetch("overtime_hours")) &&
                (row["category_name"].nil? || adjustment.dig("category", "name") == row["category_name"]) &&
                adjustment["source_time_entry_version"].is_a?(Integer) &&
                (row["source_time_entry_version"].nil? || row["source_time_entry_version"] == adjustment["source_time_entry_version"])
@@ -560,11 +581,16 @@ module TimeTracking
     end
 
     def verify_applied!
-      expected = entries.map { |row| row.fetch("source_time_entry_id").to_s } +
-        classification_cases.flat_map { |row| row.fetch("source_time_entry_ids").map(&:to_s) }
-      issued = TimeTrackingManualAllocation.where(time_tracking_source: @source,
-        source_time_entry_id: expected, status: "issued").pluck(:source_time_entry_id)
-      raise Error, "Not all verified AIRE entries have issued payment evidence" unless issued.sort == expected.sort
+      expected = entries + classification_cases.flat_map do |row|
+        row.fetch("source_entries").map { |entry| entry.merge("payroll_item_id" => row.fetch("payroll_item_id"), "source_user_uuid" => row.fetch("source_user_uuid")) }
+      end
+      unless expected.all? { |row| TimeTrackingManualAllocation.exists?(time_tracking_source: @source,
+        payroll_item_id: row.fetch("payroll_item_id"), source_time_entry_id: row.fetch("source_time_entry_id").to_s,
+        source_user_uuid: row.fetch("source_user_uuid"), regular_hours: coverage_hours(row.fetch("regular_hours")),
+        overtime_hours: coverage_hours(row.fetch("overtime_hours")), original_work_date: row.fetch("original_work_date"),
+        status: "issued", **(row["source_time_entry_version"].nil? ? {} : { source_time_entry_version: row["source_time_entry_version"] })) }
+        raise Error, "Not all verified AIRE entries have issued payment evidence"
+      end
       unless finalized_line_keys(finalized_acknowledgements.where.not(delivered_at: nil).to_a) ==
              finalized_line_keys(@verified_finalized_allocations)
         raise Error, "Not all finalized AIRE batch payable lines reached paid status"
