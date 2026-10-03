@@ -87,7 +87,15 @@ module TimeTracking
             next
           end
           if excluded_employee_ids.include?(employee.id)
-            results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
+            if finalized_batch?
+              results[:errors] << {
+                source_user_id: source_user_id,
+                employee_id: employee.id,
+                error: "Finalized AIRE batch includes an employee excluded from this pay period; resolve the exclusion before importing"
+              }
+            else
+              results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
+            end
             next
           end
 

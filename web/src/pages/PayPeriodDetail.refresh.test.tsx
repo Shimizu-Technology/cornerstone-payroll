@@ -51,6 +51,7 @@ vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
   },
 }));
 vi.mock('@/components/payroll/AirePayrollRecordsDialog', () => ({ AirePayrollRecordsDialog: () => null }));
+vi.mock('@/components/payroll/AirePaymentEvidenceHolds', () => ({ AirePaymentEvidenceHolds: () => null }));
 vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
   AirePayrollCockpit: ({ onReviewFinalizedBatch }: { onReviewFinalizedBatch?: () => void }) => (
     <button type="button" onClick={onReviewFinalizedBatch}>Review verified AIRE batch</button>

@@ -38,6 +38,15 @@ module AirePayrollCalendar
         return { publication_id: publication.id, status: "delivered" } if publication.delivered?
         return { publication_id: publication.id, status: "skipped" } if publication.next_delivery_attempt_at&.>(@now)
 
+        unless publication.aire_payroll_calendar_period.time_tracking_source.historical_reconciliation_complete?
+          publication.update!(
+            delivery_enqueued_until: nil,
+            next_delivery_attempt_at: publication.cutoff_at > @now ? @now + 5.minutes : nil,
+            last_error: "Historical payroll reconciliation approval is required before delivering this calendar"
+          )
+          return { publication_id: publication.id, status: "held" }
+        end
+
         publication.update!(
           delivery_attempts: publication.delivery_attempts + 1,
           delivery_enqueued_until: nil,

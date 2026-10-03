@@ -1,15 +1,35 @@
 name: Quality
+run-name: ${{ inputs.payroll_sha && format('Connected payroll {0} + {1}', inputs.payroll_sha, inputs.aire_sha) || format('Quality {0}', github.ref_name) }}
 
 on:
   pull_request:
   push:
     branches: [main, staging-v2]
   workflow_dispatch:
+    inputs:
+      payroll_sha:
+        description: Optional full Payroll SHA for exact-pair certification (supply both SHAs)
+        required: false
+        type: string
+      aire_sha:
+        description: Optional full AIRE SHA for exact-pair certification (supply both SHAs)
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  connected-payroll:
+    name: Connected payroll exact-pair certification
+    if: github.event_name == 'workflow_dispatch' && (inputs.payroll_sha != '' || inputs.aire_sha != '')
+    needs: [backend, frontend, browser, staging-v2-configuration]
+    uses: ./.github/workflows/connected-payroll.yml
+    with:
+      payroll_sha: ${{ inputs.payroll_sha }}
+      aire_sha: ${{ inputs.aire_sha }}
+
   backend:
     runs-on: ubuntu-latest
     services:
@@ -126,7 +146,7 @@ jobs:
 
   staging-v2-configuration:
     name: Staging v2 configuration
-    if: github.event_name == 'push' || github.base_ref == 'staging-v2'
+    if: github.event_name == 'push' || github.base_ref == 'staging-v2' || (github.event_name == 'workflow_dispatch' && (inputs.payroll_sha != '' || inputs.aire_sha != ''))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

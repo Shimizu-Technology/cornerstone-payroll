@@ -13,6 +13,10 @@ class PayrollItem < ApplicationRecord
   belongs_to :company
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
+  has_one :non_employee_check_supersession, dependent: :restrict_with_error
+  has_one :direct_deposit_payment_confirmation, dependent: :restrict_with_error
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :check_events, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
@@ -195,7 +199,12 @@ class PayrollItem < ApplicationRecord
   # @param reason [String] required written reason (min 10 chars)
   # @param ip_address [String, nil]
   # @return [CheckEvent]
+  def duplicate_check_linked?
+    NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
+  end
+
   def void!(user:, reason:, ip_address: nil)
+    raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Already voided" if voided?
     raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
     raise ArgumentError, "No check number assigned" if check_number.blank?
@@ -204,6 +213,7 @@ class PayrollItem < ApplicationRecord
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
       raise ArgumentError, "Already voided" if voided? # re-check under lock
+      raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
       update!(

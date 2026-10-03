@@ -21,18 +21,13 @@ populated = {
 abort "Refusing to seed a populated AIRE certification database: #{populated.inspect}" if populated.any?
 
 guam = ActiveSupport::TimeZone["Pacific/Guam"]
-cutoff_at = (guam.now.beginning_of_minute + 2.minutes)
-cutoff_date = cutoff_at.to_date
-pay_date = cutoff_date + 7.days
-
-if cutoff_date.day >= 16
-  start_date = cutoff_date.beginning_of_month
-  end_date = cutoff_date.change(day: 15)
-else
-  previous_month = cutoff_date.prev_month
-  start_date = previous_month.change(day: 16)
-  end_date = previous_month.end_of_month
-end
+policy = JSON.parse(File.read(ENV.fetch("CERTIFICATION_POLICY_FIXTURE_PATH")))
+abort "Unsupported certification policy fixture" unless policy.fetch("schema_version") == 1
+cutoff_at = Time.iso8601(policy.fetch("cutoff_at")).in_time_zone("Pacific/Guam")
+pay_date = Date.iso8601(policy.fetch("pay_date"))
+start_date = Date.iso8601(policy.fetch("start_date"))
+end_date = Date.iso8601(policy.fetch("end_date"))
+abort "Certification must begin before its fixed cutoff" unless (cutoff_at - Time.current).to_i == 120
 
 fixture = ApplicationRecord.transaction do
   admin = User.create!(
@@ -116,6 +111,7 @@ fixture = ApplicationRecord.transaction do
 
   {
     schema_version: 1,
+    integration_profile: Payroll::IntegrationProfile.call,
     shared_secret: shared_secret,
     delegation_token: grant.issued_token,
     admin_id: admin.id,

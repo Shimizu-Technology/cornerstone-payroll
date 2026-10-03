@@ -473,7 +473,7 @@ describe('AirePayrollCockpit', () => {
     const submit = within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     await user.type(screen.getByRole('textbox', { name: /reason/i }), 'Verified against manager note');
-    await user.click(submit);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
 
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 3,
@@ -482,6 +482,18 @@ describe('AirePayrollCockpit', () => {
       command_id: expect.any(String),
     })));
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows the payment hold when historical payment confirmation is pending', async () => {
+    const data = fixtures();
+    data.entries.time_entries = [{ ...timeEntry, state: { ...timeEntry.state,
+      approval_status: 'approved', overtime_status: 'not_required', payable_now: false,
+      payroll_disposition: 'pending_payment_attestation',
+      payroll_exclusion_reasons: ['pending_payment_attestation'],
+    } }];
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    expect(await screen.findByText('Payment confirmation needed')).toBeTruthy();
   });
 
   it('reviews ordinary clock-entry overtime in AIRE without requiring a base-time approval', async () => {

@@ -32,7 +32,7 @@ periods = (-4..2).flat_map do |offset|
   [ period_for.call(reference.change(day: 1)), period_for.call(reference.change(day: 16)) ]
 end.uniq.sort_by(&:first)
 
-pay_date_for = ->((_start_date, end_date)) { end_date + 1.day }
+pay_date_for = ->((_start_date, end_date)) { end_date.day == 15 ? end_date.end_of_month : end_date.next_month.change(day: 15) }
 cutoff_for_index = lambda do |index|
   previous_pay_date = pay_date_for.call(periods.fetch(index - 1))
   cutoff_date = previous_pay_date + 7.days
@@ -101,7 +101,7 @@ ActiveRecord::Base.transaction do
     company: company,
     frequency: "semimonthly",
     period_rule: "semimonthly",
-    pay_date_rule: "manual",
+    pay_date_rule: "semimonthly_15th_and_month_end",
     timezone: "Pacific/Guam",
     source: "operator_confirmed",
     confirmation_status: "confirmed",

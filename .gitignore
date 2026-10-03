@@ -11,3 +11,4 @@ web/.e2e-fixtures/
 ops/staging-v2/runtime.env
 .staging-v2-state/
 backups-staging-v2/
+__pycache__/

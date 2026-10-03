@@ -17,11 +17,15 @@ done
 TEMP_DIR="$(mktemp -d "$TEMP_PARENT/cornerstone-aire-certification.XXXXXX")"
 AIRE_FIXTURE="$TEMP_DIR/aire.json"
 CORNERSTONE_FIXTURE="$TEMP_DIR/cornerstone.json"
+CERTIFICATION_CLOCK_FILE="$TEMP_DIR/clock.epoch"
+CERTIFICATION_POLICY_FIXTURE_PATH="$TEMP_DIR/policy.json"
 AIRE_LOG="$TEMP_DIR/aire.log"
 CORNERSTONE_LOG="$TEMP_DIR/cornerstone.log"
 AIRE_PID=""
 CORNERSTONE_PID=""
-RBENV_ROOT="$(rbenv root 2>/dev/null || true)"
+# A supplied runtime directory makes the drill portable to CI with two pinned Rubies.
+# Local runs retain rbenv selection when no directory is supplied.
+source "$ROOT_DIR/scripts/local_certification/runtime.sh"
 
 fail() {
   echo "Certification failed: $*" >&2
@@ -57,8 +61,11 @@ trap cleanup EXIT INT TERM
 [[ -n "$AIRE_REPO_PATH" ]] || fail "set AIRE_REPO_PATH to the local aire-services repository"
 [[ -d "$AIRE_REPO_PATH/backend" ]] || fail "AIRE_REPO_PATH must contain backend/"
 [[ -f "$AIRE_REPO_PATH/backend/app/models/payroll_integration_grant.rb" ]] || fail "the selected AIRE repository does not support delegated payroll"
-[[ -n "$RBENV_ROOT" && -d "$RBENV_ROOT/shims" ]] || fail "rbenv is required to select each repository's pinned Ruby"
 [[ -f "$ROOT_DIR/api/.ruby-version" && -f "$AIRE_REPO_PATH/backend/.ruby-version" ]] || fail "both Rails applications must pin Ruby in .ruby-version"
+(certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}")
+(certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}")
+# Pin control-plane Ruby too; macOS may otherwise select its legacy system Ruby.
+certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
 [[ "$AIRE_DATABASE" == aire_cornerstone_certification_* ]] || fail "unsafe AIRE database name"
 [[ "$CORNERSTONE_DATABASE" == cornerstone_aire_certification_* ]] || fail "unsafe Cornerstone database name"
 
@@ -74,14 +81,17 @@ CORNERSTONE_DATABASE_URL="postgresql:///$CORNERSTONE_DATABASE"
 AIRE_BASE_URL="http://localhost:$AIRE_PORT"
 CORNERSTONE_BASE_URL="http://localhost:$CORNERSTONE_PORT"
 
+ruby "$ROOT_DIR/scripts/local_certification/policy_fixture.rb" prepare \
+  "$CERTIFICATION_POLICY_FIXTURE_PATH" "$CERTIFICATION_CLOCK_FILE"
+
 echo "Preparing isolated local databases..."
 createdb "$AIRE_DATABASE"
 createdb "$CORNERSTONE_DATABASE"
 
 (
   cd "$AIRE_REPO_PATH/backend"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+  certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}"
+  certification_use_clock "$AIRE_DATABASE_URL"
   RAILS_ENV=test TEST_DATABASE_URL="$AIRE_DATABASE_URL" bundle exec rails db:schema:load
   RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
     PAYROLL_SHARED_SECRET="$SHARED_SECRET" CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" \
@@ -90,8 +100,8 @@ createdb "$CORNERSTONE_DATABASE"
 
 (
   cd "$ROOT_DIR/api"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
   RAILS_ENV=test TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" bundle exec rails db:schema:load db:seed >/dev/null
   RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" CERTIFICATION_FIXTURE_PATH="$CORNERSTONE_FIXTURE" \
@@ -124,8 +134,8 @@ CUTOFF_AT="$(json_value "$AIRE_FIXTURE" cutoff_at)"
 echo "Starting isolated AIRE and Cornerstone APIs..."
 (
   cd "$AIRE_REPO_PATH/backend"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+  certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}"
+  certification_use_clock "$AIRE_DATABASE_URL"
   exec env RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
     PAYROLL_SHARED_SECRET="$SHARED_SECRET" \
     CORNERSTONE_PAYROLL_EVENTS_URL="$CORNERSTONE_BASE_URL/api/v1/integrations/aire/events" \
@@ -135,8 +145,8 @@ AIRE_PID=$!
 
 (
   cd "$ROOT_DIR/api"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
   exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     CORS_ORIGINS="http://127.0.0.1:44329" \
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
@@ -190,8 +200,8 @@ api_call 201 "publish the next available AIRE payroll period" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$NEXT_PAY_PERIOD_ID/aire_payroll_calendar/publish" "$NEXT_PUBLISH_RESPONSE"
 (
   cd "$ROOT_DIR/api"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
       publications = AirePayrollCalendarPublication.where(delivery_status: %w[pending failed]).order(:id).to_a
@@ -205,8 +215,8 @@ api_call 201 "publish the next available AIRE payroll period" POST \
 )
 (
   cd "$AIRE_REPO_PATH/backend"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+  certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}"
+  certification_use_clock "$AIRE_DATABASE_URL"
   RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
     EXPECTED_PREVIOUS_REGULAR_PAY_DATE="$PREVIOUS_REGULAR_PAY_DATE" \
     EXPECTED_CURRENT_PAY_DATE="$PAY_DATE" \
@@ -214,12 +224,26 @@ api_call 201 "publish the next available AIRE payroll period" POST \
       periods = PayrollCalendarPeriod.order(:start_date).to_a
       abort "expected two published calendar periods" unless periods.size == 2
       abort "calendar contract did not use schema 2.0" unless periods.all? { |period| period.schema_version == "2.0" }
-      abort "calendar contract did not preserve the configured rule" unless periods.all? { |period| period.cutoff_rule == "after_previous_regular_payday" && period.cutoff_days == 7 }
+      abort "calendar contract did not preserve the fixed Guam policy" unless periods.all? do |period|
+        local = period.cutoff_at.in_time_zone("Pacific/Guam")
+        period.cutoff_rule == "after_previous_regular_payday" && period.cutoff_days == 7 &&
+          local.to_date == period.previous_regular_pay_date + 7.days && local.hour == 17 && local.min.zero? && local.sec.zero? &&
+          (period.pay_date.day == 15 || period.pay_date == period.pay_date.end_of_month)
+      end
       expected_previous_dates = [ ENV.fetch("EXPECTED_PREVIOUS_REGULAR_PAY_DATE"), ENV.fetch("EXPECTED_CURRENT_PAY_DATE") ]
       actual_previous_dates = periods.map { |period| period.previous_regular_pay_date.iso8601 }
       abort "calendar contract lost the target-run payday association" unless actual_previous_dates == expected_previous_dates
       puts "PASS: AIRE preserved each target run association with the previous regular payday cutoff"
     '
+)
+
+(
+  cd "$ROOT_DIR/api"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
+  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+    AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" \
+    bundle exec rails runner "$ROOT_DIR/scripts/local_certification/verify_history_contract.rb"
 )
 
 OVERVIEW_BEFORE="$TEMP_DIR/overview-before.json"
@@ -272,10 +296,9 @@ api_call 409 "reject a stale manual-time decision" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit/time_entries/$MANUAL_HOLD_ID/approval" \
   "$STALE_RESPONSE" "$STALE_BODY"
 
-echo "Waiting for the synthetic cutoff at $CUTOFF_AT..."
-until ruby -rtime -e 'exit(Time.now >= Time.iso8601(ARGV[0]) ? 0 : 1)' "$CUTOFF_AT"; do
-  sleep 2
-done
+echo "Advancing both isolated test APIs past the fixed 17:00 Guam cutoff at $CUTOFF_AT..."
+ruby "$ROOT_DIR/scripts/local_certification/policy_fixture.rb" advance \
+  "$CERTIFICATION_POLICY_FIXTURE_PATH" "$CERTIFICATION_CLOCK_FILE"
 
 FINALIZE_BODY="$TEMP_DIR/finalize.json"
 ruby -rjson -rsecurerandom -e 'File.write(ARGV[0], JSON.generate(command_id: SecureRandom.uuid, expected_version: 0, reason: "Reviewed readiness and locked the synthetic cutoff"))' "$FINALIZE_BODY"
@@ -287,8 +310,8 @@ api_call 202 "lock the due AIRE period from Cornerstone" POST \
 echo "Delivering and verifying AIRE's immutable finalized event over local HTTP..."
 (
   cd "$AIRE_REPO_PATH/backend"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$AIRE_REPO_PATH/backend/.ruby-version")"
+  certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}"
+  certification_use_clock "$AIRE_DATABASE_URL"
   RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
     PAYROLL_SHARED_SECRET="$SHARED_SECRET" \
     CORNERSTONE_PAYROLL_EVENTS_URL="$CORNERSTONE_BASE_URL/api/v1/integrations/aire/events" \
@@ -301,8 +324,8 @@ echo "Delivering and verifying AIRE's immutable finalized event over local HTTP.
 )
 (
   cd "$ROOT_DIR/api"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
       event = AirePayrollEvent.order(:id).last or abort "missing received AIRE event"
@@ -363,7 +386,8 @@ PRINT_RESPONSE="$TEMP_DIR/print.json"
 api_call 200 "record the synthetic paper check as prepared" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/payroll_items/$PAYROLL_ITEM_ID/check/mark_printed" "$PRINT_RESPONSE"
 DELIVERY_BODY="$TEMP_DIR/delivery.json"
-TZ=Pacific/Guam ruby -rjson -rdate -e 'File.write(ARGV[0], JSON.generate(delivered_on: Date.today.iso8601, delivery_method: "hand_delivery", attestation: true, evidence_reference: "LOCAL-CERTIFICATION-ONLY", note: "Synthetic local delivery proof"))' "$DELIVERY_BODY"
+ruby -rjson -e 'File.write(ARGV[0], JSON.generate(delivered_on: ARGV.fetch(1), delivery_method: "hand_delivery", attestation: true, evidence_reference: "LOCAL-CERTIFICATION-ONLY", note: "Synthetic local delivery proof"))' "$DELIVERY_BODY" \
+  "$(json_value "$CERTIFICATION_POLICY_FIXTURE_PATH" delivery_date)"
 DELIVERY_RESPONSE="$TEMP_DIR/delivery-response.json"
 api_call 200 "record synthetic check delivery as the payment event" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/payroll_items/$PAYROLL_ITEM_ID/check/mark_delivered" \
@@ -371,8 +395,8 @@ api_call 200 "record synthetic check delivery as the payment event" POST \
 
 (
   cd "$ROOT_DIR/api"
-  export PATH="$RBENV_ROOT/shims:$PATH"
-  export RBENV_VERSION="$(<"$ROOT_DIR/api/.ruby-version")"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  certification_use_clock "$CORNERSTONE_DATABASE_URL"
   RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
     bundle exec rails runner '
       entry_acknowledgements = AirePayrollEntryAcknowledgement.order(:id).to_a

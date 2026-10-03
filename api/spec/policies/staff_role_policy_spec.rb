@@ -17,6 +17,7 @@ RSpec.describe StaffRolePolicy do
       view_record_activity: %w[super_admin org_admin admin manager accountant],
       manage_filing_review: %w[super_admin org_admin admin manager accountant],
       manage_client_configuration: %w[super_admin org_admin admin manager],
+      manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
       manage_organization: %w[super_admin org_admin admin],
       manage_platform: %w[super_admin]
     }
@@ -35,6 +36,38 @@ RSpec.describe StaffRolePolicy do
 
     it "denies a missing user" do
       expect(described_class.allowed?(nil, :staff_workspace)).to be(false)
+    end
+  end
+
+  describe ".historical_reconciliation_allowed?" do
+    it "uses home fallback only when no current unarchived client assignment exists" do
+      home = create(:company)
+      target = create(:company, organization: home.organization)
+      actor = create(:user, role: "accountant", company: home)
+      sql_allowed = ->(company) do
+        ApplicationRecord.connection.select_value("SELECT historical_time_reconciliation_actor_allowed(#{actor.id}, #{company.id})")
+      end
+      expect(sql_allowed.call(home)).to be(true)
+      expect(sql_allowed.call(target)).to be(false)
+      expect(described_class.historical_reconciliation_allowed?(actor, home)).to be(true)
+      assignment = create(:company_assignment, user: actor, company: target)
+      actor = User.find(actor.id)
+      expect(described_class.historical_reconciliation_allowed?(actor, home)).to be(false)
+      expect(sql_allowed.call(home)).to be(false)
+      expect(sql_allowed.call(target)).to be(true)
+      expect(described_class.historical_reconciliation_allowed?(actor, target)).to be(true)
+      assignment.update!(expires_at: 1.minute.ago)
+      actor = User.find(actor.id)
+      expect(described_class.historical_reconciliation_allowed?(actor, home)).to be(true)
+      expect(described_class.historical_reconciliation_allowed?(actor, target)).to be(false)
+      expect(sql_allowed.call(home)).to be(true)
+      expect(sql_allowed.call(target)).to be(false)
+      home.update!(active: false)
+      expect(sql_allowed.call(home)).to be(false)
+      expect(described_class.historical_reconciliation_allowed?(actor, home)).to be(false)
+      expect(described_class.allowed?(actor, :manage_client_configuration)).to be(false)
+      expect(described_class.capability_for(controller_path: "api/v1/admin/aire_payroll_calendars", action_name: "publish"))
+        .to eq(:manage_client_configuration)
     end
   end
 

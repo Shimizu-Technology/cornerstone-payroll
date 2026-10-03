@@ -35,6 +35,8 @@ if [[ "${failed_pair}" == "${payroll_sha} ${aire_sha}" ]]; then
   exit 0
 fi
 
+certificate_run_id="$("${SCRIPT_DIR}/verify-pair-certificate.sh" "${payroll_sha}" "${aire_sha}")" || exit 0
+
 git -C "${SERVICE_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "The staging v2 service directory is not a Git checkout." >&2; exit 1; }
 if [[ -n "$(git -C "${SERVICE_DIR}" status --porcelain --untracked-files=no)" ]]; then
   echo "Tracked deployment files have local changes; refusing to overwrite them." >&2
@@ -43,4 +45,4 @@ fi
 git -C "${SERVICE_DIR}" fetch --quiet origin staging-v2
 git -C "${SERVICE_DIR}" cat-file -e "${payroll_sha}^{commit}"
 git -C "${SERVICE_DIR}" checkout --quiet --detach "${payroll_sha}"
-exec "${SERVICE_DIR}/ops/staging-v2/deploy.sh" "${payroll_sha}" "${aire_sha}"
+exec "${SERVICE_DIR}/ops/staging-v2/deploy.sh" "${payroll_sha}" "${aire_sha}" "${certificate_run_id}"

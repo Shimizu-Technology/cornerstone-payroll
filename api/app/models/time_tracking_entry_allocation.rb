@@ -8,6 +8,7 @@ class TimeTrackingEntryAllocation < ApplicationRecord
   belongs_to :time_tracking_import
   belongs_to :pay_period
   belongs_to :payroll_item
+  has_one :time_tracking_legacy_identity_binding, dependent: :restrict_with_error
   belongs_to :employee
 
   validates :source_user_id, :source_time_entry_id, :line_key, :source_kind, :original_work_date, presence: true
@@ -17,6 +18,16 @@ class TimeTrackingEntryAllocation < ApplicationRecord
   validates :total_hours, :regular_hours, :overtime_hours, numericality: true
   validate :hours_reconcile
   validate :ownership_reconciles
+
+  def verified_source_user_uuid
+    return source_user_uuid if source_user_uuid.present?
+
+    binding = time_tracking_legacy_identity_binding
+    return nil unless binding
+    raise TimeTrackingEmployeeMapping::IdentityConflict, "Legacy identity evidence no longer matches this allocation" unless binding.matching_allocation?(self)
+
+    binding.source_user_uuid
+  end
 
   def readonly?
     persisted?

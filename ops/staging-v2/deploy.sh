@@ -7,9 +7,14 @@ source "${SCRIPT_DIR}/common.sh"
 
 payroll_sha="${1:-}"
 aire_sha="${2:-}"
+certificate_run_id="${3:-}"
 for value in "${payroll_sha}" "${aire_sha}"; do
-  [[ "${value}" =~ ^[0-9a-f]{40}$ ]] || { echo "usage: $0 <payroll-sha> <aire-sha>" >&2; exit 64; }
+  [[ "${value}" =~ ^[0-9a-f]{40}$ ]] || { echo "usage: $0 <payroll-sha> <aire-sha> [certificate-run-id]" >&2; exit 64; }
 done
+
+# A direct operator deployment must meet the same exact-pair gate as polling.
+# Verification runs before secrets are loaded, images pulled, or data changed.
+certificate_run_id="$("${SCRIPT_DIR}/verify-pair-certificate.sh" "${payroll_sha}" "${aire_sha}" "${certificate_run_id}")"
 
 load_staging_secrets
 validate_staging_configuration
@@ -53,6 +58,7 @@ done
 if [[ "${healthy}" == "1" ]]; then
   printf '%s\n' "${payroll_sha}" > "${state_dir}/deployed-payroll-sha"
   printf '%s\n' "${aire_sha}" > "${state_dir}/deployed-aire-sha"
+  printf '%s\n' "${certificate_run_id}" > "${state_dir}/deployed-certificate-run-id"
   rm -f "${state_dir}/failed-sha-pair"
   echo "AIRE + Cornerstone staging v2 deployed payroll=${payroll_sha} aire=${aire_sha}."
   exit 0

@@ -20,6 +20,24 @@ module TimeTracking
       app.aireservicesguam.com
     ].freeze
 
+    def self.for_payroll_actor(source, actor:)
+      raise Error, "Sign in as a payroll administrator before reviewing AIRE hours" unless actor
+
+      delegation = source.delegation_for(actor)
+      # A transport or rate-limit failure is not evidence that the account is
+      # disconnected. Surface it so callers can retry without a false setup
+      # warning or an unauthenticated follow-up request.
+      connected = new(source).payroll_account_link(external_actor_id: actor.id)
+        .dig("account_link", "connected") == true
+      if connected
+        new(source, actor: actor)
+      elsif delegation.present?
+        new(source, delegation: delegation)
+      else
+        raise Error, "Connect your AIRE administrator account in payroll before reviewing AIRE hours"
+      end
+    end
+
     def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
       @delegation = delegation
@@ -101,13 +119,65 @@ module TimeTracking
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
     end
 
-    def payroll_cockpit_manual_review(start_date:, end_date:)
-      uri = payroll_cockpit_uri("/manual_review", start_date: start_date, end_date: end_date)
+    def payroll_cockpit_manual_review(start_date:, end_date:, external_pay_period_id: nil)
+      query = { start_date: start_date, end_date: end_date }
+      query[:external_pay_period_id] = external_pay_period_id if external_pay_period_id.present?
+      uri = payroll_cockpit_uri("/manual_review", query)
       require_secure_payroll_transport!(uri)
       request_json(
         uri,
         validate_source: false,
+        headers: (@actor.present? || @delegation.present?) ? payroll_actor_headers : {},
         surface_remote_error: true
+      )
+    end
+
+    def payroll_cockpit_manual_allocations(external_pay_period_id:, page: 1)
+      uri = payroll_cockpit_uri("/manual_allocations", external_pay_period_id: external_pay_period_id, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, surface_remote_error: true)
+    end
+
+    def commit_payroll_manual_allocation(entry_id:, command_id:, expected_version:, source_user_uuid:,
+                                         regular_hours:, overtime_hours:, external_pay_period_id:,
+                                         external_payroll_item_id:, pay_date:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations"),
+        body: {
+          source_time_entry_id: normalized_cockpit_id(entry_id),
+          command_id: command_id,
+          expected_version: expected_version,
+          source_user_uuid: source_user_uuid,
+          regular_hours: regular_hours,
+          overtime_hours: overtime_hours,
+          external_pay_period_id: external_pay_period_id,
+          external_payroll_item_id: external_payroll_item_id,
+          pay_date: pay_date,
+          reason: reason
+        }
+      )
+    end
+
+    def issue_payroll_manual_allocation(allocation_id:, command_id:, expected_version:,
+                                        payment_method:, payment_reference:, payment_effective_on:, occurred_at:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
+        body: {
+          command_id: command_id,
+          expected_version: expected_version,
+          payment_method: payment_method,
+          payment_reference: payment_reference,
+          payment_effective_on: payment_effective_on,
+          occurred_at: occurred_at,
+          reason: reason
+        }
+      )
+    end
+
+    def void_payroll_manual_allocation(allocation_id:, command_id:, expected_version:, occurred_at:, reason:)
+      delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/void"),
+        body: { command_id: command_id, expected_version: expected_version, occurred_at: occurred_at, reason: reason }
       )
     end
 
@@ -126,6 +196,35 @@ module TimeTracking
         validate_source: false,
         surface_remote_error: true
       )
+    end
+
+    def payroll_cockpit_history_entries(through_work_date:, page: 1)
+      uri = payroll_cockpit_uri("/history_entries", through_work_date: through_work_date, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def payroll_payment_attestations(source_user_uuid:, page: 1)
+      uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def create_payroll_payment_attestation(source_time_entry_id:, source_user_uuid:, command_id:, expected_version:, reason:)
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations"), body: {
+        source_time_entry_id: normalized_cockpit_id(source_time_entry_id), source_user_uuid: source_user_uuid,
+        command_id: command_id, expected_version: expected_version, reason: reason
+      })
+    end
+
+    def retract_payroll_payment_attestation(attestation_id:, command_id:, expected_version:, reason:)
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/retract"),
+        body: { command_id: command_id, expected_version: expected_version, reason: reason })
+    end
+
+    def payroll_cockpit_time_entry(entry_id:)
+      request_json(payroll_cockpit_uri("/time_entries/#{normalized_cockpit_id(entry_id)}"),
+        validate_source: false, surface_remote_error: true)
     end
 
     def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
@@ -233,7 +332,7 @@ module TimeTracking
       )
     end
 
-    def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, contract_version: nil, source_line_key: nil, source_kind: nil, total_hours: nil, regular_hours: nil, overtime_hours: nil, payment_method: nil, payment_reference: nil, metadata: {})
+    def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, contract_version: nil, source_line_key: nil, source_kind: nil, total_hours: nil, regular_hours: nil, overtime_hours: nil, payment_method: nil, payment_reference: nil, payment_effective_on: nil, metadata: {})
       request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
@@ -255,6 +354,7 @@ module TimeTracking
           overtime_hours: overtime_hours,
           payment_method: payment_method,
           payment_reference: payment_reference,
+          payment_effective_on: payment_effective_on,
           metadata: metadata
         }.compact
       )
@@ -283,6 +383,7 @@ module TimeTracking
       request["Accept-Encoding"] = "identity"
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
+      request["X-Payroll-Source-Instance-Id"] = @source.expected_source_instance_id if @source.remote_identity_pinned?
       headers.each { |key, value| request[key] = value }
       if body
         request["Content-Type"] = "application/json"
@@ -410,6 +511,14 @@ module TimeTracking
       normalized_id
     end
 
+    def normalized_cockpit_id(value, label: "record")
+      normalized = value.to_s
+      raise Error, "Invalid AIRE #{label} ID" unless normalized.match?(/\A[1-9]\d*\z/)
+
+      normalized
+    end
+
+
     def normalize_external_actor_id(value)
       normalized_id = value.to_s
       raise Error, "Invalid Cornerstone account ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
@@ -418,14 +527,7 @@ module TimeTracking
     end
 
     def delegated_request_json(uri, body:)
-      headers = if @actor.present?
-        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
-      else
-        token = @delegation&.token.to_s
-        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
-
-        { "X-Aire-Delegation-Token" => token }
-      end
+      headers = payroll_actor_headers
       require_secure_payroll_transport!(uri)
 
       request_json(
@@ -436,6 +538,17 @@ module TimeTracking
         headers: headers,
         surface_remote_error: true
       )
+    end
+
+    def payroll_actor_headers
+      if @actor.present?
+        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
+      else
+        token = @delegation&.token.to_s
+        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
+
+        { "X-Aire-Delegation-Token" => token }
+      end
     end
 
     def require_secure_payroll_transport!(uri)

@@ -12,6 +12,7 @@ class StaffRolePolicy
     manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
+    manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
     manage_organization: %w[super_admin org_admin admin],
     manage_platform: %w[super_admin]
   }.freeze
@@ -27,6 +28,7 @@ class StaffRolePolicy
     manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager or admin access required",
+    manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
     manage_platform: "Super admin access required"
   }.freeze
@@ -93,6 +95,9 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_cockpits#correct_time_entry" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#route_settlement_case" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#confirm_employee_mapping" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_cockpits#payment_evidence" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#create_payment_attestation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#retract_payment_attestation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#finalize" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
@@ -156,6 +161,14 @@ class StaffRolePolicy
     return false unless user
 
     CAPABILITY_ROLES.fetch(capability).include?(user.role)
+  end
+
+  # Historical approvals are separate from source/calendar configuration and
+  # must also respect each accountant or manager's assigned client scope.
+  def self.historical_reconciliation_allowed?(user, company)
+    user.present? && company.present? && allowed?(user, :manage_historical_time_reconciliation) &&
+      user.payroll_access_allowed? && company.active? && company.organization.active? &&
+      company.test_workspace_archived_at.nil? && user.accessible_company_ids.include?(company.id)
   end
 
   def self.capabilities_for(user)
