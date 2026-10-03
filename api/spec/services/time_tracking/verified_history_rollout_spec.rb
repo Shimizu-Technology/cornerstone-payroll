@@ -269,4 +269,65 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       .to eq(%w[category:1 category:2])
   end
 
+  it "rejects old scope and does not certify entries left outside approved dispositions" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "2.0", identity_verified_at: Time.current)
+    manifest["source_instance_id"] = source.expected_source_instance_id
+    manifest["history_through_work_date"] = (period.end_date - 1).iso8601
+    expect { described_class.new(manifest: manifest, actor: actor).preview! }
+      .to raise_error(described_class::Error, /latest committed regular/)
+    manifest["history_through_work_date"] = period.end_date.iso8601
+    manifest["issued_entries"].first["source_time_entry_version"] = 2
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 },
+                          { "id" => "99", "source_user_uuid" => uuid, "version" => 3 } ],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "truncated" => false })
+    rollout = described_class.new(manifest: manifest, actor: actor)
+    digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+    expect { rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+      .to raise_error(described_class::Error, /without a verified disposition/)
+    expect(item.check_events.deliveries.count).to eq(0)
+    manifest["reviewed_unpaid_entries"] = [ { "source_time_entry_id" => "99", "source_user_uuid" => uuid, "source_time_entry_version" => 3 } ]
+    rollout = described_class.new(manifest: manifest, actor: actor)
+    digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+    rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner")
+    expect(AireVerifiedHistoryRolloutReceipt.last.coverage_verified).to be(true)
+  end
+
+  it "approves immutable legacy bindings before new payment events and completes scoped history without rewriting old records" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "2.0", identity_verified_at: Time.current)
+    source.update_column(:historical_reconciliation_required, true)
+    mapping = TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee,
+      source_user_id: "91", source_user_uuid: nil)
+    import = create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source)
+    allocation = TimeTrackingEntryAllocation.create!(company: company, time_tracking_source: source, time_tracking_import: import,
+      pay_period: period, payroll_item: item, employee: employee, source_user_id: "91", source_user_uuid: nil,
+      source_time_entry_id: "41", original_work_date: Date.new(2026, 8, 14), line_key: "category:1", source_kind: "current",
+      total_hours: 6.1, regular_hours: 6.1, overtime_hours: 0)
+    old = AirePayrollEntryAcknowledgement.record_for_import!(time_tracking_import: import, status: "committed", occurred_at: Time.current).first
+    manifest["source_instance_id"] = source.expected_source_instance_id
+    manifest["history_through_work_date"] = period.end_date.iso8601
+    manifest["issued_entries"] = []
+    manifest["finalized_batch_entries"] = [{ "payroll_item_id" => item.id, "source_time_entry_id" => "41", "source_line_key" => "category:1",
+      "source_user_uuid" => uuid, "source_time_entry_version" => 2, "regular_hours" => "6.10", "overtime_hours" => "0.00" }]
+    manifest["legacy_identity_bindings"] = [{ "allocation_id" => allocation.id, "mapping_id" => mapping.id,
+      "source_user_uuid" => uuid, "source_time_entry_id" => "41", "source_time_entry_version" => 2,
+      "source_line_key" => "category:1", "original_work_date" => "2026-08-14", "external_batch_id" => import.external_batch_id,
+      "batch_checksum" => import.external_batch_checksum, "source_instance_id" => source.expected_source_instance_id, "source_total_hours" => "6.10" }]
+    allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
+      "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [{ "id" => "41", "version" => 2, "source_user_uuid" => uuid }],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "truncated" => false })
+    allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
+    digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+    described_class.new(manifest: manifest, actor: actor).apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner")
+    expect(allocation.reload.source_user_uuid).to be_nil
+    expect(old.reload.source_user_uuid).to be_nil
+    expect(item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_issued").source_user_uuid).to eq(uuid)
+    expect(source.historical_reconciliation_complete?).to be(true)
+    expect { described_class.new(manifest: manifest, actor: actor).apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+      .not_to change(TimeTrackingLegacyIdentityBinding, :count)
+  end
+
 end

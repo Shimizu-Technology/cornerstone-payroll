@@ -72,7 +72,7 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
       ack.check_event_id = check_event_id
       ack.source_time_entry_id = row.source_time_entry_id
       ack.source_user_id = row.source_user_id
-      ack.source_user_uuid = row.source_user_uuid
+      ack.source_user_uuid = row.verified_source_user_uuid
       ack.contract_version = LINE_CONTRACT_VERSION
       ack.source_line_key = row.line_key
       ack.source_kind = row.source_kind

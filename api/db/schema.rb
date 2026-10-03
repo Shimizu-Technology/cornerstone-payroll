@@ -143,16 +143,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   end
 
   create_table "aire_verified_history_rollout_receipts", force: :cascade do |t|
+    t.string "accepted_manifest_sha256", limit: 64
+    t.bigint "approved_by_id"
     t.bigint "company_id", null: false
     t.datetime "completed_at", null: false
+    t.boolean "coverage_verified", default: false, null: false
     t.datetime "created_at", null: false
     t.integer "identity_count", null: false
     t.string "manifest_sha256", limit: 64, null: false
     t.integer "paid_source_entry_count", null: false
+    t.string "release_owner"
+    t.uuid "source_instance_id"
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "idx_verified_history_approver"
     t.index ["company_id"], name: "index_aire_verified_history_rollout_receipts_on_company_id"
-    t.index ["manifest_sha256"], name: "idx_aire_verified_rollout_receipts_manifest", unique: true
+    t.index ["time_tracking_source_id", "manifest_sha256", "coverage_verified"], name: "idx_verified_history_manifest_approval", unique: true
     t.index ["time_tracking_source_id"], name: "idx_aire_verified_rollout_receipts_source"
   end
 
@@ -3347,7 +3353,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["payroll_item_id"], name: "idx_classification_reconciliations_item", unique: true
     t.index ["time_tracking_source_id"], name: "idx_classification_reconciliations_source"
     t.check_constraint "(source_regular_hours + source_overtime_hours) = (payroll_regular_hours + payroll_overtime_hours)", name: "classification_reconciliation_total_hours"
-    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'complete'::character varying]::text[])", name: "classification_reconciliation_status"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'complete'::character varying::text])", name: "classification_reconciliation_status"
   end
 
   create_table "time_tracking_delegations", force: :cascade do |t|
@@ -3453,6 +3459,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "external_batch_id IS NULL AND external_batch_checksum IS NULL AND contract_version IS NULL AND source_cutoff_at IS NULL OR external_batch_id IS NOT NULL AND external_batch_checksum IS NOT NULL AND contract_version IS NOT NULL AND source_cutoff_at IS NOT NULL", name: "time_tracking_imports_batch_provenance_complete"
   end
 
+  create_table "time_tracking_legacy_identity_bindings", force: :cascade do |t|
+    t.string "accepted_manifest_sha256", limit: 64, null: false
+    t.bigint "approved_by_id", null: false
+    t.string "batch_checksum", limit: 64, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.string "external_batch_id", null: false
+    t.date "original_work_date", null: false
+    t.string "release_owner", null: false
+    t.uuid "source_instance_id", null: false
+    t.string "source_line_key", null: false
+    t.string "source_time_entry_id", null: false
+    t.integer "source_time_entry_version", null: false
+    t.decimal "source_total_hours", precision: 8, scale: 2, null: false
+    t.string "source_user_id", null: false
+    t.uuid "source_user_uuid", null: false
+    t.bigint "time_tracking_employee_mapping_id", null: false
+    t.bigint "time_tracking_entry_allocation_id", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.index ["approved_by_id"], name: "index_time_tracking_legacy_identity_bindings_on_approved_by_id"
+    t.index ["company_id"], name: "index_time_tracking_legacy_identity_bindings_on_company_id"
+    t.index ["employee_id"], name: "index_time_tracking_legacy_identity_bindings_on_employee_id"
+    t.index ["time_tracking_employee_mapping_id"], name: "idx_legacy_binding_mapping"
+    t.index ["time_tracking_entry_allocation_id"], name: "idx_legacy_binding_allocation", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_legacy_binding_source"
+    t.check_constraint "source_time_entry_version >= 0 AND batch_checksum::text ~ '^[0-9a-f]{64}$'::text AND accepted_manifest_sha256::text ~ '^[0-9a-f]{64}$'::text AND length(btrim(release_owner::text)) > 0", name: "legacy_identity_binding_evidence_shape"
+  end
+
   create_table "time_tracking_manual_allocations", force: :cascade do |t|
     t.bigint "classification_reconciliation_id"
     t.uuid "commit_command_id", null: false
@@ -3490,7 +3525,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["time_tracking_source_id"], name: "idx_on_time_tracking_source_id_e71b0095b1"
     t.index ["void_command_id"], name: "index_time_tracking_manual_allocations_on_void_command_id", unique: true
     t.check_constraint "regular_hours >= 0::numeric AND overtime_hours >= 0::numeric AND (regular_hours + overtime_hours) > 0::numeric", name: "manual_time_allocation_positive_hours"
-    t.check_constraint "status::text = ANY (ARRAY['pending_commit'::character varying, 'committed'::character varying, 'issued'::character varying, 'voided'::character varying]::text[])", name: "manual_time_allocation_status"
+    t.check_constraint "status::text = ANY (ARRAY['pending_commit'::character varying::text, 'committed'::character varying::text, 'issued'::character varying::text, 'voided'::character varying::text])", name: "manual_time_allocation_status"
   end
 
   create_table "time_tracking_sources", force: :cascade do |t|
@@ -3500,6 +3535,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.uuid "connection_uuid", default: -> { "gen_random_uuid()" }, null: false
     t.datetime "created_at", null: false
     t.string "expected_source_instance_id"
+    t.boolean "historical_reconciliation_required", default: false, null: false
     t.datetime "identity_verified_at"
     t.datetime "last_synced_at"
     t.string "name", null: false
@@ -3700,6 +3736,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "aire_payroll_events", "time_tracking_sources", on_delete: :restrict
   add_foreign_key "aire_verified_history_rollout_receipts", "companies"
   add_foreign_key "aire_verified_history_rollout_receipts", "time_tracking_sources"
+  add_foreign_key "aire_verified_history_rollout_receipts", "users", column: "approved_by_id"
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
@@ -4123,6 +4160,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "time_tracking_imports", "time_tracking_sources"
   add_foreign_key "time_tracking_imports", "users", column: "applied_by_id"
   add_foreign_key "time_tracking_imports", "users", column: "reconciled_by_id"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "companies"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "employees"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "time_tracking_employee_mappings"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "time_tracking_entry_allocations"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "time_tracking_sources"
+  add_foreign_key "time_tracking_legacy_identity_bindings", "users", column: "approved_by_id"
   add_foreign_key "time_tracking_manual_allocations", "companies"
   add_foreign_key "time_tracking_manual_allocations", "employees"
   add_foreign_key "time_tracking_manual_allocations", "pay_periods"
@@ -4395,5 +4438,74 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     CREATE TRIGGER direct_deposit_payment_confirmations_append_only
     BEFORE UPDATE OR DELETE ON direct_deposit_payment_confirmations
     FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+  SQL
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION protect_legacy_identity_binding() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'Legacy identity bindings are append-only';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM time_tracking_entry_allocations a
+        JOIN time_tracking_imports i ON i.id = a.time_tracking_import_id
+        JOIN time_tracking_sources s ON s.id = a.time_tracking_source_id
+        JOIN payroll_items p ON p.id = a.payroll_item_id
+        JOIN employees e ON e.id = a.employee_id
+        JOIN pay_periods pp ON pp.id = a.pay_period_id
+        JOIN companies c ON c.id = a.company_id
+        JOIN users u ON u.id = NEW.approved_by_id
+        JOIN time_tracking_employee_mappings m ON m.id = NEW.time_tracking_employee_mapping_id
+        WHERE a.id = NEW.time_tracking_entry_allocation_id AND a.source_user_uuid IS NULL
+          AND a.company_id = NEW.company_id AND s.company_id = c.id AND p.company_id = c.id
+          AND e.company_id = c.id AND pp.company_id = c.id AND p.employee_id = e.id
+          AND p.pay_period_id = pp.id AND i.pay_period_id = pp.id AND i.time_tracking_source_id = s.id
+          AND a.time_tracking_source_id = NEW.time_tracking_source_id AND a.employee_id = NEW.employee_id
+          AND a.source_user_id = NEW.source_user_id AND a.source_time_entry_id = NEW.source_time_entry_id
+          AND a.line_key = NEW.source_line_key AND a.original_work_date = NEW.original_work_date
+          AND i.external_batch_id = NEW.external_batch_id AND i.external_batch_checksum = NEW.batch_checksum
+          AND s.expected_source_instance_id::text = NEW.source_instance_id::text
+          AND m.company_id = c.id AND m.time_tracking_source_id = s.id AND m.employee_id = e.id
+          AND m.source_user_id = a.source_user_id AND (m.source_user_uuid IS NULL OR m.source_user_uuid::text = NEW.source_user_uuid::text)
+          AND u.organization_id = c.organization_id AND u.active = true AND u.role IN (0,1,5,6)
+      ) THEN
+        RAISE EXCEPTION 'Legacy identity binding tenant, source, owner, or batch evidence changed';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER legacy_identity_binding_integrity
+    BEFORE INSERT OR UPDATE OR DELETE ON time_tracking_legacy_identity_bindings
+    FOR EACH ROW EXECUTE FUNCTION protect_legacy_identity_binding();
+
+    CREATE OR REPLACE FUNCTION protect_bound_legacy_allocation() RETURNS trigger AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM time_tracking_legacy_identity_bindings WHERE time_tracking_entry_allocation_id = OLD.id) THEN
+        RAISE EXCEPTION 'An allocation with approved legacy identity evidence is immutable';
+      END IF;
+      IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER bound_legacy_allocation_immutable
+    BEFORE UPDATE OR DELETE ON time_tracking_entry_allocations
+    FOR EACH ROW EXECUTE FUNCTION protect_bound_legacy_allocation();
+  SQL
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION protect_verified_history_receipt() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'Verified history receipts are append-only'; END IF;
+      IF NEW.coverage_verified AND (
+        NEW.accepted_manifest_sha256 IS DISTINCT FROM NEW.manifest_sha256 OR
+        NEW.source_instance_id IS NULL OR NEW.release_owner IS NULL OR length(btrim(NEW.release_owner)) = 0 OR
+        NOT EXISTS (SELECT 1 FROM time_tracking_sources s JOIN companies c ON c.id = s.company_id
+          JOIN users u ON u.id = NEW.approved_by_id WHERE s.id = NEW.time_tracking_source_id
+          AND s.company_id = NEW.company_id AND s.expected_source_instance_id::text = NEW.source_instance_id::text
+          AND u.organization_id = c.organization_id AND u.active = true AND u.role IN (0,1,5,6))
+      ) THEN RAISE EXCEPTION 'Verified history receipt requires accepted installation-bound owner approval'; END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER verified_history_receipt_integrity BEFORE INSERT OR UPDATE OR DELETE
+    ON aire_verified_history_rollout_receipts FOR EACH ROW EXECUTE FUNCTION protect_verified_history_receipt();
   SQL
 end

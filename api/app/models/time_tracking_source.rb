@@ -5,6 +5,8 @@ class TimeTrackingSource < ApplicationRecord
   UUID_PATTERN = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i
 
   belongs_to :company
+  has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_legacy_identity_bindings, dependent: :restrict_with_error
   has_many :time_tracking_employee_mappings, dependent: :destroy
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
@@ -22,6 +24,7 @@ class TimeTrackingSource < ApplicationRecord
   validates :source_type, inclusion: { in: SOURCE_TYPES }
   validates :expected_source_instance_id, format: { with: UUID_PATTERN }, allow_nil: true
   validates :source_protocol, :source_protocol_version, :identity_verified_at, presence: true, if: :remote_identity_pinned?
+  validate :history_gate_cannot_be_disabled, on: :update
   validate :source_capabilities_are_strings
   validate :remote_identity_fields_are_complete
   validates :name, uniqueness: { scope: :company_id }
@@ -30,6 +33,15 @@ class TimeTrackingSource < ApplicationRecord
   validate :source_type_must_not_change, on: :update
 
   scope :active, -> { where(active: true) }
+
+  def historical_reconciliation_complete?
+    return true unless historical_reconciliation_required?
+    return false unless remote_identity_pinned?
+
+    aire_verified_history_rollout_receipts.where(company_id: company_id,
+      source_instance_id: expected_source_instance_id, coverage_verified: true)
+      .where("accepted_manifest_sha256 = manifest_sha256").where.not(approved_by_id: nil).where.not(release_owner: nil).exists?
+  end
 
   def shared_secret_configured?
     shared_secret.present?
@@ -50,6 +62,12 @@ class TimeTrackingSource < ApplicationRecord
   end
 
   private
+
+  def history_gate_cannot_be_disabled
+    if historical_reconciliation_required_change == [ true, false ]
+      errors.add(:historical_reconciliation_required, "cannot be cleared through ordinary source setup")
+    end
+  end
 
   def assign_connection_uuid
     self.connection_uuid ||= SecureRandom.uuid

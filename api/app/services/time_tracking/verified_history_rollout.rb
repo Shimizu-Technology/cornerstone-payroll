@@ -72,7 +72,9 @@ module TimeTracking
     def preview!
       validate_structure!
       validate_company!
+      validate_history_scope!
       validate_identities!
+      validate_legacy_bindings!
       validate_checks!
       validate_entries!
       validate_finalized_batch_entries!
@@ -101,19 +103,32 @@ module TimeTracking
         end
       end
       summary = preview!
+      if accepted_manifest_sha256.present? && !history_scope_verified?
+        raise Error, "Accepted history manifest leaves scoped source entries without a verified disposition"
+      end
+      apply_legacy_bindings!(accepted_manifest_sha256: accepted_manifest_sha256, release_owner: release_owner)
       apply_identities!
       apply_deliveries!
       apply_classification_cases!
       apply_exact_entries!
       apply_finalized_batch_payments!
       verify_applied!
-      AireVerifiedHistoryRolloutReceipt.find_or_create_by!(manifest_sha256: @manifest_sha256) do |receipt|
+      approved_coverage = accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present? && history_scope_verified?
+      AireVerifiedHistoryRolloutReceipt.find_or_create_by!(time_tracking_source: @source,
+        manifest_sha256: @manifest_sha256, coverage_verified: approved_coverage) do |receipt|
         receipt.company = @company
         receipt.time_tracking_source = @source
         receipt.identity_count = identities.length
         receipt.paid_source_entry_count = entries.length +
           classification_cases.sum { |row| row.fetch("source_time_entry_ids").length } + finalized_batch_entries.length
         receipt.completed_at = Time.current
+        receipt.source_instance_id = @source.expected_source_instance_id
+        if accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present?
+          receipt.accepted_manifest_sha256 = @manifest_sha256
+          receipt.approved_by = actor
+          receipt.release_owner = release_owner.to_s.strip
+          receipt.coverage_verified = history_scope_verified?
+        end
       end
       summary
     end
@@ -213,6 +228,94 @@ module TimeTracking
       end
     end
 
+    def legacy_identity_bindings
+      manifest.fetch("legacy_identity_bindings", [])
+    end
+
+    def legacy_binding_service
+      @legacy_binding_service ||= LegacyIdentityBindingService.new(source: @source, actor: actor,
+        manifest_sha256: @manifest_sha256, client: @client)
+    end
+
+    def validate_legacy_bindings!
+      raise Error, "Legacy bindings must be a list" unless legacy_identity_bindings.is_a?(Array)
+      @legacy_bindings_by_allocation = {}
+      legacy_identity_bindings.each do |evidence|
+        identity = identities.find { |row| row.fetch("source_user_uuid") == evidence.fetch("source_user_uuid") }
+        raise Error, "Legacy binding has no verified employee identity" unless identity
+        binding = legacy_binding_service.verify!(evidence: evidence, identity: identity)
+        if @legacy_bindings_by_allocation.key?(binding.time_tracking_entry_allocation_id)
+          raise Error, "Legacy binding allocation is duplicated"
+        end
+        @legacy_bindings_by_allocation[binding.time_tracking_entry_allocation_id] = binding
+      end
+    rescue LegacyIdentityBindingService::Error, KeyError => e
+      raise Error, e.message
+    end
+
+    def apply_legacy_bindings!(accepted_manifest_sha256:, release_owner:)
+      @legacy_bindings_by_allocation.each_value do |binding|
+        legacy_binding_service.apply!(binding: binding, accepted_manifest_sha256: accepted_manifest_sha256,
+          release_owner: release_owner)
+      end
+    rescue LegacyIdentityBindingService::Error => e
+      raise Error, e.message
+    end
+
+    def validate_history_scope!
+      date = manifest["history_through_work_date"]
+      if date.blank?
+        raise Error, "History scope is required for an existing source connection" if @source.historical_reconciliation_required? || Rails.env.production?
+        return
+      end
+      @history_through_work_date = Date.iso8601(date)
+      latest_regular_end = @company.pay_periods.where(status: "committed", cycle: "regular", run_purpose: "regular").maximum(:end_date)
+      if latest_regular_end && @history_through_work_date < latest_regular_end
+        raise Error, "History scope does not include the latest committed regular payroll"
+      end
+      @history_inventory = []
+      page = 1
+      loop do
+        raise Error, "Historical source inventory exceeded the bounded page limit" if page > 100
+        response = @client.payroll_cockpit_history_entries(through_work_date: date, page: page)
+        rows = response.fetch("time_entries")
+        pagination = response.fetch("pagination")
+        unless rows.is_a?(Array) && pagination["current_page"] == page && pagination["total_pages"].is_a?(Integer) &&
+               pagination["total_pages"].between?(0, 100) && pagination["truncated"] == false
+          raise Error, "AIRE returned incomplete historical source inventory"
+        end
+        @history_inventory.concat(rows)
+        break if page >= pagination["total_pages"]
+        page += 1
+      end
+      keys = @history_inventory.map { |row| [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ] }
+      raise Error, "AIRE returned duplicate historical source entries" unless keys.uniq.length == keys.length
+    rescue Date::Error, KeyError, TypeError => e
+      raise Error, "Historical source scope is invalid or incomplete: #{e.message}"
+    end
+
+    def history_scope_verified?
+      return false unless @history_inventory && @source.remote_identity_pinned? &&
+                          manifest["source_instance_id"] == @source.expected_source_instance_id
+      paid = entries + finalized_batch_entries + classification_cases.flat_map do |row|
+        row.fetch("source_entries").map { |entry| entry.merge("source_user_uuid" => row.fetch("source_user_uuid")) }
+      end
+      paid_keys = paid.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row["source_time_entry_version"] ] }.uniq
+      unpaid = Array(manifest["reviewed_unpaid_entries"])
+      held = Array(manifest["held_source_entries"])
+      unpaid_keys = unpaid.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
+      held_keys = held.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
+      dispositions = paid_keys + unpaid_keys + held_keys
+      return false unless dispositions.uniq.length == dispositions.length
+      @history_inventory.all? do |row|
+        key = [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ]
+        next false unless dispositions.include?(key)
+        !held_keys.include?(key) || row.dig("lifecycle", "status") == "payment_attested_pending_evidence"
+      end
+    rescue KeyError
+      false
+    end
+
     def validate_checks!
       checks.each do |row|
         item = PayrollItem.includes(:check_events, :pay_period).find_by(id: row.fetch("payroll_item_id"))
@@ -290,13 +393,16 @@ module TimeTracking
         allocation = allocations.one? ? allocations.first : nil
         unless item && allocation && allocation.time_tracking_import.finalized_batch? &&
                allocation.time_tracking_source_id == @source.id &&
-               allocation.source_user_uuid == row.fetch("source_user_uuid") &&
+               (allocation.verified_source_user_uuid || @legacy_bindings_by_allocation[allocation.id]&.source_user_uuid) == row.fetch("source_user_uuid") &&
                hours(allocation.regular_hours) == hours(row.fetch("regular_hours")) &&
                hours(allocation.overtime_hours) == hours(row.fetch("overtime_hours")) &&
                checks.any? { |check| check.fetch("payroll_item_id").to_i == item.id }
           raise Error, "Finalized AIRE batch entry #{row.fetch('source_time_entry_id')} changed"
         end
         @verified_finalized_allocations << allocation
+      end
+      unless (@legacy_bindings_by_allocation.keys - @verified_finalized_allocations.map(&:id)).empty?
+        raise Error, "Legacy binding is outside the manifest's finalized payable lines"
       end
       item_ids = finalized_batch_entries.map { |row| row.fetch("payroll_item_id").to_i }.uniq
       existing_ids = TimeTrackingEntryAllocation.where(payroll_item_id: item_ids).pluck(:id).sort

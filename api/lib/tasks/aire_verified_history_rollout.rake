@@ -40,7 +40,9 @@ namespace :aire_rollout do
     manifest = TimeTracking::VerifiedHistoryRollout.load_file!(
       path: ENV.fetch("AIRE_ROLLOUT_MANIFEST_PATH"), expected_sha256: expected_sha256
     )
-    unless AireVerifiedHistoryRolloutReceipt.exists?(
+    source = TimeTrackingSource.find(manifest.fetch("source_id"))
+    unless source.historical_reconciliation_complete? && AireVerifiedHistoryRolloutReceipt.exists?(
+      coverage_verified: true, source_instance_id: source.expected_source_instance_id,
       company_id: manifest.fetch("company_id"), time_tracking_source_id: manifest.fetch("source_id"),
       manifest_sha256: expected_sha256
     )

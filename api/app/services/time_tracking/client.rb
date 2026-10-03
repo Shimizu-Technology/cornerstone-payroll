@@ -198,6 +198,17 @@ module TimeTracking
       )
     end
 
+    def payroll_cockpit_history_entries(through_work_date:, page: 1)
+      uri = payroll_cockpit_uri("/history_entries", through_work_date: through_work_date, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def payroll_cockpit_time_entry(entry_id:)
+      request_json(payroll_cockpit_uri("/time_entries/#{normalized_cockpit_id(entry_id)}"),
+        validate_source: false, surface_remote_error: true)
+    end
+
     def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
       query = {
         external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
