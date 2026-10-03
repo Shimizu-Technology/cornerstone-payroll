@@ -137,6 +137,11 @@ fixture = ApplicationRecord.transaction do
     source_type: "aire_services",
     base_url: aire_base_url,
     shared_secret: aire.fetch("shared_secret"),
+    expected_source_instance_id: aire.fetch("integration_profile").fetch("source_instance_id"),
+    source_protocol: aire.fetch("integration_profile").fetch("protocol"),
+    source_protocol_version: aire.fetch("integration_profile").fetch("protocol_version"),
+    source_capabilities: aire.fetch("integration_profile").fetch("capabilities"),
+    identity_verified_at: Time.current,
     active: true
   )
   TimeTrackingDelegation.create!(

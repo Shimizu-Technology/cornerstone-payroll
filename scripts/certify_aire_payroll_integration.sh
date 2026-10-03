@@ -219,6 +219,14 @@ api_call 201 "publish the next available AIRE payroll period" POST \
     '
 )
 
+(
+  cd "$ROOT_DIR/api"
+  certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+  RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+    AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" \
+    bundle exec rails runner "$ROOT_DIR/scripts/local_certification/verify_history_contract.rb"
+)
+
 OVERVIEW_BEFORE="$TEMP_DIR/overview-before.json"
 api_call 200 "load live AIRE hours in Cornerstone" GET \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit" "$OVERVIEW_BEFORE"
