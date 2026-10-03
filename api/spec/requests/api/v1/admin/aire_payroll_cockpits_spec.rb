@@ -909,5 +909,4 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       expect(response).not_to have_http_status(:created)
     end
   end
-
 end

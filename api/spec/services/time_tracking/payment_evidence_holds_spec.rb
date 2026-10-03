@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "rails_helper"
 RSpec.describe TimeTracking::PaymentEvidenceHolds do
   let(:company) { create(:company) }
@@ -85,5 +86,4 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
       command_id: command_id, reason: reason) }.to raise_error(TimeTracking::Client::Error, /too large/)
     expect(client).to have_received(:payroll_payment_attestations).exactly(10).times
   end
-
 end
