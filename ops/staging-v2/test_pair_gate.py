@@ -13,6 +13,14 @@ SOURCE = Path(__file__).resolve().parent
 PAYROLL_SHA = "1" * 40
 AIRE_SHA = "2" * 40
 WORKFLOW_SHA = "3" * 40
+PUBLISH_JOBS = {
+    "cornerstone-payroll": ["backend", "frontend", "browser", "Staging v2 configuration",
+        "Publish staging v2 images (cornerstone-payroll-api, api, api/Dockerfile)",
+        "Publish staging v2 images (cornerstone-payroll-web, web, web/Dockerfile)"],
+    "aire-services": ["backend", "frontend", "staging-configuration", "publish-gate",
+        "publish (aire-services-api, backend, backend/Dockerfile)",
+        "publish (aire-services-web, frontend, frontend/Dockerfile)"],
+}
 
 
 class PairGateTest(unittest.TestCase):
@@ -48,6 +56,17 @@ class PairGateTest(unittest.TestCase):
                 "run_id": 101, "run_attempt": 1,
             },
         }
+        self.model["candidates"] = {}
+        for repo, sha, run_id, workflow, name in (
+                ("cornerstone-payroll", PAYROLL_SHA, 201, "quality.yml", "Quality"),
+                ("aire-services", AIRE_SHA, 202, "staging-v2.yml", "Staging v2 images")):
+            self.model["candidates"][repo] = {
+                "runs": [{"databaseId": run_id, "headSha": sha, "createdAt": "2026-10-03T09:00:00Z"}],
+                "run": {"id": run_id, "status": "completed", "conclusion": "success", "event": "push",
+                        "head_branch": "staging-v2", "head_sha": sha, "name": name,
+                        "path": ".github/workflows/" + workflow, "run_attempt": 1},
+                "jobs": [{"name": job, "status": "completed", "conclusion": "success"} for job in PUBLISH_JOBS[repo]],
+            }
         self.install_mock("gh", '''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -59,10 +78,27 @@ if args[:2] == ["run", "list"]:
         if model.get("lookup_failure"):
             sys.exit(1)
         print(json.dumps(model["runs"]))
+    elif "--commit" in args:
+        repo = args[args.index("--repo") + 1].split("/")[-1]
+        if model.get("candidate_lookup_failure"):
+            sys.exit(1)
+        print(json.dumps(model["candidates"][repo]["runs"]))
     else:
         print("1" * 40 if workflow == "quality.yml" else "2" * 40)
 elif args[0] == "api":
-    print(json.dumps(model["run"]))
+    endpoint = next(arg for arg in args if arg.startswith("repos/"))
+    candidate = next((row for row in model["candidates"].values() if f"/runs/{row['run']['id']}" in endpoint), None)
+    if candidate and "/jobs?" in endpoint:
+        assert "--paginate" in args and "--slurp" in args
+        assert f"/attempts/{candidate['run']['run_attempt']}/" in endpoint
+        if model.get("candidate_jobs_failure"):
+            sys.exit(1)
+        # Prove pagination: required image jobs are on a separate response page.
+        print(json.dumps([{"jobs": candidate["jobs"][:4]}, {"jobs": candidate["jobs"][4:]}]))
+    elif candidate:
+        print(json.dumps(candidate["run"]))
+    else:
+        print(json.dumps(model["run"]))
 elif args[:2] == ["run", "download"]:
     if model.get("artifact_missing"):
         sys.exit(1)
@@ -193,6 +229,72 @@ esac
         (state / "deployed-payroll-sha").write_text(PAYROLL_SHA)
         (state / "deployed-aire-sha").write_text(AIRE_SHA)
         self.assert_held()
+
+    def test_direct_deploy_rejects_failed_or_pending_exact_candidate_workflow(self):
+        for repo in PUBLISH_JOBS:
+            for status, conclusion in (("completed", "failure"), ("queued", None), ("in_progress", None)):
+                with self.subTest(repo=repo, status=status):
+                    self.model["candidates"][repo]["run"].update(status=status, conclusion=conclusion)
+                    result = self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101"))
+                    self.assertNotEqual(result.returncode, 0)
+            self.model["candidates"][repo]["run"].update(status="completed", conclusion="success")
+
+    def test_direct_deploy_rejects_missing_or_wrong_head_candidate(self):
+        for repo in PUBLISH_JOBS:
+            original = self.model["candidates"][repo]["runs"]
+            self.model["candidates"][repo]["runs"] = []
+            self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+            self.model["candidates"][repo]["runs"] = original
+            candidate_run = self.model["candidates"][repo]["run"]
+            original_sha = candidate_run["head_sha"]
+            candidate_run["head_sha"] = "f" * 40
+            self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+            candidate_run["head_sha"] = original_sha
+
+    def test_direct_deploy_requires_both_image_jobs_not_just_overall_success(self):
+        for repo in PUBLISH_JOBS:
+            for position in (-2, -1):
+                job = self.model["candidates"][repo]["jobs"][position]
+                for conclusion in ("skipped", "failure", None):
+                    with self.subTest(repo=repo, image=job["name"], conclusion=conclusion):
+                        job["conclusion"] = conclusion
+                        self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+                job["conclusion"] = "success"
+
+    def test_candidate_workflow_proof_rejects_wrong_workflow_event_or_branch(self):
+        for key, wrong in (("path", ".github/workflows/untrusted.yml"), ("event", "workflow_dispatch"), ("head_branch", "main")):
+            run = self.model["candidates"]["cornerstone-payroll"]["run"]
+            original = run[key]
+            run[key] = wrong
+            self.assertNotEqual(self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA)).returncode, 0)
+            run[key] = original
+
+    def test_candidate_mode_for_ci_requires_quality_and_published_images(self):
+        result = self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.model["candidates"]["aire-services"]["jobs"] = self.model["candidates"]["aire-services"]["jobs"][:-1]
+        self.assertNotEqual(self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA)).returncode, 0)
+
+    def test_candidate_lookup_or_paginated_jobs_error_holds_direct_deployment(self):
+        for key in ("candidate_lookup_failure", "candidate_jobs_failure"):
+            self.model[key] = True
+            self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+            self.model[key] = False
+
+    def test_superseded_image_gate_and_missing_normal_quality_job_are_held(self):
+        candidate = self.model["candidates"]["aire-services"]
+        candidate["jobs"][3]["conclusion"] = "skipped"
+        self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+        candidate["jobs"][3]["conclusion"] = "success"
+        payroll = self.model["candidates"]["cornerstone-payroll"]
+        payroll["jobs"] = payroll["jobs"][1:]
+        self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+
+    def test_latest_exact_candidate_attempt_pending_does_not_reuse_prior_success(self):
+        candidate = self.model["candidates"]["cornerstone-payroll"]
+        candidate["runs"].append({"databaseId": 208, "headSha": PAYROLL_SHA, "createdAt": "2026-10-03T10:00:00Z"})
+        candidate["run"].update(id=208, status="queued", conclusion=None)
+        self.assertNotEqual(self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
 
 
 if __name__ == "__main__":

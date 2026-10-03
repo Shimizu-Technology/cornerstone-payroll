@@ -64,6 +64,8 @@ ops/staging-v2/deploy.sh FULL_PAYROLL_COMMIT_SHA FULL_AIRE_COMMIT_SHA CERTIFICAT
 
 This verifies the provider run's repository, workflow path, dispatch event, staging branch, exact pair, completed success, current attempt, and matching artifact. The successful deployment records `deployed-certificate-run-id` alongside the two deployed SHAs. There is no uncertified bootstrap or bypass flag.
 
+Both certification CI and every direct deployment also verify each candidate's latest exact-SHA staging-v2 push workflow: Payroll Quality and AIRE Staging v2 images. All normal quality jobs and both API/web image publication jobs must have completed successfully in that workflow's current attempt. A successful overall workflow with skipped publication is insufficient. The verifier reads all job pages; missing, pending, failed, wrong-head, wrong-workflow or unavailable candidate evidence holds deployment. CI runs the shared verifier from its trusted caller revision before starting the synthetic drill. The dispatch workflow revision may differ from the candidate Payroll SHA only because the candidates' own quality and image evidence are independently verified.
+
 Local gate tests use only temporary files and mocked CLIs:
 
 ```bash
