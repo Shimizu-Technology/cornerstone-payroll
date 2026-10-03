@@ -830,6 +830,7 @@ export interface AirePayrollCockpitOverview {
     external_payroll_item_id?: string;
     source_time_entry_id: string;
     source_line_key?: string;
+    // AIRE serializes exact decimal hours as a string.
     total_hours?: string;
     payment_method?: string;
     payment_reference?: string;
