@@ -34,6 +34,7 @@ import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
   regular: 'Regular payroll',
@@ -578,7 +579,7 @@ export function PayPeriods() {
         return;
       }
 
-      const today = new Date();
+      const today = new Date(`${guamBusinessDate()}T12:00:00`);
       let startDate: Date;
       let endDate: Date;
       if (schedule.period_rule === 'semimonthly') {

@@ -18,6 +18,7 @@ class TimeTrackingSource < ApplicationRecord
   encrypts :shared_secret
 
   before_validation :assign_connection_uuid, on: :create
+  before_validation :require_existing_payroll_history, on: :create
 
   validates :name, :source_type, :base_url, :shared_secret, presence: true
   validates :connection_uuid, presence: true, uniqueness: true
@@ -62,6 +63,14 @@ class TimeTrackingSource < ApplicationRecord
   end
 
   private
+
+  def require_existing_payroll_history
+    return unless source_type == "aire_services" && company
+
+    if company.pay_periods.where(status: "committed", cycle: "regular", run_purpose: "regular").exists?
+      self.historical_reconciliation_required = true
+    end
+  end
 
   def history_gate_cannot_be_disabled
     if historical_reconciliation_required_change == [ true, false ]

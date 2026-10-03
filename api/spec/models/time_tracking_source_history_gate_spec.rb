@@ -2,6 +2,21 @@
 
 require "rails_helper"
 RSpec.describe TimeTrackingSource do
+  it "requires historical approval when a new AIRE connection is added after committed regular payroll" do
+    company = create(:company)
+    create(:pay_period, :committed, company: company)
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    expect(source.historical_reconciliation_required?).to be(true)
+    expect(source.historical_reconciliation_complete?).to be(false)
+  end
+
+  it "allows a new empty connection and does not treat adjustment payroll as a regular history anchor" do
+    company = create(:company)
+    create(:pay_period, :committed, company: company, run_purpose: "adjustment")
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    expect(source.historical_reconciliation_required?).to be(false)
+  end
+
   it "keeps existing connections blocked until approved installation-bound historical coverage exists" do
     source = create(:time_tracking_source, expected_source_instance_id: SecureRandom.uuid,
       source_protocol: "shimizu_time_payroll", source_protocol_version: "2.0", identity_verified_at: Time.current)

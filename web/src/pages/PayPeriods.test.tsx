@@ -172,9 +172,11 @@ describe('fixed semimonthly paydays', () => {
     ['2028-02-05', '2028-02-01', '2028-02-15', '2028-02-29'],
     ['2026-02-20', '2026-02-16', '2026-02-28', '2026-03-15'],
     ['2026-12-20', '2026-12-16', '2026-12-31', '2027-01-15'],
+    ['2026-02-16T00:30:00+10:00', '2026-02-16', '2026-02-28', '2026-03-15'],
+    ['2027-01-01T00:30:00+10:00', '2027-01-01', '2027-01-15', '2027-01-31'],
   ])('suggests the scheduled payday for %s without shifting weekends', async (today, start, end, payday) => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(`${today}T12:00:00+10:00`));
+    vi.setSystemTime(new Date(today.includes('T') ? today : `${today}T12:00:00+10:00`));
     apiMocks.activeCompany = { id: 11 };
     apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
     apiMocks.companyGet.mockResolvedValue({ company: { next_check_number: 1001 } });

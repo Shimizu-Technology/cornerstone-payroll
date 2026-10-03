@@ -163,6 +163,7 @@ const dispositionLabel = (entry: AirePayrollTimeEntry) => {
   if (disposition === 'open_clock') return 'Missing punch';
   if (disposition === 'denied_approval' || disposition === 'denied_overtime') return 'Not payable';
   if (disposition === 'pending_overtime') return 'Overtime approval needed';
+  if (disposition === 'pending_payment_attestation') return 'Payment confirmation needed';
   if (disposition === 'pending_approval') return 'Awaiting approval';
   return entry.state.approval_status.replaceAll('_', ' ');
 };

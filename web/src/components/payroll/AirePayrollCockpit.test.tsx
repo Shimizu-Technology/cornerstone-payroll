@@ -484,6 +484,18 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
   });
 
+  it('shows the payment hold when historical payment confirmation is pending', async () => {
+    const data = fixtures();
+    data.entries.time_entries = [{ ...timeEntry, state: { ...timeEntry.state,
+      approval_status: 'approved', overtime_status: 'not_required', payable_now: false,
+      payroll_disposition: 'pending_payment_attestation',
+      payroll_exclusion_reasons: ['pending_payment_attestation'],
+    } }];
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    expect(await screen.findByText('Payment confirmation needed')).toBeTruthy();
+  });
+
   it('reviews ordinary clock-entry overtime in AIRE without requiring a base-time approval', async () => {
     const user = userEvent.setup();
     const data = fixtures();
