@@ -27,9 +27,9 @@ module AirePayrollCalendar
       previous_pay_date = previous_regular_pay_date if schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
       cutoff_date = if previous_pay_date
                       previous_pay_date + schedule.time_tracking_cutoff_days
-                    else
+      else
                       pay_period.pay_date - schedule.time_tracking_cutoff_days
-                    end
+      end
       cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
       cutoff_at = Time.find_zone!(TIME_ZONE).local(
         cutoff_date.year,
@@ -70,14 +70,25 @@ module AirePayrollCalendar
         end
         fail_contract!("Confirm a semimonthly pay schedule before publishing this period to AIRE.", "pay_schedule_confirmation_required")
       end
-      fail_contract!("AIRE payroll cutoff must remain seven calendar days before pay date", "cutoff_rule_invalid") unless pay_schedule.payroll_cutoff_days_before == CUTOFF_DAYS_BEFORE
+      unless pay_schedule.pay_date_rule == "semimonthly_15th_and_month_end" &&
+             pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday" &&
+             pay_schedule.time_tracking_cutoff_days == 7 && pay_schedule.payroll_cutoff_at_minutes == 1_020
+        fail_contract!("Confirm AIRE's fixed 15th/month-end paydays and seven days after the previous regular payday at 17:00 Guam", "cutoff_rule_invalid")
+      end
+      fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
+      unless pay_period.pay_date == pay_schedule.scheduled_pay_date_for(pay_period.end_date)
+        fail_contract!("Use the fixed regular scheduled payday before publishing to AIRE.", "pay_date_invalid")
+      end
       previous_regular_pay_date if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
       if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday" &&
          previous_regular_pay_date + pay_schedule.time_tracking_cutoff_days >= pay_period.pay_date
         fail_contract!("The time-tracking lock must fall before this payroll's pay date.", "cutoff_after_payday")
       end
-      fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless pay_period.resolved_company_workweek&.confirmed?
-      fail_contract!("AIRE payroll periods must be the 1st–15th or 16th–month end", "period_dates_invalid") unless semimonthly_dates?
+      workweek = pay_period.resolved_company_workweek
+      fail_contract!("Confirm the legal overtime workweek before publishing this period", "workweek_confirmation_required") unless workweek&.confirmed?
+      unless workweek.starts_on_weekday.zero? && workweek.starts_at_minutes.zero? && workweek.timezone == TIME_ZONE
+        fail_contract!("AIRE currently supports a Sunday midnight Guam overtime workweek; resolve the workweek before publishing", "workweek_unsupported")
+      end
       fail_contract!("The pay date must be after the period end", "pay_date_invalid") unless pay_period.pay_date > pay_period.end_date
 
       true
@@ -102,6 +113,9 @@ module AirePayrollCalendar
       date = candidates.first
       unless date && date < pay_period.pay_date
         fail_contract!("The previous regular payday must precede this payroll's pay date.", "previous_regular_payday_invalid")
+      end
+      unless date == pay_schedule.scheduled_pay_date_for(pay_period.start_date - 1.day)
+        fail_contract!("The previous regular payday must use the fixed scheduled date.", "previous_regular_payday_invalid")
       end
       @previous_regular_pay_date = date
     end

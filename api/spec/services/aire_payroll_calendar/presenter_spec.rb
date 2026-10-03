@@ -11,7 +11,10 @@ RSpec.describe AirePayrollCalendar::Presenter do
       company: company,
       frequency: "semimonthly",
       period_rule: "semimonthly",
-      pay_date_rule: "manual",
+      pay_date_rule: "semimonthly_15th_and_month_end",
+      time_tracking_cutoff_rule: "after_previous_regular_payday",
+      time_tracking_cutoff_days: 7,
+      payroll_cutoff_at_minutes: 1020,
       timezone: "Pacific/Guam",
       source: "operator_confirmed",
       confirmation_status: "confirmed",
@@ -35,6 +38,11 @@ RSpec.describe AirePayrollCalendar::Presenter do
       notes: "Confirmed Sunday workweek"
     )
   end
+  let!(:previous_regular) do
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 9, 16), end_date: Date.new(2026, 9, 30), pay_date: Date.new(2026, 10, 15))
+  end
+
   let(:pay_period) do
     create(
       :pay_period,
@@ -43,14 +51,14 @@ RSpec.describe AirePayrollCalendar::Presenter do
       company_workweek: workweek,
       start_date: Date.new(2026, 10, 1),
       end_date: Date.new(2026, 10, 15),
-      pay_date: Date.new(2026, 10, 25)
+      pay_date: Date.new(2026, 10, 31)
     )
   end
 
   it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
     state = described_class.call(
       pay_period,
-      now: Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
+      now: Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
     )
 
     expect(state).to include(
@@ -118,7 +126,9 @@ RSpec.describe AirePayrollCalendar::Presenter do
       delivery_status: "delivered",
       delivered_at: Time.find_zone!("Pacific/Guam").local(2026, 10, 17, 17)
     )
-    pay_period.update!(pay_date: Date.new(2026, 11, 5))
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+    pay_period.update!(start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 30))
 
     state = described_class.call(
       pay_period,

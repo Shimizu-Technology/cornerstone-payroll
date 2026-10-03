@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 
@@ -161,5 +161,35 @@ describe('PayPeriods test workspaces', () => {
       expect(screen.queryByRole('button', { name: action })).toBeNull();
     }
     expect(screen.queryByText('Payroll Workflow')).toBeNull();
+  });
+});
+
+describe('fixed semimonthly paydays', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ['2026-02-05', '2026-02-01', '2026-02-15', '2026-02-28'],
+    ['2028-02-05', '2028-02-01', '2028-02-15', '2028-02-29'],
+    ['2026-02-20', '2026-02-16', '2026-02-28', '2026-03-15'],
+    ['2026-12-20', '2026-12-16', '2026-12-31', '2027-01-15'],
+    ['2026-02-16T00:30:00+10:00', '2026-02-16', '2026-02-28', '2026-03-15'],
+    ['2027-01-01T00:30:00+10:00', '2027-01-01', '2027-01-15', '2027-01-31'],
+  ])('suggests the scheduled payday for %s without shifting weekends', async (today, start, end, payday) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(today.includes('T') ? today : `${today}T12:00:00+10:00`));
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.companyGet.mockResolvedValue({ company: { next_check_number: 1001 } });
+    apiMocks.payScheduleGet.mockResolvedValue({ pay_schedule_settings: { pay_schedule: {
+      confirmation_status: 'confirmed', frequency: 'semimonthly', period_rule: 'semimonthly',
+      pay_date_rule: 'semimonthly_15th_and_month_end',
+    } } });
+
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    await waitFor(() => expect((screen.getByLabelText('Pay Date') as HTMLInputElement).value).toBe(payday));
+    expect((screen.getByLabelText('Start Date') as HTMLInputElement).value).toBe(start);
+    expect((screen.getByLabelText('End Date') as HTMLInputElement).value).toBe(end);
+    expect(screen.getByText(/including weekends and holidays/)).toBeTruthy();
   });
 });

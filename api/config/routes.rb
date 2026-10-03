@@ -274,6 +274,11 @@ Rails.application.routes.draw do
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :manual_review
+            get :payment_evidence
+            post :payment_attestations, action: :create_payment_attestation
+            post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post :manual_allocations, action: :create_manual_allocation
+            post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
             get :exceptions
             get :settlement_cases
@@ -371,6 +376,7 @@ Rails.application.routes.draw do
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
         post "payroll_items/:payroll_item_id/check/mark_delivered", to: "checks#mark_delivered", as: :payroll_item_check_mark_delivered
         patch "payroll_items/:payroll_item_id/check_number",      to: "checks#update_check_number", as: :payroll_item_check_number
+        post "payroll_items/:payroll_item_id/direct_deposit/confirm_payment", to: "checks#confirm_direct_deposit_payment"
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
         # Replace (uncashed) — void + cut a corrected check on the same item.
@@ -485,6 +491,8 @@ Rails.application.routes.draw do
             post :mark_printed
             post :mark_paid
             post :void_check
+            get :payroll_matches
+            post :supersede_with_payroll_item
             get :check_pdf
             get :voucher_pdf
             get :history

@@ -34,6 +34,7 @@ import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
   regular: 'Regular payroll',
@@ -578,7 +579,7 @@ export function PayPeriods() {
         return;
       }
 
-      const today = new Date();
+      const today = new Date(`${guamBusinessDate()}T12:00:00`);
       let startDate: Date;
       let endDate: Date;
       if (schedule.period_rule === 'semimonthly') {
@@ -606,8 +607,12 @@ export function PayPeriods() {
 
       const payDate = schedule.pay_date_rule === 'days_after_period_end'
         ? new Date(endDate)
+        : schedule.pay_date_rule === 'semimonthly_15th_and_month_end'
+          ? endDate.getDate() === 15
+            ? new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0)
+            : new Date(endDate.getFullYear(), endDate.getMonth() + 1, 15)
         : null;
-      if (payDate) payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
+      if (payDate && schedule.pay_date_rule === 'days_after_period_end') payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
 
       const selectedPayDate = payDate ? toDateInput(payDate) : '';
       if (!createDatesEditedRef.current) {
@@ -619,7 +624,7 @@ export function PayPeriods() {
         }));
         if (!isComparisonOnlyPayDate(selectedPayDate)) void loadCurrentNextCheckNumber();
       }
-      setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
+      setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${schedule.pay_date_rule === 'semimonthly_15th_and_month_end' ? '; scheduled paydays are the 15th and month end, including weekends and holidays' : payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
     } catch {
       if (!isCurrentRequest()) return;
       if (!createDatesEditedRef.current) {

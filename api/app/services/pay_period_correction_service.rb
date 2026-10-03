@@ -48,6 +48,9 @@ class PayPeriodCorrectionService
       raise InvalidStateError, "Only committed pay periods can be voided" unless locked.committed?
       raise AlreadyVoidedError, "This pay period has already been voided" if locked.voided?
       raise AlreadySupersededError, "This pay period already has a correction run" if locked.superseded_by_id.present?
+      if NonEmployeeCheckSupersession.joins(:payroll_item).where(payroll_items: { pay_period_id: locked.id }).exists?
+        raise InvalidStateError, "This pay period contains a payroll check linked to a duplicate software record; review that reconciliation before voiding"
+      end
       PayrollLiabilityPaymentGuard.ensure_clear!(
         pay_period: locked,
         error_class: InvalidStateError,

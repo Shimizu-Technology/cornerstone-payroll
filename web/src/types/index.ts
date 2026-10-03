@@ -853,6 +853,7 @@ export interface AirePayrollCockpitOverview {
 export interface AirePayrollManualReviewAdjustment {
   source_time_entry_id: string;
   source_kind: 'current' | 'carryover' | 'correction';
+  source_time_entry_version?: number;
   original_work_date: string;
   category?: { id?: string | number; key?: string | null; name?: string | null } | null;
   total_hours: number;
@@ -890,6 +891,21 @@ export interface AirePayrollManualReview {
   start_date: string;
   end_date: string;
   generated_at: string;
+  payment_attestations?: Array<{
+    id: number; source_time_entry_id: string; source_user_uuid: string; hours: number;
+    original_work_date: string; status: string; attested_at: string; source_changed: boolean;
+    evidence_needed: string;
+  }>;
+  cornerstone_manual_allocations?: Array<{
+    id: number; employee_name: string; source_time_entry_id: string; original_work_date: string;
+    regular_hours: number; overtime_hours: number; status: string; last_sync_error?: string;
+  }>;
+  historical_classification_reviews?: Array<{
+    id: number; employee_name: string; source_entry_count: number; check_number: string;
+    source_regular_hours: number; source_overtime_hours: number;
+    payroll_regular_hours: number; payroll_overtime_hours: number;
+    gross_wage_difference: number; status: string; note: string;
+  }>;
   employees: AirePayrollManualReviewEmployee[];
   exclusions: AirePayrollManualReviewExclusion[];
   issues: {
@@ -1734,9 +1750,14 @@ export interface CheckListMeta {
   check_stock_type: CheckStockType;
 }
 
+export interface DirectDepositItem {
+  id: number; employee_id: number; employee_name: string; net_pay: number;
+  payment_confirmation?: { settled_on: string; bank_reference: string; confirmed_at: string } | null;
+}
+
 export interface CheckListResponse {
   checks: CheckItem[];
-  direct_deposit_items: Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>;
+  direct_deposit_items: DirectDepositItem[];
   meta: CheckListMeta;
 }
 
@@ -2218,6 +2239,7 @@ export type PaymentPeriodType = 'none' | 'pay_period' | 'month' | 'quarter' | 'y
 export type OutgoingPaymentMethod = 'check' | 'ach' | 'eftps' | 'wire' | 'card' | 'cash' | 'other';
 
 export interface NonEmployeeCheck {
+  supersession?: { payroll_item_id: number; payroll_check_number: string; reason: string; linked_at: string } | null;
   id: number;
   pay_period_id: number | null;
   company_id: number;
@@ -2351,4 +2373,30 @@ export interface DashboardStats {
   last_payroll_total?: number;
   ytd_payroll_total: number;
   pending_approvals: number;
+}
+
+export interface AirePaymentEvidenceHold {
+  id: string;
+  version: number;
+  source_time_entry_id: string;
+  source_user_uuid: string;
+  source_time_entry_version: number;
+  employee_name: string;
+  work_date: string;
+  hours: number;
+  status: string;
+  reason: string;
+  source_changed: boolean;
+}
+
+export interface AirePaymentEvidenceReview {
+  candidates: Array<{
+    source_time_entry_id: string;
+    source_time_entry_version: number;
+    source_user_uuid: string;
+    employee_name: string;
+    original_work_date: string;
+    total_hours: number;
+  }>;
+  payment_attestations: AirePaymentEvidenceHold[];
 }

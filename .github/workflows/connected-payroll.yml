@@ -1,0 +1,155 @@
+name: Connected payroll certification
+
+on:
+  pull_request:
+    branches: [staging-v2]
+    paths:
+      - .github/workflows/connected-payroll.yml
+      - ops/staging-v2/**
+      - scripts/certify_aire_payroll_integration.sh
+      - scripts/local_certification/**
+  workflow_call:
+    inputs:
+      payroll_sha:
+        description: Full immutable Cornerstone Payroll commit SHA
+        required: true
+        type: string
+      aire_sha:
+        description: Full immutable AIRE Services commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: connected-payroll-${{ inputs.payroll_sha }}-${{ inputs.aire_sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check shell syntax and exact-pair gate behavior
+        run: |
+          bash -n ops/staging-v2/*.sh scripts/certify_aire_payroll_integration.sh scripts/local_certification/runtime.sh
+          python3 ops/staging-v2/test_pair_gate.py
+          python3 -m unittest discover -s ops/staging-v2 -p "test_public_aire_actions.py"
+
+  certify:
+    # Reusable workflows inherit the caller's workflow_dispatch event.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PAYROLL_SHA: ${{ inputs.payroll_sha }}
+      AIRE_SHA: ${{ inputs.aire_sha }}
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - name: Validate immutable inputs
+        run: |
+          [[ "$PAYROLL_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AIRE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: Shimizu-Technology/cornerstone-payroll
+          ref: ${{ inputs.payroll_sha }}
+          path: payroll
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Shimizu-Technology/aire-services
+          ref: ${{ inputs.aire_sha }}
+          path: aire
+          persist-credentials: false
+      - name: Verify both checked-out revisions
+        run: |
+          [[ "$(git -C payroll rev-parse HEAD)" == "$PAYROLL_SHA" ]]
+          [[ "$(git -C aire rev-parse HEAD)" == "$AIRE_SHA" ]]
+      - name: Check out the trusted certification implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: gate
+          persist-credentials: false
+      - name: Verify each candidate's exact-SHA quality and image workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Public AIRE metadata is read without forwarding this repo-scoped token.
+          AIRE_ACTIONS_PUBLIC_READ: "true"
+        run: gate/ops/staging-v2/verify-pair-certificate.sh --candidate-workflows-only "$PAYROLL_SHA" "$AIRE_SHA"
+      - name: Read pinned Ruby versions
+        id: versions
+        run: |
+          payroll_ruby="$(cat payroll/api/.ruby-version)"
+          aire_ruby="$(cat aire/backend/.ruby-version)"
+          [[ "$payroll_ruby" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$aire_ruby" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "payroll=$payroll_ruby" >> "$GITHUB_OUTPUT"
+          echo "aire=$aire_ruby" >> "$GITHUB_OUTPUT"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ steps.versions.outputs.payroll }}
+          working-directory: payroll/api
+          bundler-cache: true
+      - name: Record payroll Ruby runtime
+        run: echo "PAYROLL_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ steps.versions.outputs.aire }}
+          working-directory: aire/backend
+          bundler-cache: true
+      - name: Record AIRE Ruby runtime
+        run: echo "AIRE_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
+      - name: Install PostgreSQL client and listener inspection
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client lsof
+      - name: Certify the real HTTP boundary with disposable synthetic databases
+        env:
+          AIRE_REPO_PATH: ${{ github.workspace }}/aire
+        run: payroll/scripts/certify_aire_payroll_integration.sh
+      - name: Write non-secret exact-pair certificate
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          certificate = {
+              "schema_version": 1,
+              "certification": "passed",
+              "lane": "real-http-synthetic-v1",
+              "payroll_sha": os.environ["PAYROLL_SHA"],
+              "aire_sha": os.environ["AIRE_SHA"],
+              "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }
+          Path("pair-certificate.json").write_text(json.dumps(certificate, indent=2) + "\n")
+          PY
+      - name: Retain only the pair certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-payroll-pair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pair-certificate.json
+          if-no-files-found: error
+          retention-days: 90

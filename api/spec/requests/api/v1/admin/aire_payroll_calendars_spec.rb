@@ -11,7 +11,10 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
       company: company,
       frequency: "semimonthly",
       period_rule: "semimonthly",
-      pay_date_rule: "manual",
+      pay_date_rule: "semimonthly_15th_and_month_end",
+      time_tracking_cutoff_rule: "after_previous_regular_payday",
+      time_tracking_cutoff_days: 7,
+      payroll_cutoff_at_minutes: 1020,
       timezone: "Pacific/Guam",
       source: "operator_confirmed",
       confirmation_status: "confirmed",
@@ -35,6 +38,11 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
       notes: "Confirmed Sunday workweek"
     )
   end
+  let!(:previous_regular) do
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 9, 16), end_date: Date.new(2026, 9, 30), pay_date: Date.new(2026, 10, 15))
+  end
+
   let(:pay_period) do
     create(
       :pay_period,
@@ -43,7 +51,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
       company_workweek: workweek,
       start_date: Date.new(2026, 10, 1),
       end_date: Date.new(2026, 10, 15),
-      pay_date: Date.new(2026, 10, 25)
+      pay_date: Date.new(2026, 10, 31)
     )
   end
 
