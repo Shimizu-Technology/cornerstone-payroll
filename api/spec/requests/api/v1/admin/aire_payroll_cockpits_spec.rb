@@ -48,6 +48,16 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       },
       "finalized_batch" => nil,
       "processing_history" => [],
+      "entry_processing_history" => [
+        {
+          "event_id" => "cornerstone-check-5001",
+          "status" => "payment_issued",
+          "occurred_at" => "2026-10-23T00:01:00+10:00",
+          "source_time_entry_id" => "42",
+          "total_hours" => "8.0",
+          "payment_reference" => "5001"
+        }
+      ],
       "carryovers" => { "total_entries" => 0, "total_hours" => 0 }
     }
   end
@@ -87,6 +97,10 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(response.headers["Cache-Control"]).to include("no-store")
     cockpit = response.parsed_body.fetch("aire_payroll_cockpit")
     expect(cockpit.dig("readiness", "eligible_hours")).to eq(8.0)
+    expect(cockpit.dig("entry_processing_history", 0)).to include(
+      "status" => "payment_issued",
+      "payment_reference" => "5001"
+    )
     expect(cockpit.dig("employees", 0, "cornerstone")).to include(
       "status" => "mapped",
       "employee_id" => employee.id,

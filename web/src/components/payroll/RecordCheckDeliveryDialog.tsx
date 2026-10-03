@@ -63,7 +63,7 @@ export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordC
         </div>
         <label className="flex items-start gap-2 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-5 text-primary-900">
           <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
-          <span>I confirm this check was released using the method and date above. This will mark linked AIRE hours as paid.</span>
+          <span>I confirm this check was released using the method and date above. Any linked AIRE hours will be marked as paid.</span>
         </label>
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">{error}</div>}
         <DialogFooter>
