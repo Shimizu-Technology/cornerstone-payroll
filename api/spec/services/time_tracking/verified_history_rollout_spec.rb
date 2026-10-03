@@ -279,7 +279,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     inventory_entry = { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.2 }
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ inventory_entry ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
+      "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     expect { described_class.new(manifest: manifest, actor: actor).apply!(
       accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
@@ -306,7 +307,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 },
                           { "id" => "99", "source_user_uuid" => uuid, "version" => 3, "hours" => 2 } ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
+      "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     rollout = described_class.new(manifest: manifest, actor: actor)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     expect { rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
@@ -356,7 +358,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       end
       allow(client).to receive(:payroll_cockpit_history_entries).and_return(
         "time_entries" => [ inventory_entry ],
-        "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
+        "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     end
 
     def apply_accepted_history
@@ -416,7 +419,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
     it "holds completion when total hours drift in the fresh final source read" do
       initial = { "time_entries" => [ inventory_entry ],
-        "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
+        "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
       changed = initial.deep_dup
       changed["time_entries"].first.merge!("hours" => 6.2, "regular_hours" => 6.2)
       allow(client).to receive(:payroll_cockpit_history_entries).and_return(initial, changed)
@@ -455,11 +459,192 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     end
   end
 
+  context "with a paginated current historical source inventory" do
+    let(:row_count) { 51 }
+    let(:page_size) { 50 }
+    let(:source_rows) do
+      [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ] +
+        (row_count - 1).times.map { |index| { "id" => (100 + index).to_s, "source_user_uuid" => uuid, "version" => 0, "hours" => 2 } }
+    end
+
+    def history_page(page)
+      pages = [ (row_count.to_f / page_size).ceil, 1 ].max
+      { "source_state" => "current", "through_work_date" => manifest.fetch("history_through_work_date"),
+        "time_entries" => source_rows.slice((page - 1) * page_size, page_size) || [],
+        "pagination" => { "current_page" => page, "per_page" => page_size, "total_count" => row_count,
+                          "total_pages" => pages, "truncated" => page < pages } }
+    end
+
+    def apply_paginated_history
+      digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+      described_class.new(manifest: manifest, actor: actor).apply!(
+        accepted_manifest_sha256: digest, release_owner: "Approved test owner")
+    end
+
+    before do
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source.update_column(:historical_reconciliation_required, true)
+      manifest["source_instance_id"] = source.expected_source_instance_id
+      manifest["history_through_work_date"] = period.end_date.iso8601
+      manifest["issued_entries"].first["source_time_entry_version"] = 2
+      manifest["reviewed_unpaid_entries"] = source_rows.drop(1).map do |row|
+        { "source_user_uuid" => uuid, "source_time_entry_id" => row.fetch("id"), "source_time_entry_version" => row.fetch("version") }
+      end
+      @inventory_pages = []
+      @fixture_transaction_depth = ActiveRecord::Base.connection.open_transactions
+      allow(client).to receive(:payroll_cockpit_history_entries) do |through_work_date:, page:|
+        expect(through_work_date).to eq(period.end_date.iso8601)
+        # The spec's fixture transaction is borrowed; rollout must not add a
+        # transaction or hold a row lock during either remote capture.
+        expect(ActiveRecord::Base.connection.open_transactions).to eq(@fixture_transaction_depth)
+        @inventory_pages << page
+        history_page(page)
+      end
+    end
+
+    it "accepts all 51 rows and reads both pages again outside the completion transaction" do
+      apply_paginated_history
+      expect(@inventory_pages).to eq([ 1, 2, 1, 2 ])
+      expect(source.historical_reconciliation_complete?).to be(true)
+    end
+
+    context "with the client's 250-row page size" do
+      let(:row_count) { 251 }
+      let(:page_size) { 250 }
+
+      it "accepts the provider's truncated first page and complete final page" do
+        apply_paginated_history
+        expect(@inventory_pages).to eq([ 1, 2, 1, 2 ])
+        expect(source.historical_reconciliation_complete?).to be(true)
+      end
+    end
+
+    context "when the source has no historical work" do
+      let(:row_count) { 0 }
+      let(:source_rows) { [] }
+
+      before do
+        %w[identity_links delivered_checks issued_entries].each { |key| manifest[key] = [] }
+      end
+
+      it "accepts the provider's empty one-page inventory" do
+        apply_paginated_history
+        expect(@inventory_pages).to eq([ 1, 1 ])
+        expect(source.historical_reconciliation_complete?).to be(true)
+      end
+    end
+
+    it "rejects malformed page size, page counts, truncated flags and source scope" do
+      [ [ "per_page", nil ], [ "per_page", 0 ], [ "total_pages", 0 ], [ "total_pages", 3 ],
+        [ "current_page", 2 ], [ "truncated", false ], [ "truncated", nil ] ].each do |field, value|
+        bad_page = history_page(1)
+        bad_page.fetch("pagination")[field] = value
+        allow(client).to receive(:payroll_cockpit_history_entries).and_return(bad_page)
+        expect { apply_paginated_history }.to raise_error(described_class::Error, /incomplete historical source inventory/)
+      end
+      [ [ "source_state", "finalized" ], [ "through_work_date", "2026-08-14" ] ].each do |field, value|
+        bad_page = history_page(1).merge(field => value)
+        allow(client).to receive(:payroll_cockpit_history_entries).and_return(bad_page)
+        expect { apply_paginated_history }.to raise_error(described_class::Error, /incomplete historical source inventory/)
+      end
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
+    it "rejects malformed response objects, metadata and source rows" do
+      [ nil, [], history_page(1).merge("pagination" => nil),
+        history_page(1).merge("time_entries" => [ nil ]), history_page(1).except("pagination") ].each do |bad_page|
+        allow(client).to receive(:payroll_cockpit_history_entries).and_return(bad_page)
+        expect { apply_paginated_history }.to raise_error(described_class::Error, /historical source inventory|invalid or incomplete/)
+      end
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
+    it "rejects an omitted final page or a final page still marked truncated" do
+      final_page = history_page(2)
+      final_page["time_entries"] = []
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(history_page(1), final_page)
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /incomplete historical source inventory/)
+      final_page = history_page(2)
+      final_page.fetch("pagination")["truncated"] = true
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(history_page(1), final_page)
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /incomplete historical source inventory/)
+    end
+
+    it "rejects a changed total or per-page grain between otherwise complete pages" do
+      final_page = history_page(2)
+      final_page["time_entries"] << source_rows.last.merge("id" => "999")
+      final_page.fetch("pagination")["total_count"] = row_count + 1
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(history_page(1), final_page)
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /changed while paging/)
+      final_page = history_page(2)
+      final_page.fetch("pagination")["per_page"] = 49
+      final_page["time_entries"] = source_rows.last(2)
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(history_page(1), final_page)
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /changed while paging/)
+    end
+
+    it "rejects a duplicate entry crossing pages even when all advertised counts match" do
+      final_page = history_page(2)
+      final_page["time_entries"] = [ source_rows.first ]
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(history_page(1), final_page)
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /duplicate historical source entries/)
+    end
+
+    it "rechecks the latest committed regular history scope after final remote capture" do
+      calls = 0
+      allow(client).to receive(:payroll_cockpit_history_entries) do |through_work_date:, page:|
+        calls += 1
+        if calls == 4
+          create(:pay_period, :committed, company: company, start_date: Date.new(2026, 8, 16),
+            end_date: Date.new(2026, 8, 31), pay_date: Date.new(2026, 9, 15))
+        end
+        history_page(page)
+      end
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /latest committed regular payroll/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+      expect(source.historical_reconciliation_complete?).to be(false)
+    end
+
+    it "discards cached actor access and denies a revoked client assignment after capture" do
+      home = create(:company, organization: company.organization)
+      actor.update!(role: "accountant", company: home)
+      assignment = create(:company_assignment, user: actor, company: company)
+      calls = 0
+      allow(client).to receive(:payroll_cockpit_history_entries) do |through_work_date:, page:|
+        calls += 1
+        assignment.destroy! if calls == 4
+        history_page(page)
+      end
+      expect { apply_paginated_history }.to raise_error(described_class::Error, /cannot approve completion/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
+    it "rechecks source activity, installation and actor approval scope before the receipt" do
+      [ -> { source.update!(active: false) },
+        -> { source.update!(expected_source_instance_id: SecureRandom.uuid) },
+        -> { actor.update!(active: false) } ].each do |change|
+        source.update!(active: true, expected_source_instance_id: manifest.fetch("source_instance_id"))
+        actor.update!(active: true)
+        calls = 0
+        allow(client).to receive(:payroll_cockpit_history_entries) do |through_work_date:, page:|
+          calls += 1
+          change.call if calls == 4
+          history_page(page)
+        end
+        expect { apply_paginated_history }.to raise_error(described_class::Error, /before completion|cannot approve completion/)
+        expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+        expect(source.reload.historical_reconciliation_complete?).to be(false)
+      end
+    end
+  end
+
   it "rejects a historical inventory that omits rows from its advertised total" do
     manifest["history_through_work_date"] = period.end_date.iso8601
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
+      "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     expect { described_class.new(manifest: manifest, actor: actor).preview! }
       .to raise_error(described_class::Error, /incomplete historical source inventory/)
     expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
@@ -473,7 +658,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"].first["source_time_entry_version"] = 2
     initial = { "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
+      "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
     changed = initial.deep_dup
     changed["time_entries"] << { "id" => "99", "source_user_uuid" => uuid, "version" => 0, "hours" => 2 }
     changed["pagination"]["total_count"] = 2
@@ -517,7 +703,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
       "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
     allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [ { "id" => "41", "version" => 2, "source_user_uuid" => uuid, "hours" => 6.1 } ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
+      "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
+      "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     described_class.new(manifest: manifest, actor: actor).apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner")

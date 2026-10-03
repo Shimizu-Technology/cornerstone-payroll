@@ -116,8 +116,9 @@ module TimeTracking
       # Keep command IDs and approved bindings durable across remote failures.
       # AIRE requests cannot be rolled back by a Cornerstone SQL transaction.
       # Publish completion only after a fresh coverage read and local verification.
+      validate_history_scope!
       @source.with_lock do
-        validate_history_scope!
+        validate_completion_context!
         if accepted_manifest_sha256.present? && !history_scope_verified?
           raise Error, "Accepted history manifest leaves scoped source entries without a verified disposition"
         end
@@ -272,7 +273,7 @@ module TimeTracking
       raise Error, e.message
     end
 
-    def validate_history_scope!
+    def validate_history_scope_bound!
       date = manifest["history_through_work_date"]
       if date.blank?
         raise Error, "History scope is required for an existing source connection" if @source.historical_reconciliation_required? || Rails.env.production?
@@ -283,23 +284,61 @@ module TimeTracking
       if latest_regular_end && @history_through_work_date < latest_regular_end
         raise Error, "History scope does not include the latest committed regular payroll"
       end
+    end
+
+    def validate_completion_context!
+      @company.reload
+      @actor = User.find(actor.id)
+      unless @company.id == manifest.fetch("company_id").to_i && @company.name == manifest.fetch("company_name") &&
+             @source.company_id == @company.id && @source.active? && @source.source_type == "aire_services"
+        raise Error, "Historical rollout company or source changed before completion"
+      end
+      if manifest["source_instance_id"].present? && (!@source.remote_identity_pinned? || @source.expected_source_instance_id != manifest["source_instance_id"])
+        raise Error, "Historical rollout installation changed before completion"
+      end
+      unless StaffRolePolicy.historical_reconciliation_allowed?(actor, @company)
+        raise Error, "Historical rollout actor cannot approve completion for this company"
+      end
+      validate_history_scope_bound!
+    rescue ActiveRecord::RecordNotFound
+      raise Error, "Historical rollout company or actor changed before completion"
+    end
+
+    def validate_history_scope!
+      validate_history_scope_bound!
+      return unless @history_through_work_date
+
+      date = @history_through_work_date.iso8601
       @history_inventory = []
       page = 1
       expected_count = nil
       expected_pages = nil
+      expected_per_page = nil
       loop do
         raise Error, "Historical source inventory exceeded the bounded page limit" if page > 100
         response = @client.payroll_cockpit_history_entries(through_work_date: date, page: page)
+        raise Error, "AIRE returned incomplete historical source inventory" unless response.is_a?(Hash)
+
         rows = response.fetch("time_entries")
         pagination = response.fetch("pagination")
-        unless rows.is_a?(Array) && pagination["current_page"] == page && pagination["total_pages"].is_a?(Integer) &&
-               pagination["total_pages"].between?(0, 100) && pagination["total_count"].is_a?(Integer) &&
-               pagination["total_count"] >= 0 && pagination["truncated"] == false
+        unless response["source_state"] == "current" && response["through_work_date"] == date &&
+               rows.is_a?(Array) && rows.all? { |row| row.is_a?(Hash) } && pagination.is_a?(Hash) &&
+               pagination["current_page"] == page && pagination["total_pages"].is_a?(Integer) &&
+               pagination["total_pages"].between?(1, 100) && pagination["total_count"].is_a?(Integer) &&
+               pagination["total_count"] >= 0 && pagination["per_page"].is_a?(Integer) && pagination["per_page"].between?(1, 250)
+          raise Error, "AIRE returned incomplete historical source inventory"
+        end
+        per_page = pagination.fetch("per_page")
+        total_pages = [ (pagination.fetch("total_count") + per_page - 1) / per_page, 1 ].max
+        expected_rows = [ per_page, pagination.fetch("total_count") - (page - 1) * per_page ].min
+        unless pagination["total_pages"] == total_pages && page <= total_pages && rows.length == expected_rows &&
+               pagination["truncated"] == (page < total_pages)
           raise Error, "AIRE returned incomplete historical source inventory"
         end
         expected_count ||= pagination["total_count"]
         expected_pages ||= pagination["total_pages"]
-        unless expected_count == pagination["total_count"] && expected_pages == pagination["total_pages"]
+        expected_per_page ||= per_page
+        unless expected_count == pagination["total_count"] && expected_pages == pagination["total_pages"] && expected_per_page == per_page
           raise Error, "AIRE historical source inventory changed while paging"
         end
         @history_inventory.concat(rows)
