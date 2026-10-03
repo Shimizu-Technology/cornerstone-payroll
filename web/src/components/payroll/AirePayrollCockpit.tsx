@@ -57,6 +57,49 @@ type Props = {
 
 type View = 'timecards' | 'exceptions' | 'held_time' | 'team' | 'history';
 
+type EntryProcessingEvent = NonNullable<AirePayrollCockpitOverview['entry_processing_history']>[number];
+
+type PaymentHistoryGroup = {
+  key: string;
+  status: string;
+  occurredAt: string;
+  totalHours: number;
+  lineCount: number;
+  paymentMethod?: string;
+  paymentReference?: string;
+};
+
+const paymentStatusLabels: Record<string, string> = {
+  imported: 'Hours imported',
+  committed: 'Added to payroll',
+  payment_prepared: 'Payment prepared',
+  payment_issued: 'Check issued or deposit settled',
+  payment_failed: 'Payment failed',
+  payment_voided: 'Payment voided',
+};
+
+const paymentStatusLabel = (status: string) => paymentStatusLabels[status] || status.replaceAll('_', ' ');
+
+const groupPaymentHistory = (events: EntryProcessingEvent[]): PaymentHistoryGroup[] => {
+  const groups = new Map<string, PaymentHistoryGroup>();
+  events.forEach((event) => {
+    const key = [event.status, event.occurred_at, event.payment_method || '', event.payment_reference || ''].join('|');
+    const group = groups.get(key) || {
+      key,
+      status: event.status,
+      occurredAt: event.occurred_at,
+      totalHours: 0,
+      lineCount: 0,
+      paymentMethod: event.payment_method,
+      paymentReference: event.payment_reference,
+    };
+    group.totalHours += Number(event.total_hours || 0);
+    group.lineCount += 1;
+    groups.set(key, group);
+  });
+  return [...groups.values()].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+};
+
 type EmployeeMappingTarget = {
   employee: import('@/types').AirePayrollCockpitEmployee;
   payrollEmployeeId: number | '';
@@ -417,6 +460,11 @@ export function AirePayrollCockpit({
   const heldHours = overview
     ? overview.readiness.held_hours ?? Math.max(0, overview.readiness.total_hours - overview.readiness.eligible_hours)
     : 0;
+  const paymentHistory = useMemo(
+    () => groupPaymentHistory(overview?.entry_processing_history || []),
+    [overview?.entry_processing_history]
+  );
+  const historyCount = paymentHistory.length + (overview?.processing_history.length || 0);
   const canCommand = overview?.command_access.can_command === true;
   const canManageMappings = overview?.command_access.can_manage_mappings === true;
 
@@ -690,7 +738,7 @@ export function AirePayrollCockpit({
                 <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5 sm:p-6">
                   <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in AIRE`} />
                   <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
-                  <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecards · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecard${overview.readiness.held_entries === 1 ? '' : 's'} · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
                   <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
                   <Metric
                     label="Visible mapping"
@@ -740,7 +788,7 @@ export function AirePayrollCockpit({
                       ['exceptions', 'Needs attention', (exceptions?.time_exception_pagination.total_count || 0) + (exceptions?.leave_exception_pagination.total_count || 0)],
                       ['held_time', 'Held time', settlementCases?.pagination.total_count || 0],
                       ['team', 'Team', overview.employee_pagination.total_count],
-                      ['history', 'Payment history', overview.processing_history.length],
+                      ['history', 'Payment history', historyCount],
                     ] as Array<[View, string, number]>).map(([key, label, count]) => (
                       <button
                         key={key}
@@ -945,16 +993,43 @@ export function AirePayrollCockpit({
 
                 {view === 'history' && (
                   <div className="px-4 py-5 sm:px-6">
-                    {overview.processing_history.length ? (
-                      <div className="space-y-3">
-                        {overview.processing_history.map((event) => (
-                          <div key={event.event_id} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
-                            <History className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" />
-                            <div><p className="font-semibold text-neutral-950">{event.status.replaceAll('_', ' ')}</p><p className="mt-1 text-xs text-neutral-500">{formatGuamDateTime(event.occurred_at)}{event.external_system ? ` · ${event.external_system}` : ''}</p></div>
-                          </div>
-                        ))}
+                    {historyCount ? (
+                      <div className="space-y-6">
+                        {paymentHistory.length > 0 && (
+                          <section aria-labelledby="aire-payment-events-heading">
+                            <h4 id="aire-payment-events-heading" className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Hour and payment status</h4>
+                            <div className="mt-3 space-y-3">
+                              {paymentHistory.map((event) => (
+                                <div key={event.key} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
+                                  <History className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-neutral-950">{paymentStatusLabel(event.status)}</p>
+                                    <p className="mt-1 text-sm text-neutral-700">
+                                      {event.totalHours.toFixed(2)} hrs across {event.lineCount} timecard line{event.lineCount === 1 ? '' : 's'}
+                                      {event.paymentReference ? ` · ${event.paymentMethod === 'paper_check' ? 'Check' : 'Reference'} ${event.paymentReference}` : ''}
+                                    </p>
+                                    <p className="mt-1 text-xs text-neutral-500">{formatGuamDateTime(event.occurredAt)}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        )}
+                        {overview.processing_history.length > 0 && (
+                          <section aria-labelledby="aire-batch-events-heading">
+                            <h4 id="aire-batch-events-heading" className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Batch history</h4>
+                            <div className="mt-3 space-y-3">
+                              {[...overview.processing_history].reverse().map((event) => (
+                                <div key={event.event_id} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
+                                  <History className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
+                                  <div><p className="font-semibold text-neutral-950">{event.status.replaceAll('_', ' ')}</p><p className="mt-1 text-xs text-neutral-500">{formatGuamDateTime(event.occurred_at)}{event.external_system ? ` · ${event.external_system}` : ''}</p></div>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        )}
                       </div>
-                    ) : <p className="py-6 text-center text-sm text-neutral-500">Payment history will appear after AIRE’s batch reaches Cornerstone.</p>}
+                    ) : <p className="py-6 text-center text-sm text-neutral-500">Payment history will appear after AIRE’s hours are added to payroll.</p>}
                   </div>
                 )}
               </>

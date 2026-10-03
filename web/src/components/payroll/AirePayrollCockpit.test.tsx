@@ -340,6 +340,48 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.entries).toHaveBeenCalledWith(17, { page: 1 });
   });
 
+  it('shows exact paid hours and batch events in a clear payment history', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.entry_processing_history = [
+      {
+        event_id: 'check-5001-line-1',
+        status: 'payment_issued',
+        occurred_at: '2026-10-23T00:01:00+10:00',
+        source_time_entry_id: '42',
+        total_hours: '8.00',
+        payment_method: 'paper_check',
+        payment_reference: '5001',
+      },
+      {
+        event_id: 'check-5001-line-2',
+        status: 'payment_issued',
+        occurred_at: '2026-10-23T00:01:00+10:00',
+        source_time_entry_id: '43',
+        total_hours: '2.00',
+        payment_method: 'paper_check',
+        payment_reference: '5001',
+      },
+    ];
+    data.overview.processing_history = [{
+      event_id: 'batch-committed',
+      status: 'committed',
+      occurred_at: '2026-10-22T18:00:00+10:00',
+      external_system: 'cornerstone_payroll',
+    }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('AIRE payroll workspace');
+    await user.click(screen.getByRole('button', { name: /Payment history 2/i }));
+
+    expect(screen.getByRole('heading', { name: 'Hour and payment status' })).toBeTruthy();
+    expect(screen.getByText('Check issued or deposit settled')).toBeTruthy();
+    expect(screen.getByText('10.00 hrs across 2 timecard lines · Check 5001')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Batch history' })).toBeTruthy();
+    expect(screen.getByText('committed')).toBeTruthy();
+  });
+
   it('shows an identity suggestion without auto-linking and saves only an explicit confirmation', async () => {
     const user = userEvent.setup();
     const data = fixtures();

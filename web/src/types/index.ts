@@ -822,6 +822,18 @@ export interface AirePayrollCockpitOverview {
     external_system?: string;
     external_pay_period_id?: string;
   }>;
+  entry_processing_history?: Array<{
+    event_id: string;
+    status: string;
+    occurred_at: string;
+    external_system?: string;
+    external_payroll_item_id?: string;
+    source_time_entry_id: string;
+    source_line_key?: string;
+    total_hours?: string;
+    payment_method?: string;
+    payment_reference?: string;
+  }>;
   carryovers: Record<string, number>;
   employees: AirePayrollCockpitEmployee[];
   employee_pagination: AirePayrollPagination;
