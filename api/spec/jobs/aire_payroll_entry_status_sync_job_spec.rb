@@ -44,7 +44,7 @@ RSpec.describe AirePayrollEntryStatusSyncJob, type: :job do
       rows: [ allocation ],
       source_event_key: "spec:entry:1508:issued",
       status: "payment_issued",
-      occurred_at: Time.zone.parse("2026-09-04 12:00:00"),
+      occurred_at: Time.zone.parse("2026-09-04 12:00:00.123456"),
       payroll_item_id: item.id,
       payment_method: "paper_check",
       payment_reference: "5001"
@@ -56,7 +56,7 @@ RSpec.describe AirePayrollEntryStatusSyncJob, type: :job do
       batch_id: import.external_batch_id,
       event_id: acknowledgement.event_id,
       status: "payment_issued",
-      occurred_at: acknowledgement.occurred_at.iso8601,
+      occurred_at: acknowledgement.occurred_at.iso8601(6),
       external_pay_period_id: pay_period.id.to_s,
       external_payroll_item_id: item.id.to_s,
       source_time_entry_id: "1508",

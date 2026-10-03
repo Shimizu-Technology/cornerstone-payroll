@@ -122,6 +122,39 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     )
   end
 
+  it "rejects excluded payroll employees without claiming their finalized entries were imported" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    confirm_mapping!(company: company, source: source, employee: employee)
+    pay_period.pay_period_excluded_employees.create!(employee: employee)
+    adjustments = [
+      {
+        "source_time_entry_id" => "101",
+        "line_key" => "flight:2500",
+        "source_kind" => "current",
+        "original_work_date" => "2026-08-20",
+        "original_week_start" => "2026-08-16",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 8.0,
+        "regular_hours" => 8.0,
+        "overtime_hours" => 0.0
+      }
+    ]
+    import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+
+    result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+    expect(result[:errors]).to contain_exactly(include(employee_id: employee.id, error: /excluded from this pay period/))
+    expect(result[:skipped]).to be_empty
+    expect(import.reload.status).to eq("previewed")
+    expect(TimeTrackingEntryAllocation.where(time_tracking_import: import)).to be_empty
+    expect(AirePayrollAcknowledgement.where(time_tracking_import: import)).to be_empty
+    expect(AirePayrollEntryAcknowledgement.where(time_tracking_import: import)).to be_empty
+    expect(pay_period.payroll_items.where(employee: employee)).to be_empty
+  end
+
   it "requires a written acknowledgement and calculates a correction with Cornerstone's wage rate" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")

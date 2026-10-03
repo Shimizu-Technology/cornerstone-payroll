@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_01_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -511,7 +511,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_010000) do
     t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying::text, 'needs_confirmation'::character varying::text])", name: "company_pay_schedules_confirmation_check"
     t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_pay_schedules_dates_check"
     t.check_constraint "frequency::text = ANY (ARRAY['weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text, 'monthly'::character varying::text])", name: "company_pay_schedules_frequency_check"
-    t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying::text, 'days_after_period_end'::character varying::text])", name: "company_pay_schedules_pay_date_rule_check"
+    t.check_constraint "pay_date_rule::text <> 'semimonthly_15th_and_month_end'::text OR frequency::text = 'semimonthly'::text AND period_rule::text = 'semimonthly'::text", name: "company_pay_schedules_fixed_semimonthly_check"
+    t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying, 'days_after_period_end'::character varying, 'semimonthly_15th_and_month_end'::character varying]::text[])", name: "company_pay_schedules_pay_date_rule_check"
     t.check_constraint "payroll_cutoff_at_minutes >= 0 AND payroll_cutoff_at_minutes <= 1439", name: "company_pay_schedules_cutoff_time_check"
     t.check_constraint "payroll_cutoff_days_before = 7", name: "company_pay_schedules_cutoff_days_check"
     t.check_constraint "period_anchor_date IS NULL OR period_start_weekday IS NULL OR EXTRACT(dow FROM period_anchor_date)::integer = period_start_weekday", name: "company_pay_schedules_anchor_weekday_check"

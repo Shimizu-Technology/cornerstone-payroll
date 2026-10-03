@@ -3828,7 +3828,7 @@ export interface CompanyPayScheduleSetting {
   period_rule: 'manual' | 'weekly' | 'biweekly' | 'semimonthly';
   period_start_weekday?: number | null;
   period_anchor_date?: string | null;
-  pay_date_rule: 'manual' | 'days_after_period_end';
+  pay_date_rule: 'manual' | 'days_after_period_end' | 'semimonthly_15th_and_month_end';
   pay_date_offset_days?: number | null;
   payroll_cutoff_days_before: number;
   time_tracking_cutoff_rule: 'before_pay_date' | 'after_previous_regular_payday';

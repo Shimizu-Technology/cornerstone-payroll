@@ -130,6 +130,8 @@ class PayPeriod < ApplicationRecord
             if: :supplemental?
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
+  validate :fixed_semimonthly_schedule_dates,
+           if: -> { new_record? || will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? || will_save_change_to_company_pay_schedule_id? || will_save_change_to_run_purpose? || will_save_change_to_cycle? }
   validate :supplemental_target_must_be_regular
   validate :off_cycle_tips_excludes_base_salary
   validate :purpose_fields_change_only_in_draft
@@ -618,6 +620,22 @@ class PayPeriod < ApplicationRecord
 
     if pay_date < end_date
       errors.add(:pay_date, "must be on or after end date")
+    end
+  end
+
+  def fixed_semimonthly_schedule_dates
+    return unless regular_cycle? && regular_run? && start_date && end_date && pay_date
+
+    schedule = company_pay_schedule
+    return unless schedule&.pay_date_rule == "semimonthly_15th_and_month_end"
+
+    first_half = start_date.day == 1 && end_date == start_date.change(day: 15)
+    second_half = start_date.day == 16 && end_date == start_date.end_of_month
+    unless first_half || second_half
+      errors.add(:base, "The fixed semimonthly schedule requires periods of the 1st–15th or 16th–month end")
+    end
+    unless pay_date == schedule.scheduled_pay_date_for(end_date)
+      errors.add(:pay_date, "must be the scheduled month-end or following 15th; weekends and holidays do not shift it")
     end
   end
 
