@@ -102,7 +102,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
         {aireRecordLinked && lineStatus && lineStatus.line_count > 0 && (
           <div className="grid divide-y divide-neutral-200 border-t border-neutral-200 bg-neutral-50 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
             {([
-              ['In payroll', lineStatus.in_payroll, 'Committed without delivery evidence'],
+              ['In payroll', lineStatus.in_payroll, 'Added to payroll; payment not yet recorded'],
               ['Prepared', lineStatus.payment_pending, 'Payment prepared; delivery pending'],
               ['Paid', lineStatus.paid, 'Delivery or settlement recorded'],
               ['Attention', lineStatus.needs_attention, 'Failed, voided, or missing evidence'],

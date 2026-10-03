@@ -118,6 +118,7 @@ describe('AireFinalizedBatchAction', () => {
     expect(screen.getByText('AIRE hours are linked; payment evidence is pending')).toBeTruthy();
     expect(screen.getByText('Payment pending')).toBeTruthy();
     expect(screen.getByText('72.50 hrs', { selector: '.font-display.text-lg' })).toBeTruthy();
+    expect(screen.getByText(/Added to payroll; payment not yet recorded/i)).toBeTruthy();
     expect(screen.getByText(/committed payroll records remain unpaid/i)).toBeTruthy();
   });
 
