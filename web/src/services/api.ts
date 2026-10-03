@@ -1186,6 +1186,16 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit`,
       { ...params, employee_per_page: 100 }
     ),
+  airePaymentEvidence: (id: number) =>
+    api.get<import('@/types').AirePaymentEvidenceReview>(`/admin/pay_periods/${id}/aire_payroll_cockpit/payment_evidence`),
+  createAirePaymentHold: (id: number, data: {
+    source_time_entry_id: string; source_user_uuid: string; expected_version: number; command_id: string; reason: string;
+  }) => api.post<{ payment_attestation: import('@/types').AirePaymentEvidenceHold }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_attestations`, data),
+  retractAirePaymentHold: (id: number, holdId: string, data: {
+    source_user_uuid: string; expected_version: number; command_id: string; reason: string;
+  }) => api.post<{ payment_attestation: import('@/types').AirePaymentEvidenceHold }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_attestations/${encodeURIComponent(holdId)}/retract`, data),
   airePayrollManualReview: (id: number) =>
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`

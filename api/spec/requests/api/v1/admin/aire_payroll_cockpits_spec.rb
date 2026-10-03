@@ -850,4 +850,64 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to include("Publish this pay period")
   end
+  context "reported payment evidence" do
+    let(:uuid) { SecureRandom.uuid }
+    let(:service) { instance_double(TimeTracking::PaymentEvidenceHolds) }
+    let(:reason) { "Owner reported payment, actual check and delivery evidence pending" }
+    let(:payload) { { source_time_entry_id: "41", source_user_uuid: uuid,
+      command_id: SecureRandom.uuid, expected_version: 2, reason: reason } }
+    before do
+      allow(TimeTracking::Client).to receive(:for_payroll_actor).with(source, actor: admin).and_return(client)
+      allow(TimeTracking::PaymentEvidenceHolds).to receive(:new).with(pay_period: pay_period, source: source, client: client).and_return(service)
+    end
+    it "audits a delegated hold without creating a payroll item" do
+      expect(service).to receive(:create!).with(**payload.merge(expected_version: "2")).and_return("payment_attestation" => { "id" => "501" })
+      expect { post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload }.not_to change(PayrollItem, :count)
+      expect(response).to have_http_status(:created)
+      expect(AuditLog.find_by!(action: "aire_payroll_cockpit#payment_hold_recorded").metadata)
+        .to include("command_id" => payload[:command_id], "reason" => reason)
+    end
+    it "preserves remote source conflict feedback" do
+      allow(service).to receive(:create!).and_raise(TimeTracking::Client::Error.new("Source version changed", response_status: 409))
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["error"]).to eq("Source version changed")
+    end
+    it "retracts and audits explicit evidence reasons" do
+      permitted = payload.except(:source_time_entry_id)
+      expect(service).to receive(:retract!).with(attestation_id: "501", **permitted.merge(expected_version: "2"))
+        .and_return("payment_attestation" => { "id" => "501", "status" => "retracted" })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations/501/retract", params: permitted
+      expect(response).to have_http_status(:ok)
+      expect(AuditLog.find_by!(action: "aire_payroll_cockpit#payment_hold_retracted").user_id).to eq(admin.id)
+    end
+    it "rejects employee roles before any source access" do
+      admin.update!(role: "employee")
+      expect(service).not_to receive(:create!)
+      expect(TimeTracking::Client).not_to receive(:for_payroll_actor)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload
+      expect(response).to have_http_status(:forbidden)
+    end
+    it "rejects an unassigned accountant despite the historical staff capability" do
+      home = create(:company, organization: company.organization)
+      admin.update!(role: "accountant", company: home)
+      expect(TimeTracking::Client).not_to receive(:for_payroll_actor)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload
+      expect(response).not_to have_http_status(:created)
+    end
+    it "reads payment holds with a delegated staff identity on a committed period" do
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      expect(service).to receive(:review).and_return(candidates: [], payment_attestations: [])
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_evidence"
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Cache-Control"]).to include("no-store")
+    end
+    it "requires active company and organization scope even for an administrator" do
+      company.update!(active: false)
+      expect(TimeTracking::Client).not_to receive(:for_payroll_actor)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload
+      expect(response).not_to have_http_status(:created)
+    end
+  end
+
 end

@@ -274,6 +274,9 @@ Rails.application.routes.draw do
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :manual_review
+            get :payment_evidence
+            post :payment_attestations, action: :create_payment_attestation
+            post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries

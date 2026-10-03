@@ -6,6 +6,7 @@ module Api
       class AirePayrollCockpitsController < BaseController
         before_action :set_pay_period_and_source
         before_action :disable_http_caching
+        before_action :require_payment_evidence_access!, only: %i[payment_evidence create_payment_attestation retract_payment_attestation]
         before_action :require_manual_reconciliation_access!, only: %i[create_manual_allocation retry_manual_allocation]
 
         def show
@@ -27,6 +28,34 @@ module Api
               routing_options: routing_options_payload
             )
           }
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def payment_evidence
+          render json: payment_evidence_service.review
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def create_payment_attestation
+          permitted = params.permit(:source_time_entry_id, :source_user_uuid, :command_id, :expected_version, :reason)
+          result = payment_evidence_service.create!(**permitted.to_h.symbolize_keys)
+          audit_payment_evidence!("payment_hold_recorded", permitted[:source_time_entry_id], permitted, result)
+          render json: result, status: :created
+        rescue ArgumentError, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retract_payment_attestation
+          permitted = params.permit(:source_user_uuid, :command_id, :expected_version, :reason)
+          result = payment_evidence_service.retract!(attestation_id: params[:payment_attestation_id], **permitted.to_h.symbolize_keys)
+          audit_payment_evidence!("payment_hold_retracted", params[:payment_attestation_id], permitted, result)
+          render json: result
+        rescue ArgumentError, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
         end
@@ -438,6 +467,25 @@ module Api
 
         def current_delegation
           @current_delegation ||= @source.delegation_for(current_user)
+        end
+
+        def require_payment_evidence_access!
+          return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)
+
+          render json: { error: "You do not have permission to manage payment evidence for this company" }, status: :forbidden
+        end
+
+        def payment_evidence_service
+          require_aire_source!
+          @payment_evidence_service ||= TimeTracking::PaymentEvidenceHolds.new(
+            pay_period: @pay_period, source: @source,
+            client: TimeTracking::Client.for_payroll_actor(@source, actor: current_user)
+          )
+        end
+
+        def audit_payment_evidence!(event, id, permitted, result)
+          record_command_audit!(action: "aire_payroll_cockpit##{event}", record_type: "AirePaymentEvidence",
+            record_id: id, command_id: permitted[:command_id], reason: permitted[:reason], result: result)
         end
 
         def command_params

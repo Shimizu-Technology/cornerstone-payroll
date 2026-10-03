@@ -43,6 +43,7 @@ import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel'
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecordsDialog';
 import { AirePayrollCockpit } from '@/components/payroll/AirePayrollCockpit';
+import { AirePaymentEvidenceHolds } from '@/components/payroll/AirePaymentEvidenceHolds';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
@@ -1815,6 +1816,11 @@ export function PayPeriodDetail({
               setTimeTrackingImportOpen(true);
             }}
           />
+        )}
+
+        {payPeriod.time_tracking?.active_source_types.includes('aire_services') && (
+          <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
+            onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
         )}
 
         {payPeriod.notes && (

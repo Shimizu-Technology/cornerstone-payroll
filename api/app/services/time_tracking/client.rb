@@ -204,6 +204,24 @@ module TimeTracking
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
+    def payroll_payment_attestations(source_user_uuid:, page: 1)
+      uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def create_payroll_payment_attestation(source_time_entry_id:, source_user_uuid:, command_id:, expected_version:, reason:)
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations"), body: {
+        source_time_entry_id: normalized_cockpit_id(source_time_entry_id), source_user_uuid: source_user_uuid,
+        command_id: command_id, expected_version: expected_version, reason: reason
+      })
+    end
+
+    def retract_payroll_payment_attestation(attestation_id:, command_id:, expected_version:, reason:)
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/retract"),
+        body: { command_id: command_id, expected_version: expected_version, reason: reason })
+    end
+
     def payroll_cockpit_time_entry(entry_id:)
       request_json(payroll_cockpit_uri("/time_entries/#{normalized_cockpit_id(entry_id)}"),
         validate_source: false, surface_remote_error: true)

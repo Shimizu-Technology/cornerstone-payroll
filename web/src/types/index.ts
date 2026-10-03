@@ -2374,3 +2374,29 @@ export interface DashboardStats {
   ytd_payroll_total: number;
   pending_approvals: number;
 }
+
+export interface AirePaymentEvidenceHold {
+  id: string;
+  version: number;
+  source_time_entry_id: string;
+  source_user_uuid: string;
+  source_time_entry_version: number;
+  employee_name: string;
+  work_date: string;
+  hours: number;
+  status: string;
+  reason: string;
+  source_changed: boolean;
+}
+
+export interface AirePaymentEvidenceReview {
+  candidates: Array<{
+    source_time_entry_id: string;
+    source_time_entry_version: number;
+    source_user_uuid: string;
+    employee_name: string;
+    original_work_date: string;
+    total_hours: number;
+  }>;
+  payment_attestations: AirePaymentEvidenceHold[];
+}
