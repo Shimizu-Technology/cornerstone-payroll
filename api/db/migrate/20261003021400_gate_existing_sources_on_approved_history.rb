@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 class GateExistingSourcesOnApprovedHistory < ActiveRecord::Migration[8.1]
   def change
     add_column :time_tracking_sources, :historical_reconciliation_required, :boolean, null: false, default: false

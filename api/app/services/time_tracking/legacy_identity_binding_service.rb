@@ -9,6 +9,7 @@ module TimeTracking
     end
 
     def verify!(evidence:, identity:)
+      validate_actor!
       allocation = @source.time_tracking_entry_allocations.find(evidence.fetch("allocation_id"))
       mapping = @source.time_tracking_employee_mappings.find(evidence.fetch("mapping_id"))
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(evidence.fetch("source_user_uuid"))
@@ -63,6 +64,7 @@ module TimeTracking
     end
 
     def apply!(binding:, accepted_manifest_sha256:, release_owner:)
+      validate_actor!
       unless accepted_manifest_sha256.to_s.downcase == @digest && release_owner.to_s.strip.present?
         raise Error, "Legacy identity bindings require an accepted manifest and named release owner"
       end
@@ -77,6 +79,12 @@ module TimeTracking
     end
 
     private
+
+    def validate_actor!
+      unless StaffRolePolicy.historical_reconciliation_allowed?(@actor, @source.company)
+        raise Error, "Actor cannot approve historical reconciliation for this company"
+      end
+    end
 
     def decimal(value)
       number = BigDecimal(value.to_s)

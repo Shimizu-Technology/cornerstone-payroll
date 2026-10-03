@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "rails_helper"
 
 RSpec.describe TimeTracking::LegacyIdentityBindingService do
@@ -50,6 +51,25 @@ RSpec.describe TimeTracking::LegacyIdentityBindingService do
       .to raise_error(ActiveRecord::StatementInvalid, /immutable/)
   end
 
+  it "accepts an assigned accountant but rejects expired assignment even through direct SQL" do
+    actor.update!(role: "accountant", company: create(:company, organization: company.organization))
+    assignment = create(:company_assignment, user: actor, company: company)
+    candidate = service.verify!(evidence: evidence, identity: identity)
+    raw = candidate.attributes.except("id").merge("release_owner" => "Approved test owner", "created_at" => Time.current)
+    expect(bind).to be_persisted
+    second = allocation.dup
+    second.source_time_entry_id = "42"
+    second.save!
+    assignment.update!(expires_at: 1.minute.ago)
+    fresh_actor = User.find(actor.id)
+    denied = described_class.new(source: source, actor: fresh_actor, manifest_sha256: digest, client: client)
+    expect { denied.verify!(evidence: evidence, identity: identity) }
+      .to raise_error(described_class::Error, /cannot approve historical reconciliation/)
+    expect { ApplicationRecord.transaction(requires_new: true) {
+      TimeTrackingLegacyIdentityBinding.insert_all!([ raw.merge("time_tracking_entry_allocation_id" => second.id, "source_time_entry_id" => "42") ])
+    } }.to raise_error(ActiveRecord::StatementInvalid, /tenant, source, owner, or batch/)
+  end
+
   it "requires accepted approval even in a local rehearsal" do
     pending = service.verify!(evidence: evidence, identity: identity)
     expect { service.apply!(binding: pending, accepted_manifest_sha256: "b" * 64, release_owner: "test") }
@@ -89,5 +109,4 @@ RSpec.describe TimeTracking::LegacyIdentityBindingService do
     } }.to raise_error(ActiveRecord::StatementInvalid, /tenant, source, owner, or batch/)
     expect(TimeTrackingLegacyIdentityBinding.count).to eq(0)
   end
-
 end

@@ -87,6 +87,13 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(TimeTrackingEmployeeMapping.count).to eq(0)
   end
 
+  it "denies an accountant an unassigned client in the same organization" do
+    actor.update!(role: "accountant", company: create(:company, organization: company.organization))
+    expect { described_class.new(manifest: manifest, actor: actor).preview! }
+      .to raise_error(described_class::Error, /cannot approve historical reconciliation/)
+    expect(TimeTrackingEmployeeMapping.count).to eq(0)
+  end
+
   it "rejects name, source installation, and captured-version drift before applying" do
     allow(client).to receive(:payroll_cockpit_employee).and_return("employee" => {
       "id" => "91", "payroll_integration_id" => uuid, "full_name" => "Different Person"
@@ -297,7 +304,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
   it "rejects a historical inventory that omits rows from its advertised total" do
     manifest["history_through_work_date"] = period.end_date.iso8601
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
-      "time_entries" => [{ "id" => "41", "source_user_uuid" => uuid, "version" => 2 }],
+      "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     expect { described_class.new(manifest: manifest, actor: actor).preview! }
       .to raise_error(described_class::Error, /incomplete historical source inventory/)
@@ -311,7 +318,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"].first["source_time_entry_version"] = 2
-    initial = { "time_entries" => [{ "id" => "41", "source_user_uuid" => uuid, "version" => 2 }],
+    initial = { "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
     changed = initial.deep_dup
     changed["time_entries"] << { "id" => "99", "source_user_uuid" => uuid, "version" => 0 }
@@ -328,7 +335,11 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(TimeTrackingManualAllocation.find_by!(source_time_entry_id: "41").status).to eq("issued")
   end
 
-  it "approves immutable legacy bindings before new payment events and completes scoped history without rewriting old records" do
+  it "lets an assigned accountant approve bindings and complete history without broader configuration authority" do
+    home = create(:company, organization: company.organization)
+    actor.update!(company: home, role: "accountant")
+    create(:company_assignment, user: actor, company: company)
+    expect(StaffRolePolicy.allowed?(actor, :manage_client_configuration)).to be(false)
     source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
       source_protocol_version: "2.0", identity_verified_at: Time.current)
     source.update_column(:historical_reconciliation_required, true)
@@ -343,15 +354,15 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"] = []
-    manifest["finalized_batch_entries"] = [{ "payroll_item_id" => item.id, "source_time_entry_id" => "41", "source_line_key" => "category:1",
-      "source_user_uuid" => uuid, "source_time_entry_version" => 2, "regular_hours" => "6.10", "overtime_hours" => "0.00" }]
-    manifest["legacy_identity_bindings"] = [{ "allocation_id" => allocation.id, "mapping_id" => mapping.id,
+    manifest["finalized_batch_entries"] = [ { "payroll_item_id" => item.id, "source_time_entry_id" => "41", "source_line_key" => "category:1",
+      "source_user_uuid" => uuid, "source_time_entry_version" => 2, "regular_hours" => "6.10", "overtime_hours" => "0.00" } ]
+    manifest["legacy_identity_bindings"] = [ { "allocation_id" => allocation.id, "mapping_id" => mapping.id,
       "source_user_uuid" => uuid, "source_time_entry_id" => "41", "source_time_entry_version" => 2,
       "source_line_key" => "category:1", "original_work_date" => "2026-08-14", "external_batch_id" => import.external_batch_id,
-      "batch_checksum" => import.external_batch_checksum, "source_instance_id" => source.expected_source_instance_id, "source_total_hours" => "6.10" }]
+      "batch_checksum" => import.external_batch_checksum, "source_instance_id" => source.expected_source_instance_id, "source_total_hours" => "6.10" } ]
     allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
       "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
-    allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [{ "id" => "41", "version" => 2, "source_user_uuid" => uuid }],
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [ { "id" => "41", "version" => 2, "source_user_uuid" => uuid } ],
       "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
@@ -363,5 +374,4 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect { described_class.new(manifest: manifest, actor: actor).apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
       .not_to change(TimeTrackingLegacyIdentityBinding, :count)
   end
-
 end

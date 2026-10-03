@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 class CreateTimeTrackingLegacyIdentityBindings < ActiveRecord::Migration[8.1]
   def change
     create_table :time_tracking_legacy_identity_bindings do |t|

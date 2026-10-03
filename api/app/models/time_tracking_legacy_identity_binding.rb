@@ -47,8 +47,7 @@ class TimeTrackingLegacyIdentityBinding < ApplicationRecord
     valid = matching_allocation?(allocation) && mapping.company_id == company_id &&
       mapping.time_tracking_source_id == time_tracking_source_id && mapping.employee_id == employee_id &&
       mapping.source_user_id == source_user_id && (mapping.source_user_uuid.nil? || mapping.source_user_uuid == source_user_uuid) &&
-      approved_by.active? && approved_by.organization_id == company.organization_id &&
-      StaffRolePolicy.allowed?(approved_by, :manage_client_configuration)
+      StaffRolePolicy.historical_reconciliation_allowed?(approved_by, company)
     errors.add(:base, "Legacy identity binding tenant, source, owner, or batch evidence changed") unless valid
   end
 

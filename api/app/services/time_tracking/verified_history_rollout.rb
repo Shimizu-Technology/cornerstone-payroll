@@ -203,8 +203,8 @@ module TimeTracking
       if manifest["source_instance_id"].present? && (!@source.remote_identity_pinned? || @source.expected_source_instance_id != manifest["source_instance_id"])
         raise Error, "AIRE rollout installation identity changed"
       end
-      raise Error, "AIRE rollout actor cannot administer this company" unless actor.payroll_access_allowed? &&
-        actor.organization_id == @company.organization_id
+      raise Error, "AIRE rollout actor cannot approve historical reconciliation for this company" unless
+        StaffRolePolicy.historical_reconciliation_allowed?(actor, @company)
       linked = TimeTracking::Client.new(@source).payroll_account_link(external_actor_id: actor.id)
         .dig("account_link")
       unless linked&.fetch("connected", false) == true &&

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_03_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -4440,6 +4440,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
   SQL
   execute <<~SQL
+    CREATE OR REPLACE FUNCTION historical_time_reconciliation_actor_allowed(actor_id bigint, target_company_id bigint)
+    RETURNS boolean AS $$
+      SELECT EXISTS (
+        SELECT 1 FROM users u JOIN companies c ON c.id = target_company_id
+        JOIN organizations o ON o.id = c.organization_id
+        WHERE u.id = actor_id AND u.active = true AND c.active = true
+          AND c.test_workspace_archived_at IS NULL AND o.status = 'active'
+          AND (u.role = 5 OR (u.organization_id = c.organization_id AND (
+            u.role IN (0,6) OR (u.role IN (1,3) AND (
+              EXISTS (SELECT 1 FROM company_assignments ca WHERE ca.user_id = u.id AND ca.company_id = c.id
+                AND (ca.expires_at IS NULL OR ca.expires_at > CURRENT_TIMESTAMP))
+              OR (u.company_id = c.id AND NOT EXISTS (
+                SELECT 1 FROM company_assignments ca JOIN companies assigned ON assigned.id = ca.company_id
+                WHERE ca.user_id = u.id AND assigned.organization_id = u.organization_id
+                  AND assigned.test_workspace_archived_at IS NULL
+                  AND (ca.expires_at IS NULL OR ca.expires_at > CURRENT_TIMESTAMP)
+              ))
+            ))
+          )))
+      );
+    $$ LANGUAGE sql STABLE;
+  SQL
+
+  execute <<~SQL
     CREATE OR REPLACE FUNCTION protect_legacy_identity_binding() RETURNS trigger AS $$
     BEGIN
       IF TG_OP <> 'INSERT' THEN
@@ -4466,7 +4490,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
           AND s.expected_source_instance_id::text = NEW.source_instance_id::text
           AND m.company_id = c.id AND m.time_tracking_source_id = s.id AND m.employee_id = e.id
           AND m.source_user_id = a.source_user_id AND (m.source_user_uuid IS NULL OR m.source_user_uuid::text = NEW.source_user_uuid::text)
-          AND u.organization_id = c.organization_id AND u.active = true AND u.role IN (0,1,5,6)
+          AND historical_time_reconciliation_actor_allowed(u.id, c.id)
       ) THEN
         RAISE EXCEPTION 'Legacy identity binding tenant, source, owner, or batch evidence changed';
       END IF;
@@ -4500,7 +4524,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
         NOT EXISTS (SELECT 1 FROM time_tracking_sources s JOIN companies c ON c.id = s.company_id
           JOIN users u ON u.id = NEW.approved_by_id WHERE s.id = NEW.time_tracking_source_id
           AND s.company_id = NEW.company_id AND s.expected_source_instance_id::text = NEW.source_instance_id::text
-          AND u.organization_id = c.organization_id AND u.active = true AND u.role IN (0,1,5,6))
+          AND historical_time_reconciliation_actor_allowed(u.id, c.id))
       ) THEN RAISE EXCEPTION 'Verified history receipt requires accepted installation-bound owner approval'; END IF;
       RETURN NEW;
     END;
