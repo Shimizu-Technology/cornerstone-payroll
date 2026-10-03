@@ -31,10 +31,14 @@ class LocalCertificationClockTest < Minitest::Test
 
   def test_runtime_resolves_locked_gems_before_loading_the_clock
     # Model CI's default-gem mismatch without downloads or changing installed gems.
-    uri = Gem::Specification.find_by_name("uri")
+    require "uri"
+    uri_file = $LOADED_FEATURES.find { |path| path.end_with?("/uri.rb") }
     locked_uri = File.join(@directory, "locked-uri")
-    FileUtils.mkdir_p(locked_uri)
-    FileUtils.cp_r(File.join(uri.full_gem_path, "lib"), locked_uri)
+    library = File.join(locked_uri, "lib")
+    FileUtils.mkdir_p(library)
+    # Default gems may live in rubylibdir instead of a gems/<name>/lib folder.
+    FileUtils.cp(uri_file, File.join(library, "uri.rb"))
+    FileUtils.cp_r(File.join(File.dirname(uri_file), "uri"), library)
     File.write(File.join(locked_uri, "uri.gemspec"), <<~GEMSPEC)
       Gem::Specification.new do |spec|
         spec.name = "uri"
