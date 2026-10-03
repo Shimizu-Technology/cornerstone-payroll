@@ -64,6 +64,8 @@ trap cleanup EXIT INT TERM
 [[ -f "$ROOT_DIR/api/.ruby-version" && -f "$AIRE_REPO_PATH/backend/.ruby-version" ]] || fail "both Rails applications must pin Ruby in .ruby-version"
 (certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}")
 (certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}")
+# Pin control-plane Ruby too; macOS may otherwise select its legacy system Ruby.
+certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
 [[ "$AIRE_DATABASE" == aire_cornerstone_certification_* ]] || fail "unsafe AIRE database name"
 [[ "$CORNERSTONE_DATABASE" == cornerstone_aire_certification_* ]] || fail "unsafe Cornerstone database name"
 
