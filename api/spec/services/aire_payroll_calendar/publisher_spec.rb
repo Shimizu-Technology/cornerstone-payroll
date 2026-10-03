@@ -54,6 +54,17 @@ RSpec.describe AirePayrollCalendar::Publisher do
     allow(AirePayrollCalendarPublication).to receive(:dispatch_one!)
   end
 
+  it "blocks an existing source until its historical coverage is approved" do
+    source.update!(historical_reconciliation_required: true)
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    end.to raise_error(described_class::Error, /complete historical payroll reconciliation/)
+
+    expect(source.aire_payroll_calendar_periods).to be_empty
+    expect(AirePayrollCalendarPublication).not_to have_received(:dispatch_one!)
+  end
+
   it "creates one versioned T-7 Guam publication and queues delivery" do
     result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
 
@@ -136,6 +147,30 @@ RSpec.describe AirePayrollCalendar::Publisher do
     expect do
       described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
     end.to raise_error(AirePayrollCalendar::Contract::Error, /adjacent previous regular payroll period/)
+  end
+
+  it "uses the fixed regular scheduled payday and 5pm Guam even when the payday is a weekend" do
+    schedule.update!(time_tracking_cutoff_rule: "after_previous_regular_payday", time_tracking_cutoff_days: 7, payroll_cutoff_at_minutes: 1020)
+    previous = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 7, 16), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 15))
+    target = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 8, 1), end_date: Date.new(2026, 8, 15), pay_date: Date.new(2026, 8, 31))
+    # An adjustment's later check date cannot move the anchor.
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: previous.start_date, end_date: previous.end_date, pay_date: Date.new(2026, 8, 20), run_purpose: "adjustment")
+    result = described_class.new(pay_period: target, source: source, actor: actor,
+      now: Time.find_zone!("Pacific/Guam").local(2026, 8, 16, 9)).call
+
+    expect(result.publication.payload).to include("previous_regular_pay_date" => "2026-08-15", "cutoff_at" => "2026-08-22T17:00:00+10:00")
+  end
+
+  it "rejects workweeks that AIRE cannot classify instead of publishing an unimportable calendar" do
+    workweek.update!(starts_on_weekday: 1)
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    end.to raise_error(AirePayrollCalendar::Contract::Error, /Sunday midnight Guam/)
+    expect(AirePayrollCalendarPublication.count).to eq(0)
   end
 
   it "appends the next revision when dates change before cutoff" do

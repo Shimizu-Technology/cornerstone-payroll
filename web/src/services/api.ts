@@ -3334,6 +3334,12 @@ export const checksApi = {
   }): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
     api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`, data),
 
+  confirmDirectDepositPayment: (payrollItemId: number, data: {
+    settled_on: string; bank_reference: string; attestation: boolean; note?: string;
+  }) => api.post<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }>(
+    `/admin/payroll_items/${payrollItemId}/direct_deposit/confirm_payment`, data
+  ),
+
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>
     api.patch<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/check_number`, {
@@ -3828,7 +3834,7 @@ export interface CompanyPayScheduleSetting {
   period_rule: 'manual' | 'weekly' | 'biweekly' | 'semimonthly';
   period_start_weekday?: number | null;
   period_anchor_date?: string | null;
-  pay_date_rule: 'manual' | 'days_after_period_end';
+  pay_date_rule: 'manual' | 'days_after_period_end' | 'semimonthly_15th_and_month_end';
   pay_date_offset_days?: number | null;
   payroll_cutoff_days_before: number;
   time_tracking_cutoff_rule: 'before_pay_date' | 'after_previous_regular_payday';
@@ -4955,6 +4961,9 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   markPaid: (id: number, data: { payment_date: string; confirmation_number?: string }) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_paid`, data),
+  payrollMatches: (id: number) => api.get<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }>(`/admin/non_employee_checks/${id}/payroll_matches`),
+  supersedeWithPayrollItem: (id: number, payrollItemId: number, reason: string, recipientVerified: boolean) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/supersede_with_payroll_item`, { payroll_item_id: payrollItemId, reason, recipient_verified: recipientVerified }),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
   checkPdf: (id: number, options?: { startingSlot?: number }) =>

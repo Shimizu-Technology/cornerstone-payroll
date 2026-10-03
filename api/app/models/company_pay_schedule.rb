@@ -3,7 +3,7 @@
 class CompanyPaySchedule < ApplicationRecord
   FREQUENCIES = %w[weekly biweekly semimonthly monthly].freeze
   PERIOD_RULES = %w[manual weekly biweekly semimonthly].freeze
-  PAY_DATE_RULES = %w[manual days_after_period_end].freeze
+  PAY_DATE_RULES = %w[manual days_after_period_end semimonthly_15th_and_month_end].freeze
   SOURCES = %w[operator_confirmed production_inferred legacy_system_default].freeze
   CONFIRMATION_STATUSES = %w[confirmed needs_confirmation].freeze
   PAYROLL_CUTOFF_DAYS_BEFORE = 7
@@ -36,6 +36,7 @@ class CompanyPaySchedule < ApplicationRecord
   validate :automatic_period_rule_has_weekday
   validate :biweekly_rule_has_aligned_anchor
   validate :automatic_pay_date_rule_has_offset
+  validate :fixed_semimonthly_paydays_require_semimonthly_periods
 
   scope :effective_on, ->(date) {
     where("effective_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", date, date)
@@ -54,7 +55,22 @@ class CompanyPaySchedule < ApplicationRecord
     period_rule == "manual" || pay_date_rule == "manual"
   end
 
+  def scheduled_pay_date_for(period_end)
+    return unless pay_date_rule == "semimonthly_15th_and_month_end" && period_end
+
+    # The first half is paid at month end; the second half is paid on the
+    # following month's 15th. Scheduled dates never shift for non-working days.
+    period_end.day == 15 ? period_end.end_of_month : period_end.next_month.change(day: 15)
+  end
+
   private
+
+  def fixed_semimonthly_paydays_require_semimonthly_periods
+    return unless pay_date_rule == "semimonthly_15th_and_month_end"
+    return if frequency == "semimonthly" && period_rule == "semimonthly"
+
+    errors.add(:pay_date_rule, "requires a semimonthly frequency and period rule")
+  end
 
   def ends_on_not_before_effective_on
     return if ends_on.blank? || effective_on.blank? || ends_on >= effective_on

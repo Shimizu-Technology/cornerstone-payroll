@@ -32,7 +32,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
       batch_id: import.external_batch_id,
       event_id: acknowledgement.event_id,
       status: acknowledgement.status,
-      occurred_at: acknowledgement.occurred_at.iso8601,
+      occurred_at: acknowledgement.occurred_at.iso8601(6),
       external_pay_period_id: import.pay_period_id.to_s,
       external_payroll_item_id: acknowledgement.payroll_item_id.to_s,
       source_time_entry_id: acknowledgement.source_time_entry_id,
@@ -40,6 +40,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
       **payable_line,
       payment_method: acknowledgement.payment_method,
       payment_reference: acknowledgement.payment_reference,
+      payment_effective_on: acknowledgement.payment_effective_on&.iso8601,
       metadata: {
         company_id: import.pay_period.company_id,
         pay_period_start: import.pay_period.start_date.iso8601,

@@ -116,6 +116,7 @@ fixture = ApplicationRecord.transaction do
 
   {
     schema_version: 1,
+    integration_profile: Payroll::IntegrationProfile.call,
     shared_secret: shared_secret,
     delegation_token: grant.issued_token,
     admin_id: admin.id,
