@@ -112,22 +112,31 @@ module TimeTracking
       apply_classification_cases!
       apply_exact_entries!
       apply_finalized_batch_payments!
-      verify_applied!
-      approved_coverage = accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present? && history_scope_verified?
-      AireVerifiedHistoryRolloutReceipt.find_or_create_by!(time_tracking_source: @source,
-        manifest_sha256: @manifest_sha256, coverage_verified: approved_coverage) do |receipt|
-        receipt.company = @company
-        receipt.time_tracking_source = @source
-        receipt.identity_count = identities.length
-        receipt.paid_source_entry_count = entries.length +
-          classification_cases.sum { |row| row.fetch("source_time_entry_ids").length } + finalized_batch_entries.length
-        receipt.completed_at = Time.current
-        receipt.source_instance_id = @source.expected_source_instance_id
-        if accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present?
-          receipt.accepted_manifest_sha256 = @manifest_sha256
-          receipt.approved_by = actor
-          receipt.release_owner = release_owner.to_s.strip
-          receipt.coverage_verified = history_scope_verified?
+      # Keep command IDs and approved bindings durable across remote failures.
+      # AIRE requests cannot be rolled back by a Cornerstone SQL transaction.
+      # Publish completion only after a fresh coverage read and local verification.
+      @source.with_lock do
+        validate_history_scope!
+        if accepted_manifest_sha256.present? && !history_scope_verified?
+          raise Error, "Accepted history manifest leaves scoped source entries without a verified disposition"
+        end
+        verify_applied!
+        approved_coverage = accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present? && history_scope_verified?
+        AireVerifiedHistoryRolloutReceipt.find_or_create_by!(time_tracking_source: @source,
+          manifest_sha256: @manifest_sha256, coverage_verified: approved_coverage) do |receipt|
+          receipt.company = @company
+          receipt.time_tracking_source = @source
+          receipt.identity_count = identities.length
+          receipt.paid_source_entry_count = entries.length +
+            classification_cases.sum { |row| row.fetch("source_time_entry_ids").length } + finalized_batch_entries.length
+          receipt.completed_at = Time.current
+          receipt.source_instance_id = @source.expected_source_instance_id
+          if accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present?
+            receipt.accepted_manifest_sha256 = @manifest_sha256
+            receipt.approved_by = actor
+            receipt.release_owner = release_owner.to_s.strip
+            receipt.coverage_verified = history_scope_verified?
+          end
         end
       end
       summary
@@ -275,20 +284,31 @@ module TimeTracking
       end
       @history_inventory = []
       page = 1
+      expected_count = nil
+      expected_pages = nil
       loop do
         raise Error, "Historical source inventory exceeded the bounded page limit" if page > 100
         response = @client.payroll_cockpit_history_entries(through_work_date: date, page: page)
         rows = response.fetch("time_entries")
         pagination = response.fetch("pagination")
         unless rows.is_a?(Array) && pagination["current_page"] == page && pagination["total_pages"].is_a?(Integer) &&
-               pagination["total_pages"].between?(0, 100) && pagination["truncated"] == false
+               pagination["total_pages"].between?(0, 100) && pagination["total_count"].is_a?(Integer) &&
+               pagination["total_count"] >= 0 && pagination["truncated"] == false
           raise Error, "AIRE returned incomplete historical source inventory"
+        end
+        expected_count ||= pagination["total_count"]
+        expected_pages ||= pagination["total_pages"]
+        unless expected_count == pagination["total_count"] && expected_pages == pagination["total_pages"]
+          raise Error, "AIRE historical source inventory changed while paging"
         end
         @history_inventory.concat(rows)
         break if page >= pagination["total_pages"]
         page += 1
       end
-      keys = @history_inventory.map { |row| [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ] }
+      unless @history_inventory.length == expected_count
+        raise Error, "AIRE returned incomplete historical source inventory"
+      end
+      keys = @history_inventory.map { |row| row.fetch("id").to_s }
       raise Error, "AIRE returned duplicate historical source entries" unless keys.uniq.length == keys.length
     rescue Date::Error, KeyError, TypeError => e
       raise Error, "Historical source scope is invalid or incomplete: #{e.message}"

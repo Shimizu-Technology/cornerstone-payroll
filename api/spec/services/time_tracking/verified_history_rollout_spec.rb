@@ -281,7 +281,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2 },
                           { "id" => "99", "source_user_uuid" => uuid, "version" => 3 } ],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "truncated" => false })
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     rollout = described_class.new(manifest: manifest, actor: actor)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     expect { rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
@@ -292,6 +292,40 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     rollout.apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner")
     expect(AireVerifiedHistoryRolloutReceipt.last.coverage_verified).to be(true)
+  end
+
+  it "rejects a historical inventory that omits rows from its advertised total" do
+    manifest["history_through_work_date"] = period.end_date.iso8601
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "time_entries" => [{ "id" => "41", "source_user_uuid" => uuid, "version" => 2 }],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
+    expect { described_class.new(manifest: manifest, actor: actor).preview! }
+      .to raise_error(described_class::Error, /incomplete historical source inventory/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
+
+  it "keeps completion closed when the fresh final inventory gains an unreviewed entry" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "2.0", identity_verified_at: Time.current)
+    source.update_column(:historical_reconciliation_required, true)
+    manifest["source_instance_id"] = source.expected_source_instance_id
+    manifest["history_through_work_date"] = period.end_date.iso8601
+    manifest["issued_entries"].first["source_time_entry_version"] = 2
+    initial = { "time_entries" => [{ "id" => "41", "source_user_uuid" => uuid, "version" => 2 }],
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
+    changed = initial.deep_dup
+    changed["time_entries"] << { "id" => "99", "source_user_uuid" => uuid, "version" => 0 }
+    changed["pagination"]["total_count"] = 2
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(initial, changed)
+    digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
+
+    expect { described_class.new(manifest: manifest, actor: actor).apply!(
+      accepted_manifest_sha256: digest, release_owner: "Approved test owner") }
+      .to raise_error(described_class::Error, /without a verified disposition/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    expect(source.historical_reconciliation_complete?).to be(false)
+    # Remote writes have already happened. Preserve their idempotent command IDs.
+    expect(TimeTrackingManualAllocation.find_by!(source_time_entry_id: "41").status).to eq("issued")
   end
 
   it "approves immutable legacy bindings before new payment events and completes scoped history without rewriting old records" do
@@ -318,7 +352,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
       "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
     allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [{ "id" => "41", "version" => 2, "source_user_uuid" => uuid }],
-      "pagination" => { "current_page" => 1, "total_pages" => 1, "truncated" => false })
+      "pagination" => { "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
     described_class.new(manifest: manifest, actor: actor).apply!(accepted_manifest_sha256: digest, release_owner: "Approved test owner")
