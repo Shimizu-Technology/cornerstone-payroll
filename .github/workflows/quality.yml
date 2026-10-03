@@ -226,6 +226,9 @@ jobs:
           '
       - name: Check deployment scripts
         run: bash -n ops/staging-v2/*.sh
+      - name: Test connected deployment gates
+        working-directory: ops/staging-v2
+        run: python3 -m unittest test_pair_gate.py test_public_aire_actions.py
       - name: Validate staging v2 LaunchAgent
         run: python3 -c 'import plistlib; plistlib.load(open("ops/staging-v2/launchd/com.shimizutechnology.aire-payroll-staging-v2.plist", "rb"))'
       - name: Build staging API image

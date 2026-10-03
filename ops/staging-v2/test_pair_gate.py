@@ -46,7 +46,7 @@ class PairGateTest(unittest.TestCase):
             "run": {
                 "id": 101, "status": "completed", "conclusion": "success",
                 "event": "workflow_dispatch", "head_branch": "staging-v2",
-                "name": "Quality", "path": ".github/workflows/quality.yml",
+                "name": f"Connected payroll {PAYROLL_SHA} + {AIRE_SHA}", "path": ".github/workflows/quality.yml",
                 "display_title": f"Connected payroll {PAYROLL_SHA} + {AIRE_SHA}",
                 "head_sha": WORKFLOW_SHA, "run_attempt": 1,
             },
@@ -58,7 +58,7 @@ class PairGateTest(unittest.TestCase):
         }
         self.model["candidates"] = {}
         for repo, sha, run_id, workflow, name in (
-                ("cornerstone-payroll", PAYROLL_SHA, 201, "quality.yml", "Quality"),
+                ("cornerstone-payroll", PAYROLL_SHA, 201, "quality.yml", "Quality staging-v2"),
                 ("aire-services", AIRE_SHA, 202, "staging-v2.yml", "Staging v2 images")):
             self.model["candidates"][repo] = {
                 "runs": [{"databaseId": run_id, "headSha": sha, "createdAt": "2026-10-03T09:00:00Z"}],
@@ -240,6 +240,21 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.deploy_log.read_text().splitlines(), [PAYROLL_SHA, AIRE_SHA, "101"])
 
+    def test_dynamic_run_titles_are_not_workflow_identity(self):
+        for public_read in (False, True):
+            with self.subTest(public_read=public_read):
+                if public_read:
+                    self.enable_public_reader()
+                self.certify()
+                result = self.execute()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.deploy_log.read_text().splitlines(), [PAYROLL_SHA, AIRE_SHA, "101"])
+                self.deploy_log.unlink()
+
+    def test_explicit_certificate_rejects_wrong_pair_title(self):
+        self.model["run"]["display_title"] = f"Connected payroll {PAYROLL_SHA} + {'f' * 40}"
+        self.assertNotEqual(self.execute("verify-pair-certificate.sh", (PAYROLL_SHA, AIRE_SHA, "101")).returncode, 0)
+
     def test_direct_deploy_cannot_bypass_missing_certificate(self):
         result = self.execute("direct-deploy.sh", (PAYROLL_SHA, AIRE_SHA))
         self.assertNotEqual(result.returncode, 0)
@@ -293,12 +308,14 @@ else:
                 job["conclusion"] = "success"
 
     def test_candidate_workflow_proof_rejects_wrong_workflow_event_or_branch(self):
-        for key, wrong in (("path", ".github/workflows/untrusted.yml"), ("event", "workflow_dispatch"), ("head_branch", "main")):
-            run = self.model["candidates"]["cornerstone-payroll"]["run"]
-            original = run[key]
-            run[key] = wrong
-            self.assertNotEqual(self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA)).returncode, 0)
-            run[key] = original
+        for repo in PUBLISH_JOBS:
+            for key, wrong in (("path", ".github/workflows/untrusted.yml"), ("event", "workflow_dispatch"), ("head_branch", "main")):
+                with self.subTest(repo=repo, field=key):
+                    run = self.model["candidates"][repo]["run"]
+                    original = run[key]
+                    run[key] = wrong
+                    self.assertNotEqual(self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA)).returncode, 0)
+                    run[key] = original
 
     def test_candidate_mode_for_ci_requires_quality_and_published_images(self):
         result = self.execute("verify-pair-certificate.sh", ("--candidate-workflows-only", PAYROLL_SHA, AIRE_SHA))
