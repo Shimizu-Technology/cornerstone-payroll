@@ -52,6 +52,25 @@ RSpec.describe TimeTracking::ManualAllocationService do
     expect { create_link }.to raise_error(described_class::Error, /already linked to this payroll item/)
   end
 
+  it "preserves legitimate partial source hours covered by different payroll items" do
+    item.update!(hours_worked: 3.05)
+    second_period = create(:pay_period, :committed, company: company,
+      start_date: Date.new(2026, 8, 16), end_date: Date.new(2026, 8, 31), pay_date: Date.new(2026, 9, 1))
+    second_item = create(:payroll_item, :with_check, company: company, pay_period: second_period,
+      employee: employee, hours_worked: 3.05, overtime_hours: 0)
+    parameters = { source_time_entry_id: "41", source_time_entry_version: 2, source_user_uuid: uuid,
+      regular_hours: "3.05", overtime_hours: "0.00", original_work_date: "2026-08-15",
+      note: "Each issued check covers only half of this exact source entry" }
+    first = service.create!(payroll_item_id: item.id, **parameters)
+    second = described_class.new(pay_period: second_period, source: source, actor: actor)
+      .create!(payroll_item_id: second_item.id, **parameters)
+
+    expect(first.status).to eq("committed")
+    expect(second.status).to eq("committed")
+    expect(TimeTrackingManualAllocation.where(source_time_entry_id: "41").sum(:regular_hours)).to eq(6.1)
+    expect(first.payroll_item_id).not_to eq(second.payroll_item_id)
+  end
+
   it "does not mark the hours paid until a delivered check event exists" do
     allocation = create_link
     allow(client).to receive(:issue_payroll_manual_allocation).and_return(

@@ -46,10 +46,19 @@ module TimeTracking
         raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
       end
 
-      verify_live_source!(entry_id, uuid, version, work_date, regular, overtime)
+      begin
+        verify_live_source!(entry_id, uuid, version, work_date, regular, overtime)
+      rescue Error
+        existing = TimeTrackingManualAllocation.find_by(time_tracking_source: source,
+          source_time_entry_id: entry_id, payroll_item_id: item.id)
+        if matching_classification_allocation?(existing, classification_reconciliation, uuid, version, work_date, regular, overtime)
+          sync!(existing)
+          return existing
+        end
+        raise
+      end
 
-      allocation = nil
-      item.with_lock do
+      allocation = item.with_lock do
         raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
         unless item.effective_payment_delivery_method.in?(%w[paper_check direct_deposit])
           raise Error, "Choose a supported payroll payment method before linking AIRE hours"
@@ -58,8 +67,12 @@ module TimeTracking
         if !classification_reconciliation && TimeTrackingClassificationReconciliation.exists?(payroll_item_id: item.id)
           raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
         end
-        if TimeTrackingManualAllocation.where(time_tracking_source: source, source_time_entry_id: entry_id,
-                                              payroll_item_id: item.id).exists?
+        existing = TimeTrackingManualAllocation.find_by(time_tracking_source: source,
+          source_time_entry_id: entry_id, payroll_item_id: item.id)
+        if existing
+          if matching_classification_allocation?(existing, classification_reconciliation, uuid, version, work_date, regular, overtime)
+            next existing
+          end
           raise Error, "This AIRE time entry is already linked to this payroll item"
         end
         allocated = item.pay_period.time_tracking_manual_allocations.where(payroll_item_id: item.id).where.not(status: "voided")
@@ -73,7 +86,7 @@ module TimeTracking
           raise Error, "Selected AIRE hours exceed the regular or overtime hours on this paycheck"
         end
 
-        allocation = TimeTrackingManualAllocation.create!(
+        TimeTrackingManualAllocation.create!(
           company: pay_period.company,
           time_tracking_source: source,
           pay_period: pay_period,
@@ -119,6 +132,13 @@ module TimeTracking
     private
 
     attr_reader :pay_period, :source, :actor
+
+    def matching_classification_allocation?(allocation, reconciliation, uuid, version, work_date, regular, overtime)
+      allocation && reconciliation && allocation.classification_reconciliation_id == reconciliation.id &&
+        allocation.status != "voided" && allocation.source_user_uuid == uuid &&
+        allocation.source_time_entry_version == version && allocation.original_work_date == work_date &&
+        allocation.regular_hours == regular && allocation.overtime_hours == overtime
+    end
 
     def validate_classification_reconciliation!(reconciliation, item, entry_id, uuid, version, work_date, regular, overtime)
       unless reconciliation.is_a?(TimeTrackingClassificationReconciliation) &&

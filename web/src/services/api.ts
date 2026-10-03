@@ -3336,7 +3336,7 @@ export const checksApi = {
 
   confirmDirectDepositPayment: (payrollItemId: number, data: {
     settled_on: string; bank_reference: string; attestation: boolean; note?: string;
-  }) => api.post<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }>(
+  }): Promise<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }> => api.post<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }>(
     `/admin/payroll_items/${payrollItemId}/direct_deposit/confirm_payment`, data
   ),
 
@@ -4961,8 +4961,8 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   markPaid: (id: number, data: { payment_date: string; confirmation_number?: string }) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_paid`, data),
-  payrollMatches: (id: number) => api.get<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }>(`/admin/non_employee_checks/${id}/payroll_matches`),
-  supersedeWithPayrollItem: (id: number, payrollItemId: number, reason: string, recipientVerified: boolean) =>
+  payrollMatches: (id: number): Promise<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }> => api.get<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }>(`/admin/non_employee_checks/${id}/payroll_matches`),
+  supersedeWithPayrollItem: (id: number, payrollItemId: number, reason: string, recipientVerified: boolean): Promise<{ non_employee_check: NonEmployeeCheck }> =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/supersede_with_payroll_item`, { payroll_item_id: payrollItemId, reason, recipient_verified: recipientVerified }),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),

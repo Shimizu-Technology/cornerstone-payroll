@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_03_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_03_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -4312,7 +4312,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_040000) do
           AND NEW.verified_facts->'recipient_verified' = 'true'::jsonb
           AND NEW.verified_facts->>'standalone_payee' = c.payable_to
           AND NEW.verified_facts->>'payroll_employee_id' = p.employee_id::text
-          AND NEW.verified_facts->>'payroll_employee_name' = concat_ws(' ', nullif(btrim(e.first_name), ''), nullif(btrim(e.middle_name), ''), nullif(btrim(e.last_name), ''))
+          AND NEW.verified_facts->>'payroll_employee_name' = concat_ws(' ', CASE WHEN e.first_name !~ '^[[:space:]]*$' THEN e.first_name END, CASE WHEN e.middle_name !~ '^[[:space:]]*$' THEN e.middle_name END, CASE WHEN e.last_name !~ '^[[:space:]]*$' THEN e.last_name END)
           AND NEW.verified_facts->>'standalone_check_number' = c.check_number
           AND NEW.verified_facts->>'payroll_check_number' = p.check_number
           AND NEW.verified_facts->>'normalized_check_number' = coalesce(nullif(ltrim(p.check_number, '0'), ''), '0')

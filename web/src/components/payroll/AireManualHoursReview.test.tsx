@@ -188,8 +188,18 @@ it('shows historical evidence and wage differences without claiming another paym
   render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
   await screen.findByRole('region', { name: 'Historical payment reconciliation' });
   expect(screen.getByText(/does not create another paycheck/)).toBeTruthy();
-  expect(screen.getByText(/Gross wage difference: \$5.00/)).toBeTruthy();
+  expect(screen.getByText(/Gross wage difference: \+\$5.00/)).toBeTruthy();
   expect(screen.getByText(/wage split still needs review/)).toBeTruthy();
+});
+
+it('shows the direction when issued check wages exceed the source estimate', async () => {
+  apiMocks.manualReview.mockResolvedValue({ ...review, historical_classification_reviews: [{
+    id: 2, employee_name: 'Example Worker', check_number: '2002', source_entry_count: 1,
+    source_regular_hours: 4, source_overtime_hours: 0, payroll_regular_hours: 3, payroll_overtime_hours: 1,
+    gross_wage_difference: -5, status: 'complete', note: 'Retained for review',
+  }] });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  expect(await screen.findByText(/Gross wage difference: −\$5.00 \(issued check wages exceed AIRE estimate\)/)).toBeTruthy();
 });
 
 it('keeps owner-reported historical payments visibly held pending check evidence', async () => {

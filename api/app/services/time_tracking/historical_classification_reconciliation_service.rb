@@ -26,7 +26,19 @@ module TimeTracking
       raise Error, "Map this AIRE person to the payroll employee first" unless mapping
 
       reconciliation = TimeTrackingClassificationReconciliation.find_by(payroll_item: item)
-      reconciliation ||= prepare!(item: item, uuid: uuid)
+      unless reconciliation
+        # Fetch source evidence before locking SQL rows. Concurrent reviewers
+        # reuse the first saved review after the short local creation lock.
+        prepared = prepare!(item: item, uuid: uuid)
+        reconciliation = item.with_lock do
+          TimeTrackingClassificationReconciliation.find_by(payroll_item: item) || begin
+            validate_preparable_item!(item)
+            validate_saved!(prepared, item: item, uuid: uuid)
+            prepared.save!
+            prepared
+          end
+        end
+      end
       validate_saved!(reconciliation, item: item, uuid: uuid)
       if reconciliation.status == "complete"
         verify_issued_coverage!(reconciliation)
@@ -89,13 +101,8 @@ module TimeTracking
     end
 
     def prepare!(item:, uuid:)
-      raise Error, "A voided paycheck cannot establish paid AIRE hours" if item.voided?
-      raise Error, "This paycheck already has exact AIRE allocations" if item.time_tracking_entry_allocations.exists? ||
-                                                                item.time_tracking_manual_allocations.where.not(status: "voided").exists?
-      raise Error, "Use a delivered paper check for historical classification reconciliation" unless
-        item.effective_payment_delivery_method == "paper_check" && item.check_number.present? && item.net_pay.to_d.positive?
+      validate_preparable_item!(item)
       delivery = item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
-      raise Error, "Record the actual check-delivery evidence before marking AIRE hours paid" unless delivery&.effective_on
 
       review = TimeTracking::Client.for_payroll_actor(source, actor: actor).payroll_cockpit_manual_review(
         start_date: pay_period.start_date.iso8601,
@@ -144,7 +151,7 @@ module TimeTracking
              "AIRE #{format('%.2f', source_regular)} regular / #{format('%.2f', source_overtime)} OT hours; " \
              "check #{format('%.2f', payroll_regular)} regular / #{format('%.2f', payroll_overtime)} OT hours. " \
              "Total hours match and are marked paid once; estimated gross wage difference #{format('%+.2f', difference)} is retained for later review, not automatically paid or deducted."
-      TimeTrackingClassificationReconciliation.create!(
+      TimeTrackingClassificationReconciliation.new(
         company: pay_period.company, time_tracking_source: source, pay_period: pay_period,
         payroll_item: item, employee: item.employee, created_by: actor,
         source_user_uuid: uuid, source_entries: snapshots,
@@ -153,6 +160,16 @@ module TimeTracking
         gross_wage_difference: difference, check_number: item.check_number,
         payment_effective_on: delivery.effective_on, note: note
       )
+    end
+
+    def validate_preparable_item!(item)
+      raise Error, "A voided paycheck cannot establish paid AIRE hours" if item.voided?
+      raise Error, "This paycheck already has exact AIRE allocations" if item.time_tracking_entry_allocations.exists? ||
+                                                                item.time_tracking_manual_allocations.where.not(status: "voided").exists?
+      raise Error, "Use a delivered paper check for historical classification reconciliation" unless
+        item.effective_payment_delivery_method == "paper_check" && item.check_number.present? && item.net_pay.to_d.positive?
+      delivery = item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
+      raise Error, "Record the actual check-delivery evidence before marking AIRE hours paid" unless delivery&.effective_on
     end
 
     def source_entry_snapshot!(entry)

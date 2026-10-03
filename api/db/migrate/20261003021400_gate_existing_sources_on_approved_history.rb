@@ -9,7 +9,7 @@ class GateExistingSourcesOnApprovedHistory < ActiveRecord::Migration[8.1]
     add_reference :aire_verified_history_rollout_receipts, :approved_by, foreign_key: { to_table: :users }, index: { name: "idx_verified_history_approver" }
     add_column :aire_verified_history_rollout_receipts, :release_owner, :string
     add_column :aire_verified_history_rollout_receipts, :coverage_verified, :boolean, null: false, default: false
-    remove_index :aire_verified_history_rollout_receipts, name: "idx_aire_verified_rollout_receipts_manifest"
+    remove_index :aire_verified_history_rollout_receipts, :manifest_sha256, unique: true, name: "idx_aire_verified_rollout_receipts_manifest"
     add_index :aire_verified_history_rollout_receipts, [ :time_tracking_source_id, :manifest_sha256, :coverage_verified ],
       unique: true, name: "idx_verified_history_manifest_approval"
     reversible do |direction|

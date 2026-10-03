@@ -236,7 +236,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   <article key={item.id} className="mt-4 rounded-lg border border-warning-200 bg-white p-4 text-sm">
                     <p className="font-semibold">{item.employee_name} · check {item.check_number} · {item.source_entry_count} source entries</p>
                     <p className="mt-2">AIRE: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
-                    <p className="mt-2">Gross wage difference: ${item.gross_wage_difference.toFixed(2)} · {item.status}</p>
+                    <p className="mt-2">Gross wage difference: {item.gross_wage_difference < 0 ? '−' : '+'}${Math.abs(item.gross_wage_difference).toFixed(2)} ({item.gross_wage_difference < 0 ? 'issued check wages exceed AIRE estimate' : item.gross_wage_difference > 0 ? 'AIRE estimate exceeds issued check wages' : 'estimates match'}) · {item.status}</p>
                     <p className="mt-2 text-neutral-600">{item.note}</p>
                   </article>
                 ))}

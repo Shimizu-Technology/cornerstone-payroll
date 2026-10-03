@@ -27,6 +27,35 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     allow(client).to receive(:payroll_account_link).and_return("account_link" => { "connected" => false })
   end
 
+  context "manual payment allocations" do
+    let(:pay_period) { create(:pay_period, :committed, company: company) }
+
+    it "audits the actor, allocation command and payment-link explanation" do
+      employee = create(:employee, company: company)
+      item = create(:payroll_item, :with_check, company: company, pay_period: pay_period, employee: employee, hours_worked: 4)
+      uuid = SecureRandom.uuid
+      TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+        employee: employee, source_user_id: "91", source_user_uuid: uuid)
+      allow(TimeTracking::Client).to receive(:for_payroll_actor).and_return(client)
+      allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [ { "source_user_uuid" => uuid,
+        "adjustments" => [ { "source_time_entry_id" => "41", "source_time_entry_version" => 2,
+          "original_work_date" => pay_period.start_date.iso8601, "regular_hours" => 4, "overtime_hours" => 0 } ] } ])
+      allow(client).to receive(:commit_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501", "version" => 0 })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_allocations", params: {
+        payroll_item_id: item.id, source_time_entry_id: "41", source_time_entry_version: 2, source_user_uuid: uuid,
+        regular_hours: "4.00", overtime_hours: "0.00", original_work_date: pay_period.start_date.iso8601,
+        note: "This issued historical check covers these exact source hours"
+      }
+      expect(response).to have_http_status(:created)
+      allocation = TimeTrackingManualAllocation.last
+      audit = AuditLog.find_by!(action: "aire_payroll_cockpit#manual_allocation_created")
+      expect(audit.user_id).to eq(admin.id)
+      expect(audit.record_id.to_i).to eq(allocation.id)
+      expect(audit.metadata).to include("command_id" => allocation.commit_command_id,
+        "reason" => allocation.reconciliation_note)
+    end
+  end
+
   def period_payload
     {
       "payroll_period" => {

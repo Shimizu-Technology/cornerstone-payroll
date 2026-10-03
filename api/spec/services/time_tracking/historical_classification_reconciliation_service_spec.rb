@@ -75,6 +75,46 @@ RSpec.describe TimeTracking::HistoricalClassificationReconciliationService do
       .not_to change(TimeTrackingManualAllocation, :count)
   end
 
+  it "reuses a concurrent review without fetching AIRE while holding an item transaction" do
+    baseline_transactions = ApplicationRecord.connection.open_transactions
+    allow(client).to receive(:payroll_cockpit_manual_review) do
+      expect(ApplicationRecord.connection.open_transactions).to eq(baseline_transactions)
+      review
+    end
+    interleaved = false
+    allow_any_instance_of(PayrollItem).to receive(:with_lock).and_wrap_original do |original, *args, &block|
+      unless interleaved
+        interleaved = true
+        service.send(:prepare!, item: item, uuid: uuid).save!
+      end
+      original.call(*args, &block)
+    end
+
+    result = service.call(payroll_item_id: item.id, source_user_uuid: uuid)
+    expect(result.reload.status).to eq("complete")
+    expect(TimeTrackingClassificationReconciliation.count).to eq(1)
+    expect(TimeTrackingManualAllocation.count).to eq(2)
+  end
+
+  it "reuses the exact allocation when concurrent callers finish the same pending review" do
+    reconciliation = service.send(:prepare!, item: item, uuid: uuid)
+    reconciliation.save!
+    entry = reconciliation.source_entries.first
+    parameters = { payroll_item_id: item.id, source_time_entry_id: entry.fetch("source_time_entry_id"),
+      source_time_entry_version: entry.fetch("source_time_entry_version"), source_user_uuid: uuid,
+      regular_hours: entry.fetch("regular_hours"), overtime_hours: entry.fetch("overtime_hours"),
+      original_work_date: entry.fetch("original_work_date"), note: reconciliation.note,
+      classification_reconciliation: reconciliation }
+    allocations = TimeTracking::ManualAllocationService.new(pay_period: period, source: source, actor: actor)
+    first = allocations.create!(**parameters)
+    review["employees"].first["adjustments"].shift
+    second = allocations.create!(**parameters)
+    expect(second.id).to eq(first.id)
+    expect(second.commit_command_id).to eq(first.commit_command_id)
+    expect(TimeTrackingManualAllocation.count).to eq(1)
+    expect(client).to have_received(:commit_payroll_manual_allocation).once
+  end
+
   it "reconciles only verified historical entries when a newer entry appears in the old period" do
     review["employees"][0]["adjustments"] << {
       "source_time_entry_id" => "99", "source_time_entry_version" => 0,

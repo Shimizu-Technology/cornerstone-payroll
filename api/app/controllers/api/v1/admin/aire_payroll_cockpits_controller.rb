@@ -275,6 +275,9 @@ module Api
 
         def create_manual_allocation
           allocation = manual_allocation_service.create!(**manual_allocation_params.to_h.symbolize_keys)
+          record_command_audit!(action: "aire_payroll_cockpit#manual_allocation_created",
+            record_type: "TimeTrackingManualAllocation", record_id: allocation.id,
+            command_id: allocation.commit_command_id, reason: allocation.reconciliation_note, result: {})
           render json: { manual_allocation: manual_allocation_json(allocation) }, status: :created
         rescue ActionController::ParameterMissing, ArgumentError,
                TimeTracking::ManualAllocationService::Error, ActiveRecord::RecordInvalid => e

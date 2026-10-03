@@ -46,6 +46,16 @@ RSpec.describe NonEmployeeCheckSupersessionService do
       verified_facts: verified_facts, created_at: Time.current }
   end
 
+  def assert_valid_raw_record!
+    record = raw_record
+    ApplicationRecord.transaction(requires_new: true) do
+      NonEmployeeCheckSupersession.insert_all!([ record ])
+      expect(NonEmployeeCheckSupersession.exists?(non_employee_check_id: check.id)).to be(true)
+      raise ActiveRecord::Rollback
+    end
+    expect(NonEmployeeCheckSupersession.exists?(non_employee_check_id: check.id)).to be(false)
+  end
+
   before do
     unless RSpec.current_example.metadata[:unapproved]
       CheckSupersessionRolloutApproval.create!(company: company, approved_by: approver,
@@ -211,6 +221,18 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     expect(NonEmployeeCheckSupersession.count).to eq(0)
   end
 
+  it "accepts exact raw supersession facts as a positive control" do
+    assert_valid_raw_record!
+  end
+
+  it "preserves whitespace in nonblank employee name parts as display evidence" do
+    employee.update!(first_name: "  Example ", middle_name: " \t ", last_name: " Worker  ")
+    assert_valid_raw_record!
+    evidence = described_class.new(check: check, actor: actor).supersede!(
+      payroll_item_id: item.id, reason: "Exact physical check verified against the same employee", recipient_verified: true)
+    expect(evidence.verified_facts.fetch("payroll_employee_name")).to eq(employee.full_name)
+  end
+
   it "rejects cross-company evidence at the database boundary" do
     item
     other_company = create(:company, organization: company.organization)
@@ -224,17 +246,20 @@ RSpec.describe NonEmployeeCheckSupersessionService do
   end
 
   it "rejects a direct insert with missing verified facts" do
+    assert_valid_raw_record!
     expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(verified_facts: {}) ]) }
       .to raise_error(ActiveRecord::StatementInvalid, /recipient attestation/)
   end
 
   it "rejects a direct insert with a mismatched amount snapshot" do
+    assert_valid_raw_record!
     expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(
       verified_facts: verified_facts.merge("standalone_amount" => "999.00")
     ) ]) }.to raise_error(ActiveRecord::StatementInvalid, /amount/)
   end
 
   it "rejects a direct insert without the matching delivery event" do
+    assert_valid_raw_record!
     expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(
       verified_facts: verified_facts.merge("delivery_event_id" => 0)
     ) ]) }.to raise_error(ActiveRecord::StatementInvalid, /delivery evidence/)
@@ -247,6 +272,7 @@ RSpec.describe NonEmployeeCheckSupersessionService do
 
   it "rejects a direct insert from an unauthorized reviewer" do
     accountant = create(:user, company: company, role: "accountant")
+    assert_valid_raw_record!
     expect { NonEmployeeCheckSupersession.insert_all!([ raw_record.merge(user_id: accountant.id) ]) }
       .to raise_error(ActiveRecord::StatementInvalid, /manager or administrator/)
   end

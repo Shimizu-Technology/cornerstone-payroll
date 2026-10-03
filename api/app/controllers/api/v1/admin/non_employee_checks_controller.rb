@@ -34,7 +34,7 @@ module Api
           # only an `id → count` map in a single grouped query, then pass
           # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by, :paid_by, :line_items, :payroll_liability_check_allocations)
+            .includes(:pay_period, :created_by, :paid_by, :line_items, :payroll_liability_check_allocations, :non_employee_check_supersession)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.standalone if params[:standalone] == "true"
@@ -266,6 +266,12 @@ module Api
         rescue ActionController::ParameterMissing, NonEmployeeCheckSupersessionService::Error,
                ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::StatementInvalid => e
+          raise unless e.cause.is_a?(PG::RaiseException)
+
+          Rails.logger.warn("Standalone check supersession failed database evidence verification")
+          render json: { error: "The payroll link failed database verification. Refresh the matches and try again." },
+            status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/non_employee_checks/:id
@@ -500,7 +506,7 @@ module Api
           # Preload :edits so check_payload's `edit_count: check.edits.size`
           # uses the loaded association instead of issuing a per-request COUNT.
           @check = NonEmployeeCheck
-            .includes(:edits, :line_items, :pay_period, :created_by, :paid_by, :payroll_liability_check_allocations)
+            .includes(:edits, :line_items, :pay_period, :created_by, :paid_by, :payroll_liability_check_allocations, :non_employee_check_supersession)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
