@@ -20,7 +20,7 @@ temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/connected-payroll-certificate.XXXXXX
 trap 'rm -rf -- "${temporary_dir}"' EXIT
 
 verify_candidate_workflow() {
-  local candidate_repo="$1" workflow="$2" sha="$3" expected_name="$4" attempt run_id
+  local candidate_repo="$1" workflow="$2" sha="$3" attempt run_id
   local prefix="${temporary_dir}/${candidate_repo}"
   if [[ "${candidate_repo}" == "aire-services" && "${AIRE_ACTIONS_PUBLIC_READ:-false}" == "true" ]]; then
     python3 "${script_dir}/public_aire_actions.py" runs "${sha}" > "${prefix}-runs.json"
@@ -44,12 +44,14 @@ PY
   else
     gh api "repos/Shimizu-Technology/${candidate_repo}/actions/runs/${run_id}" > "${prefix}-run.json"
   fi
-  attempt="$(python3 - "${prefix}-run.json" "${sha}" "${workflow}" "${expected_name}" "${run_id}" <<'PY'
+  attempt="$(python3 - "${prefix}-run.json" "${sha}" "${workflow}" "${run_id}" <<'PY'
 import json, sys
 run = json.load(open(sys.argv[1]))
-expected = {"id": int(sys.argv[5]), "event": "push", "head_branch": "staging-v2",
+# GitHub run.name follows run-name when configured; the exact workflow path
+# identifies this workflow independently of its presentation title.
+expected = {"id": int(sys.argv[4]), "event": "push", "head_branch": "staging-v2",
             "head_sha": sys.argv[2], "path": ".github/workflows/" + sys.argv[3],
-            "name": sys.argv[4], "status": "completed", "conclusion": "success"}
+            "status": "completed", "conclusion": "success"}
 if any(run.get(key) != value for key, value in expected.items()):
     sys.exit("Candidate quality or image workflow is pending, failed, or mismatched; deployment held.")
 attempt = run.get("run_attempt")
@@ -86,8 +88,8 @@ PY
 # The HTTP certificate alone does not prove the candidates' ordinary gates or
 # image publication. Apply these same exact-SHA prerequisites in CI and on every
 # direct/manual deployment, independent of the dispatch workflow's own revision.
-verify_candidate_workflow cornerstone-payroll quality.yml "${payroll_sha}" Quality
-verify_candidate_workflow aire-services staging-v2.yml "${aire_sha}" "Staging v2 images"
+verify_candidate_workflow cornerstone-payroll quality.yml "${payroll_sha}"
+verify_candidate_workflow aire-services staging-v2.yml "${aire_sha}"
 if [[ "${candidates_only}" == "1" ]]; then
   echo "Both immutable candidates passed staging push quality gates and image publication."
   exit 0
@@ -123,7 +125,7 @@ run = json.load(open(sys.argv[1]))
 expected = {
     "id": int(sys.argv[4]), "status": "completed", "conclusion": "success",
     "event": "workflow_dispatch", "head_branch": "staging-v2",
-    "name": "Quality", "path": ".github/workflows/quality.yml",
+    "path": ".github/workflows/quality.yml",
     "display_title": f"Connected payroll {sys.argv[2]} + {sys.argv[3]}",
 }
 if any(run.get(key) != value for key, value in expected.items()):
