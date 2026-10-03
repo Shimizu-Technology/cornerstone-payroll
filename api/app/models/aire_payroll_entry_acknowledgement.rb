@@ -21,7 +21,7 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
   scope :undelivered, -> { where(delivered_at: nil) }
   scope :due_for_dispatch, -> { undelivered.where("enqueued_at IS NULL OR enqueued_at < ?", REDISPATCH_AFTER.ago) }
 
-  def self.record_for_import!(time_tracking_import:, status:, occurred_at:, payment_method: nil, payment_reference: nil, source_event_prefix: "import", payroll_item_id: nil, allocations: nil)
+  def self.record_for_import!(time_tracking_import:, status:, occurred_at:, payment_method: nil, payment_reference: nil, payment_effective_on: nil, source_event_prefix: "import", payroll_item_id: nil, allocations: nil)
     unless allocations
       scope = time_tracking_import.time_tracking_entry_allocations.includes(:payroll_item)
       scope = scope.where(payroll_item_id: payroll_item_id) if payroll_item_id.present?
@@ -37,7 +37,8 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
         occurred_at: occurred_at,
         payroll_item_id: allocation.payroll_item_id,
         payment_method: payment_method,
-        payment_reference: payment_reference
+        payment_reference: payment_reference,
+        payment_effective_on: payment_effective_on
       )
     end
   end
@@ -53,12 +54,13 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
         payroll_item_id: item.id,
         check_event_id: check_event.id,
         payment_method: "paper_check",
-        payment_reference: check_event.check_number
+        payment_reference: check_event.check_number,
+        payment_effective_on: check_event.effective_on
       )
     end
   end
 
-  def self.record_from_rows!(rows:, source_event_key:, status:, occurred_at:, payroll_item_id:, check_event_id: nil, payment_method: nil, payment_reference: nil)
+  def self.record_from_rows!(rows:, source_event_key:, status:, occurred_at:, payroll_item_id:, check_event_id: nil, payment_method: nil, payment_reference: nil, payment_effective_on: nil)
     rows = rows.to_a
     raise ArgumentError, "AIRE entry acknowledgement requires exactly one payable line" unless rows.one?
 
@@ -81,6 +83,7 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
       ack.occurred_at = occurred_at
       ack.payment_method = payment_method
       ack.payment_reference = payment_reference
+      ack.payment_effective_on = payment_effective_on
     end
   end
 

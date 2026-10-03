@@ -34,6 +34,7 @@ class CheckEvent < ApplicationRecord
 
   after_create :record_aire_entry_lifecycle
   after_create_commit :dispatch_aire_entry_lifecycle
+  after_create_commit :dispatch_aire_manual_allocations
 
   private
 
@@ -70,6 +71,14 @@ class CheckEvent < ApplicationRecord
     return if @aire_entry_acknowledgement_ids.blank?
 
     AirePayrollEntryAcknowledgement.dispatch_pending!(ids: @aire_entry_acknowledgement_ids)
+  end
+
+  def dispatch_aire_manual_allocations
+    return unless event_type == "delivered" || (event_type == "voided" && payroll_item.voided?)
+
+    payroll_item.time_tracking_manual_allocations.where.not(status: "voided").find_each do |allocation|
+      AireManualAllocationSyncJob.perform_later(allocation.id)
+    end
   end
 
   def aire_entry_lifecycle_status

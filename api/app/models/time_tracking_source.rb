@@ -6,6 +6,9 @@ class TimeTrackingSource < ApplicationRecord
 
   belongs_to :company
   has_many :time_tracking_employee_mappings, dependent: :destroy
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
+  has_many :aire_verified_history_rollout_receipts, dependent: :restrict_with_error
   has_many :time_tracking_imports, dependent: :destroy
   has_many :time_tracking_delegations, dependent: :destroy
   has_many :aire_payroll_calendar_periods, dependent: :restrict_with_error

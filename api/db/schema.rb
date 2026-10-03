@@ -84,6 +84,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.text "last_error"
     t.datetime "occurred_at", null: false
     t.decimal "overtime_hours", precision: 8, scale: 2
+    t.date "payment_effective_on"
     t.string "payment_method"
     t.string "payment_reference"
     t.bigint "payroll_item_id", null: false
@@ -105,7 +106,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["source_event_key"], name: "idx_aire_entry_ack_unique_source_event", unique: true
     t.index ["time_tracking_import_id", "source_time_entry_id", "source_line_key", "status"], name: "idx_aire_entry_ack_payable_line_status"
     t.index ["time_tracking_import_id"], name: "idx_on_time_tracking_import_id_95ff82b3b6"
-    t.check_constraint "contract_version IS NULL AND source_line_key IS NULL AND source_kind IS NULL AND total_hours IS NULL AND regular_hours IS NULL AND overtime_hours IS NULL OR contract_version::text = '2.0'::text AND source_line_key IS NOT NULL AND (source_kind::text = ANY (ARRAY['current'::character varying, 'carryover'::character varying, 'correction'::character varying]::text[])) AND total_hours IS NOT NULL AND regular_hours IS NOT NULL AND overtime_hours IS NOT NULL AND total_hours = (regular_hours + overtime_hours)", name: "aire_entry_ack_line_contract_shape"
+    t.check_constraint "contract_version IS NULL AND source_line_key IS NULL AND source_kind IS NULL AND total_hours IS NULL AND regular_hours IS NULL AND overtime_hours IS NULL OR contract_version::text = '2.0'::text AND source_line_key IS NOT NULL AND (source_kind::text = ANY (ARRAY['current'::character varying::text, 'carryover'::character varying::text, 'correction'::character varying::text])) AND total_hours IS NOT NULL AND regular_hours IS NOT NULL AND overtime_hours IS NOT NULL AND total_hours = (regular_hours + overtime_hours)", name: "aire_entry_ack_line_contract_shape"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying::text, 'committed'::character varying::text, 'payment_prepared'::character varying::text, 'payment_issued'::character varying::text, 'payment_failed'::character varying::text, 'payment_voided'::character varying::text])", name: "aire_payroll_entry_ack_status_check"
   end
 
@@ -139,6 +140,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "event_type::text = 'payroll_batch.finalized'::text", name: "aire_payroll_events_type_check"
     t.check_constraint "verification_attempts >= 0", name: "aire_payroll_events_attempts_check"
     t.check_constraint "verification_status::text = ANY (ARRAY['pending'::character varying::text, 'failed'::character varying::text, 'rejected'::character varying::text, 'verified'::character varying::text])", name: "aire_payroll_events_status_check"
+  end
+
+  create_table "aire_verified_history_rollout_receipts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "completed_at", null: false
+    t.datetime "created_at", null: false
+    t.integer "identity_count", null: false
+    t.string "manifest_sha256", limit: 64, null: false
+    t.integer "paid_source_entry_count", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_aire_verified_history_rollout_receipts_on_company_id"
+    t.index ["manifest_sha256"], name: "idx_aire_verified_rollout_receipts_manifest", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_aire_verified_rollout_receipts_source"
   end
 
   create_table "annual_retirement_limits", force: :cascade do |t|
@@ -328,8 +343,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["recorded_by_id"], name: "index_check_reconciliation_events_on_recorded_by_id"
     t.check_constraint "((payroll_item_id IS NOT NULL)::integer + (non_employee_check_id IS NOT NULL)::integer) = 1", name: "check_reconciliation_events_one_source"
     t.check_constraint "amount > 0::numeric", name: "check_reconciliation_events_positive_amount"
-    t.check_constraint "event_type::text = ANY (ARRAY['cleared'::character varying, 'clearing_reversed'::character varying, 'replacement_required'::character varying]::text[])", name: "check_reconciliation_events_event_type"
-    t.check_constraint "evidence_type IS NULL OR (evidence_type::text = ANY (ARRAY['bank_statement'::character varying, 'bank_portal'::character varying, 'accountant_review'::character varying, 'payee_confirmation'::character varying, 'other'::character varying]::text[]))", name: "check_reconciliation_events_evidence_type"
+    t.check_constraint "event_type::text = ANY (ARRAY['cleared'::character varying::text, 'clearing_reversed'::character varying::text, 'replacement_required'::character varying::text])", name: "check_reconciliation_events_event_type"
+    t.check_constraint "evidence_type IS NULL OR (evidence_type::text = ANY (ARRAY['bank_statement'::character varying::text, 'bank_portal'::character varying::text, 'accountant_review'::character varying::text, 'payee_confirmation'::character varying::text, 'other'::character varying::text]))", name: "check_reconciliation_events_evidence_type"
   end
 
   create_table "check_signoff_sheets", force: :cascade do |t|
@@ -344,6 +359,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["company_id"], name: "index_check_signoff_sheets_on_company_id"
     t.index ["pay_period_id"], name: "index_check_signoff_sheets_on_pay_period_id", unique: true
     t.index ["updated_by_id"], name: "index_check_signoff_sheets_on_updated_by_id"
+  end
+
+  create_table "check_supersession_rollout_approvals", force: :cascade do |t|
+    t.datetime "approved_at", null: false
+    t.bigint "approved_by_id", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "reason", null: false
+    t.index ["approved_by_id"], name: "index_check_supersession_rollout_approvals_on_approved_by_id"
+    t.index ["company_id"], name: "index_check_supersession_rollout_approvals_on_company_id", unique: true
   end
 
   create_table "client_documents", force: :cascade do |t|
@@ -479,7 +504,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["granted_by_id"], name: "index_company_assignments_on_granted_by_id"
     t.index ["user_id", "company_id"], name: "index_company_assignments_on_user_id_and_company_id", unique: true
     t.index ["user_id"], name: "index_company_assignments_on_user_id"
-    t.check_constraint "workspace_access_level IS NULL OR (workspace_access_level::text = ANY (ARRAY['operator'::character varying, 'reviewer'::character varying, 'workspace_admin'::character varying]::text[]))", name: "company_assignments_workspace_access_level_check"
+    t.check_constraint "workspace_access_level IS NULL OR (workspace_access_level::text = ANY (ARRAY['operator'::character varying::text, 'reviewer'::character varying::text, 'workspace_admin'::character varying::text]))", name: "company_assignments_workspace_access_level_check"
   end
 
   create_table "company_pay_schedules", force: :cascade do |t|
@@ -521,7 +546,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "period_start_weekday IS NULL OR period_start_weekday >= 0 AND period_start_weekday <= 6", name: "company_pay_schedules_weekday_check"
     t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying::text, 'production_inferred'::character varying::text, 'legacy_system_default'::character varying::text])", name: "company_pay_schedules_source_check"
     t.check_constraint "time_tracking_cutoff_days >= 0 AND time_tracking_cutoff_days <= 31", name: "company_pay_schedules_time_cutoff_days_check"
-    t.check_constraint "time_tracking_cutoff_rule::text = ANY (ARRAY['before_pay_date'::character varying, 'after_previous_regular_payday'::character varying]::text[])", name: "company_pay_schedules_time_cutoff_rule_check"
+    t.check_constraint "time_tracking_cutoff_rule::text = ANY (ARRAY['before_pay_date'::character varying::text, 'after_previous_regular_payday'::character varying::text])", name: "company_pay_schedules_time_cutoff_rule_check"
   end
 
   create_table "company_workweeks", force: :cascade do |t|
@@ -643,6 +668,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["company_id"], name: "index_departments_on_company_id"
   end
 
+  create_table "direct_deposit_payment_confirmations", force: :cascade do |t|
+    t.string "bank_reference", null: false
+    t.datetime "created_at", null: false
+    t.string "ip_address"
+    t.text "note"
+    t.bigint "payroll_item_id", null: false
+    t.date "settled_on", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["payroll_item_id"], name: "index_direct_deposit_payment_confirmations_on_payroll_item_id", unique: true
+    t.index ["user_id"], name: "index_direct_deposit_payment_confirmations_on_user_id"
+  end
+
   create_table "employee_change_requests", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -690,23 +728,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["employee_id", "item_code"], name: "idx_employee_configuration_review_resolutions_unique", unique: true
     t.index ["employee_id"], name: "index_employee_configuration_review_resolutions_on_employee_id"
     t.index ["reviewed_by_id"], name: "idx_employee_config_reviews_reviewer"
-    t.check_constraint "(item_code::text <> ALL (ARRAY['certify_employee_profile'::character varying, 'certify_variable_salary_pay'::character varying, 'certify_retirement_configuration'::character varying, 'certify_multiple_wage_rates'::character varying, 'certify_tipped_pay'::character varying, 'certify_contractor_setup'::character varying, 'loan_balance_not_transferred'::character varying]::text[])) OR source_reference IS NOT NULL AND btrim(source_reference::text) <> ''::text AND effective_on IS NOT NULL", name: "employee_config_review_certification_evidence"
+    t.check_constraint "(item_code::text <> ALL (ARRAY['certify_employee_profile'::character varying::text, 'certify_variable_salary_pay'::character varying::text, 'certify_retirement_configuration'::character varying::text, 'certify_multiple_wage_rates'::character varying::text, 'certify_tipped_pay'::character varying::text, 'certify_contractor_setup'::character varying::text, 'loan_balance_not_transferred'::character varying::text])) OR source_reference IS NOT NULL AND btrim(source_reference::text) <> ''::text AND effective_on IS NOT NULL", name: "employee_config_review_certification_evidence"
     t.check_constraint "jsonb_typeof(item_fields) = 'array'::text", name: "employee_configuration_review_resolutions_fields_array"
     t.check_constraint "source_reference IS NULL OR char_length(source_reference::text) <= 255", name: "employee_config_review_source_reference_length"
   end
-
-  execute <<~SQL
-    CREATE OR REPLACE FUNCTION prevent_employee_configuration_review_resolution_mutation()
-    RETURNS trigger AS $$
-    BEGIN
-      RAISE EXCEPTION 'employee_configuration_review_resolutions are append-only';
-    END;
-    $$ LANGUAGE plpgsql;
-
-    CREATE TRIGGER employee_configuration_review_resolutions_append_only
-    BEFORE UPDATE OR DELETE ON employee_configuration_review_resolutions
-    FOR EACH ROW EXECUTE FUNCTION prevent_employee_configuration_review_resolution_mutation();
-  SQL
 
   create_table "employee_deductions", force: :cascade do |t|
     t.boolean "active", default: true
@@ -741,23 +766,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["employee_document_requirement_id"], name: "idx_on_employee_document_requirement_id_04b47c5045"
     t.index ["employee_id"], name: "index_employee_document_requirement_events_on_employee_id"
   end
-
-  execute <<~SQL
-    CREATE OR REPLACE FUNCTION prevent_employee_document_requirement_event_mutation()
-    RETURNS trigger
-    LANGUAGE plpgsql
-    AS $function$
-    BEGIN
-      RAISE EXCEPTION 'employee_document_requirement_events are append-only'
-        USING ERRCODE = 'integrity_constraint_violation';
-    END;
-    $function$;
-
-    CREATE TRIGGER employee_document_requirement_events_append_only
-    BEFORE UPDATE OR DELETE ON employee_document_requirement_events
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_employee_document_requirement_event_mutation();
-  SQL
 
   create_table "employee_document_requirements", force: :cascade do |t|
     t.bigint "client_document_id"
@@ -1098,7 +1106,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
-    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying, 'direct_deposit'::character varying]::text[]))", name: "employees_payment_delivery_method_check"
+    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
   end
 
@@ -1139,8 +1147,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["recorded_by_id"], name: "index_expense_payments_on_recorded_by_id"
     t.index ["reversed_by_id"], name: "index_expense_payments_on_reversed_by_id"
     t.check_constraint "amount > 0::numeric", name: "check_expense_payment_positive"
-    t.check_constraint "((reversed_at IS NULL) AND (reversed_by_id IS NULL) AND (reversal_reason IS NULL)) OR ((reversed_at IS NOT NULL) AND (reversal_reason IS NOT NULL))", name: "check_expense_payment_reversal_fields"
-    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'other'::character varying]::text[])", name: "check_expense_payment_method"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying::text, 'check'::character varying::text, 'ach'::character varying::text, 'card'::character varying::text, 'wire'::character varying::text, 'other'::character varying::text])", name: "check_expense_payment_method"
+    t.check_constraint "reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL OR reversed_at IS NOT NULL AND reversal_reason IS NOT NULL", name: "check_expense_payment_reversal_fields"
   end
 
   create_table "expense_vendors", force: :cascade do |t|
@@ -1255,7 +1263,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["organization_id"], name: "index_finance_books_on_organization_id"
     t.index ["owner_user_id"], name: "index_finance_books_on_owner_user_id"
     t.check_constraint "kind::text = 'client'::text AND company_id IS NOT NULL AND owner_user_id IS NULL OR kind::text = 'organization'::text AND owner_user_id IS NULL OR kind::text = 'personal'::text AND company_id IS NULL AND owner_user_id IS NOT NULL AND is_default = false", name: "finance_books_owner_shape_check"
-    t.check_constraint "kind::text = ANY (ARRAY['organization'::character varying, 'client'::character varying, 'personal'::character varying]::text[])", name: "finance_books_kind_check"
+    t.check_constraint "kind::text = ANY (ARRAY['organization'::character varying::text, 'client'::character varying::text, 'personal'::character varying::text])", name: "finance_books_kind_check"
   end
 
   create_table "form500_filings", force: :cascade do |t|
@@ -2148,6 +2156,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "amount > 0::numeric", name: "non_employee_check_line_items_amount_positive"
   end
 
+  create_table "non_employee_check_supersessions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "non_employee_check_id", null: false
+    t.bigint "payroll_item_id", null: false
+    t.text "reason", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "verified_facts", default: {}, null: false
+    t.index ["company_id"], name: "index_non_employee_check_supersessions_on_company_id"
+    t.index ["non_employee_check_id"], name: "idx_on_non_employee_check_id_9b0b859cc0", unique: true
+    t.index ["payroll_item_id"], name: "index_non_employee_check_supersessions_on_payroll_item_id", unique: true
+    t.index ["user_id"], name: "index_non_employee_check_supersessions_on_user_id"
+  end
+
   create_table "non_employee_checks", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2, null: false
     t.string "auto_generated_type"
@@ -2167,10 +2189,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.date "payment_date"
     t.string "payment_method", default: "check", null: false
     t.string "payment_period_type", default: "none", null: false
-    t.integer "print_count", default: 0, null: false
-    t.datetime "printed_at"
     t.datetime "prepared_at"
     t.datetime "prepared_source_updated_at"
+    t.integer "print_count", default: 0, null: false
+    t.datetime "printed_at"
     t.string "reference_number"
     t.integer "tax_month"
     t.integer "tax_quarter"
@@ -2200,6 +2222,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
   end
 
+  create_table "operational_queue_probes", force: :cascade do |t|
+    t.integer "attempt_count", default: 0, null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.integer "effect_count", default: 0, null: false
+    t.datetime "expires_at", null: false
+    t.uuid "probe_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["probe_id"], name: "index_operational_queue_probes_on_probe_id", unique: true
+    t.check_constraint "attempt_count >= 0", name: "operational_queue_probes_attempt_count_nonnegative"
+    t.check_constraint "effect_count = 0 AND completed_at IS NULL OR effect_count = 1 AND completed_at IS NOT NULL", name: "operational_queue_probes_completion_consistent"
+    t.check_constraint "effect_count >= 0 AND effect_count <= 1", name: "operational_queue_probes_effect_count_range"
+  end
+
   create_table "organizations", force: :cascade do |t|
     t.integer "client_limit", default: 3
     t.datetime "created_at", null: false
@@ -2211,20 +2247,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["primary_company_id"], name: "index_organizations_on_primary_company_id"
     t.index ["slug"], name: "index_organizations_on_slug", unique: true
     t.index ["status"], name: "index_organizations_on_status"
-  end
-
-  create_table "operational_queue_probes", force: :cascade do |t|
-    t.integer "attempt_count", default: 0, null: false
-    t.datetime "completed_at"
-    t.datetime "created_at", null: false
-    t.integer "effect_count", default: 0, null: false
-    t.datetime "expires_at", null: false
-    t.uuid "probe_id", null: false
-    t.datetime "updated_at", null: false
-    t.index ["probe_id"], name: "index_operational_queue_probes_on_probe_id", unique: true
-    t.check_constraint "attempt_count >= 0", name: "operational_queue_probes_attempt_count_nonnegative"
-    t.check_constraint "(effect_count = 0 AND completed_at IS NULL) OR (effect_count = 1 AND completed_at IS NOT NULL)", name: "operational_queue_probes_completion_consistent"
-    t.check_constraint "effect_count >= 0 AND effect_count <= 1", name: "operational_queue_probes_effect_count_range"
   end
 
   create_table "pay_component_tax_rules", force: :cascade do |t|
@@ -2370,6 +2392,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "(promoted_payment_prepared_at IS NULL) = (promoted_payment_prepared_by_id IS NULL)", name: "pay_periods_promoted_payment_preparer_complete"
+    t.check_constraint "(test_workspace_role IS NULL) = (test_workspace_source_pay_period_id IS NULL)", name: "pay_periods_training_lineage_complete"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
     t.check_constraint "intake_stale_at IS NULL AND intake_stale_reason IS NULL AND intake_stale_session_id IS NULL OR intake_stale_at IS NOT NULL AND NULLIF(btrim(intake_stale_reason), ''::text) IS NOT NULL AND intake_stale_session_id IS NOT NULL", name: "pay_periods_intake_stale_complete"
     t.check_constraint "parallel_run = false OR status::text <> 'committed'::text", name: "pay_periods_parallel_runs_not_committed"
@@ -2378,8 +2401,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
     t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
-    t.check_constraint "test_workspace_role IS NULL OR (test_workspace_role::text = ANY (ARRAY['baseline'::character varying, 'practice'::character varying]::text[]))", name: "pay_periods_test_workspace_role_check"
-    t.check_constraint "(test_workspace_role IS NULL) = (test_workspace_source_pay_period_id IS NULL)", name: "pay_periods_training_lineage_complete"
+    t.check_constraint "test_workspace_role IS NULL OR (test_workspace_role::text = ANY (ARRAY['baseline'::character varying::text, 'practice'::character varying::text]))", name: "pay_periods_test_workspace_role_check"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -2434,9 +2456,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["payroll_filing_record_id", "occurred_at", "id"], name: "idx_payroll_filing_events_timeline"
     t.index ["payroll_filing_record_id"], name: "index_payroll_filing_events_on_payroll_filing_record_id"
     t.index ["recorded_by_id"], name: "index_payroll_filing_events_on_recorded_by_id"
-    t.check_constraint "event_type::text = ANY (ARRAY['submitted'::character varying, 'resubmitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'correction_needed'::character varying]::text[])", name: "payroll_filing_events_type"
-    t.check_constraint "from_status IS NULL OR (from_status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[]))", name: "payroll_filing_events_from_status"
-    t.check_constraint "to_status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[])", name: "payroll_filing_events_to_status"
+    t.check_constraint "event_type::text = ANY (ARRAY['submitted'::character varying::text, 'resubmitted'::character varying::text, 'accepted'::character varying::text, 'accepted_with_errors'::character varying::text, 'rejected'::character varying::text, 'correction_needed'::character varying::text])", name: "payroll_filing_events_type"
+    t.check_constraint "from_status IS NULL OR (from_status::text = ANY (ARRAY['submitted'::character varying::text, 'accepted'::character varying::text, 'accepted_with_errors'::character varying::text, 'rejected'::character varying::text, 'needs_correction'::character varying::text]))", name: "payroll_filing_events_from_status"
+    t.check_constraint "to_status::text = ANY (ARRAY['submitted'::character varying::text, 'accepted'::character varying::text, 'accepted_with_errors'::character varying::text, 'rejected'::character varying::text, 'needs_correction'::character varying::text])", name: "payroll_filing_events_to_status"
   end
 
   create_table "payroll_filing_records", force: :cascade do |t|
@@ -2457,8 +2479,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["company_id", "filing_type", "tax_year"], name: "idx_payroll_filings_annual_identity", unique: true, where: "(quarter IS NULL)"
     t.index ["company_id"], name: "index_payroll_filing_records_on_company_id"
     t.index ["id", "company_id"], name: "idx_payroll_filing_records_tenant_key", unique: true
-    t.check_constraint "(filing_type::text = ANY (ARRAY['w2_gu_w3_ss'::character varying, 'form_1099_nec'::character varying]::text[])) AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_500_payment'::character varying, 'w1'::character varying, 'swica'::character varying, 'federal_941'::character varying]::text[])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_records_identity"
-    t.check_constraint "status::text = ANY (ARRAY['submitted'::character varying, 'accepted'::character varying, 'accepted_with_errors'::character varying, 'rejected'::character varying, 'needs_correction'::character varying]::text[])", name: "payroll_filing_records_status"
+    t.check_constraint "(filing_type::text = ANY (ARRAY['w2_gu_w3_ss'::character varying::text, 'form_1099_nec'::character varying::text])) AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_500_payment'::character varying::text, 'w1'::character varying::text, 'swica'::character varying::text, 'federal_941'::character varying::text])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_records_identity"
+    t.check_constraint "status::text = ANY (ARRAY['submitted'::character varying::text, 'accepted'::character varying::text, 'accepted_with_errors'::character varying::text, 'rejected'::character varying::text, 'needs_correction'::character varying::text])", name: "payroll_filing_records_status"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_records_tax_year"
   end
 
@@ -2749,10 +2771,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.date "check_date"
     t.string "check_memo"
     t.string "check_number"
-    t.integer "check_print_count", default: 0, null: false
-    t.datetime "check_printed_at"
     t.datetime "check_prepared_at"
     t.datetime "check_prepared_source_updated_at"
+    t.integer "check_print_count", default: 0, null: false
+    t.datetime "check_printed_at"
     t.bigint "company_id", null: false
     t.bigint "correction_for_payroll_item_id"
     t.text "correction_reason"
@@ -2836,7 +2858,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["voided"], name: "index_payroll_items_on_voided"
     t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying::text, 'mosa_revel'::character varying::text]))", name: "payroll_items_bonus_source_check"
     t.check_constraint "imported_bonus IS NULL OR imported_bonus >= 0::numeric", name: "payroll_items_imported_bonus_check"
-    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying, 'direct_deposit'::character varying]::text[]))", name: "payroll_items_payment_delivery_method_check"
+    t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "payroll_items_payment_delivery_method_check"
     t.check_constraint "payment_delivery_method::text IS DISTINCT FROM 'direct_deposit'::text OR check_number IS NULL", name: "payroll_items_direct_deposit_no_check_number"
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
   end
@@ -3298,6 +3320,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
+  create_table "time_tracking_classification_reconciliations", force: :cascade do |t|
+    t.string "check_number", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "gross_wage_difference", precision: 12, scale: 2, null: false
+    t.text "note", null: false
+    t.bigint "pay_period_id", null: false
+    t.date "payment_effective_on", null: false
+    t.bigint "payroll_item_id", null: false
+    t.decimal "payroll_overtime_hours", precision: 8, scale: 2, null: false
+    t.decimal "payroll_regular_hours", precision: 8, scale: 2, null: false
+    t.jsonb "source_entries", default: [], null: false
+    t.decimal "source_overtime_hours", precision: 8, scale: 2, null: false
+    t.decimal "source_regular_hours", precision: 8, scale: 2, null: false
+    t.uuid "source_user_uuid", null: false
+    t.string "status", default: "pending", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "idx_on_company_id_879e10400d"
+    t.index ["created_by_id"], name: "idx_on_created_by_id_b38983023e"
+    t.index ["employee_id"], name: "idx_on_employee_id_37c38adfe5"
+    t.index ["pay_period_id"], name: "idx_on_pay_period_id_bc8b0e1c9d"
+    t.index ["payroll_item_id"], name: "idx_classification_reconciliations_item", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_classification_reconciliations_source"
+    t.check_constraint "(source_regular_hours + source_overtime_hours) = (payroll_regular_hours + payroll_overtime_hours)", name: "classification_reconciliation_total_hours"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'complete'::character varying]::text[])", name: "classification_reconciliation_status"
+  end
+
   create_table "time_tracking_delegations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3401,6 +3453,46 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.check_constraint "external_batch_id IS NULL AND external_batch_checksum IS NULL AND contract_version IS NULL AND source_cutoff_at IS NULL OR external_batch_id IS NOT NULL AND external_batch_checksum IS NOT NULL AND contract_version IS NOT NULL AND source_cutoff_at IS NOT NULL", name: "time_tracking_imports_batch_provenance_complete"
   end
 
+  create_table "time_tracking_manual_allocations", force: :cascade do |t|
+    t.bigint "classification_reconciliation_id"
+    t.uuid "commit_command_id", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.uuid "issue_command_id", null: false
+    t.text "last_sync_error"
+    t.datetime "last_synced_at"
+    t.date "original_work_date", null: false
+    t.decimal "overtime_hours", precision: 8, scale: 2, null: false
+    t.bigint "pay_period_id", null: false
+    t.bigint "payroll_item_id", null: false
+    t.text "reconciliation_note", null: false
+    t.decimal "regular_hours", precision: 8, scale: 2, null: false
+    t.string "remote_allocation_id"
+    t.integer "remote_version"
+    t.string "source_time_entry_id", null: false
+    t.integer "source_time_entry_version", null: false
+    t.uuid "source_user_uuid", null: false
+    t.string "status", default: "pending_commit", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "void_command_id", null: false
+    t.index ["classification_reconciliation_id"], name: "idx_manual_allocations_classification_reconciliation"
+    t.index ["commit_command_id"], name: "index_time_tracking_manual_allocations_on_commit_command_id", unique: true
+    t.index ["company_id"], name: "index_time_tracking_manual_allocations_on_company_id"
+    t.index ["created_by_id"], name: "index_time_tracking_manual_allocations_on_created_by_id"
+    t.index ["employee_id"], name: "index_time_tracking_manual_allocations_on_employee_id"
+    t.index ["issue_command_id"], name: "index_time_tracking_manual_allocations_on_issue_command_id", unique: true
+    t.index ["pay_period_id"], name: "index_time_tracking_manual_allocations_on_pay_period_id"
+    t.index ["payroll_item_id"], name: "index_time_tracking_manual_allocations_on_payroll_item_id"
+    t.index ["time_tracking_source_id", "source_time_entry_id", "payroll_item_id"], name: "index_manual_time_allocations_on_source_entry_and_item", unique: true
+    t.index ["time_tracking_source_id"], name: "idx_on_time_tracking_source_id_e71b0095b1"
+    t.index ["void_command_id"], name: "index_time_tracking_manual_allocations_on_void_command_id", unique: true
+    t.check_constraint "regular_hours >= 0::numeric AND overtime_hours >= 0::numeric AND (regular_hours + overtime_hours) > 0::numeric", name: "manual_time_allocation_positive_hours"
+    t.check_constraint "status::text = ANY (ARRAY['pending_commit'::character varying, 'committed'::character varying, 'issued'::character varying, 'voided'::character varying]::text[])", name: "manual_time_allocation_status"
+  end
+
   create_table "time_tracking_sources", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.string "base_url", null: false
@@ -3471,7 +3563,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["pay_period_id"], name: "index_training_replay_benchmarks_on_pay_period_id", unique: true
     t.index ["source_company_id"], name: "index_training_replay_benchmarks_on_source_company_id"
     t.index ["source_pay_period_id"], name: "index_training_replay_benchmarks_on_source_pay_period_id"
-    t.check_constraint "source_status::text = ANY (ARRAY['calculated'::character varying, 'approved'::character varying, 'committed'::character varying]::text[])", name: "training_replay_benchmarks_source_status_check"
+    t.check_constraint "source_status::text = ANY (ARRAY['calculated'::character varying::text, 'approved'::character varying::text, 'committed'::character varying::text])", name: "training_replay_benchmarks_source_status_check"
   end
 
   create_table "transmittals", force: :cascade do |t|
@@ -3526,7 +3618,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["organization_id"], name: "index_user_printer_profile_selections_on_organization_id"
     t.index ["printer_profile_id"], name: "index_user_printer_profile_selections_on_printer_profile_id"
     t.index ["user_id"], name: "index_user_printer_profile_selections_on_user_id"
-    t.check_constraint "check_stock_type::text = ANY (ARRAY['bottom_check'::character varying, 'top_check'::character varying, 'first_hawaiian_4up'::character varying]::text[])", name: "user_printer_selections_stock_type_check"
+    t.check_constraint "check_stock_type::text = ANY (ARRAY['bottom_check'::character varying::text, 'top_check'::character varying::text, 'first_hawaiian_4up'::character varying::text])", name: "user_printer_selections_stock_type_check"
   end
 
   create_table "user_sessions", force: :cascade do |t|
@@ -3590,44 +3682,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     t.index ["marked_ready_by_id"], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
-  add_foreign_key "expense_vendors", "finance_books"
-  add_foreign_key "expense_vendors", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expense_vendors_book_organization"
-  add_foreign_key "expenses", "expense_vendors", column: ["expense_vendor_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_expenses_expense_vendor_id_book_scope", deferrable: :deferred
-  add_foreign_key "expenses", "finance_books"
-  add_foreign_key "expenses", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expenses_book_organization"
-  add_foreign_key "finance_api_requests", "finance_api_tokens"
-  add_foreign_key "finance_api_requests", "finance_api_tokens", column: ["finance_api_token_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_token_book"
-  add_foreign_key "finance_api_requests", "finance_books"
-  add_foreign_key "finance_api_requests", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_requests_book_organization"
-  add_foreign_key "finance_api_requests", "invoices"
-  add_foreign_key "finance_api_requests", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_invoice_book"
-  add_foreign_key "finance_api_requests", "organizations"
-  add_foreign_key "finance_api_tokens", "finance_books"
-  add_foreign_key "finance_api_tokens", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_tokens_book_organization"
-  add_foreign_key "finance_api_tokens", "organizations"
-  add_foreign_key "finance_api_tokens", "users", column: "created_by_id"
-  add_foreign_key "finance_books", "companies"
-  add_foreign_key "finance_books", "companies", column: ["company_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_books_company_id_book_scope", deferrable: :deferred
-  add_foreign_key "finance_books", "organizations", on_delete: :cascade
-  add_foreign_key "finance_books", "users", column: "owner_user_id"
-  add_foreign_key "invoice_billing_profiles", "finance_books"
-  add_foreign_key "invoice_billing_profiles", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_billing_profiles_book_organization"
-  add_foreign_key "invoice_chat_sessions", "finance_books"
-  add_foreign_key "invoice_chat_sessions", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_chat_sessions_book_organization"
-  add_foreign_key "invoice_chat_sessions", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_recipient_id_book_scope", deferrable: :deferred
-  add_foreign_key "invoice_chat_sessions", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_id_book_scope", deferrable: :deferred
-  add_foreign_key "invoice_recipients", "finance_books"
-  add_foreign_key "invoice_recipients", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recipients_book_organization"
-  add_foreign_key "invoice_recurrences", "finance_books"
-  add_foreign_key "invoice_recurrences", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recurrences_book_organization"
-  add_foreign_key "invoice_recurrences", "invoices", column: ["source_invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_recurrences_source_invoice_id_book_scope", deferrable: :deferred
-  add_foreign_key "invoice_send_schedules", "finance_books"
-  add_foreign_key "invoice_send_schedules", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_send_schedules_book_organization"
-  add_foreign_key "invoice_send_schedules", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_send_schedules_invoice_id_book_scope", deferrable: :deferred
-  add_foreign_key "invoices", "finance_books"
-  add_foreign_key "invoices", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoices_book_organization"
-  add_foreign_key "invoices", "invoice_billing_profiles", column: ["invoice_billing_profile_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_billing_profile_id_book_scope", deferrable: :deferred
-  add_foreign_key "invoices", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_recipient_id_book_scope", deferrable: :deferred
   add_foreign_key "aire_payroll_acknowledgements", "time_tracking_imports"
   add_foreign_key "aire_payroll_calendar_periods", "companies", on_delete: :restrict
   add_foreign_key "aire_payroll_calendar_periods", "pay_periods", column: ["pay_period_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_aire_calendar_periods_pay_period_tenant"
@@ -3644,6 +3698,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", column: ["aire_payroll_calendar_publication_id", "aire_payroll_calendar_period_id"], primary_key: ["id", "aire_payroll_calendar_period_id"], name: "fk_aire_payroll_events_publication_period"
   add_foreign_key "aire_payroll_events", "aire_payroll_calendar_publications", on_delete: :restrict
   add_foreign_key "aire_payroll_events", "time_tracking_sources", on_delete: :restrict
+  add_foreign_key "aire_verified_history_rollout_receipts", "companies"
+  add_foreign_key "aire_verified_history_rollout_receipts", "time_tracking_sources"
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
@@ -3669,6 +3725,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
+  add_foreign_key "check_supersession_rollout_approvals", "companies"
+  add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "client_documents", "companies"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
@@ -3699,6 +3757,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "departments", "companies"
+  add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
+  add_foreign_key "direct_deposit_payment_confirmations", "users"
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
@@ -3752,12 +3812,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "expense_payments", "organizations"
   add_foreign_key "expense_payments", "users", column: "recorded_by_id"
   add_foreign_key "expense_payments", "users", column: "reversed_by_id"
+  add_foreign_key "expense_vendors", "finance_books"
+  add_foreign_key "expense_vendors", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expense_vendors_book_organization"
   add_foreign_key "expense_vendors", "organizations"
   add_foreign_key "expenses", "expense_vendors"
+  add_foreign_key "expenses", "expense_vendors", column: ["expense_vendor_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_expenses_expense_vendor_id_book_scope", deferrable: :deferred
+  add_foreign_key "expenses", "finance_books"
+  add_foreign_key "expenses", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_expenses_book_organization"
   add_foreign_key "expenses", "organizations"
   add_foreign_key "expenses", "users", column: "created_by_id"
   add_foreign_key "expenses", "users", column: "updated_by_id"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
+  add_foreign_key "finance_api_requests", "finance_api_tokens"
+  add_foreign_key "finance_api_requests", "finance_api_tokens", column: ["finance_api_token_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_token_book"
+  add_foreign_key "finance_api_requests", "finance_books"
+  add_foreign_key "finance_api_requests", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_requests_book_organization"
+  add_foreign_key "finance_api_requests", "invoices"
+  add_foreign_key "finance_api_requests", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_finance_api_requests_invoice_book"
+  add_foreign_key "finance_api_requests", "organizations"
+  add_foreign_key "finance_api_tokens", "finance_books"
+  add_foreign_key "finance_api_tokens", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_api_tokens_book_organization"
+  add_foreign_key "finance_api_tokens", "organizations"
+  add_foreign_key "finance_api_tokens", "users", column: "created_by_id"
+  add_foreign_key "finance_books", "companies"
+  add_foreign_key "finance_books", "companies", column: ["company_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_finance_books_company_id_book_scope", deferrable: :deferred
+  add_foreign_key "finance_books", "organizations", on_delete: :cascade
+  add_foreign_key "finance_books", "users", column: "owner_user_id"
   add_foreign_key "form500_filings", "companies"
   add_foreign_key "form500_filings", "pay_periods"
   add_foreign_key "form500_filings", "users", column: "created_by_id"
@@ -3827,11 +3907,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "invoice_artifacts", "invoices"
   add_foreign_key "invoice_artifacts", "organizations"
   add_foreign_key "invoice_artifacts", "users", column: "created_by_id"
+  add_foreign_key "invoice_billing_profiles", "finance_books"
+  add_foreign_key "invoice_billing_profiles", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_billing_profiles_book_organization"
   add_foreign_key "invoice_billing_profiles", "organizations"
   add_foreign_key "invoice_chat_messages", "invoice_chat_sessions", on_delete: :cascade
   add_foreign_key "invoice_chat_sessions", "companies"
+  add_foreign_key "invoice_chat_sessions", "finance_books"
+  add_foreign_key "invoice_chat_sessions", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_chat_sessions_book_organization"
   add_foreign_key "invoice_chat_sessions", "invoice_recipients"
+  add_foreign_key "invoice_chat_sessions", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_recipient_id_book_scope", deferrable: :deferred
   add_foreign_key "invoice_chat_sessions", "invoices"
+  add_foreign_key "invoice_chat_sessions", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_chat_sessions_invoice_id_book_scope", deferrable: :deferred
   add_foreign_key "invoice_chat_sessions", "organizations"
   add_foreign_key "invoice_chat_sessions", "users", column: "created_by_id"
   add_foreign_key "invoice_chat_sessions", "users", column: "updated_by_id"
@@ -3853,10 +3939,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "invoice_payments", "users", column: "recorded_by_id"
   add_foreign_key "invoice_payments", "users", column: "reversed_by_id"
   add_foreign_key "invoice_recipients", "companies"
+  add_foreign_key "invoice_recipients", "finance_books"
+  add_foreign_key "invoice_recipients", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recipients_book_organization"
   add_foreign_key "invoice_recipients", "organizations"
+  add_foreign_key "invoice_recurrences", "finance_books"
+  add_foreign_key "invoice_recurrences", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_recurrences_book_organization"
+  add_foreign_key "invoice_recurrences", "invoices", column: "source_invoice_id"
+  add_foreign_key "invoice_recurrences", "invoices", column: ["source_invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_recurrences_source_invoice_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoice_recurrences", "organizations"
+  add_foreign_key "invoice_recurrences", "users", column: "created_by_id"
+  add_foreign_key "invoice_send_schedules", "finance_books"
+  add_foreign_key "invoice_send_schedules", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoice_send_schedules_book_organization"
+  add_foreign_key "invoice_send_schedules", "invoices"
+  add_foreign_key "invoice_send_schedules", "invoices", column: ["invoice_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoice_send_schedules_invoice_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoice_send_schedules", "organizations"
+  add_foreign_key "invoice_send_schedules", "users", column: "created_by_id"
   add_foreign_key "invoices", "companies"
+  add_foreign_key "invoices", "finance_books"
+  add_foreign_key "invoices", "finance_books", column: ["finance_book_id", "organization_id"], primary_key: ["id", "organization_id"], name: "fk_invoices_book_organization"
   add_foreign_key "invoices", "invoice_billing_profiles"
+  add_foreign_key "invoices", "invoice_billing_profiles", column: ["invoice_billing_profile_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_billing_profile_id_book_scope", deferrable: :deferred
   add_foreign_key "invoices", "invoice_recipients"
+  add_foreign_key "invoices", "invoice_recipients", column: ["invoice_recipient_id", "finance_book_id"], primary_key: ["id", "finance_book_id"], name: "fk_invoices_invoice_recipient_id_book_scope", deferrable: :deferred
+  add_foreign_key "invoices", "invoice_recurrences"
   add_foreign_key "invoices", "organizations"
   add_foreign_key "invoices", "users", column: "created_by_id"
   add_foreign_key "invoices", "users", column: "updated_by_id"
@@ -3868,6 +3973,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "non_employee_check_supersessions", "companies"
+  add_foreign_key "non_employee_check_supersessions", "non_employee_checks"
+  add_foreign_key "non_employee_check_supersessions", "payroll_items"
+  add_foreign_key "non_employee_check_supersessions", "users"
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
@@ -3991,6 +4100,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "time_tracking_classification_reconciliations", "companies"
+  add_foreign_key "time_tracking_classification_reconciliations", "employees"
+  add_foreign_key "time_tracking_classification_reconciliations", "pay_periods"
+  add_foreign_key "time_tracking_classification_reconciliations", "payroll_items"
+  add_foreign_key "time_tracking_classification_reconciliations", "time_tracking_sources"
+  add_foreign_key "time_tracking_classification_reconciliations", "users", column: "created_by_id"
   add_foreign_key "time_tracking_delegations", "companies", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", column: ["time_tracking_source_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_time_tracking_delegations_source_tenant", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", on_delete: :cascade
@@ -4008,6 +4123,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "time_tracking_imports", "time_tracking_sources"
   add_foreign_key "time_tracking_imports", "users", column: "applied_by_id"
   add_foreign_key "time_tracking_imports", "users", column: "reconciled_by_id"
+  add_foreign_key "time_tracking_manual_allocations", "companies"
+  add_foreign_key "time_tracking_manual_allocations", "employees"
+  add_foreign_key "time_tracking_manual_allocations", "pay_periods"
+  add_foreign_key "time_tracking_manual_allocations", "payroll_items"
+  add_foreign_key "time_tracking_manual_allocations", "time_tracking_classification_reconciliations", column: "classification_reconciliation_id"
+  add_foreign_key "time_tracking_manual_allocations", "time_tracking_sources"
+  add_foreign_key "time_tracking_manual_allocations", "users", column: "created_by_id"
   add_foreign_key "time_tracking_sources", "companies"
   add_foreign_key "timecards", "companies"
   add_foreign_key "timecards", "employees", column: "applied_employee_id"
@@ -4025,8 +4147,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "user_invitations", "companies"
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_printer_profile_selections", "organizations", on_delete: :cascade
-  add_foreign_key "user_printer_profile_selections", "printer_profiles", on_delete: :cascade
   add_foreign_key "user_printer_profile_selections", "printer_profiles", column: ["printer_profile_id", "organization_id", "check_stock_type"], primary_key: ["id", "organization_id", "check_stock_type"], name: "fk_user_printer_selections_profile_scope", on_delete: :cascade
+  add_foreign_key "user_printer_profile_selections", "printer_profiles", on_delete: :cascade
   add_foreign_key "user_printer_profile_selections", "users", on_delete: :cascade
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
@@ -4035,6 +4157,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_employee_configuration_review_resolution_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'employee_configuration_review_resolutions are append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER employee_configuration_review_resolutions_append_only
+    BEFORE UPDATE OR DELETE ON employee_configuration_review_resolutions
+    FOR EACH ROW EXECUTE FUNCTION prevent_employee_configuration_review_resolution_mutation();
+  SQL
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_employee_document_requirement_event_mutation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      RAISE EXCEPTION 'employee_document_requirement_events are append-only'
+        USING ERRCODE = 'integrity_constraint_violation';
+    END;
+    $function$;
+
+    CREATE TRIGGER employee_document_requirement_events_append_only
+    BEFORE UPDATE OR DELETE ON employee_document_requirement_events
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_employee_document_requirement_event_mutation();
+  SQL
   execute <<~SQL
     CREATE OR REPLACE FUNCTION prevent_payroll_item_legacy_disposition_mutation()
     RETURNS trigger AS $$
@@ -4047,7 +4197,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     BEFORE UPDATE OR DELETE ON payroll_item_legacy_dispositions
     FOR EACH ROW EXECUTE FUNCTION prevent_payroll_item_legacy_disposition_mutation();
   SQL
-
   execute <<~SQL
     CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
     RETURNS trigger AS $$
@@ -4077,11 +4226,174 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_030000) do
     BEFORE UPDATE OR DELETE ON payroll_filing_events
     FOR EACH ROW EXECUTE FUNCTION prevent_payroll_filing_event_mutation();
   SQL
-  add_foreign_key "invoice_recurrences", "invoices", column: "source_invoice_id"
-  add_foreign_key "invoice_recurrences", "organizations"
-  add_foreign_key "invoice_recurrences", "users", column: "created_by_id"
-  add_foreign_key "invoice_send_schedules", "invoices"
-  add_foreign_key "invoice_send_schedules", "organizations"
-  add_foreign_key "invoice_send_schedules", "users", column: "created_by_id"
-  add_foreign_key "invoices", "invoice_recurrences"
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION protect_non_employee_check_supersession()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'Non-employee check supersession evidence is append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_non_employee_check_supersessions ON non_employee_check_supersessions;
+    CREATE TRIGGER protect_non_employee_check_supersessions
+    BEFORE UPDATE OR DELETE ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION protect_non_employee_check_supersession();
+
+    CREATE OR REPLACE FUNCTION validate_non_employee_check_supersession_tenant() RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM non_employee_checks c
+        JOIN payroll_items p ON p.id = NEW.payroll_item_id
+        JOIN pay_periods pp ON pp.id = p.pay_period_id
+        JOIN employees e ON e.id = p.employee_id
+        JOIN companies co ON co.id = c.company_id
+        JOIN users u ON u.id = NEW.user_id
+        JOIN check_events d ON d.id = (NEW.verified_facts->>'delivery_event_id')::bigint
+        WHERE c.id = NEW.non_employee_check_id
+          AND c.company_id = NEW.company_id
+          AND p.company_id = NEW.company_id
+          AND pp.company_id = NEW.company_id
+          AND e.company_id = NEW.company_id
+          AND u.organization_id = co.organization_id
+          AND c.pay_period_id IS NULL AND c.voided = false
+          AND c.printed_at IS NOT NULL AND c.paid_at IS NULL
+          AND c.payment_method = 'check'
+          AND NOT EXISTS (SELECT 1 FROM payroll_liability_check_allocations a WHERE a.non_employee_check_id = c.id)
+          AND pp.status = 'committed' AND p.voided = false
+          AND (p.payment_delivery_method IS NULL OR p.payment_delivery_method = 'paper_check')
+          AND d.payroll_item_id = p.id AND d.event_type = 'delivered'
+          AND d.check_number = p.check_number
+          AND c.check_number ~ '^[0-9]+$' AND p.check_number ~ '^[0-9]+$'
+          AND coalesce(nullif(ltrim(c.check_number, '0'), ''), '0') = coalesce(nullif(ltrim(p.check_number, '0'), ''), '0')
+          AND c.amount = p.net_pay
+          AND NEW.verified_facts->'recipient_verified' = 'true'::jsonb
+          AND NEW.verified_facts->>'standalone_payee' = c.payable_to
+          AND NEW.verified_facts->>'payroll_employee_id' = p.employee_id::text
+          AND NEW.verified_facts->>'payroll_employee_name' = concat_ws(' ', nullif(btrim(e.first_name), ''), nullif(btrim(e.middle_name), ''), nullif(btrim(e.last_name), ''))
+          AND NEW.verified_facts->>'standalone_check_number' = c.check_number
+          AND NEW.verified_facts->>'payroll_check_number' = p.check_number
+          AND NEW.verified_facts->>'normalized_check_number' = coalesce(nullif(ltrim(p.check_number, '0'), ''), '0')
+          AND (NEW.verified_facts->>'standalone_amount')::numeric = c.amount
+          AND (NEW.verified_facts->>'payroll_net_amount')::numeric = p.net_pay
+          AND NEW.verified_facts->>'delivered_on' = d.effective_on::text
+          AND NEW.verified_facts->>'delivery_evidence_type' IS NOT DISTINCT FROM d.evidence_type
+          AND NEW.verified_facts->>'delivery_evidence_reference' IS NOT DISTINCT FROM d.evidence_reference
+      ) THEN
+        RAISE EXCEPTION 'Supersession requires matching company, check, amount, recipient attestation, and delivery evidence';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS validate_non_employee_check_supersession_tenant_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER validate_non_employee_check_supersession_tenant_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION validate_non_employee_check_supersession_tenant();
+
+    CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'Check supersession rollout approvals are append-only';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
+        WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
+          AND u.organization_id = c.organization_id AND u.active = true
+          AND u.role IN (5, 6)
+      ) OR length(btrim(NEW.reason)) < 20 THEN
+        RAISE EXCEPTION 'Live-check rollout approval requires an active organization administrator and documented reason';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_check_supersession_rollout_approvals ON check_supersession_rollout_approvals;
+    CREATE TRIGGER protect_check_supersession_rollout_approvals
+    BEFORE INSERT OR UPDATE OR DELETE ON check_supersession_rollout_approvals
+    FOR EACH ROW EXECUTE FUNCTION protect_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM companies c JOIN users u ON u.id = NEW.user_id
+        WHERE c.id = NEW.company_id AND u.organization_id = c.organization_id
+          AND u.active = true AND u.role IN (5, 6, 0, 1)
+      ) THEN
+        RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
+      END IF;
+      IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
+        AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
+        RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS enforce_check_supersession_rollout_approval_on_insert ON non_employee_check_supersessions;
+    CREATE TRIGGER enforce_check_supersession_rollout_approval_on_insert
+    BEFORE INSERT ON non_employee_check_supersessions
+    FOR EACH ROW EXECUTE FUNCTION enforce_check_supersession_rollout_approval();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_superseded_payroll_item() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.voided = true AND OLD.voided = false
+        AND EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_superseded_payroll_item_on_update ON payroll_items;
+    CREATE TRIGGER prevent_voiding_superseded_payroll_item_on_update
+    BEFORE UPDATE OF voided ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_superseded_payroll_item();
+
+    CREATE OR REPLACE FUNCTION prevent_voiding_period_with_superseded_checks() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.correction_status = 'voided' AND OLD.correction_status IS DISTINCT FROM 'voided'
+        AND EXISTS (
+          SELECT 1 FROM payroll_items p
+          JOIN non_employee_check_supersessions s ON s.payroll_item_id = p.id
+          WHERE p.pay_period_id = OLD.id
+        ) THEN
+        RAISE EXCEPTION 'A pay period with a payroll check linked to a duplicate software record cannot be voided';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS prevent_voiding_period_with_superseded_checks_on_update ON pay_periods;
+    CREATE TRIGGER prevent_voiding_period_with_superseded_checks_on_update
+    BEFORE UPDATE OF correction_status ON pay_periods
+    FOR EACH ROW EXECUTE FUNCTION prevent_voiding_period_with_superseded_checks();
+
+    CREATE OR REPLACE FUNCTION protect_superseded_payroll_item_facts() RETURNS trigger AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM non_employee_check_supersessions WHERE payroll_item_id = OLD.id)
+        AND (
+          NEW.check_number IS DISTINCT FROM OLD.check_number OR
+          NEW.net_pay IS DISTINCT FROM OLD.net_pay OR
+          NEW.employee_id IS DISTINCT FROM OLD.employee_id OR
+          NEW.pay_period_id IS DISTINCT FROM OLD.pay_period_id OR
+          NEW.company_id IS DISTINCT FROM OLD.company_id OR
+          NEW.payment_delivery_method IS DISTINCT FROM OLD.payment_delivery_method
+        ) THEN
+        RAISE EXCEPTION 'A payroll check linked to a duplicate software record cannot change verified payment facts';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS protect_superseded_payroll_item_facts_on_update ON payroll_items;
+    CREATE TRIGGER protect_superseded_payroll_item_facts_on_update
+    BEFORE UPDATE OF check_number, net_pay, employee_id, pay_period_id, company_id, payment_delivery_method ON payroll_items
+    FOR EACH ROW EXECUTE FUNCTION protect_superseded_payroll_item_facts();
+
+  SQL
+  execute <<~SQL
+    CREATE TRIGGER direct_deposit_payment_confirmations_append_only
+    BEFORE UPDATE OR DELETE ON direct_deposit_payment_confirmations
+    FOR EACH ROW EXECUTE FUNCTION prevent_check_evidence_mutation();
+  SQL
 end

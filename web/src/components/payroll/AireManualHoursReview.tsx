@@ -28,6 +28,7 @@ const exclusionLabel = (reason: string) => ({
   overtime_approved_after_cutoff: 'overtime approved after cutoff',
   denied_approval: 'time denied',
   denied_overtime: 'overtime denied',
+  payment_attested_pending_evidence: 'payment reported; check evidence pending',
 }[reason] || reason.replaceAll('_', ' '));
 
 export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked }: Props) {
@@ -198,6 +199,49 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 </tbody>
               </table>
             </div>
+
+            {(review.payment_attestations?.length || 0) > 0 && (
+              <section className="border-t border-warning-200 bg-warning-50/60 px-6 py-6" aria-label="Payment evidence pending">
+                <h4 className="font-semibold text-neutral-950">Payment reported; check evidence pending</h4>
+                <p className="mt-2 text-sm text-neutral-600">These entries remain held while the historical payment is verified. They are excluded from payable hours and cannot be treated as issued payments.</p>
+                {review.payment_attestations?.map((attestation) => (
+                  <article key={attestation.id} className="mt-4 rounded-lg border border-warning-200 bg-white p-4 text-sm">
+                    <p className="font-semibold">Source entry {attestation.source_time_entry_id} · {hours(attestation.hours)} hrs · {formatDate(attestation.original_work_date)}</p>
+                    <p className="mt-2">{attestation.evidence_needed}</p>
+                    {attestation.source_changed && <p className="mt-2 text-warning-900">The source changed after the payment was reported. Review the current evidence before reconciliation.</p>}
+                  </article>
+                ))}
+              </section>
+            )}
+            {(review.cornerstone_manual_allocations?.length || 0) > 0 && (
+              <section className="border-t border-neutral-200 px-6 py-6" aria-label="Historical payment reconciliation">
+                <h4 className="font-semibold text-neutral-950">Historical payment reconciliation</h4>
+                <p className="mt-2 text-sm text-neutral-600">These source entries are linked to existing payroll payments. Reconciliation records evidence and does not create another paycheck.</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {review.cornerstone_manual_allocations?.map((allocation) => (
+                    <article key={allocation.id} className="rounded-lg border border-neutral-200 p-4">
+                      <p className="font-semibold">{allocation.employee_name} · {hours(allocation.regular_hours + allocation.overtime_hours)} hrs</p>
+                      <p className="mt-2 text-sm">{formatDate(allocation.original_work_date)} · {allocation.status.replaceAll('_', ' ')}</p>
+                      {allocation.last_sync_error && <p role="alert" className="mt-2 text-sm text-danger-800">{allocation.last_sync_error}</p>}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+            {(review.historical_classification_reviews?.length || 0) > 0 && (
+              <section className="border-t border-warning-200 bg-warning-50/60 px-6 py-6" aria-label="Historical classification reviews">
+                <h4 className="font-semibold text-neutral-950">Historical regular and overtime differences</h4>
+                <p className="mt-2 text-sm text-neutral-600">The issued check is preserved. A completed source reconciliation still requires review of any wage difference.</p>
+                {review.historical_classification_reviews?.map((item) => (
+                  <article key={item.id} className="mt-4 rounded-lg border border-warning-200 bg-white p-4 text-sm">
+                    <p className="font-semibold">{item.employee_name} · check {item.check_number} · {item.source_entry_count} source entries</p>
+                    <p className="mt-2">AIRE: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
+                    <p className="mt-2">Gross wage difference: ${item.gross_wage_difference.toFixed(2)} · {item.status}</p>
+                    <p className="mt-2 text-neutral-600">{item.note}</p>
+                  </article>
+                ))}
+              </section>
+            )}
 
             {review.exclusions.length > 0 && (
               <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">

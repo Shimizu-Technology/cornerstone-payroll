@@ -174,3 +174,33 @@ describe('AireManualHoursReview', () => {
     expect(screen.getByText(/Refresh before using AIRE hours for payroll/i)).toBeTruthy();
   });
 });
+
+it('shows historical evidence and wage differences without claiming another payment', async () => {
+  apiMocks.manualReview.mockResolvedValue({
+    ...review,
+    cornerstone_manual_allocations: [{ id: 1, employee_name: 'Example Worker', source_time_entry_id: '301',
+      original_work_date: '2026-08-20', regular_hours: 4, overtime_hours: 0, status: 'issued' }],
+    historical_classification_reviews: [{ id: 1, employee_name: 'Example Worker', check_number: '2001',
+      source_entry_count: 1, source_regular_hours: 3, source_overtime_hours: 1,
+      payroll_regular_hours: 4, payroll_overtime_hours: 0, gross_wage_difference: 5,
+      status: 'complete', note: 'Owner confirmed historical check; wage split still needs review' }],
+  });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  await screen.findByRole('region', { name: 'Historical payment reconciliation' });
+  expect(screen.getByText(/does not create another paycheck/)).toBeTruthy();
+  expect(screen.getByText(/Gross wage difference: \$5.00/)).toBeTruthy();
+  expect(screen.getByText(/wage split still needs review/)).toBeTruthy();
+});
+
+it('keeps owner-reported historical payments visibly held pending check evidence', async () => {
+  apiMocks.manualReview.mockResolvedValue({ ...review, payment_attestations: [{
+    id: 1, source_time_entry_id: '501', source_user_uuid: 'example', hours: 4,
+    original_work_date: '2026-08-20', status: 'pending_evidence', attested_at: '2026-09-01',
+    source_changed: true, evidence_needed: 'Supply the issued check and delivery record',
+  }] });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  await screen.findByRole('region', { name: 'Payment evidence pending' });
+  expect(screen.getByText(/excluded from payable hours/)).toBeTruthy();
+  expect(screen.getByText(/Supply the issued check/)).toBeTruthy();
+  expect(screen.getByText(/source changed after/)).toBeTruthy();
+});

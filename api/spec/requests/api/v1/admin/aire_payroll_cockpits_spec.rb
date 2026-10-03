@@ -160,7 +160,8 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(response).to have_http_status(:ok)
     expect(client).to have_received(:payroll_cockpit_manual_review).with(
       start_date: "2026-08-16",
-      end_date: "2026-08-31"
+      end_date: "2026-08-31",
+      external_pay_period_id: unpublished.id
     )
     expect(response.parsed_body.dig("employees", 0, "cornerstone")).to include(
       "status" => "mapped",

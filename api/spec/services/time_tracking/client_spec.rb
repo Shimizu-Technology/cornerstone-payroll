@@ -34,6 +34,25 @@ RSpec.describe TimeTracking::Client do
     end
     let(:external_id) { SecureRandom.uuid }
 
+    it "binds both read and mutation requests to the pinned source installation" do
+      instance_id = SecureRandom.uuid
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "aire_payroll", source_protocol_version: "2.0", identity_verified_at: Time.current)
+      reader = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
+        .with(headers: { "X-Payroll-Source-Instance-Id" => instance_id })
+        .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      writer = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_allocations/51/issue")
+        .with(headers: { "X-Payroll-Source-Instance-Id" => instance_id, "X-Cornerstone-Actor-Id" => actor.id.to_s })
+        .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      client_for(source, actor: actor).issue_payroll_manual_allocation(allocation_id: 51,
+        command_id: SecureRandom.uuid, expected_version: 0, payment_method: "paper_check",
+        payment_reference: "1001", payment_effective_on: "2026-09-01",
+        occurred_at: "2026-09-01T00:00:00.123456Z", reason: "Documented historical handoff")
+      expect(reader).to have_been_requested.once
+      expect(writer).to have_been_requested.once
+    end
+
     it "reads a manual payroll review by date range without requiring a published calendar ID" do
       review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")
         .with(

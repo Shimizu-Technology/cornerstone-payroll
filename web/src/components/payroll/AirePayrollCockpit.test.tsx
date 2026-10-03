@@ -473,7 +473,7 @@ describe('AirePayrollCockpit', () => {
     const submit = within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     await user.type(screen.getByRole('textbox', { name: /reason/i }), 'Verified against manager note');
-    await user.click(submit);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
 
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 3,

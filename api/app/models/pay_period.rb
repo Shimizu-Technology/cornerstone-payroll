@@ -47,6 +47,8 @@ class PayPeriod < ApplicationRecord
            inverse_of: :promotion_source_pay_period,
            dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
