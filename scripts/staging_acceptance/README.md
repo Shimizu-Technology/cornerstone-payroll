@@ -1,0 +1,25 @@
+# Actual operator manual acceptance fixture
+
+This additive fixture is for the existing local AIRE/Payroll staging Compose deployment. It admits an already verified provider identity to the application databases and supplies synthetic manual reconciliation data. It does not call Clerk, create a provider identity or session, grant production access, or reuse the misleadingly named original staging account.
+
+Run `seed_manual_fixture.rb` through each application's Rails runner, starting with `dry_run` for both applications. The wrapper must target the existing `colima-aire-payroll-staging-v2` context and `aire-payroll-staging-v2` Compose project. Run AIRE `apply` before Payroll `apply`. Keep principal inputs and all execution evidence in the private acceptance directory; never put actual identifiers, email addresses, credentials, or environment dumps in Git or chat.
+
+The script requires all of these guards:
+
+- Rails production mode with `DEPLOYMENT_ENV=staging`, `STAGING_SEED_ALLOWED=true`, and `STAGING_FIXTURE_NAMESPACE=staging-v2`.
+- `STAGING_ACCEPTANCE_FIXTURE=actual-operator-manual-acceptance-v1` and `STAGING_ACCEPTANCE_MODE=dry_run` or `apply`.
+- Actual and configured database names match `aire_services_staging_v2` or `cornerstone_payroll_staging_v2`, using their exact Compose database host and staging database role.
+- Existing installation UUID in `STAGING_SOURCE_INSTANCE_ID`; verified existing provider principal in `STAGING_ACTUAL_CLERK_ID`, `STAGING_ACTUAL_EMAIL`, and `STAGING_ACTUAL_NAME`. These are operator-supplied private inputs, not a new provider registration.
+- Unoccupied reserved namespace, no existing matching local principal, no source hours or calendar covering the synthetic retrospective work range, and a real unshifted clock.
+
+The AIRE side creates an active personal-access administrator for the real principal, one synthetic employee/category at $25, and one pending four-hour manual entry dated September 10, 2026. Creation and revision timestamps remain the real current time. It makes no historical cutoff claim and creates no account link, grant, approval, batch, payment, or calendar.
+
+The Payroll side creates a clearly named synthetic company in the existing staging organization. The real operator has the accountant role and one assignment, solely to this new company. An inactive, non-login Fixture Maintainer authors the explicit synthetic $25 wage, fixed semimonthly schedule, Sunday-midnight Guam workweek, and fictional new-hire document waivers. Every setup note says `Synthetic acceptance fixture, no real employee/business evidence`. The real operator is never the script's setup approver. The source is created and installation-verified before any committed company history exists. Its clear history gate therefore reflects a new company rather than an approved legacy history. Existing companies' gates remain unchanged.
+
+The seeded September 1–15 period is a draft unpublished adjustment run, payable September 30. It contains no payroll item or approval. After the self-link feature is deployed, the operator signs in normally, connects her own AIRE account with explicit consent, approves the pending AIRE entry herself, creates/calculates/approves/commits the synthetic Payroll item, and links its exact source identity/version/date/hours. A committed allocation reserves hours; only an actual test delivery or bank-confirmation action records payment. Acceptance should inspect both states without treating an attestation as verified payment.
+
+The original staging calendar has no frozen overtime policy. This script neither repairs it nor tests automatic cutoff finalization. AIRE calendars are global and reject overlapping ranges, so a new Payroll company cannot supply an independent overlapping regular calendar. On the current shared staging instance, the earliest untouched fixed-rule period is October 16–31, payday November 15, with a November 7 cutoff at 17:00 Guam. Any earlier accelerated scheduled-flow acceptance needs a separately owned disposable stack with an explicitly labeled test clock.
+
+Before returning success, each apply transaction compares hashes of every pre-existing row in the protected domain tables. Any old-row change rolls back the additive fixture. Dry-run/apply output contains aggregate claims and hashes, never principal data. A repeated apply refuses occupied namespace; it never updates an existing fixture. The two databases are separate transactions: if the second application is blocked, retain and report the first application's unapproved fixture rather than deleting users or weakening a guard.
+
+Retain the named fixture for human acceptance. Clean task-owned runners and temporary files immediately; leave shared services and the operator's browser unchanged. Preserve the pre/post private evidence and report exactly which application fixture was applied. Later removal requires a scoped cleanup plan because actual consent or acceptance actions may have created immutable audit records.
