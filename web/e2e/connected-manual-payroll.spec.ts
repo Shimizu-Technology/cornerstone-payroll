@@ -30,8 +30,12 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await inputs.nth(1).press('Tab');
   await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).click();
+  const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
+  await expect(commitDialog).toBeVisible();
+  await expect(commitDialog.getByText(`#${periodId}`, { exact: true })).toBeVisible();
+  await expect(commitDialog.getByText(/Checks and bank payments require separate issuance/)).toBeVisible();
+  await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
   await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
   const before = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
   const item = before.pay_period.payroll_items.find((value: { employee_id: number }) => value.employee_id === fixture.manual_employee_id);
