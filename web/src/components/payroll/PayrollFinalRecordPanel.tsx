@@ -146,7 +146,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
             <DialogHeader>
               <DialogTitle>Final Payroll Record</DialogTitle>
               <DialogDescription>
-                {record ? `${record.company.name} · ${record.pay_period.start_date} through ${record.pay_period.end_date} · paid ${record.pay_period.pay_date}` : 'Committed payroll record'}
+                {record ? `${record.company.name} · ${record.pay_period.start_date} through ${record.pay_period.end_date} · scheduled pay date ${record.pay_period.pay_date}` : 'Committed payroll record'}
               </DialogDescription>
             </DialogHeader>
             <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setOpen(false)} aria-label="Close final payroll record">

@@ -35,7 +35,7 @@ const routerMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isManager: true }),
+  useAuth: () => ({ isManager: true, hasCapability: () => true }),
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
@@ -711,7 +711,7 @@ describe('AirePayrollCockpit', () => {
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock AIRE cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('link', { name: /connect my AIRE account/i }).getAttribute('href'))
-      .toBe('/time-tracking-sources?source_id=1');
+      .toBe('/app/aire-account-connection?source_id=1&return_to=%2Fcompanies%2F1%2Fpay-periods%2F17');
   });
 
   it('does not let an older refresh overwrite a newer payroll view', async () => {
