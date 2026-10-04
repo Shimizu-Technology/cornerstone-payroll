@@ -35,6 +35,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await expect(commitDialog).toBeVisible();
   await expect(commitDialog.getByText(`#${periodId}`, { exact: true })).toBeVisible();
   await expect(commitDialog.getByText(/Checks and bank payments require separate issuance/)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('manual-commit-context-desktop.png'), fullPage: false });
   await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
   await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
   const before = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
