@@ -20,7 +20,7 @@ Complete the local drill first. Use synthetic data only.
 2. Sign in to the local Cornerstone interface and open the printed synthetic pay-period ID.
 3. Without opening AIRE, identify:
    - the regular/kiosk entry that is eligible automatically;
-   - the manual entry and daily overtime that require approval;
+   - the manual entry requiring approval, a long day that stays regular below forty weekly hours, and the genuine weekly overtime in the manual drill;
    - the cutoff time in ChST;
    - the immutable finalized batch and processing history;
    - the hours included in the committed synthetic payroll; and
