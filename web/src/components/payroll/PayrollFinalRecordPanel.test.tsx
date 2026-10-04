@@ -50,6 +50,8 @@ describe('PayrollFinalRecordPanel', () => {
     expect(screen.getByText('$316.50 outstanding')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'View record' }));
+    expect(screen.getByText(/scheduled pay date 2026-08-20/)).toBeTruthy();
+    expect(screen.queryByText(/· paid 2026-08-20/)).toBeNull();
     expect(screen.getByRole('heading', { name: 'Balanced payroll journal' })).toBeTruthy();
     expect(screen.getByText('Reconcile 1 employee check')).toBeTruthy();
     expect(screen.getByText('Mo Shimizu')).toBeTruthy();

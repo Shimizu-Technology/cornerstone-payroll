@@ -33,7 +33,8 @@ import {
 import { ApiError, payPeriodsApi } from '@/services/api';
 import { formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
-import { currentAppPath, newEmployeePath } from '@/lib/routes';
+import { aireAccountConnectionPath, currentAppPath, newEmployeePath } from '@/lib/routes';
+import { useAuth } from '@/contexts/AuthContext';
 import type {
   AirePayrollCalendarState,
   AirePayrollCockpitOverview,
@@ -351,6 +352,7 @@ export function AirePayrollCockpit({
   const location = useLocation();
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
+  const { hasCapability } = useAuth();
   const [overview, setOverview] = useState<AirePayrollCockpitOverview | null>(null);
   const [timeEntries, setTimeEntries] = useState<AirePayrollTimeEntriesResponse | null>(null);
   const [exceptions, setExceptions] = useState<AirePayrollExceptionsResponse | null>(null);
@@ -768,14 +770,14 @@ export function AirePayrollCockpit({
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">Live details are available, but actions need your AIRE access</p>
-                      <p className="mt-1 leading-5">Connect your administrator account once so AIRE can verify and record your approvals. The connection stays active until you disconnect it or your AIRE access is disabled.</p>
-                      <Link
-                        to={`/time-tracking-sources?source_id=${calendar.source_id}`}
+                      <p className="mt-1 leading-5">Connect your own AIRE account with payroll access for permitted reconciliation. Your Payroll role still controls approvals, mappings, routing and calendar setup.</p>
+                      {hasCapability('manage_own_aire_account_link') ? <Link
+                        to={aireAccountConnectionPath(calendar.source_id, currentAppPath(location.pathname, location.search))}
                         className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2"
                       >
                         Connect my AIRE account
                         <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Link>
+                      </Link> : <p className="mt-2">Ask your payroll administrator to review your company access.</p>}
                     </div>
                   </div>
                 )}

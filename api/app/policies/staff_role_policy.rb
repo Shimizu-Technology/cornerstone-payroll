@@ -12,6 +12,7 @@ class StaffRolePolicy
     manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
+    manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
     manage_organization: %w[super_admin org_admin admin],
     manage_platform: %w[super_admin]
@@ -28,6 +29,7 @@ class StaffRolePolicy
     manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager or admin access required",
+    manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
     manage_platform: "Super admin access required"
@@ -82,9 +84,9 @@ class StaffRolePolicy
     "api/v1/admin/time_tracking_sources#test_connection" => :manage_organization,
     "api/v1/admin/time_tracking_sources#save_delegation" => :manage_client_configuration,
     "api/v1/admin/time_tracking_sources#destroy_delegation" => :manage_client_configuration,
-    "api/v1/admin/time_tracking_sources#show_aire_account_link" => :manage_client_configuration,
-    "api/v1/admin/time_tracking_sources#create_aire_account_link" => :manage_client_configuration,
-    "api/v1/admin/time_tracking_sources#destroy_aire_account_link" => :manage_client_configuration,
+    "api/v1/admin/time_tracking_sources#show_aire_account_link" => :manage_own_aire_account_link,
+    "api/v1/admin/time_tracking_sources#create_aire_account_link" => :manage_own_aire_account_link,
+    "api/v1/admin/time_tracking_sources#destroy_aire_account_link" => :manage_own_aire_account_link,
     "api/v1/admin/pay_component_tax_rules#create" => :manage_organization,
     "api/v1/admin/pay_component_tax_rules#update" => :manage_organization,
     "api/v1/admin/pay_schedule_settings#update" => :manage_client_configuration,
@@ -169,6 +171,13 @@ class StaffRolePolicy
   # must also respect each accountant or manager's assigned client scope.
   def self.historical_reconciliation_allowed?(user, company)
     user.present? && company.present? && allowed?(user, :manage_historical_time_reconciliation) &&
+      user.payroll_access_allowed? && company.active? && company.organization.active? &&
+      company.test_workspace_archived_at.nil? && user.accessible_company_ids.include?(company.id)
+  end
+
+  # Connecting an operator's own AIRE identity does not grant source setup.
+  def self.own_aire_account_link_allowed?(user, company)
+    user.present? && company.present? && allowed?(user, :manage_own_aire_account_link) &&
       user.payroll_access_allowed? && company.active? && company.organization.active? &&
       company.test_workspace_archived_at.nil? && user.accessible_company_ids.include?(company.id)
   end

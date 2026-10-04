@@ -931,6 +931,7 @@ export interface AirePayrollManualReview {
 
 export interface AireManualAllocation {
   id: number;
+  pay_period_id?: number;
   payroll_item_id?: number;
   employee_id?: number;
   employee_name: string;
@@ -946,6 +947,11 @@ export interface AireManualAllocation {
   remote_allocation_id?: string;
   last_sync_error?: string;
   last_synced_at?: string;
+  payment_evidence?: {
+    reference: string;
+    effective_on: string;
+    provenance: 'aire_issued_receipt';
+  };
 }
 
 export interface AireManualAllocationInput {

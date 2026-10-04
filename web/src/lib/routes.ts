@@ -53,6 +53,14 @@ export function payrollGoLivePath(companyId: number): string {
   return `${companyPath(companyId)}/payroll-go-live`;
 }
 
+export function aireAccountConnectionPath(sourceId?: number, returnTo?: string): string {
+  const query = new URLSearchParams();
+  if (sourceId && Number.isSafeInteger(sourceId) && sourceId > 0) query.set('source_id', String(sourceId));
+  if (returnTo) query.set('return_to', safeInternalReturnPath(returnTo, '/app'));
+  const path = `/app/aire-account-connection${query.size ? `?${query}` : ''}`;
+  return path.length <= MAX_APP_URL_LENGTH ? path : aireAccountConnectionPath(sourceId);
+}
+
 export function payRunPath(
   companyId: number,
   payRunId: number,

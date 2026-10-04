@@ -24,6 +24,7 @@ module Api
           :create_aire_account_link,
           :destroy_aire_account_link
         ]
+        before_action :require_own_account_link_access!, only: %i[show_aire_account_link create_aire_account_link destroy_aire_account_link]
         before_action :disable_http_caching
 
         def index
@@ -172,12 +173,26 @@ module Api
           Date.current.iso8601
         end
 
+        def require_own_account_link_access!
+          # Status GET belongs to the credential control surface with connect
+          # and disconnect. Require workspace write access for all three so a
+          # read-only reviewer cannot inspect or manage personal credentials.
+          return if StaffRolePolicy.own_aire_account_link_allowed?(current_user, @source.company) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @source.company,
+              request_method: "POST", capability: :manage_own_aire_account_link)
+
+          render json: { error: "You do not have permission to connect your AIRE account for this company" }, status: :forbidden
+        end
+
         def account_link_client
           unless @source.source_type == "aire_services"
             raise TimeTracking::Client::Error.new("Account linking is only available for AIRE Services", response_status: 422)
           end
+          unless @source.active? && @source.company_id == current_company_id
+            raise TimeTracking::Client::Error.new("This AIRE source is inactive. Ask your payroll administrator to review the current connection.", response_status: 422)
+          end
           unless @source.shared_secret_configured?
-            raise TimeTracking::Client::Error.new("Save the AIRE shared secret before connecting your account", response_status: 422)
+            raise TimeTracking::Client::Error.new("This AIRE source needs its integration credential configured by your payroll administrator before connecting your account", response_status: 422)
           end
 
           TimeTracking::Client.new(@source)
@@ -185,7 +200,7 @@ module Api
 
         def aire_account_link_return_url
           frontend_url = ENV.fetch("FRONTEND_URL")
-          "#{frontend_url.to_s.chomp('/')}/time-tracking-sources?source_id=#{@source.id}"
+          "#{frontend_url.to_s.chomp('/')}/app/aire-account-connection?source_id=#{@source.id}"
         end
 
         def render_one_active_source_error

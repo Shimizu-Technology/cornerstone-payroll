@@ -30,8 +30,13 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await inputs.nth(1).press('Tab');
   await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).click();
+  const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
+  await expect(commitDialog).toBeVisible();
+  await expect(commitDialog.getByText(`#${periodId}`, { exact: true })).toBeVisible();
+  await expect(commitDialog.getByText(/Checks and bank payments require separate issuance/)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('manual-commit-context-desktop.png'), fullPage: false });
+  await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
   await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
   const before = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
   const item = before.pay_period.payroll_items.find((value: { employee_id: number }) => value.employee_id === fixture.manual_employee_id);
@@ -78,6 +83,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(Number(allocation.regular_hours)).toBe(4);
   expect(Number(allocation.overtime_hours)).toBe(0);
   expect(allocation.payroll_item_check_status).toBe('prepared');
+  expect(allocation.payment_evidence).toBeUndefined();
 
   await reconciliation.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('manual-prepared-unpaid-desktop.png'), fullPage: false });
@@ -113,6 +119,11 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   const after = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
   expect(after.pay_period.payroll_items.map((value: { id: number }) => value.id)).toEqual(before.pay_period.payroll_items.map((value: { id: number }) => value.id));
   const finalItem = after.pay_period.payroll_items.find((value: { id: number }) => value.id === item.id);
+  expect(issued.payment_evidence).toEqual({ reference: finalItem.check_number,
+    effective_on: policy.delivery_date, provenance: 'aire_issued_receipt' });
+  const issuedDate = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${policy.delivery_date}T00:00:00Z`));
+  await expect(reconciliation.getByText(`AIRE issued receipt · reference ${finalItem.check_number} · paid ${issuedDate}`)).toBeVisible();
   for (const field of ['hours_worked', 'overtime_hours', 'gross_pay', 'net_pay']) expect(finalItem[field]).toEqual(item[field]);
   await reconciliation.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('manual-issued-desktop.png'), fullPage: false });
