@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 AIRE_REPO_PATH="${AIRE_REPO_PATH:-}"
 AIRE_PORT="${AIRE_PORT:-44327}"
 CORNERSTONE_PORT="${CORNERSTONE_PORT:-44328}"
+CONNECTED_WEB_PORT="${CONNECTED_WEB_PORT:-44339}"
 KEEP_RUNNING="${KEEP_RUNNING:-false}"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
@@ -68,6 +69,7 @@ trap cleanup EXIT INT TERM
 certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
 [[ "$AIRE_DATABASE" == aire_cornerstone_certification_* ]] || fail "unsafe AIRE database name"
 [[ "$CORNERSTONE_DATABASE" == cornerstone_aire_certification_* ]] || fail "unsafe Cornerstone database name"
+[[ "$CONNECTED_WEB_PORT" =~ ^[0-9]{1,5}$ && "$CONNECTED_WEB_PORT" -gt 0 && "$CONNECTED_WEB_PORT" -le 65535 ]] || fail "invalid connected browser port"
 
 for port in "$AIRE_PORT" "$CORNERSTONE_PORT"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -148,7 +150,7 @@ AIRE_PID=$!
   certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
   certification_use_clock "$CORNERSTONE_DATABASE_URL"
   exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
-    CORS_ORIGINS="http://127.0.0.1:44329" \
+    CORS_ORIGINS="http://127.0.0.1:44329,http://localhost:${CONNECTED_WEB_PORT:-44339},http://127.0.0.1:${CONNECTED_WEB_PORT:-44339}" \
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
 ) >"$CORNERSTONE_LOG" 2>&1 &
 CORNERSTONE_PID=$!
@@ -464,6 +466,26 @@ ruby -rjson -e '
 ' "$NEXT_SETTLEMENTS" "$MANUAL_HOLD_ID"
 echo "PASS: the next pay period shows all four held hours as scheduled and unpaid"
 
+echo "Certifying the assigned-accountant manual payroll and exact payment reconciliation path..."
+export CERTIFICATION_CLOCK_FILE CERTIFICATION_POLICY_FIXTURE_PATH AIRE_REPO_PATH
+export AIRE_DATABASE_URL CORNERSTONE_DATABASE_URL CORNERSTONE_BASE_URL
+ruby "$ROOT_DIR/scripts/local_certification/manual_http.rb"
+
+if [[ "${RUN_CONNECTED_BROWSER:-false}" == "true" ]]; then
+  (
+    # Browser child runners share the API's guarded clock and isolated DB. Keep
+    # these Rails-only options out of the control-plane Ruby verifier below.
+    certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+    certification_use_clock "$CORNERSTONE_DATABASE_URL"
+    export AUTH_ENABLED=false
+    E2E_CONNECTED_FIXTURE_PATH="$CORNERSTONE_FIXTURE" E2E_AIRE_FIXTURE_PATH="$AIRE_FIXTURE" \
+      E2E_POLICY_FIXTURE_PATH="$CERTIFICATION_POLICY_FIXTURE_PATH" \
+      E2E_API_PORT="$CORNERSTONE_PORT" E2E_AIRE_PORT="$AIRE_PORT" E2E_WEB_PORT="$CONNECTED_WEB_PORT" \
+      npm --prefix "$ROOT_DIR/web" run test:e2e:connected
+  )
+  ruby "$ROOT_DIR/scripts/local_certification/manual_http.rb" --verify-browser
+fi
+
 echo "LOCAL AIRE PAYROLL CERTIFICATION PASSED"
 echo "Cornerstone API: $CORNERSTONE_BASE_URL"
 echo "AIRE API: $AIRE_BASE_URL"
@@ -471,6 +493,7 @@ echo "Synthetic pay period ID: $PAY_PERIOD_ID"
 echo "Synthetic next pay period ID: $NEXT_PAY_PERIOD_ID"
 
 if [[ "$KEEP_RUNNING" == "true" ]]; then
+  echo "Private browser fixture paths: Cornerstone=$CORNERSTONE_FIXTURE AIRE=$AIRE_FIXTURE"
   echo "Servers are being kept open for browser review. Press Ctrl-C to clean up."
   wait "$AIRE_PID" "$CORNERSTONE_PID"
 fi

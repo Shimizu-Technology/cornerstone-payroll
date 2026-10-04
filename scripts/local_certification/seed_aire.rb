@@ -109,11 +109,50 @@ fixture = ApplicationRecord.transaction do
     capabilities: PayrollIntegrationGrant::CAPABILITIES
   )
 
+  manual_admin = User.create!(email: "aire-manual-authority@example.test", clerk_id: "aire_manual_authority",
+    first_name: "Manual", last_name: "Authority", role: "admin", is_active: true,
+    personal_access_enabled: true, profile_source: "clerk", time_tracking_enabled: false)
+  manual_employee = User.create!(email: "aire-manual-worker@example.test", clerk_id: "aire_manual_worker",
+    first_name: "Morgan", last_name: "Manual", role: "employee", is_active: true,
+    personal_access_enabled: true, profile_source: "clerk", time_tracking_enabled: true, kiosk_enabled: true)
+  UserTimeCategory.create!(user: manual_employee, time_category: category, hourly_rate_cents: 2_500)
+  manual_date = end_date + 1.day
+  manual_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
+    work_date: manual_date, start_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 8),
+    end_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 18),
+    entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
+    approved_at: cutoff_at - 2.days, overtime_status: "approved", overtime_approved_by: manual_admin,
+    overtime_approved_at: cutoff_at - 2.days, description: "Synthetic unbatched manual reconciliation source")
+  void_date = manual_date + 1.day
+  void_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
+    work_date: void_date, start_time: guam.local(void_date.year, void_date.month, void_date.day, 8),
+    end_time: guam.local(void_date.year, void_date.month, void_date.day, 10),
+    entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
+    approved_at: cutoff_at - 2.days, description: "Synthetic undelivered manual-check void source")
+  browser_date = manual_date + 2.days
+  browser_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
+    work_date: browser_date, start_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 8),
+    end_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 12),
+    entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
+    approved_at: cutoff_at - 2.days, description: "Untouched approved four-hour source reserved for browser acceptance")
+  manual_grant = PayrollIntegrationGrant.issue!(user: manual_admin, capabilities: ["settlement_case_management"])
+
   {
     schema_version: 1,
     integration_profile: Payroll::IntegrationProfile.call,
     shared_secret: shared_secret,
     delegation_token: grant.issued_token,
+    manual_delegation_token: manual_grant.issued_token,
+    manual_authority_id: manual_admin.id,
+    manual_employee_id: manual_employee.id,
+    manual_employee_uuid: manual_employee.payroll_integration_uuid,
+    manual_employee_email: manual_employee.email,
+    manual_entry_id: manual_entry.id,
+    manual_void_entry_id: void_entry.id,
+    manual_work_date: manual_date.iso8601,
+    manual_void_work_date: void_date.iso8601,
+    manual_browser_entry_id: browser_entry.id,
+    manual_browser_work_date: browser_date.iso8601,
     admin_id: admin.id,
     employee_id: employee.id,
     employee_uuid: employee.payroll_integration_uuid,
