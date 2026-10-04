@@ -47,13 +47,13 @@ export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordC
         <DialogHeader>
           <DialogTitle>Record check issued</DialogTitle>
           <DialogDescription>
-            Check #{item.check_number} for {item.employee_name}. Printing prepared the check; this step records when it left Cornerstone&apos;s control.
+            Check #{item.check_number} for {item.employee_name}. Record when it was released to the business or employee. The business&apos;s later distribution does not change this issue date.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Issue date" type="date" value={deliveredOn} onChange={(event) => setDeliveredOn(event.target.value)} />
           <Select label="How it was issued" value={deliveryMethod} onChange={(event) => setDeliveryMethod(event.target.value as typeof deliveryMethod)}>
-            <option value="hand_delivery">Handed to employee</option>
+            <option value="hand_delivery">Hand delivery</option>
             <option value="mail">Mailed</option>
             <option value="courier">Courier / delivery service</option>
             <option value="other">Other documented method</option>
