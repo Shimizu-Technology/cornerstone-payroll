@@ -65,6 +65,17 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
     end
 
+    it "exposes own AIRE account connection to accountants without configuration access" do
+      company = create(:company)
+      user = create(:user, company: company, organization: company.organization, role: "accountant")
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+      get "/api/v1/auth/me"
+      expect(response).to have_http_status(:ok)
+      capabilities = response.parsed_body.dig("user", "capabilities")
+      expect(capabilities).to include("manage_own_aire_account_link", "payroll_operations")
+      expect(capabilities).not_to include("manage_client_configuration", "manage_organization")
+    end
+
     it "ignores an active company header outside the current user's organization" do
       organization = create(:organization)
       company = create(:company, organization: organization)

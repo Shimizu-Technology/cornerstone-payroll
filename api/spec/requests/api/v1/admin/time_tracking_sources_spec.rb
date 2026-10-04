@@ -126,7 +126,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(client).to have_received(:create_payroll_account_link_session).with(
       external_actor_id: manager.id,
       external_actor_email: "chels@example.com",
-      return_url: "https://payroll.shimizu-technology.com/time-tracking-sources?source_id=#{source.id}"
+      return_url: "https://payroll.shimizu-technology.com/app/aire-account-connection?source_id=#{source.id}"
     )
   end
 
