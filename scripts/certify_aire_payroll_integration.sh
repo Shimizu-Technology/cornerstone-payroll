@@ -140,6 +140,7 @@ echo "Starting isolated AIRE and Cornerstone APIs..."
   certification_use_clock "$AIRE_DATABASE_URL"
   exec env RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$AIRE_DATABASE_URL" \
     PAYROLL_SHARED_SECRET="$SHARED_SECRET" \
+    FRONTEND_URL="http://localhost:44340" \
     CORNERSTONE_PAYROLL_EVENTS_URL="$CORNERSTONE_BASE_URL/api/v1/integrations/aire/events" \
     bundle exec rails server --binding 127.0.0.1 --port "$AIRE_PORT"
 ) >"$AIRE_LOG" 2>&1 &
@@ -150,6 +151,7 @@ AIRE_PID=$!
   certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
   certification_use_clock "$CORNERSTONE_DATABASE_URL"
   exec env RAILS_ENV=test AUTH_ENABLED=false E2E_TEST_MODE=true TEST_DATABASE_URL="$CORNERSTONE_DATABASE_URL" \
+    FRONTEND_URL="http://localhost:$CONNECTED_WEB_PORT" \
     CORS_ORIGINS="http://127.0.0.1:44329,http://localhost:${CONNECTED_WEB_PORT:-44339},http://127.0.0.1:${CONNECTED_WEB_PORT:-44339}" \
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
 ) >"$CORNERSTONE_LOG" 2>&1 &
@@ -468,7 +470,7 @@ echo "PASS: the next pay period shows all four held hours as scheduled and unpai
 
 echo "Certifying the assigned-accountant manual payroll and exact payment reconciliation path..."
 export CERTIFICATION_CLOCK_FILE CERTIFICATION_POLICY_FIXTURE_PATH AIRE_REPO_PATH
-export AIRE_DATABASE_URL CORNERSTONE_DATABASE_URL CORNERSTONE_BASE_URL
+export AIRE_DATABASE_URL CORNERSTONE_DATABASE_URL CORNERSTONE_BASE_URL AIRE_BASE_URL
 ruby "$ROOT_DIR/scripts/local_certification/manual_http.rb"
 
 if [[ "${RUN_CONNECTED_BROWSER:-false}" == "true" ]]; then

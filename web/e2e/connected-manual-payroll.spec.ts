@@ -78,6 +78,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(Number(allocation.regular_hours)).toBe(4);
   expect(Number(allocation.overtime_hours)).toBe(0);
   expect(allocation.payroll_item_check_status).toBe('prepared');
+  expect(allocation.payment_evidence).toBeUndefined();
 
   await reconciliation.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('manual-prepared-unpaid-desktop.png'), fullPage: false });
@@ -113,6 +114,11 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   const after = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
   expect(after.pay_period.payroll_items.map((value: { id: number }) => value.id)).toEqual(before.pay_period.payroll_items.map((value: { id: number }) => value.id));
   const finalItem = after.pay_period.payroll_items.find((value: { id: number }) => value.id === item.id);
+  expect(issued.payment_evidence).toEqual({ reference: finalItem.check_number,
+    effective_on: policy.delivery_date, provenance: 'aire_issued_receipt' });
+  const issuedDate = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${policy.delivery_date}T00:00:00Z`));
+  await expect(reconciliation.getByText(`AIRE issued receipt · reference ${finalItem.check_number} · paid ${issuedDate}`)).toBeVisible();
   for (const field of ['hours_worked', 'overtime_hours', 'gross_pay', 'net_pay']) expect(finalItem[field]).toEqual(item[field]);
   await reconciliation.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('manual-issued-desktop.png'), fullPage: false });

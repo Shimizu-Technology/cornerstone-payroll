@@ -164,7 +164,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
         <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-600">Match exact AIRE hours to an existing committed payroll item. The link records which hours it covers and follows the payment evidence already recorded in Payroll.</p></div>
       <Button type="button" variant="outline" size="sm" disabled={busy || loading} onClick={() => void load()}>Refresh reconciliation</Button>
     </div>
-    <p className="text-sm text-neutral-600">Prepared checks remain unpaid until delivery is recorded. Direct deposits require bank confirmation. For a reported-payment hold, verify the evidence and retract the hold with a reason before linking eligible hours.</p>
+    <p className="text-sm text-neutral-600">Printing prepares a check. Record its issuance when it is handed to AIRE; AIRE handles employee distribution. Direct deposits require bank confirmation. A reported-payment hold stays in place while its evidence is reviewed; retract it only if the payment report was incorrect.</p>
     {loading && <p role="status" className="text-sm">Loading exact source hours and existing links…</p>}
     {error && <p role="alert" className="rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-primary-50 p-3 text-sm text-primary-900">{notice}</p>}
