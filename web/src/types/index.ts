@@ -843,6 +843,7 @@ export interface AirePayrollCockpitOverview {
     can_read: boolean;
     can_command: boolean;
     can_manage_mappings: boolean;
+    can_manage_manual_allocations?: boolean;
     delegation_configured: boolean;
     account_link_configured?: boolean;
     legacy_delegation_configured?: boolean;
@@ -891,15 +892,13 @@ export interface AirePayrollManualReview {
   start_date: string;
   end_date: string;
   generated_at: string;
+  command_access?: { can_manage_manual_allocations: boolean; delegation_configured?: boolean };
   payment_attestations?: Array<{
     id: number; source_time_entry_id: string; source_user_uuid: string; hours: number;
     original_work_date: string; status: string; attested_at: string; source_changed: boolean;
     evidence_needed: string;
   }>;
-  cornerstone_manual_allocations?: Array<{
-    id: number; employee_name: string; source_time_entry_id: string; original_work_date: string;
-    regular_hours: number; overtime_hours: number; status: string; last_sync_error?: string;
-  }>;
+  cornerstone_manual_allocations?: AireManualAllocation[];
   historical_classification_reviews?: Array<{
     id: number; employee_name: string; source_entry_count: number; check_number: string;
     source_regular_hours: number; source_overtime_hours: number;
@@ -928,6 +927,36 @@ export interface AirePayrollManualReview {
     correction_count: number;
     exclusion_count: number;
   };
+}
+
+export interface AireManualAllocation {
+  id: number;
+  payroll_item_id?: number;
+  employee_id?: number;
+  employee_name: string;
+  source_user_uuid?: string;
+  source_time_entry_id: string;
+  source_time_entry_version?: number;
+  original_work_date: string;
+  regular_hours: number;
+  overtime_hours: number;
+  status: string;
+  payroll_item_check_status?: string;
+  payment_method?: string;
+  remote_allocation_id?: string;
+  last_sync_error?: string;
+  last_synced_at?: string;
+}
+
+export interface AireManualAllocationInput {
+  payroll_item_id: number;
+  source_time_entry_id: string;
+  source_time_entry_version: number;
+  source_user_uuid: string;
+  original_work_date: string;
+  regular_hours: string;
+  overtime_hours: string;
+  note: string;
 }
 
 export interface AirePayrollRoutingOption {

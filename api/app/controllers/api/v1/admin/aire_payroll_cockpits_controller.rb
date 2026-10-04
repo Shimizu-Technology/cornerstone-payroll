@@ -68,6 +68,7 @@ module Api
             external_pay_period_id: @pay_period.id
           )
           render json: cockpit_presenter.manual_review(payload).merge(
+            "command_access" => command_access_payload,
             "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
               .includes(:employee, payroll_item: :check_events)
               .order(:id)
@@ -317,8 +318,15 @@ module Api
 
         def retry_manual_allocation
           allocation = @pay_period.time_tracking_manual_allocations.find(params[:manual_allocation_id])
+          unless @source&.active? && @source.company_id == @pay_period.company_id &&
+                 allocation.time_tracking_source_id == @source.id && allocation.company_id == @pay_period.company_id
+            raise TimeTracking::ManualAllocationService::Error,
+              "This allocation belongs to an inactive or different AIRE source. Review its original source before retrying."
+          end
           manual_allocation_service.sync!(allocation)
           render json: { manual_allocation: manual_allocation_json(allocation.reload) }
+        rescue TimeTracking::ManualAllocationService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
         end
@@ -326,7 +334,16 @@ module Api
         private
 
         def require_manual_reconciliation_access!
-          require_capability!(:manage_client_configuration)
+          return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)
+
+          render json: { error: "You do not have permission to reconcile manual AIRE hours for this company" }, status: :forbidden
+        end
+
+        def manual_reconciliation_allowed?
+          @source&.active? && @source.company_id == @pay_period.company_id &&
+            StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @pay_period.company,
+              request_method: "POST", capability: :manage_historical_time_reconciliation)
         end
 
         def manual_allocation_params
@@ -441,6 +458,8 @@ module Api
           account_link_configured = account_link_connected?
           {
             can_read: true,
+            can_manage_manual_allocations: manual_reconciliation_allowed? &&
+              (account_link_configured || delegation.present?),
             can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration),
             can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&
               (account_link_configured || delegation.present?),

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "manual_printer_fixture"
 
 database_name = ActiveRecord::Base.connection_db_config.database.to_s
 unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" && database_name.start_with?("cornerstone_aire_certification_")
@@ -157,6 +158,36 @@ fixture = ApplicationRecord.transaction do
     source_user_id: aire.fetch("employee_id").to_s,
     source_user_uuid: aire.fetch("employee_uuid")
   )
+  accountant = User.create!(organization: organization, company: company,
+    email: "manual-accountant@example.test", name: "Assigned Manual Accountant", role: "accountant", active: true)
+  CompanyAssignment.create!(user: accountant, company: company, granted_by: admin)
+  ManualPrinterFixture.seed!(company: company, accountant: accountant, admin: admin)
+  TimeTrackingDelegation.create!(company: company, time_tracking_source: source,
+    user: accountant, token: aire.fetch("manual_delegation_token"))
+  manual_employee = employee.dup
+  manual_employee.assign_attributes(first_name: "Morgan", last_name: "Manual",
+    email: aire.fetch("manual_employee_email"), ssn_encrypted: "900-00-0098")
+  manual_employee.save!
+  manual_wage_rate = EmployeeWageRate.create!(employee: manual_employee, label: aire.fetch("category_name"),
+    rate: 25, is_primary: true, active: true)
+  EmployeeDocumentReadiness.seed_new_hire!(employee: manual_employee, actor: admin)
+  manual_employee.employee_document_requirements.find_each do |requirement|
+    EmployeeDocumentRequirementReviewService.new(requirement: requirement, actor: admin,
+      attributes: { status: "waived", review_note: "Synthetic manual certification; no actual employee evidence",
+        lock_version: requirement.lock_version }).call!
+  end
+  TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: manual_employee,
+    source_user_id: aire.fetch("manual_employee_id").to_s, source_user_uuid: aire.fetch("manual_employee_uuid"))
+  manual_periods = 3.times.map do |index|
+    PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: next_start_date, end_date: next_end_date, pay_date: next_pay_date, status: "draft",
+      run_purpose: "adjustment", run_purpose_source: "operator_selected",
+      notes: "Synthetic manual adjustment #{index + 1}; does not replace the published regular calendar")
+  end
+  browser_period = PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
+    start_date: next_start_date, end_date: next_end_date, pay_date: next_pay_date, status: "draft",
+    run_purpose: "adjustment", run_purpose_source: "operator_selected",
+    notes: "Reserved draft manual browser acceptance; untouched by the scripted certificate")
   previous_pay_period = PayPeriod.create!(
     company: company,
     company_pay_schedule: schedule,
@@ -192,6 +223,13 @@ fixture = ApplicationRecord.transaction do
     schema_version: 1,
     company_id: company.id,
     admin_email: admin.email,
+    manual_accountant_email: accountant.email,
+    manual_accountant_id: accountant.id,
+    manual_employee_id: manual_employee.id,
+    manual_employee_name: manual_employee.full_name,
+    manual_employee_wage_rate_id: manual_wage_rate.id,
+    manual_pay_period_ids: manual_periods.map(&:id),
+    manual_browser_pay_period_id: browser_period.id,
     employee_id: employee.id,
     employee_wage_rate_id: wage_rate.id,
     source_id: source.id,
