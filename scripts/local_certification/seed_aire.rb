@@ -139,14 +139,14 @@ fixture = ApplicationRecord.transaction do
   # Keep every source inside even February’s short second half.
   void_date = manual_week_start
   void_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
-    work_date: void_date, start_time: guam.local(void_date.year, void_date.month, void_date.day, 8),
-    end_time: guam.local(void_date.year, void_date.month, void_date.day, 10),
+    work_date: void_date, start_time: guam.local(void_date.year, void_date.month, void_date.day, 14, 30),
+    end_time: guam.local(void_date.year, void_date.month, void_date.day, 16, 30),
     entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
     approved_at: cutoff_at - 2.days, description: "Synthetic undelivered manual-check void source")
   browser_date = manual_week_start + 1.day
   browser_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
-    work_date: browser_date, start_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 8),
-    end_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 12),
+    work_date: browser_date, start_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 14, 30),
+    end_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 18, 30),
     entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
     approved_at: cutoff_at - 2.days, description: "Untouched approved four-hour source reserved for browser acceptance")
   manual_grant = PayrollIntegrationGrant.issue!(user: manual_admin, capabilities: ["settlement_case_management"])
