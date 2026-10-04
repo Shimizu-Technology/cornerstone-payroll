@@ -146,8 +146,8 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
       <Card><CardContent className="space-y-5 py-6">
         <div className="flex items-start gap-3"><ShieldCheck className="mt-1 h-5 w-5 shrink-0 text-primary-700" /><div>
           <h1 className="text-lg font-semibold text-neutral-950">Connect your own AIRE account</h1>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">Sign in to AIRE with your administrator account and confirm access. This connects your identity for this company; it does not change your Payroll role. Managers still handle time approvals, employee mappings, settlement routing and calendar setup.</p>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">No tokens to copy. Access remains active until disconnected or your AIRE administrator access is disabled.</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">Sign in to AIRE with your own account that has payroll access and confirm the connection. This connects your identity for this company; it does not change your Payroll role. Managers still handle time approvals, employee mappings, settlement routing and calendar setup.</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">No tokens to copy. Access remains active until disconnected or your AIRE payroll access is disabled.</p>
         </div></div>
         {loading && <p role="status">Loading active AIRE sources…</p>}
         {error && <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{error}</p>}
@@ -159,7 +159,7 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
         {checking && <p role="status">Checking your current AIRE access…</p>}
         {source && account && !checking && <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
           <Badge variant={account.connected ? 'success' : 'warning'}>{account.connected ? 'Connected' : 'Not connected'}</Badge>
-          {account.connected ? <><p className="mt-3 font-semibold text-neutral-900">Connected as {account.aire_user_name || account.aire_user_email || 'your AIRE administrator account'}</p>
+          {account.connected ? <><p className="mt-3 font-semibold text-neutral-900">Connected as {account.aire_user_name || account.aire_user_email || 'your AIRE account'}</p>
             {account.aire_user_email && <p className="mt-1 text-sm text-neutral-600">{account.aire_user_email}</p>}
             <Button className="mt-4" variant="outline" disabled={busy} onClick={() => setDisconnectOpen(true)}><Unplug className="mr-2 h-4 w-4" />Disconnect my account</Button></>
             : <><p className="mt-3 text-sm leading-6 text-neutral-600">AIRE will ask you to sign in and approve this connection, then return here. A Payroll administrator cannot sign in on your behalf.</p>

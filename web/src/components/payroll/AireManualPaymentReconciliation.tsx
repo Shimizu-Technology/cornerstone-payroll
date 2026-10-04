@@ -181,8 +181,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
             : 'payroll item review needed'}</p>
           <Badge className="mt-2" variant={allocation.status === 'issued' ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
           {allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
-            ? <p className="mt-2">AIRE issued receipt · {allocation.payment_evidence.method === 'paper_check' ? 'check ' : allocation.payment_evidence.method === 'direct_deposit' ? 'bank reference ' : 'reference '}{allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}
-              {allocation.payment_evidence.recorded_at && ` · recorded ${formatGuamDateTime(allocation.payment_evidence.recorded_at)}`}</p>
+            ? <p className="mt-2">AIRE issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
             : <p className="mt-2 text-neutral-600">Verified issued receipt details are not available in this review.</p>}
           {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">AIRE status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}

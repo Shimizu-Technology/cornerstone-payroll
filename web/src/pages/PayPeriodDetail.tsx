@@ -352,6 +352,7 @@ export function PayPeriodDetail({
   const [processing, setProcessing] = useState(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
+  const commitRouteGenerationRef = useRef(0);
   const { activeCompany } = useCompany();
   const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
@@ -954,6 +955,11 @@ export function PayPeriodDetail({
   };
 
   useEffect(() => {
+    commitRouteGenerationRef.current += 1;
+    return () => { commitRouteGenerationRef.current += 1; };
+  }, [companyId, payRunId]);
+
+  useEffect(() => {
     if (payPeriod?.status !== 'approved' || payPeriod.correction_status === 'voided') setCommitPeriodId(null);
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
@@ -961,17 +967,18 @@ export function PayPeriodDetail({
     if (!payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
-    const currentRequestId = loadRequestIdRef.current;
+    const currentRouteGeneration = commitRouteGenerationRef.current;
+    const isCurrentRoute = () => currentRouteGeneration === commitRouteGenerationRef.current;
     setCommitPeriodId(null);
     setProcessing(true);
     setError(null);
     try {
       const response = await payPeriodsApi.commit(confirmedPeriodId);
-      if (currentRequestId !== loadRequestIdRef.current) return;
+      if (!isCurrentRoute()) return;
       setPayPeriod(response.pay_period);
       await loadPayPeriod(confirmedPeriodId, true);
     } catch (err) {
-      if (currentRequestId === loadRequestIdRef.current) setError(err instanceof Error ? err.message : 'Failed to commit');
+      if (isCurrentRoute()) setError(err instanceof Error ? err.message : 'Failed to commit');
     } finally {
       commitInFlightRef.current = false;
       setProcessing(false);
