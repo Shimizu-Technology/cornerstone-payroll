@@ -95,6 +95,8 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_cockpits#correct_time_entry" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#route_settlement_case" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#confirm_employee_mapping" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_cockpits#create_manual_allocation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#retry_manual_allocation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#payment_evidence" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#create_payment_attestation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#retract_payment_attestation" => :manage_historical_time_reconciliation,
