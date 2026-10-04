@@ -174,6 +174,9 @@ module Api
         end
 
         def require_own_account_link_access!
+          # Status GET belongs to the credential control surface with connect
+          # and disconnect. Require workspace write access for all three so a
+          # read-only reviewer cannot inspect or manage personal credentials.
           return if StaffRolePolicy.own_aire_account_link_allowed?(current_user, @source.company) &&
             TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @source.company,
               request_method: "POST", capability: :manage_own_aire_account_link)

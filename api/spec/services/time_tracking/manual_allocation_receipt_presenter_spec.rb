@@ -22,8 +22,8 @@ RSpec.describe TimeTracking::ManualAllocationReceiptPresenter do
   end
 
   it "shows the immutable source issuance reference and date without consulting the current check or scheduled payday" do
-    expect(present([ receipt ])).to eq(reference: "original-check-1234", effective_on: "2026-09-15", provenance: "aire_issued_receipt")
     expect(allocation).not_to receive(:payroll_item)
+    expect(present([ receipt ])).to eq(reference: "original-check-1234", effective_on: "2026-09-15", provenance: "aire_issued_receipt")
   end
 
   %w[id external_pay_period_id external_payroll_item_id source_time_entry_id source_user_uuid original_work_date regular_hours overtime_hours].each do |field|
