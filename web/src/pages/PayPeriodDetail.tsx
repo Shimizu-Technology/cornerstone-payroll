@@ -47,6 +47,8 @@ import { AirePaymentEvidenceHolds } from '@/components/payroll/AirePaymentEviden
 import { AireManualPaymentReconciliation } from '@/components/payroll/AireManualPaymentReconciliation';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
+import { PayrollCommitDialog } from '@/components/payroll/PayrollCommitDialog';
+import { useCompany } from '@/contexts/CompanyContext';
 import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
@@ -348,6 +350,9 @@ export function PayPeriodDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
+  const commitInFlightRef = useRef(false);
+  const { activeCompany } = useCompany();
   const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
   const [clientApprovalLoading, setClientApprovalLoading] = useState(false);
@@ -505,6 +510,7 @@ export function PayPeriodDetail({
     // momentarily render against the previous period's checks while the
     // new panel loads.
     setPayPeriod(null);
+    setCommitPeriodId(null);
     setTimeTrackingImportOpen(false);
     setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
@@ -947,21 +953,27 @@ export function PayPeriodDetail({
     }
   };
 
-  const handleCommit = async () => {
-    if (!payPeriod) return;
-    const warningText = payPeriod.compliance_warnings?.length
-      ? `\n\nAttention:\n${payPeriod.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
-      : '';
-    if (!confirm(`Commit this payroll? This will update YTD totals and cannot be undone.${warningText}`)) return;
+  useEffect(() => {
+    if (payPeriod?.status !== 'approved' || payPeriod.correction_status === 'voided') setCommitPeriodId(null);
+  }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
+
+  const handleCommit = async (confirmedPeriodId: number) => {
+    if (!payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
+        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
+    commitInFlightRef.current = true;
+    const currentRequestId = loadRequestIdRef.current;
+    setCommitPeriodId(null);
+    setProcessing(true);
+    setError(null);
     try {
-      setProcessing(true);
-      setError(null);
-      const response = await payPeriodsApi.commit(payPeriod.id);
+      const response = await payPeriodsApi.commit(confirmedPeriodId);
+      if (currentRequestId !== loadRequestIdRef.current) return;
       setPayPeriod(response.pay_period);
-      await loadPayPeriod(payPeriod.id, true);
+      await loadPayPeriod(confirmedPeriodId, true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to commit');
+      if (currentRequestId === loadRequestIdRef.current) setError(err instanceof Error ? err.message : 'Failed to commit');
     } finally {
+      commitInFlightRef.current = false;
       setProcessing(false);
     }
   };
@@ -1556,7 +1568,7 @@ export function PayPeriodDetail({
           </Button>
           {payPeriod.parallel_run
             ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
-            : <Button onClick={handleCommit} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
+            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>
@@ -3746,6 +3758,11 @@ export function PayPeriodDetail({
           </form>
         </DialogContent>
       </Dialog>
+
+      <PayrollCommitDialog open={commitPeriodId === payRunId && payPeriod.id === payRunId && isApproved && !isVoided}
+        payPeriod={payPeriod} companyName={activeCompany && activeCompany.id === payPeriod.company_id ? activeCompany.name : `Company #${payPeriod.company_id || companyId}`}
+        itemCount={reportablePayrollItems.length} totalNet={totalNet} processing={processing}
+        onCancel={() => setCommitPeriodId(null)} onConfirm={confirmedPeriodId => void handleCommit(confirmedPeriodId)} />
 
       <Dialog
         open={payDateCorrectionOpen}
