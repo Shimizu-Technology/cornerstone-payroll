@@ -29,6 +29,50 @@ class LocalCertificationClockTest < Minitest::Test
     Open3.capture3(@environment.merge(overrides), RbConfig.ruby, "-e", code)
   end
 
+  def test_runtime_resolves_locked_gems_before_loading_the_clock
+    # Model CI's default-gem mismatch without downloads or changing installed gems.
+    require "uri"
+    uri_file = $LOADED_FEATURES.find { |path| path.end_with?("/uri.rb") }
+    locked_uri = File.join(@directory, "locked-uri")
+    library = File.join(locked_uri, "lib")
+    FileUtils.mkdir_p(library)
+    # Default gems may live in rubylibdir instead of a gems/<name>/lib folder.
+    FileUtils.cp(uri_file, File.join(library, "uri.rb"))
+    FileUtils.cp_r(File.join(File.dirname(uri_file), "uri"), library)
+    File.write(File.join(locked_uri, "uri.gemspec"), <<~GEMSPEC)
+      Gem::Specification.new do |spec|
+        spec.name = "uri"
+        spec.version = "99.0.0"
+        spec.summary = "Disposable certification boot-order fixture"
+        spec.authors = ["Certification test"]
+        spec.require_paths = ["lib"]
+      end
+    GEMSPEC
+    gemfile = File.join(@directory, "Gemfile")
+    File.write(gemfile, "gem 'uri', path: #{locked_uri.inspect}\n")
+    code = <<~'RUBY'
+      require "bundler/setup"
+      abort "wrong locked uri" unless Gem.loaded_specs.fetch("uri").version.to_s == "99.0.0"
+      abort "clock not loaded" unless Time.now.to_i == 1792648800
+      print "locked gem and clock loaded"
+    RUBY
+    environment = @environment.merge(
+      "BUNDLE_GEMFILE" => gemfile,
+      "ROOT_DIR" => File.expand_path("../..", __dir__),
+      "CLOCK_RUNTIME" => File.expand_path("runtime.sh", __dir__),
+      "CLOCK_RUBY" => RbConfig.ruby,
+      "CLOCK_BOOT_TEST_CODE" => code
+    )
+    stdout, stderr, status = Open3.capture3(environment, "bash", "-c", <<~'SHELL')
+      set -e
+      source "$CLOCK_RUNTIME"
+      certification_use_clock "$TEST_DATABASE_URL"
+      exec "$CLOCK_RUBY" -e "$CLOCK_BOOT_TEST_CODE"
+    SHELL
+    assert status.success?, "#{stdout} #{stderr}"
+    assert_includes stdout, "locked gem and clock loaded"
+  end
+
   def test_reads_shared_atomic_updates_without_changing_monotonic_clock
     code = <<~'CODE'
       first = Time.now.to_i
