@@ -31,5 +31,6 @@ certification_use_ruby() {
 certification_use_clock() {
   export RAILS_ENV=test E2E_TEST_MODE=true TEST_DATABASE_URL="$1"
   export CERTIFICATION_CLOCK_FILE CERTIFICATION_POLICY_FIXTURE_PATH
-  export RUBYOPT="${RUBYOPT:+$RUBYOPT }-r${ROOT_DIR}/scripts/local_certification/clock.rb"
+  # Resolve locked gems before the shim requires URI (also a Ruby default gem).
+  export RUBYOPT="-rbundler/setup ${RUBYOPT:+$RUBYOPT }-r${ROOT_DIR}/scripts/local_certification/clock.rb"
 }
