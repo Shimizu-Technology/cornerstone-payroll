@@ -134,6 +134,39 @@ RSpec.describe "Scoped AIRE manual allocation access", type: :request do
     expect(TimeTracking::Client).not_to have_received(:new)
   end
 
+  it "rejects a pending old-source allocation after an active replacement is selected, without any side effects" do
+    allocation = existing_allocation
+    source.update!(active: false)
+    create(:time_tracking_source, company: company, source_type: "aire_services")
+    allocation_state = allocation.reload.attributes
+    item_state = item.reload.attributes
+    audit_count = AuditLog.count
+    post "#{path}/manual_allocations/#{allocation.id}/retry"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("inactive or different AIRE source")
+    expect(allocation.reload.attributes).to eq(allocation_state)
+    expect(item.reload.attributes).to eq(item_state)
+    expect(AuditLog.count).to eq(audit_count)
+    expect(TimeTracking::Client).not_to have_received(:new)
+  end
+
+  it "rejects a calendar-selected inactive source and exposes no manual write access" do
+    allocation = existing_allocation
+    create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period)
+    source.update!(active: false)
+    create(:time_tracking_source, company: company, source_type: "aire_services")
+    state = allocation.reload.attributes
+    audit_count = AuditLog.count
+    post "#{path}/manual_allocations/#{allocation.id}/retry"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(allocation.reload.attributes).to eq(state)
+    expect(AuditLog.count).to eq(audit_count)
+    expect(TimeTracking::Client).not_to have_received(:new)
+    get "#{path}/manual_review"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("command_access", "can_manage_manual_allocations")).to be(false)
+  end
+
   {
     "unassigned accountant" => -> { assignment.destroy! },
     "expired company assignment" => -> { assignment.update!(expires_at: 1.minute.ago) },
