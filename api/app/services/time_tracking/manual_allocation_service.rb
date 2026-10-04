@@ -111,6 +111,7 @@ module TimeTracking
     end
 
     def sync!(allocation, raise_on_failure: false)
+      validate_sync_source!(allocation.reload)
       3.times do
         allocation.reload
         transitioned = case allocation.status
@@ -287,7 +288,20 @@ module TimeTracking
       end
     end
 
+    def validate_sync_source!(allocation)
+      original_source = allocation.time_tracking_source.reload
+      return if original_source.active? && original_source.company_id == allocation.company_id &&
+        allocation.company_id == pay_period.company_id && allocation.pay_period_id == pay_period.id &&
+        source&.id == original_source.id && source.company_id == allocation.company_id
+
+      raise TimeTracking::Client::Error.new(
+        "The manual allocation's original AIRE source is inactive or does not match this payroll. Review the source before retrying.",
+        response_status: 422
+      )
+    end
+
     def client_for(allocation)
+      validate_sync_source!(allocation)
       @clients_by_source ||= {}
       @clients_by_source[allocation.time_tracking_source_id] ||= TimeTracking::Client.for_payroll_actor(
         allocation.time_tracking_source, actor: actor

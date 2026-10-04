@@ -41,6 +41,40 @@ RSpec.describe TimeTracking::ManualAllocationService do
                     original_work_date: "2026-08-15", note: "These issued check hours are the old AIRE carryover")
   end
 
+  %w[pending_commit committed issued].each do |status|
+    it "blocks disabled-source #{status} sync without remote writes and records a durable typed error" do
+      allocation = TimeTrackingManualAllocation.create!(company: company, time_tracking_source: source,
+        pay_period: period, payroll_item: item, employee: employee, created_by: actor,
+        source_user_uuid: uuid, source_time_entry_id: "41", source_time_entry_version: 2,
+        original_work_date: "2026-08-15", regular_hours: "6.10", overtime_hours: 0,
+        reconciliation_note: "This original-source allocation needs exact payment evidence", status: status,
+        remote_allocation_id: status == "pending_commit" ? nil : "501", remote_version: status == "pending_commit" ? nil : 1)
+      before_state = allocation.attributes.except("last_sync_error", "updated_at")
+      source.update!(active: false)
+      expect { service.sync!(allocation, raise_on_failure: true) }.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.response_status).to eq(422)
+        expect(error.message).to include("original AIRE source is inactive")
+      }
+      expect(allocation.reload.attributes.except("last_sync_error", "updated_at")).to eq(before_state)
+      expect(allocation.last_sync_error).to include("original AIRE source is inactive")
+      expect(TimeTracking::Client).not_to have_received(:for_payroll_actor)
+      expect(item.reload.check_events).to be_empty
+    end
+  end
+
+  it "blocks mismatched source context without using either source's actor client" do
+    allocation = TimeTrackingManualAllocation.create!(company: company, time_tracking_source: source,
+      pay_period: period, payroll_item: item, employee: employee, created_by: actor,
+      source_user_uuid: uuid, source_time_entry_id: "41", source_time_entry_version: 2,
+      original_work_date: "2026-08-15", regular_hours: "6.10", overtime_hours: 0,
+      reconciliation_note: "This pending allocation retains its original source identity")
+    other_source = create(:time_tracking_source, source_type: "aire_services")
+    other_service = described_class.new(pay_period: period, source: other_source, actor: actor)
+    expect { other_service.sync!(allocation, raise_on_failure: true) }.to raise_error(TimeTracking::Client::Error, /does not match/)
+    expect(allocation.reload).to have_attributes(status: "pending_commit", remote_allocation_id: nil, remote_version: nil)
+    expect(TimeTracking::Client).not_to have_received(:for_payroll_actor)
+  end
+
   it "links exact AIRE hours to a committed paycheck and retains a retryable local record" do
     allocation = create_link
 
