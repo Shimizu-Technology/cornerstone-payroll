@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
@@ -76,13 +76,13 @@ jobs:
         run: |
           [[ "$PAYROLL_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$AIRE_SHA" =~ ^[0-9a-f]{40}$ ]]
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: Shimizu-Technology/cornerstone-payroll
           ref: ${{ inputs.payroll_sha }}
           path: payroll
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: Shimizu-Technology/aire-services
           ref: ${{ inputs.aire_sha }}
@@ -93,7 +93,7 @@ jobs:
           [[ "$(git -C payroll rev-parse HEAD)" == "$PAYROLL_SHA" ]]
           [[ "$(git -C aire rev-parse HEAD)" == "$AIRE_SHA" ]]
       - name: Check out the trusted certification implementation
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           path: gate
@@ -129,7 +129,7 @@ jobs:
         run: echo "AIRE_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
       - name: Install PostgreSQL client and listener inspection
         run: sudo apt-get update && sudo apt-get install -y postgresql-client lsof
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: payroll/.node-version
           cache: npm
@@ -149,7 +149,7 @@ jobs:
         run: python3 gate/scripts/local_certification/verify_operator_result.py connected-operator-result.json "$PAYROLL_SHA" "$AIRE_SHA"
       - name: Retain synthetic operator browser evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: connected-manual-browser-${{ github.run_id }}-${{ github.run_attempt }}
           path: payroll/web/test-results/connected-manual
@@ -175,7 +175,7 @@ jobs:
           Path("pair-certificate.json").write_text(json.dumps(certificate, indent=2) + "\n")
           PY
       - name: Retain only the pair certificate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: connected-payroll-pair-${{ github.run_id }}-${{ github.run_attempt }}
           path: pair-certificate.json
