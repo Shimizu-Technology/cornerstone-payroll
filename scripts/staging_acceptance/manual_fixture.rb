@@ -77,6 +77,9 @@ module StagingAcceptance
              principal.fetch(:email).match?(/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/) && principal.fetch(:name).present?
         raise GuardError, "Verified existing provider principal inputs are required"
       end
+      unless principal.fetch(:name).split(" ", 2).length == 2
+        raise GuardError, "The existing provider principal must include first and last names"
+      end
     end
 
     private

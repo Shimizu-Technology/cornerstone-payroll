@@ -68,6 +68,24 @@ RSpec.describe StagingAcceptance::ManualFixture do
       environment["STAGING_SOURCE_INSTANCE_ID"] = ""
       expect { fixture.guard_environment! }.to raise_error(described_class::GuardError, /UUID/)
     end
+
+    %w[payroll aire].each do |app|
+      it "rejects a single-word principal name before any #{app} write or remote lookup" do
+        database = described_class::DATABASES.fetch(app)
+        allow(fixture).to receive(:database_name).and_return(database)
+        allow(ActiveRecord::Base.connection).to receive(:select_value).with("SELECT current_database()").and_return(database)
+        allow(ActiveRecord::Base.connection).to receive(:select_value).with("SELECT current_user").and_return("#{app}_staging_v2")
+        allow(ActiveRecord::Base.connection_db_config).to receive(:configuration_hash).and_return({ host: "#{app}-db" })
+        environment["STAGING_ACCEPTANCE_MODE"] = "apply"
+        environment["STAGING_ACTUAL_NAME"] = "  Operator\t "
+        expect(ApplicationRecord).not_to receive(:transaction)
+        expect(User).not_to receive(:create!)
+        expect(TimeTracking::Client).not_to receive(:new)
+
+        expect { fixture.run! }.to raise_error(described_class::GuardError, /first and last names/)
+        expect(User.count).to eq(0)
+      end
+    end
   end
 
   describe "additive Payroll fixture" do
