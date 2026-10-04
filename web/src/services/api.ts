@@ -1200,6 +1200,12 @@ export const payPeriodsApi = {
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`
     ),
+  createAireManualAllocation: (id: number, data: import('@/types').AireManualAllocationInput) =>
+    api.post<{ manual_allocation: import('@/types').AireManualAllocation }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations`, data),
+  retryAireManualAllocation: (id: number, allocationId: number) =>
+    api.post<{ manual_allocation: import('@/types').AireManualAllocation }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations/${allocationId}/retry`),
   airePayrollTimeEntries: (id: number, params?: { employee_id?: string; approval_status?: string; page?: number }) =>
     api.get<import('@/types').AirePayrollTimeEntriesResponse>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/time_entries`,

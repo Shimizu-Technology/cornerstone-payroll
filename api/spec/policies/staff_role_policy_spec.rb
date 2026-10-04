@@ -109,6 +109,11 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/historical_imports",
         action_name: "index"
       )).to eq(:payroll_operations)
+      %w[create_manual_allocation retry_manual_allocation].each do |action_name|
+        expect(described_class.capability_for(
+          controller_path: "api/v1/admin/aire_payroll_cockpits", action_name: action_name
+        )).to eq(:manage_historical_time_reconciliation)
+      end
       %w[preview apply lock archive_unlinked_workers update_worker verify_cutover update_cutover_review approve_cutover preview_ytd_bridge apply_ytd_bridge].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/historical_imports",
