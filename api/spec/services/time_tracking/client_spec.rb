@@ -519,7 +519,7 @@ RSpec.describe TimeTracking::Client do
           expected_version: 1,
           reason: "Cutoff review complete"
         )
-      end.to raise_error(TimeTracking::Client::Error, /Connect your AIRE administrator account/)
+      end.to raise_error(TimeTracking::Client::Error, /Connect your payroll-capable AIRE account/)
     end
 
     it "surfaces only bounded JSON operator errors from cockpit endpoints" do
