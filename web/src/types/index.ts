@@ -951,8 +951,6 @@ export interface AireManualAllocation {
     reference: string;
     effective_on: string;
     provenance: 'aire_issued_receipt';
-    method?: 'paper_check' | 'direct_deposit';
-    recorded_at?: string;
   };
 }
 

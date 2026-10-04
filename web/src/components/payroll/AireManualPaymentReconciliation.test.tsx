@@ -186,12 +186,21 @@ describe('AireManualPaymentReconciliation', () => {
 
   it('does not infer issued evidence from a current item, a committed status, or an unscoped identifier', async () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, pay_period_id: undefined,
-      payment_evidence: { reference: 'unissued-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt', method: 'paper_check' } }] });
+      payment_evidence: { reference: 'unissued-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} />);
     await screen.findByText('Verified issued receipt details are not available in this review.');
     expect(screen.queryByText(/AIRE issued receipt/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
+  });
+
+  it('hides an item link for an issued allocation from another pay period', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', pay_period_id: 68,
+      payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByText(/AIRE issued receipt · reference original-0042/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
+    expect(screen.getByText(/payroll item review needed/)).toBeTruthy();
   });
 
   it('offers personal connection with the work context when its delegation is missing', async () => {

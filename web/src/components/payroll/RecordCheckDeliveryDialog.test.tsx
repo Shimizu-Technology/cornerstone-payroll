@@ -21,6 +21,8 @@ describe('RecordCheckDeliveryDialog', () => {
     const item = { id: 44, check_number: '9001', employee_name: 'Sarah Shimizu' } as CheckItem;
     render(<RecordCheckDeliveryDialog item={item} onClose={vi.fn()} onComplete={onComplete} />);
 
+    expect(screen.getByText(/released to the business or employee/)).toBeTruthy();
+    expect(screen.getByText(/later distribution does not change this issue date/)).toBeTruthy();
     expect(screen.getByText(/Any linked AIRE hours will be marked as paid/i)).toBeTruthy();
     const save = screen.getByRole('button', { name: 'Record Issued' }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);

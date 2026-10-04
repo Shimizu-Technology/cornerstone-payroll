@@ -770,7 +770,7 @@ export function AirePayrollCockpit({
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">Live details are available, but actions need your AIRE access</p>
-                      <p className="mt-1 leading-5">Connect your own AIRE administrator account for permitted reconciliation. Your Payroll role still controls approvals, mappings, routing and calendar setup.</p>
+                      <p className="mt-1 leading-5">Connect your own AIRE account with payroll access for permitted reconciliation. Your Payroll role still controls approvals, mappings, routing and calendar setup.</p>
                       {hasCapability('manage_own_aire_account_link') ? <Link
                         to={aireAccountConnectionPath(calendar.source_id, currentAppPath(location.pathname, location.search))}
                         className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2"

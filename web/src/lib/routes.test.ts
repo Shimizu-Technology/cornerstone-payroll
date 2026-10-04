@@ -15,7 +15,7 @@ import {
 } from './routes';
 
 describe('canonical payroll routes', (): void => {
-  it('preserves personal connection context and rejects external return routes', () => {
+  it('preserves personal connection context and rejects external return routes', (): void => {
     expect(aireAccountConnectionPath(4, '/companies/7/pay-runs/67/work'))
       .toBe('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
     expect(aireAccountConnectionPath(4, 'https://evil.example/'))

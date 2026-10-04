@@ -43,6 +43,8 @@ describe('Personal AIRE connection', () => {
     expect(screen.getByRole('link', { name: 'Return to payroll' }).getAttribute('href')).toBe('/companies/7/pay-runs/67/work');
     expect(screen.queryByLabelText(/secret|backend|delegation token|calendar/i)).toBeNull();
     expect(screen.getByText(/does not change your Payroll role/)).toBeTruthy();
+    expect(screen.getByText(/your own account that has payroll access/)).toBeTruthy();
+    expect(screen.queryByText(/your administrator account/)).toBeNull();
   });
   it('does not read data or show commands without the own-link capability', () => {
     mocks.allowed = false; view();
