@@ -484,6 +484,14 @@ if [[ "${RUN_CONNECTED_BROWSER:-false}" == "true" ]]; then
       npm --prefix "$ROOT_DIR/web" run test:e2e:connected
   )
   ruby "$ROOT_DIR/scripts/local_certification/manual_http.rb" --verify-browser
+  ruby -rjson -e '
+    File.write(ARGV.fetch(0), JSON.pretty_generate(
+      schema_version: 1, flow: "accountant-manual-browser-v1",
+      payroll_sha: ARGV.fetch(1), aire_sha: ARGV.fetch(2),
+      browser_passed: true, source_receipt_verified: true
+    ) + "\n")
+  ' "${CONNECTED_OPERATOR_RESULT_PATH:-$TEMP_DIR/operator-result.json}" \
+    "$(git -C "$ROOT_DIR" rev-parse HEAD)" "$(git -C "$AIRE_REPO_PATH" rev-parse HEAD)"
 fi
 
 echo "LOCAL AIRE PAYROLL CERTIFICATION PASSED"
