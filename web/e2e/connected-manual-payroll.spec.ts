@@ -20,6 +20,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(user.capabilities).not.toContain('manage_client_configuration');
   const path = `/companies/${fixture.company_id}/pay-runs/${periodId}/work`;
   await page.goto(path);
+  await expect(page.getByRole('heading', { name: 'Processing Timeline', exact: true })).toBeVisible({ timeout: 30_000 });
   const row = page.getByRole('row').filter({ hasText: fixture.manual_employee_name }).filter({ has: page.getByRole('textbox') });
   await expect(row).toBeVisible();
   const inputs = row.getByRole('textbox');
