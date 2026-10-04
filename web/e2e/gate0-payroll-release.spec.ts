@@ -1669,8 +1669,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.getByRole('button', { name: 'Approve' }).click();
     await expect(page.getByRole('button', { name: 'Commit & Finalize' })).toBeVisible();
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: 'Commit & Finalize' }).click();
+    const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
+    await expect(commitDialog).toBeVisible();
+    await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
     await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Commit & Finalize' })).toHaveCount(0);
 

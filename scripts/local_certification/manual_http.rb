@@ -95,6 +95,42 @@ end
 abort "Unknown manual certification option" unless ARGV.empty?
 
 %w[aire payroll].each { |application| checkpoint.call(application, "original_capture") }
+
+# Exercise the actual two-API own-account consent protocol with explicitly
+# synthetic test principals. This does not certify a human's Clerk sign-in.
+link_path = "/api/v1/admin/time_tracking_sources/#{payroll.fetch('source_id')}/aire_account_link"
+api.call("delete", link_path, 200)
+assert.call(api.call("get", link_path, 200).dig("account_link", "connected") == false,
+  "disconnected accountant still has an active account link")
+session = api.call("post", link_path, 201, { external_actor_id: "must-not-be-used", external_actor_email: "wrong@example.test" })
+authorization = URI.parse(session.fetch("authorization_url"))
+assert.call(authorization.scheme == "http" && authorization.host == "localhost" && authorization.port == 44340 &&
+  authorization.path == "/admin/payroll-link", "unexpected local account-link destination")
+token = URI.decode_www_form(authorization.query.to_s).to_h.fetch("token")
+aire_base = URI.parse(ENV.fetch("AIRE_BASE_URL"))
+assert.call(aire_base.scheme == "http" && %w[localhost 127.0.0.1].include?(aire_base.host) &&
+  aire_base.path.empty? && aire_base.userinfo.nil? && aire_base.query.nil?, "unsafe local AIRE consent API")
+consent = lambda do |method, suffix, expected|
+  uri = URI.join(aire_base.to_s, "/api/v1/payroll/account_link_sessions/#{token}#{suffix}")
+  request = Net::HTTP.const_get(method.capitalize).new(uri)
+  request["Authorization"] = "Bearer test_token_#{aire.fetch('manual_authority_id')}"
+  request["Content-Type"] = "application/json"
+  response = Net::HTTP.start(uri.host, uri.port, open_timeout: 5, read_timeout: 30) { |http| http.request(request) }
+  abort "Synthetic own-account consent expected #{expected}, received #{response.code}" unless response.code.to_i == expected
+  JSON.parse(response.body)
+end
+details = consent.call("get", "", 200).fetch("account_link_session")
+assert.call(details.fetch("external_actor_email") == payroll.fetch("manual_accountant_email"),
+  "account-link identity was not pinned to the signed-in accountant")
+callback = URI.parse(details.fetch("return_url"))
+assert.call(callback.path == "/app/aire-account-connection" &&
+  URI.decode_www_form(callback.query.to_s).to_h["source_id"] == payroll.fetch("source_id").to_s,
+  "own-account callback lost its source context")
+consent.call("post", "/authorize", 200)
+assert.call(api.call("get", link_path, 200).dig("account_link", "connected") == true,
+  "AIRE consent did not activate the accountant's own link")
+puts "PASS: synthetic assigned accountant connected own AIRE identity through both APIs; actor spoof ignored and legacy fallback removed"
+
 periods = payroll.fetch("manual_pay_period_ids")
 review = api.call("get", review_path.call(periods.first), 200)
 assert.call(review.dig("command_access", "can_manage_manual_allocations") == true, "assigned accountant cannot reconcile")
@@ -133,6 +169,9 @@ first_request = request_for.call(items.first, source, "4.00", "1.00")
 api.call("post", allocation_path.call(periods.first), 422, first_request.merge(source_user_uuid: SecureRandom.uuid))
 first = api.call("post", allocation_path.call(periods.first), 201, first_request).fetch("manual_allocation")
 assert.call(first["status"] == "committed", "prepared check was falsely issued or link failed")
+pending_row = api.call("get", review_path.call(periods.first), 200).fetch("cornerstone_manual_allocations")
+  .find { |row| row["id"] == first.fetch("id") }
+assert.call(!pending_row.key?("payment_evidence"), "prepared check acquired fabricated issuance evidence")
 api.call("post", allocation_path.call(periods.first), 422, first_request)
 remaining = source_adjustment.call(api.call("get", review_path.call(periods.first), 200), aire.fetch("manual_entry_id"))
 assert.call(remaining && decimal.call(remaining["regular_hours"]) == 4 && decimal.call(remaining["overtime_hours"]) == 1,
@@ -156,6 +195,12 @@ assert.call(remote["status"] == "issued" && remote["payment_effective_on"] == po
   remote["payment_reference"] == first_delivery.dig("data", "payroll_item", "check_number") &&
   remote["source_user_uuid"] == aire.fetch("manual_employee_uuid") && remote["events"] == %w[committed issued],
   "exact issued source receipt missing")
+issued_row = api.call("get", review_path.call(periods.first), 200).fetch("cornerstone_manual_allocations")
+  .find { |row| row["id"] == first.fetch("id") }
+assert.call(issued_row.fetch("payment_evidence") == {
+  "reference" => remote.fetch("payment_reference"), "effective_on" => remote.fetch("payment_effective_on"),
+  "provenance" => "aire_issued_receipt"
+}, "operator review did not display the exact immutable AIRE receipt")
 
 # A real remote commit succeeds; only its acknowledgement is lost in a guarded
 # disposable runner. The HTTP retry must recover the same immutable command.

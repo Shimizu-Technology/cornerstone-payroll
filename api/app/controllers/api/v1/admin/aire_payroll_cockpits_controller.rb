@@ -67,12 +67,13 @@ module Api
             end_date: @pay_period.end_date.iso8601,
             external_pay_period_id: @pay_period.id
           )
+          receipts = TimeTracking::ManualAllocationReceiptPresenter.new(source: @source, payload: payload)
           render json: cockpit_presenter.manual_review(payload).merge(
             "command_access" => command_access_payload,
             "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
               .includes(:employee, payroll_item: :check_events)
               .order(:id)
-              .map { |allocation| manual_allocation_json(allocation) },
+              .map { |allocation| manual_allocation_json(allocation, payment_evidence: receipts.call(allocation)) },
             "historical_classification_reviews" => @pay_period.time_tracking_classification_reconciliations
               .includes(:employee)
               .order(:id)
@@ -360,9 +361,10 @@ module Api
           )
         end
 
-        def manual_allocation_json(allocation)
+        def manual_allocation_json(allocation, payment_evidence: nil)
           {
             id: allocation.id,
+            pay_period_id: allocation.pay_period_id,
             payroll_item_id: allocation.payroll_item_id,
             employee_id: allocation.employee_id,
             employee_name: allocation.employee.full_name,
@@ -378,7 +380,8 @@ module Api
             remote_allocation_id: allocation.remote_allocation_id,
             historical_classification_review_id: allocation.classification_reconciliation_id,
             last_sync_error: allocation.last_sync_error,
-            last_synced_at: allocation.last_synced_at&.iso8601
+            last_synced_at: allocation.last_synced_at&.iso8601,
+            payment_evidence: payment_evidence
           }.compact
         end
 

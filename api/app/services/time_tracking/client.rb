@@ -21,7 +21,7 @@ module TimeTracking
     ].freeze
 
     def self.for_payroll_actor(source, actor:)
-      raise Error, "Sign in as a payroll administrator before reviewing AIRE hours" unless actor
+      raise Error, "Sign in as payroll staff before reviewing AIRE hours" unless actor
 
       delegation = source.delegation_for(actor)
       # A transport or rate-limit failure is not evidence that the account is
@@ -34,7 +34,7 @@ module TimeTracking
       elsif delegation.present?
         new(source, delegation: delegation)
       else
-        raise Error, "Connect your AIRE administrator account in payroll before reviewing AIRE hours"
+        raise Error, "Connect your payroll-capable AIRE account in payroll before reviewing AIRE hours"
       end
     end
 
@@ -545,7 +545,7 @@ module TimeTracking
         { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
       else
         token = @delegation&.token.to_s
-        raise Error, "Connect your AIRE administrator account before using payroll actions" if token.blank?
+        raise Error, "Connect your payroll-capable AIRE account before using payroll actions" if token.blank?
 
         { "X-Aire-Delegation-Token" => token }
       end

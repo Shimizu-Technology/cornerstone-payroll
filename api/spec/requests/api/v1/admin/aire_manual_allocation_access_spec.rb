@@ -63,6 +63,34 @@ RSpec.describe "Scoped AIRE manual allocation access", type: :request do
     expect(TimeTrackingManualAllocation.last.employee_id).to eq(employee.id)
   end
 
+  it "shows the original issued AIRE receipt after the payroll check is replaced" do
+    allocation = existing_allocation
+    allocation.update!(status: "issued", remote_allocation_id: "501")
+    item.update!(check_number: "replacement-9999")
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return("manual_allocations" => [
+      { "id" => "501", "external_pay_period_id" => pay_period.id.to_s,
+        "external_payroll_item_id" => item.id.to_s, "source_time_entry_id" => "41", "source_user_uuid" => uuid,
+        "original_work_date" => pay_period.start_date.iso8601, "regular_hours" => 4, "overtime_hours" => 0,
+        "status" => "issued", "payment_reference" => "original-1234", "payment_effective_on" => "2026-09-15" }
+    ])
+    get "#{path}/manual_review"
+    expect(response).to have_http_status(:ok)
+    row = response.parsed_body.fetch("cornerstone_manual_allocations").sole
+    expect(row).to include("pay_period_id" => pay_period.id, "payment_evidence" => {
+      "reference" => "original-1234", "effective_on" => "2026-09-15", "provenance" => "aire_issued_receipt"
+    })
+    expect(item.reload.check_number).to eq("replacement-9999")
+    expect(item.check_events).to be_empty
+  end
+
+  it "exposes no issuance evidence when the source receipt is absent" do
+    existing_allocation.update!(status: "committed", remote_allocation_id: "501")
+    get "#{path}/manual_review"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("cornerstone_manual_allocations").sole).not_to have_key("payment_evidence")
+    expect(item.reload.check_events).to be_empty
+  end
+
   it "keeps source configuration commands unavailable to the assigned accountant" do
     post "#{path}/time_entries/41/approval", params: {
       command_id: SecureRandom.uuid, expected_version: 2, decision: "approve", reason: "Checked source hours"

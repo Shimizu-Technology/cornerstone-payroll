@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render as renderView, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AireManualPaymentReconciliation } from './AireManualPaymentReconciliation';
 import type { AireManualAllocation, AirePayrollManualReview, PayrollItem } from '@/types';
+const render = (element: React.ReactNode) => renderView(element, {
+  wrapper: ({ children }) => <MemoryRouter initialEntries={['/companies/7/pay-runs/67/work']}>{children}</MemoryRouter>,
+});
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 7 }) }));
 
 const mocks = vi.hoisted(() => ({ review: vi.fn(), create: vi.fn(), retry: vi.fn(), capability: vi.fn() }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: mocks.capability }) }));
@@ -26,7 +31,7 @@ const review: AirePayrollManualReview = {
 };
 const item = { id: 12, employee_id: 7, employment_type: 'hourly', pay_rate: 15, hours_worked: 5.1,
   overtime_hours: 1, check_number: '0012', check_status: 'prepared', payment_delivery_method: 'paper_check' } as PayrollItem;
-const allocation: AireManualAllocation = { id: 9, employee_name: 'Manual Employee', employee_id: 7, payroll_item_id: 12,
+const allocation: AireManualAllocation = { id: 9, pay_period_id: 67, employee_name: 'Manual Employee', employee_id: 7, payroll_item_id: 12,
   source_time_entry_id: '40', source_time_entry_version: 3, source_user_uuid: uuid,
   original_work_date: entry.original_work_date, regular_hours: 5.1, overtime_hours: 1, status: 'committed' };
 const props = { payPeriodId: 67, payPeriodStatus: 'committed' as const, payPeriodVoided: false,
@@ -168,10 +173,51 @@ describe('AireManualPaymentReconciliation', () => {
     expect(screen.queryByRole('button', { name: 'Link hours to payroll item' })).toBeNull();
   });
 
+  it('shows only the immutable issued receipt, independently of the current replacement check', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued',
+      payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    render(<AireManualPaymentReconciliation {...props} payrollItems={[{ ...item, check_number: 'replacement-9999' }]} />);
+    expect(await screen.findByText(/AIRE issued receipt · reference original-0042/)).toBeTruthy();
+    expect(screen.getByText(/paid Aug 19, 2026/)).toBeTruthy();
+    expect(screen.queryByText(/paid.*replacement-9999/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Payroll item 12' }).getAttribute('href'))
+      .toBe('/companies/7/pay-runs/67/payroll-items/12?return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
+  });
+
+  it('does not infer issued evidence from a current item, a committed status, or an unscoped identifier', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, pay_period_id: undefined,
+      payment_evidence: { reference: 'unissued-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    await screen.findByText('Verified issued receipt details are not available in this review.');
+    expect(screen.queryByText(/AIRE issued receipt/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
+    expect(screen.queryByText(/paid Aug/)).toBeNull();
+  });
+
+  it('hides an item link for an issued allocation from another pay period', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', pay_period_id: 68,
+      payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByText(/AIRE issued receipt · reference original-0042/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
+    expect(screen.getByText(/payroll item review needed/)).toBeTruthy();
+  });
+
+  it('offers personal connection with the work context when its delegation is missing', async () => {
+    mocks.review.mockResolvedValue({ ...review, command_access: { can_manage_manual_allocations: false, delegation_configured: false } });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect((await screen.findByRole('link', { name: 'Connect my AIRE account' })).getAttribute('href'))
+      .toBe('/app/aire-account-connection?return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
+    expect(screen.queryByRole('button', { name: 'Link hours to payroll item' })).toBeNull();
+  });
+
   it('only labels a confirmed issued allocation paid and preserves the bank-confirmation guidance', async () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', payment_method: 'direct_deposit' }] });
     render(<AireManualPaymentReconciliation {...props} />);
     expect(await screen.findByText('Payment recorded in AIRE')).toBeTruthy();
     expect(screen.getByText(/Direct deposits require bank confirmation/)).toBeTruthy();
+    expect(screen.getByText('Verified issued receipt details are not available in this review.')).toBeTruthy();
+    expect(screen.queryByText(/AIRE issued receipt/)).toBeNull();
+    expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
 });

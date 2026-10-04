@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail } from './PayPeriodDetail';
@@ -12,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
   runPayroll: vi.fn(),
+  commit: vi.fn(),
 }));
 
 const componentMocks = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ vi.mock('@/services/api', () => ({
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
+    commit: apiMocks.commit,
   },
   employeesApi: { list: apiMocks.employeesList },
   payrollItemsApi: {},
@@ -326,4 +328,115 @@ it('edits the selected active wage rate after an inactive rate', async () => {
 
   expect(trainerHours.value).toBe('12');
   expect(serverHours.value).toBe('0');
+});
+
+function approvedCommitView(refreshToken = 0) {
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  return <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved' }} refreshToken={refreshToken} />} />
+  </Routes></MemoryRouter>;
+}
+it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
+  vi.clearAllMocks(); render(approvedCommitView());
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  expect(await screen.findByRole('dialog', { name: 'Commit and finalize payroll?' })).toBeTruthy();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+it('closes before the API completes, blocks duplicate writes and leaves a failed commit visible', async () => {
+  vi.clearAllMocks();
+  let rejectCommit!: (error: Error) => void;
+  apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
+  render(approvedCommitView());
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
+  fireEvent.click(confirm); fireEvent.click(confirm);
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Committing...' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
+  expect(await screen.findByText('Commit rejected: stale approval')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('drops an open confirmation when navigating to another approved run', async () => {
+  vi.clearAllMocks(); approvedCommitView();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
+  function NavigateRuns() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other run</button>
+      <PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved' }} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  expect(await screen.findByRole('dialog')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
+  await screen.findByRole('button', { name: 'Commit & Finalize' });
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+
+it('settles a commit after a same-run sibling refresh and reloads the committed run', async () => {
+  vi.clearAllMocks();
+  const approved = { ...initialPayPeriod, status: 'approved' as const };
+  const committed = { ...initialPayPeriod, status: 'committed' as const };
+  let finishCommit!: (response: { pay_period: PayPeriod }) => void;
+  apiMocks.commit.mockReturnValue(new Promise(resolve => { finishCommit = resolve; }));
+  apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
+  const view = render(approvedCommitView());
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+  view.rerender(approvedCommitView(1));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
+  await act(async () => finishCommit({ pay_period: committed }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('button', { name: 'Commit & Finalize' })).toBeNull();
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+});
+it('preserves a commit rejection after a same-run sibling refresh', async () => {
+  vi.clearAllMocks();
+  let rejectCommit!: (error: Error) => void;
+  apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
+  const view = render(approvedCommitView());
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+  view.rerender(approvedCommitView(1));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
+  await act(async () => rejectCommit(new Error('Commit rejected after sibling refresh')));
+  expect(await screen.findByText('Commit rejected after sibling refresh')).toBeTruthy();
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+});
+
+it.each(['success', 'error'])('ignores a previous-route commit %s after navigating to another run', async outcome => {
+  vi.clearAllMocks(); approvedCommitView();
+  let finishCommit!: (response: { pay_period: PayPeriod }) => void;
+  let rejectCommit!: (error: Error) => void;
+  apiMocks.commit.mockReturnValue(new Promise((resolve, reject) => { finishCommit = resolve; rejectCommit = reject; }));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
+  function NavigateRuns() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other run</button>
+      <PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved' }} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13));
+  await act(async () => {
+    if (outcome === 'success') finishCommit({ pay_period: initialPayPeriod });
+    else rejectCommit(new Error('Previous run failed'));
+  });
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  expect(within(await screen.findByRole('dialog')).getByText('#13')).toBeTruthy();
+  expect(screen.queryByText('Previous run failed')).toBeNull();
+  expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13);
 });
