@@ -166,7 +166,6 @@ jobs:
               "schema_version": 1,
               "certification": "passed",
               "lane": "real-http-synthetic-v1",
-              "operator_flow": "accountant-manual-browser-v1",
               "payroll_sha": os.environ["PAYROLL_SHA"],
               "aire_sha": os.environ["AIRE_SHA"],
               "workflow_sha": os.environ["WORKFLOW_SHA"],
