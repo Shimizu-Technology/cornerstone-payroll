@@ -44,6 +44,7 @@ import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImport
 import { AirePayrollRecordsDialog } from '@/components/payroll/AirePayrollRecordsDialog';
 import { AirePayrollCockpit } from '@/components/payroll/AirePayrollCockpit';
 import { AirePaymentEvidenceHolds } from '@/components/payroll/AirePaymentEvidenceHolds';
+import { AireManualPaymentReconciliation } from '@/components/payroll/AireManualPaymentReconciliation';
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
@@ -1819,8 +1820,13 @@ export function PayPeriodDetail({
         )}
 
         {payPeriod.time_tracking?.active_source_types.includes('aire_services') && (
-          <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
-            onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
+          <div className="space-y-4">
+            <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
+              onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
+            <AireManualPaymentReconciliation key={`manual-reconciliation-${payPeriod.id}`} payPeriodId={payPeriod.id}
+              payPeriodStatus={payPeriod.status} payPeriodVoided={isVoided} payrollItems={payrollItems}
+              onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
+          </div>
         )}
 
         {payPeriod.notes && (
