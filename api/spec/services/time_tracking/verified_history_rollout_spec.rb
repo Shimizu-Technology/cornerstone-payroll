@@ -202,6 +202,40 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(replay_summary).to include(new_source_entries_ignored: 1)
   end
 
+  it "preserves the reviewed historical regular-payment note after the source split agrees" do
+    note = "Owner confirmed all hours paid regular; 1.48 hours flagged by legacy daily OT were paid regular."
+    manifest["issued_entries"].first["reconciliation_note"] = note
+    original_amount = item.net_pay
+
+    described_class.new(manifest: manifest, actor: actor).apply!
+    allocation = TimeTrackingManualAllocation.find_by!(source_time_entry_id: "41")
+    expect(allocation.reconciliation_note).to eq(note)
+    expect(allocation.status).to eq("issued")
+    expect(item.reload.net_pay).to eq(original_amount)
+    expect { described_class.new(manifest: manifest, actor: actor).apply! }
+      .not_to change(TimeTrackingManualAllocation, :count)
+    expect(allocation.reload.reconciliation_note).to eq(note)
+  end
+
+  it "rejects a changed owner note instead of silently retaining older issued evidence" do
+    described_class.new(manifest: manifest, actor: actor).apply!
+    manifest["issued_entries"].first["reconciliation_note"] = "New owner classification note that was not in the existing receipt"
+
+    expect { described_class.new(manifest: manifest, actor: actor).preview! }
+      .to raise_error(described_class::Error, /conflicting payment evidence/)
+    expect(TimeTrackingManualAllocation.count).to eq(1)
+  end
+
+  it "rejects malformed reviewed notes before recording any payment evidence" do
+    [ nil, 123, "short", "x" * 2_001 ].each do |note|
+      manifest["issued_entries"].first["reconciliation_note"] = note
+      expect { described_class.new(manifest: manifest, actor: actor).preview! }
+        .to raise_error(described_class::Error, /reconciliation note/)
+    end
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+    expect(item.check_events.deliveries.count).to eq(0)
+  end
+
   it "holds the release when AIRE changed an exact source entry" do
     review.fetch("employees").first.fetch("adjustments").first["regular_hours"] = "6.00"
 

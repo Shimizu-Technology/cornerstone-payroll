@@ -87,7 +87,11 @@ RSpec.describe AirePayrollCalendar::Publisher do
       "schema_version" => "2.0",
       "cutoff_rule" => "after_previous_regular_payday",
       "cutoff_days" => 7,
-      "previous_regular_pay_date" => "2026-10-15"
+      "previous_regular_pay_date" => "2026-10-15",
+      "overtime_policy" => {
+        "schema_version" => "2.0", "calculation" => "weekly_only", "weekly_threshold_hours" => 40.0,
+        "workweek_start" => "sunday", "time_zone" => "Pacific/Guam"
+      }
     )
     expect(AirePayrollCalendarPublication).to have_received(:dispatch_one!).with(result.publication.id, now: now)
     expect(AuditLog.find_by!(action: "aire_payroll_calendar#published").company_id).to eq(company.id)
@@ -107,6 +111,22 @@ RSpec.describe AirePayrollCalendar::Publisher do
       described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
     end.to raise_error(AirePayrollCalendar::Contract::Error, /previous regular payday must use the fixed/)
     expect(source.aire_payroll_calendar_periods).to be_empty
+  end
+
+  it "publishes an explicit weekly policy revision for a future legacy calendar" do
+    allow_any_instance_of(AirePayrollCalendar::Contract).to receive(:payload).and_wrap_original do |method|
+      method.call.except("overtime_policy")
+    end
+    first = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    allow_any_instance_of(AirePayrollCalendar::Contract).to receive(:payload).and_call_original
+
+    updated = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+
+    expect(updated.created).to be(true)
+    expect(updated.publication.schedule_version).to eq(2)
+    expect(updated.publication.payload.fetch("overtime_policy")).to eq(AirePayrollCalendar::Contract::OVERTIME_POLICY)
+    expect(first.publication.reload.payload).not_to have_key("overtime_policy")
+    expect(first.calendar_period.publications.count).to eq(2)
   end
 
   it "returns the same publication when the contract has not changed" do

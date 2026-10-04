@@ -228,6 +228,12 @@ api_call 201 "publish the next available AIRE payroll period" POST \
       periods = PayrollCalendarPeriod.order(:start_date).to_a
       abort "expected two published calendar periods" unless periods.size == 2
       abort "calendar contract did not use schema 2.0" unless periods.all? { |period| period.schema_version == "2.0" }
+      abort "calendar did not freeze weekly-only overtime" unless periods.all? do |period|
+        period.overtime_policy == {
+          "schema_version" => "2.0", "calculation" => "weekly_only", "weekly_threshold_hours" => 40.0,
+          "workweek_start" => "sunday", "time_zone" => "Pacific/Guam"
+        }
+      end
       abort "calendar contract did not preserve the fixed Guam policy" unless periods.all? do |period|
         local = period.cutoff_at.in_time_zone("Pacific/Guam")
         period.cutoff_rule == "after_previous_regular_payday" && period.cutoff_days == 7 &&
@@ -272,26 +278,18 @@ api_call 200 "approve manual time through Cornerstone" POST \
 APPROVED_ENTRY_VERSION="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0])).dig("time_entry", "version")' "$APPROVAL_RESPONSE")"
 APPROVED_OVERTIME_STATUS="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0])).dig("time_entry", "state", "overtime_status")' "$APPROVAL_RESPONSE")"
 [[ "$APPROVED_ENTRY_VERSION" =~ ^[0-9]+$ ]] || fail "manual-time approval did not return an entry version"
-[[ "$APPROVED_OVERTIME_STATUS" == "pending" ]] || fail "daily overtime was not routed for explicit approval"
+[[ "$APPROVED_OVERTIME_STATUS" == "none" ]] || fail "a long day below forty weekly hours was incorrectly flagged as overtime"
 REPLAY_RESPONSE="$TEMP_DIR/approval-replay.json"
 api_call 200 "replay the same delegated approval idempotently" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit/time_entries/$MANUAL_APPROVE_ID/approval" \
   "$REPLAY_RESPONSE" "$APPROVAL_BODY"
 ruby -rjson -e 'abort "approval was executed twice" unless JSON.parse(File.read(ARGV[0])).dig("command", "replayed") == true' "$REPLAY_RESPONSE"
 
-OVERTIME_BODY="$TEMP_DIR/overtime-approval.json"
-ruby -rjson -rsecurerandom -e 'File.write(ARGV[0], JSON.generate(command_id: SecureRandom.uuid, expected_version: ARGV[1].to_i, decision: "approve", reason: "Verified synthetic daily overtime before cutoff"))' \
-  "$OVERTIME_BODY" "$APPROVED_ENTRY_VERSION"
-OVERTIME_RESPONSE="$TEMP_DIR/overtime-approval-response.json"
-api_call 200 "approve daily overtime through Cornerstone" POST \
-  "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/aire_payroll_cockpit/time_entries/$MANUAL_APPROVE_ID/overtime_approval" \
-  "$OVERTIME_RESPONSE" "$OVERTIME_BODY"
 ruby -rjson -e '
   entry=JSON.parse(File.read(ARGV[0])).fetch("time_entry")
-  abort "daily overtime approval was not recorded" unless entry.dig("state", "overtime_status") == "approved"
-  abort "approved manual time is not payable" unless entry.dig("state", "payable_now") == true
-' "$OVERTIME_RESPONSE"
-echo "PASS: manual time and its daily overtime were explicitly approved through Cornerstone"
+  abort "approved regular time is not payable" unless entry.dig("state", "payable_now") == true
+' "$APPROVAL_RESPONSE"
+echo "PASS: fourteen hours in one day remain regular below forty weekly hours; manual time approved through Cornerstone"
 
 STALE_BODY="$TEMP_DIR/stale.json"
 ruby -rjson -rsecurerandom -e 'File.write(ARGV[0], JSON.generate(command_id: SecureRandom.uuid, expected_version: 99, decision: "approve", reason: "Deliberate stale-version certification"))' "$STALE_BODY"
@@ -373,9 +371,9 @@ ruby -rjson -e '
   data=JSON.parse(File.read(ARGV[0]))
   abort "payroll calculation errors" unless data.dig("results", "errors") == []
   item=data.dig("pay_period", "payroll_items")&.first or abort "missing calculated payroll item"
-  abort "eligible regular hours were not 8.0" unless item.fetch("hours_worked").to_f == 8.0
-  abort "eligible overtime hours were not 6.0" unless item.fetch("overtime_hours").to_f == 6.0
-  abort "gross pay did not preserve the overtime premium" unless item.fetch("gross_pay").to_f == 425.0
+  abort "eligible regular hours were not 14.0" unless item.fetch("hours_worked").to_f == 14.0
+  abort "a below-forty week generated overtime" unless item.fetch("overtime_hours").to_f.zero?
+  abort "gross pay did not preserve all regular hours" unless item.fetch("gross_pay").to_f == 350.0
 ' "$RUN_RESPONSE"
 
 APPROVE_RESPONSE="$TEMP_DIR/payroll-approve.json"

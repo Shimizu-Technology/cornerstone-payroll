@@ -5,9 +5,15 @@ require "rails_helper"
 RSpec.describe AirePayrollCalendar::Delivery do
   let(:now) { Time.find_zone!("Pacific/Guam").local(2026, 10, 10, 9) }
   let(:calendar_period) { create(:aire_payroll_calendar_period) }
-  let(:publication) { create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now) }
+  let(:publication) do
+    record = build(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now)
+    record.payload = record.payload.merge("overtime_policy" => AirePayrollCalendar::Contract::OVERTIME_POLICY)
+    record.payload_checksum = TimeTracking::CanonicalPayload.checksum(record.payload)
+    record.save!
+    record
+  end
   let(:source_state) do
-    publication.payload.slice("start_date", "end_date", "pay_date", "cutoff_at").merge(
+    publication.payload.slice("start_date", "end_date", "pay_date", "cutoff_at", "overtime_policy").merge(
       "external_pay_period_id" => calendar_period.external_pay_period_id,
       "schedule_version" => publication.schedule_version,
       "publication_id" => publication.publication_id,
@@ -79,6 +85,20 @@ RSpec.describe AirePayrollCalendar::Delivery do
       delivery_status: "delivered",
       source_state: utc_source_state
     )
+  end
+
+  it "rejects a successful response that did not adopt the published weekly policy" do
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return(
+      "payroll_calendar_period" => source_state.merge("overtime_policy" => {
+        "daily_threshold_hours" => 8.0, "weekly_threshold_hours" => 40.0
+      })
+    )
+
+    result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+
+    expect(result[:status]).to eq("failed")
+    expect(publication.reload.last_error).to include("does not match")
   end
 
   it "keeps network failures visible and schedules a bounded retry" do

@@ -66,7 +66,8 @@ module AirePayrollCalendar
              source_state["publication_id"] == publication.publication_id &&
              source_state.values_at("start_date", "end_date", "pay_date") ==
                expected.values_at("start_date", "end_date", "pay_date") &&
-             same_instant?(source_state["cutoff_at"], expected["cutoff_at"])
+             same_instant?(source_state["cutoff_at"], expected["cutoff_at"]) &&
+             (!expected.key?("overtime_policy") || source_state["overtime_policy"] == expected["overtime_policy"])
         raise TimeTracking::Client::Error, "AIRE returned calendar state that does not match this publication"
       end
     end
