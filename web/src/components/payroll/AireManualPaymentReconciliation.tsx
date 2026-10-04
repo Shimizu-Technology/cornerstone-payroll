@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Decimal from 'decimal.js';
+import { Link, useLocation } from 'react-router';
+import { useCompany } from '@/contexts/CompanyContext';
+import { aireAccountConnectionPath, currentAppPath, payrollItemPath } from '@/lib/routes';
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatGuamDateTime } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { AireManualAllocation, AirePayrollManualReview, PayPeriodStatus, PayrollItem } from '@/types';
 
@@ -35,6 +38,8 @@ const stateLabel = (allocation: AireManualAllocation) => ({
 
 export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, payPeriodVoided, payrollItems, onChanged }: Props) {
   const { hasCapability } = useAuth();
+  const { activeCompanyId } = useCompany();
+  const location = useLocation();
   const allowed = hasCapability('manage_historical_time_reconciliation');
   const [review, setReview] = useState<AirePayrollManualReview | null>(null);
   const [allocations, setAllocations] = useState<AireManualAllocation[]>([]);
@@ -163,12 +168,23 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
     {loading && <p role="status" className="text-sm">Loading exact source hours and existing links…</p>}
     {error && <p role="alert" className="rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-primary-50 p-3 text-sm text-primary-900">{notice}</p>}
+    {hasCapability('manage_own_aire_account_link') && review?.command_access?.delegation_configured === false && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
+      <p>Your own AIRE access is needed before linking hours. Connecting does not grant manager approvals or configuration rights.</p>
+      <Link className="mt-2 inline-flex min-h-11 items-center font-semibold underline underline-offset-4" to={aireAccountConnectionPath(undefined, currentAppPath(location.pathname, location.search))}>Connect my AIRE account</Link>
+    </div>}
     {allocations.length > 0 && <ul aria-label="Existing manual allocations" className="space-y-3">
       {allocations.map(allocation => <li key={allocation.id} className="rounded-xl border border-neutral-200 p-4 text-sm">
         <div className="flex flex-wrap items-start justify-between gap-3"><div>
           <p className="font-semibold">{allocation.employee_name} · {formatDate(allocation.original_work_date)} · source entry {allocation.source_time_entry_id}</p>
-          <p className="mt-1">{hours(allocation.regular_hours)} regular · {hours(allocation.overtime_hours)} OT · payroll item {allocation.payroll_item_id || 'review needed'}</p>
+          <p className="mt-1">{hours(allocation.regular_hours)} regular · {hours(allocation.overtime_hours)} OT · {activeCompanyId && allocation.pay_period_id === payPeriodId && allocation.payroll_item_id
+            ? <Link className="font-semibold text-primary-800 underline underline-offset-4" to={payrollItemPath(activeCompanyId, payPeriodId, allocation.payroll_item_id, { returnTo: currentAppPath(location.pathname, location.search) })}>Payroll item {allocation.payroll_item_id}</Link>
+            : 'payroll item review needed'}</p>
           <Badge className="mt-2" variant={allocation.status === 'issued' ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
+          {allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
+            ? <p className="mt-2">AIRE issued receipt · {allocation.payment_evidence.method === 'paper_check' ? 'check ' : allocation.payment_evidence.method === 'direct_deposit' ? 'bank reference ' : 'reference '}{allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}
+              {allocation.payment_evidence.recorded_at && ` · recorded ${formatGuamDateTime(allocation.payment_evidence.recorded_at)}`}</p>
+            : <p className="mt-2 text-neutral-600">Verified issued receipt details are not available in this review.</p>}
+          {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">AIRE status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button type="button" variant="outline" size="sm" disabled={busy || loading}
           onClick={() => void retry(allocation)}>Retry sync for entry {allocation.source_time_entry_id}</Button>}</div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aireAccountConnectionPath,
   correctionRunPath,
   employeeEditPath,
   employeePath,
@@ -14,6 +15,16 @@ import {
 } from './routes';
 
 describe('canonical payroll routes', (): void => {
+  it('preserves personal connection context and rejects external return routes', () => {
+    expect(aireAccountConnectionPath(4, '/companies/7/pay-runs/67/work'))
+      .toBe('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
+    expect(aireAccountConnectionPath(4, 'https://evil.example/'))
+      .toBe('/app/aire-account-connection?source_id=4&return_to=%2Fapp');
+    expect(aireAccountConnectionPath(-1)).toBe('/app/aire-account-connection');
+    expect(aireAccountConnectionPath(4, '/companies/7/?q=' + '&'.repeat(1200)))
+      .toBe('/app/aire-account-connection?source_id=4');
+  });
+
   it('builds company-scoped list and record routes', (): void => {
     expect(employeesPath(12, '?status=active')).toBe('/companies/12/employees?status=active');
     expect(employeesPath(12, 'status=active')).toBe('/companies/12/employees?status=active');
