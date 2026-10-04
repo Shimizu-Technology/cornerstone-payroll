@@ -16,15 +16,17 @@ The drill fails closed unless both applications use Rails `test`, `E2E_TEST_MODE
 1. Cornerstone publishes the target and next semimonthly periods to AIRE. Scheduled regular paydays are the 15th and month-end, including holidays. Each cutoff is seven calendar days after the previous regular scheduled payday, at 17:00 Pacific/Guam.
 2. Ordinary kiosk time is eligible without separate approval.
 3. Manual time is held until Chels approves it from Cornerstone.
-4. Daily overtime is detected by AIRE and remains held until Chels separately approves it from Cornerstone.
+4. A long day below forty hours in its Sunday–Saturday week stays regular; overtime is calculated only above forty weekly hours.
 5. A replayed approval is idempotent and a stale version is rejected.
 6. Cornerstone can lock the due AIRE cutoff without opening AIRE.
 7. AIRE creates an immutable Batch v2, retains excluded time, and delivers its finalized event to Cornerstone.
-8. Cornerstone applies the authoritative AIRE batch, preserves its 8 regular + 6 overtime split, calculates payroll, approves it, and commits it.
+8. Cornerstone applies the authoritative AIRE batch, preserves its 14 regular + 0 overtime split, calculates payroll, approves it, and commits it.
 9. Preparing a paper check leaves time unpaid. The explicit synthetic delivery event records payment for this test fixture.
 10. AIRE receives imported, committed, and payment-issued acknowledgements while the held manual entry remains visible and unpaid in the finalized period.
 11. The next published regular period shows that held entry as scheduled, still awaiting approval, and unpaid.
 12. The source installation identity is pinned, historical pagination returns all three fixture entries and their permanent owner identities/current versions, and a mismatched installation is rejected over HTTP.
+
+The manual reconciliation drill uses 32 prior hours and a ten-hour Thursday in the same workweek. It verifies the resulting 8 regular + 2 overtime hours across two checks, delivery, lost-response retry, and duplicate prevention.
 
 No direct deposit, tax payment, filing, email, or production payroll action is part of this drill.
 

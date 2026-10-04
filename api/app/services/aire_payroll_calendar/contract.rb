@@ -5,6 +5,13 @@ module AirePayrollCalendar
     SCHEMA_VERSION = "1.0"
     TIME_ZONE = "Pacific/Guam"
     CUTOFF_DAYS_BEFORE = CompanyPaySchedule::PAYROLL_CUTOFF_DAYS_BEFORE
+    OVERTIME_POLICY = {
+      "schema_version" => "2.0",
+      "calculation" => "weekly_only",
+      "weekly_threshold_hours" => 40.0,
+      "workweek_start" => "sunday",
+      "time_zone" => TIME_ZONE
+    }.freeze
 
     class Error < StandardError
       attr_reader :code
@@ -45,7 +52,8 @@ module AirePayrollCalendar
         "end_date" => pay_period.end_date.iso8601,
         "pay_date" => pay_period.pay_date.iso8601,
         "cutoff_at" => cutoff_at.iso8601,
-        "time_zone" => TIME_ZONE
+        "time_zone" => TIME_ZONE,
+        "overtime_policy" => OVERTIME_POLICY.dup
       }
       if legacy_policy
         fields["cutoff_days_before"] = CUTOFF_DAYS_BEFORE

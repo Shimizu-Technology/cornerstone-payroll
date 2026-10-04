@@ -193,6 +193,14 @@ module TimeTracking
         classification_cases.map { |row| row.fetch("payroll_item_id").to_i } +
         finalized_batch_entries.map { |row| row.fetch("payroll_item_id").to_i }
       raise Error, "AIRE rollout entry has no verified delivered check" unless (referenced - check_ids).empty?
+      entries.each do |row|
+        next unless row.key?("reconciliation_note")
+
+        note = row["reconciliation_note"]
+        unless note.is_a?(String) && note.strip.length.between?(10, 2_000)
+          raise Error, "AIRE rollout reconciliation note must contain 10 to 2000 characters"
+        end
+      end
     rescue KeyError
       raise Error, "AIRE rollout manifest has an incomplete record"
     end
@@ -432,7 +440,8 @@ module TimeTracking
                  existing.original_work_date.iso8601 == row.fetch("original_work_date") &&
                  (row["source_time_entry_version"].nil? || existing.source_time_entry_version == row["source_time_entry_version"]) &&
                  hours(existing.regular_hours) == hours(row.fetch("regular_hours")) &&
-                 hours(existing.overtime_hours) == hours(row.fetch("overtime_hours"))
+                 hours(existing.overtime_hours) == hours(row.fetch("overtime_hours")) &&
+                 (!row.key?("reconciliation_note") || existing.reconciliation_note == row.fetch("reconciliation_note").strip)
             raise Error, "AIRE entry #{row.fetch('source_time_entry_id')} has conflicting payment evidence"
           end
           next
@@ -595,7 +604,7 @@ module TimeTracking
           source_user_uuid: row.fetch("source_user_uuid"),
           regular_hours: row.fetch("regular_hours"), overtime_hours: row.fetch("overtime_hours"),
           original_work_date: row.fetch("original_work_date"),
-          note: "Verified issued-check AIRE history rollout; check #{item.check_number} delivered #{checks.find { |check| check.fetch('payroll_item_id').to_i == item.id }.fetch('delivered_on')}")
+          note: row["reconciliation_note"].presence || "Verified issued-check AIRE history rollout; check #{item.check_number} delivered #{checks.find { |check| check.fetch('payroll_item_id').to_i == item.id }.fetch('delivered_on')}")
         raise Error, "AIRE entry #{row.fetch('source_time_entry_id')} did not reach paid status" unless allocation.status == "issued"
       end
     end
@@ -627,7 +636,8 @@ module TimeTracking
         payroll_item_id: row.fetch("payroll_item_id"), source_time_entry_id: row.fetch("source_time_entry_id").to_s,
         source_user_uuid: row.fetch("source_user_uuid"), regular_hours: coverage_hours(row.fetch("regular_hours")),
         overtime_hours: coverage_hours(row.fetch("overtime_hours")), original_work_date: row.fetch("original_work_date"),
-        status: "issued", **(row["source_time_entry_version"].nil? ? {} : { source_time_entry_version: row["source_time_entry_version"] })) }
+        status: "issued", **(row.key?("reconciliation_note") ? { reconciliation_note: row.fetch("reconciliation_note").strip } : {}),
+        **(row["source_time_entry_version"].nil? ? {} : { source_time_entry_version: row["source_time_entry_version"] })) }
         raise Error, "Not all verified AIRE entries have issued payment evidence"
       end
       unless finalized_line_keys(finalized_acknowledgements.where.not(delivered_at: nil).to_a) ==
