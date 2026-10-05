@@ -70,10 +70,16 @@ class EmployeeHoursEvidence
   end
 
   def validate_payload!(payload)
+    unless payload.is_a?(Hash)
+      raise TimeTracking::Client::Error, "The source returned incomplete employee period evidence. Please retry."
+    end
+
     if @params[:period_id].present?
       period = payload["period"]
       valid = period.is_a?(Hash) && period["id"] == @params[:period_id] && period["summary"].is_a?(Hash) &&
-        %w[entries coverage_lines settlement_cases].all? { |key| period[key].is_a?(Array) }
+        %w[entries coverage_lines settlement_cases].all? do |key|
+          period[key].is_a?(Array) && period[key].all? { |row| row.is_a?(Hash) }
+        end
     else
       valid = payload["periods"].is_a?(Array) && payload["totals"].is_a?(Hash) && payload["pagination"].is_a?(Hash) &&
         payload["pagination"]["total_count"].is_a?(Integer) && payload["pagination"]["total_count"] >= 0 &&

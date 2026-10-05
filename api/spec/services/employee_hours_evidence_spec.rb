@@ -84,6 +84,14 @@ RSpec.describe EmployeeHoursEvidence do
       message: "The source returned incomplete employee period evidence. Please retry.")
   end
 
+  it "degrades malformed detail rows without losing the mapped source" do
+    allow(client).to receive(:payroll_employee_period).and_return({ "period" => {
+      "id" => "2026-08-01", "summary" => {}, "entries" => [ nil ], "coverage_lines" => [], "settlement_cases" => []
+    } })
+    expect(described_class.new(employee: employee, actor: actor, params: { period_id: "2026-08-01" }).call)
+      .to include(status: "unavailable", source_id: 5, message: "The source returned incomplete employee period evidence. Please retry.")
+  end
+
   it "rejects invalid filters before making a source request" do
     [ { start_date: "2026-02-30" }, { per_page: 101 }, { start_date: "2026-10-01", end_date: "2026-09-30" } ].each do |params|
       expect { described_class.new(employee: employee, actor: actor, params: params).call }.to raise_error(ArgumentError)
