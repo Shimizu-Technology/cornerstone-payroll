@@ -225,7 +225,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       const basePayload = {
         name: form.name.trim(),
         base_url: form.base_url.trim().replace(/\/+$/, ''),
-        authorization_origin: form.authorization_origin.trim(),
+        ...(form.source_type === 'custom' ? { authorization_origin: form.authorization_origin.trim() } : {}),
         active: form.active,
       };
 

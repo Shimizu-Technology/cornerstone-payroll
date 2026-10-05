@@ -220,7 +220,7 @@ export function TimeTrackingImportModal({
     () => sources.find((source) => source.id === sourceId) || null,
     [sources, sourceId]
   );
-  const selectedSourceIsAire = supportsSourceOperation(selectedSource, 'finalized_batch_v2');
+  const selectedSourceSupportsFinalizedBatch = supportsSourceOperation(selectedSource, 'finalized_batch_v2');
   const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
   const isFinalizedBatch = preview?.processed_payload?.validation_version === 'payroll_batch_v2';
@@ -317,8 +317,8 @@ export function TimeTrackingImportModal({
     try {
       const res = await payPeriodsApi.previewTimeTrackingImport(payPeriod.id, {
         source_id: selectedSource.id,
-        start_date: supportsSourceOperation(selectedSource, 'finalized_batch_v2') ? payPeriod.start_date : startDate,
-        end_date: supportsSourceOperation(selectedSource, 'finalized_batch_v2') ? payPeriod.end_date : endDate,
+        start_date: selectedSourceSupportsFinalizedBatch ? payPeriod.start_date : startDate,
+        end_date: selectedSourceSupportsFinalizedBatch ? payPeriod.end_date : endDate,
       });
       const finalized = res.import.processed_payload.validation_version === 'payroll_batch_v2';
       const nextMappings = new Map<string, number | null>();
@@ -466,7 +466,7 @@ export function TimeTrackingImportModal({
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                   <div className="flex items-start gap-2">
                     <Link2 className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <p>{isHistoricalReconciliation ? 'No active time tracking time tracking source is configured for this client.' : 'No active time tracking source is configured for this client.'} {isAdmin ? 'Enable one in Time Tracking Source settings, then return to this pay period.' : 'Ask an administrator to configure the client’s time tracking integration.'}</p>
+                    <p>No active time tracking source is configured for this client. {isAdmin ? 'Enable one in Time Tracking Source settings, then return to this pay period.' : 'Ask an administrator to configure the client’s time tracking integration.'}</p>
                   </div>
                   {isAdmin && <Button
                     type="button"
@@ -487,14 +487,14 @@ export function TimeTrackingImportModal({
                     <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                       <div className="text-sm font-semibold text-neutral-950">{selectedSource.name}</div>
                       <div className="mt-2 text-sm text-neutral-600">
-                        {selectedSourceIsAire
+                        {selectedSourceSupportsFinalizedBatch
                           ? 'Cornerstone will retrieve the one finalized time tracking batch that exactly matches this pay period.'
                           : 'This is the active time source configured for the client.'}
                       </div>
                     </div>
                   )}
 
-                  {selectedSourceIsAire ? (
+                  {selectedSourceSupportsFinalizedBatch ? (
                     <div className="grid gap-4 sm:grid-cols-3">
                       <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 sm:col-span-2">
                         <div className="flex items-center gap-2 text-sm font-semibold text-primary-900">
@@ -554,7 +554,7 @@ export function TimeTrackingImportModal({
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">Contract</div>
-                      <div className="mt-2 text-primary-950">time tracking payroll batch v{preview.contract_version}</div>
+                      <div className="mt-2 text-primary-950">Time tracking payroll batch v{preview.contract_version}</div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">SHA-256</div>
@@ -856,7 +856,7 @@ export function TimeTrackingImportModal({
             <div className="py-10 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success-600" aria-hidden="true" />
               <h3 className="mt-4 text-lg font-semibold text-neutral-950">
-                {!appliedThisSession && alreadyApplied ? 'These time tracking hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'time tracking hours added to payroll' : 'Time tracking imported'}
+                {!appliedThisSession && alreadyApplied ? 'These time tracking hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Time tracking hours added to payroll' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
                 {!appliedThisSession && alreadyApplied
@@ -877,7 +877,7 @@ export function TimeTrackingImportModal({
                       ? 'Cornerstone recorded the existing payroll link and is delivering the acknowledgement to time tracking. If delivery is interrupted, it will retry automatically until confirmed. Payment is reported separately only when the check is prepared and then delivered.'
                       : 'Cornerstone queues an import acknowledgement for time tracking. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.'}
                   </p>
-                  {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">time tracking status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
+                  {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">Time tracking status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
                 </div>
               )}
             </div>
@@ -888,7 +888,7 @@ export function TimeTrackingImportModal({
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceIsAire ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
             </>
           )}
           {step === 'review' && (

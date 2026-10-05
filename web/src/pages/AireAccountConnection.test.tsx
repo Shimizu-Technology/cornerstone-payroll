@@ -115,6 +115,28 @@ describe('Personal AIRE connection', () => {
     await screen.findByRole('alert'); expect(navigate).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Connect my time tracking account' })).toBeNull();
   });
+  it('permits a compatible producer only at its approved authorization origin', async () => {
+    mocks.list.mockResolvedValue({ time_tracking_sources: [{ ...source, source_type: 'custom',
+      supported_operations: ['account_linking'], authorization_origin: 'https://neutral.example.test' }] });
+    const authorized = 'https://neutral.example.test/consent?token=synthetic';
+    mocks.create.mockResolvedValue({ authorization_url: authorized });
+    const navigate = vi.fn(); view(undefined, navigate);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
+    expect(navigate).toHaveBeenCalledWith(authorized);
+  });
+  it.each([
+    ['https://neutral.example.test', 'https://foreign.example.test/consent?token=synthetic'],
+    ['invalid stored origin', 'https://neutral.example.test/consent?token=synthetic'],
+  ])('refuses a custom link outside its valid configured origin %s', async (origin, response) => {
+    mocks.list.mockResolvedValue({ time_tracking_sources: [{ ...source, source_type: 'custom',
+      supported_operations: ['account_linking'], authorization_origin: origin }] });
+    mocks.create.mockResolvedValue({ authorization_url: response });
+    const navigate = vi.fn(); view(undefined, navigate);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Time tracking returned an invalid connection link');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('aire-own-link-return:4')).toBeNull();
+  });
   it('never returns to another company or an external location supplied in a query', async () => {
     view('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F8%2Fpay-runs%2F67');
     await screen.findByText('Not connected');

@@ -67,7 +67,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('time tracking hours are ready to add')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are ready to add')).toBeTruthy();
     expect(screen.getByText('72.50 hrs')).toBeTruthy();
     expect(screen.getByText('69.00 hrs')).toBeTruthy();
     expect(screen.getByText('3.50 hrs')).toBeTruthy();
@@ -100,7 +100,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('time tracking hours are in this payroll')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are in this payroll')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByText(/Next: select Calculate Payroll/i)).toBeTruthy();
   });
@@ -115,7 +115,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('time tracking hours are linked; payment evidence is pending')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are linked; payment evidence is pending')).toBeTruthy();
     expect(screen.getByText('Payment pending')).toBeTruthy();
     expect(screen.getByText('72.50 hrs', { selector: '.font-display.text-lg' })).toBeTruthy();
     expect(screen.getByText(/Added to payroll; payment not yet recorded/i)).toBeTruthy();
@@ -135,7 +135,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('time tracking hours are paid')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are paid')).toBeTruthy();
     expect(screen.getByText(/delivery or settlement evidence for every linked payable line/i)).toBeTruthy();
   });
 

@@ -55,6 +55,15 @@ RSpec.describe AirePayrollCalendar::Presenter do
     )
   end
 
+  it "uses the capability-selected source for both metadata and its contract" do
+    unsupported = create(:time_tracking_source, company: company, name: "Legacy summary", active: false)
+    allow(company.time_tracking_sources).to receive(:active).and_return([ unsupported, source ])
+    pay_period.company = company
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+    expect(state).to include(source_id: source.id, eligible: true, can_publish: true)
+    expect(state[:cutoff_at]).to eq("2026-10-22T17:00:00+10:00")
+  end
+
   it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
     state = described_class.call(
       pay_period,

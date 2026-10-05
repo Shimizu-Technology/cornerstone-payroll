@@ -99,12 +99,12 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-display text-base font-bold text-neutral-950">time tracking payroll cutoff</h3>
+                <h3 className="font-display text-base font-bold text-neutral-950">Time tracking payroll cutoff</h3>
                 <Badge variant={statusTone(calendar.cutoff_state)}>{stateLabels[calendar.cutoff_state]}</Badge>
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                Cornerstone sets the payroll calendar. time tracking independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
+                Cornerstone sets the payroll calendar. Time tracking independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             {distance && <p className="mt-2 text-xs text-neutral-500">{distance}</p>}
           </div>
           <div className="px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">time tracking delivery</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking delivery</p>
             <p className="mt-2 font-semibold text-neutral-950">
               {calendar.publication?.delivery_status === 'delivered'
                 ? 'Schedule received'
@@ -196,7 +196,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
         {(error || calendar.publication?.last_error || batch?.last_error) && (
           <div className="flex items-start gap-4 border-t border-danger-200 bg-danger-50 px-6 py-4 text-sm text-danger-800" role="alert">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <div><p className="font-semibold">time tracking connection needs attention</p><p className="mt-2 break-words leading-6 text-danger-800">{error || batch?.last_error || calendar.publication?.last_error}</p></div>
+            <div><p className="font-semibold">Time tracking connection needs attention</p><p className="mt-2 break-words leading-6 text-danger-800">{error || batch?.last_error || calendar.publication?.last_error}</p></div>
           </div>
         )}
 

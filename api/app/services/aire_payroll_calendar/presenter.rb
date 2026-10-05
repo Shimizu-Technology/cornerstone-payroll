@@ -13,9 +13,9 @@ module AirePayrollCalendar
 
     def call
       calendar_period = @pay_period.aire_payroll_calendar_period
-      source = calendar_period&.time_tracking_source ||
+      @source = calendar_period&.time_tracking_source ||
                @pay_period.company.time_tracking_sources.active.find { |candidate| candidate.supports?(:payroll_calendar_v2) }
-      return nil unless source
+      return nil unless @source
 
       publication = calendar_period&.latest_publication
       event = calendar_period&.payroll_events&.order(occurred_at: :desc, id: :desc)&.first
@@ -27,8 +27,8 @@ module AirePayrollCalendar
 
       {
         enabled: true,
-        source_id: source.id,
-        source_name: source.name,
+        source_id: @source.id,
+        source_name: @source.name,
         eligible: desired.present? && !missed_unpublished_cutoff,
         eligibility_error: eligibility_error(missed_unpublished_cutoff),
         eligibility_code: eligibility_code(missed_unpublished_cutoff),
@@ -48,7 +48,7 @@ module AirePayrollCalendar
     def desired_contract
       return @desired_contract if defined?(@desired_contract)
 
-      @desired_contract = (@pay_period.aire_payroll_calendar_period&.time_tracking_source || @pay_period.company.time_tracking_sources.active.first).connector.calendar_contract(@pay_period).payload
+      @desired_contract = @source.connector.calendar_contract(@pay_period).payload
     rescue Contract::Error => e
       @eligibility_error = e.message
       @eligibility_code = e.code

@@ -652,8 +652,8 @@ export function AirePayrollCockpit({
           await onRefresh();
         } catch (caught) {
           setRefreshError(caught instanceof Error
-            ? `time tracking was locked, but Cornerstone could not refresh: ${caught.message}`
-            : 'time tracking was locked, but Cornerstone could not refresh its payroll status.');
+            ? `Time tracking was locked, but Cornerstone could not refresh: ${caught.message}`
+            : 'Time tracking was locked, but Cornerstone could not refresh its payroll status.');
         }
       }
       setBusy(false);
@@ -700,7 +700,7 @@ export function AirePayrollCockpit({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-display text-lg font-bold">time tracking payroll workspace</h3>
+                    <h3 className="font-display text-lg font-bold">Time tracking payroll workspace</h3>
                     <Badge className="bg-white/10 text-white">Live from time tracking</Badge>
                   </div>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-300">
@@ -792,12 +792,12 @@ export function AirePayrollCockpit({
                 {overview.payroll_period.status === 'finalized' && (
                   <div className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p><span className="font-semibold">time tracking cutoff locked.</span> Batch {overview.finalized_batch?.id || overview.payroll_period.payroll_batch_id || 'is being prepared'} contains the eligible hours. Held hours remain visible below for the next available payroll.</p>
+                    <p><span className="font-semibold">Time tracking cutoff locked.</span> Batch {overview.finalized_batch?.id || overview.payroll_period.payroll_batch_id || 'is being prepared'} contains the eligible hours. Held hours remain visible below for the next available payroll.</p>
                   </div>
                 )}
 
                 <div className="border-b border-neutral-200 px-4 pt-4 sm:px-6">
-                  <div className="flex gap-1 overflow-x-auto" aria-label="time tracking payroll details">
+                  <div className="flex gap-1 overflow-x-auto" aria-label="Time tracking payroll details">
                     {([
                       ['timecards', 'Timecards', timeEntries?.pagination.total_count || 0],
                       ['exceptions', 'Needs attention', (exceptions?.time_exception_pagination.total_count || 0) + (exceptions?.leave_exception_pagination.total_count || 0)],
@@ -830,7 +830,7 @@ export function AirePayrollCockpit({
                       />
                     )) : (
                       <div className="px-6 py-10 text-center text-sm text-neutral-500">
-                        {view === 'exceptions' ? 'No timecard exceptions need attention.' : 'time tracking has no timecards in this pay period.'}
+                        {view === 'exceptions' ? 'No timecard exceptions need attention.' : 'Time tracking has no timecards in this pay period.'}
                       </div>
                     )}
 
@@ -938,7 +938,7 @@ export function AirePayrollCockpit({
                                       <p className="mt-1 text-xs text-neutral-500">
                                         {settlementCase.processing?.payment_reference
                                           ? `Reference ${settlementCase.processing.payment_reference}`
-                                          : settlementCase.included_payroll_batch_id ? `time tracking batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
+                                          : settlementCase.included_payroll_batch_id ? `Time tracking batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
                                       </p>
                                     </div>
                                   </div>
@@ -986,7 +986,7 @@ export function AirePayrollCockpit({
                 {view === 'team' && (
                   <div className="divide-y divide-neutral-100">
                     {overview.employees.length === 0 && (
-                      <p className="px-6 py-10 text-center text-sm text-neutral-500">time tracking has no employees on this page.</p>
+                      <p className="px-6 py-10 text-center text-sm text-neutral-500">Time tracking has no employees on this page.</p>
                     )}
                     {overview.employees.map((employee) => (
                       <div key={employee.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -1068,7 +1068,7 @@ export function AirePayrollCockpit({
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">time tracking identity</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking identity</p>
               <p className="mt-2 font-semibold text-neutral-950">{employeeMapping.employee.full_name}</p>
               <p className="mt-1 text-sm text-neutral-600">{employeeMapping.employee.email || 'No email in time tracking'}</p>
             </div>
@@ -1224,7 +1224,7 @@ export function AirePayrollCockpit({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">Lock the time tracking cutoff</DialogTitle>
-              <DialogDescription className="leading-6 text-neutral-600">time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
+              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>

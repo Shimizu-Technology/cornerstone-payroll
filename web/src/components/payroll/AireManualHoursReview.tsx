@@ -117,7 +117,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           <>
             <div className="grid gap-4 border-b border-neutral-200 bg-white p-4 sm:grid-cols-3 sm:p-6">
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">time tracking payable now</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking payable now</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(review.summary.total_hours)} hrs</p>
                 <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
               </div>
@@ -148,7 +148,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">time tracking currently shows</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking currently shows</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
                       {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
                       {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
@@ -161,13 +161,13 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   </div>
                 </article>
               ))}
-              {rows.length === 0 && <p className="px-6 py-8 text-center text-sm text-neutral-500">time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</p>}
+              {rows.length === 0 && <p className="px-6 py-8 text-center text-sm text-neutral-500">Time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</p>}
             </div>
 
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
-                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">time tracking currently shows</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
+                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">Time tracking currently shows</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {rows.map(({ employee, payrollRegular, payrollOvertime, carryover, corrections, categories, matched }) => (
@@ -195,7 +195,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       </td>
                     </tr>
                   ))}
-                  {rows.length === 0 && <tr><td colSpan={4} className="px-6 py-8 text-center text-neutral-500">time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</td></tr>}
+                  {rows.length === 0 && <tr><td colSpan={4} className="px-6 py-8 text-center text-neutral-500">Time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -235,7 +235,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 {review.historical_classification_reviews?.map((item) => (
                   <article key={item.id} className="mt-4 rounded-lg border border-warning-200 bg-white p-4 text-sm">
                     <p className="font-semibold">{item.employee_name} · check {item.check_number} · {item.source_entry_count} source entries</p>
-                    <p className="mt-2">time tracking: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
+                    <p className="mt-2">Time tracking: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
                     <p className="mt-2">Gross wage difference: {item.gross_wage_difference < 0 ? '−' : '+'}${Math.abs(item.gross_wage_difference).toFixed(2)} ({item.gross_wage_difference < 0 ? 'issued check wages exceed time tracking estimate' : item.gross_wage_difference > 0 ? 'time tracking estimate exceeds issued check wages' : 'estimates match'}) · {item.status}</p>
                     <p className="mt-2 text-neutral-600">{item.note}</p>
                   </article>
@@ -261,7 +261,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <div className="border-t border-neutral-200 bg-neutral-950 px-6 py-6 text-sm text-neutral-200">
               <p className="font-semibold text-white">What happens at cutoff</p>
               <ol className="mt-2 grid gap-2 leading-5 md:grid-cols-4">
-                <li><span className="font-semibold text-white">1.</span> time tracking freezes eligible time.</li>
+                <li><span className="font-semibold text-white">1.</span> Time tracking freezes eligible time.</li>
                 <li><span className="font-semibold text-white">2.</span> Cornerstone verifies the batch.</li>
                 <li><span className="font-semibold text-white">3.</span> Review and add the hours once.</li>
                 <li><span className="font-semibold text-white">4.</span> Calculate the payroll.</li>

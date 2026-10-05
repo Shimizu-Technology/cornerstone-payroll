@@ -321,7 +321,7 @@ describe('AirePayrollCockpit', () => {
       />
     );
 
-    expect(await screen.findByText('time tracking hours are ready to add')).toBeTruthy();
+    expect(await screen.findByText('Time tracking hours are ready to add')).toBeTruthy();
     expect(screen.queryByText('Live time tracking readiness')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
@@ -331,7 +331,7 @@ describe('AirePayrollCockpit', () => {
   it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
-    expect(await screen.findByText('time tracking payroll workspace')).toBeTruthy();
+    expect(await screen.findByText('Time tracking payroll workspace')).toBeTruthy();
     expect(screen.getByText('16.08 hrs')).toBeTruthy();
     expect(screen.getAllByText('8.08 hrs').length).toBe(2);
     expect(screen.getByText('08:04 AM – 05:09 PM')).toBeTruthy();
@@ -388,7 +388,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await screen.findByText('time tracking payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Payment history 4/i }));
 
     const paymentSection = screen.getByRole('heading', { name: 'Hour and payment status' }).closest('section');
@@ -409,7 +409,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await screen.findByText('time tracking payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Payment history 0/i }));
 
     expect(screen.getByText('Payment history will appear after the source’s hours are added to payroll.')).toBeTruthy();
@@ -435,7 +435,7 @@ describe('AirePayrollCockpit', () => {
         <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
       </MemoryRouter>
     );
-    await screen.findByText('time tracking payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Team 1/i }));
 
     expect(screen.getByText('Not mapped')).toBeTruthy();
@@ -699,7 +699,7 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
   });
 
-  it('keeps the workspace readable but disables commands without an time tracking account connection', async () => {
+  it('keeps the workspace readable but disables commands without a time tracking account connection', async () => {
     mockLoads(false);
     render(
       <MemoryRouter>
@@ -814,7 +814,7 @@ describe('AirePayrollCockpit', () => {
     await user.click(screen.getByRole('button', { name: /lock eligible time/i }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'time tracking was locked, but Cornerstone could not refresh: pay period reload failed'
+      'Time tracking was locked, but Cornerstone could not refresh: pay period reload failed'
     );
     expect(apiMocks.finalize).toHaveBeenCalledOnce();
   });

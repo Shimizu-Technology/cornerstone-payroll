@@ -26,10 +26,10 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   const linkedTitle = attentionLines > 0
     ? 'time tracking payment needs attention'
     : committed && allLinesPaid
-      ? 'time tracking hours are paid'
+      ? 'Time tracking hours are paid'
       : committed && unpaidLines > 0
-        ? 'time tracking hours are linked; payment evidence is pending'
-        : 'time tracking hours are in this payroll';
+        ? 'Time tracking hours are linked; payment evidence is pending'
+        : 'Time tracking hours are in this payroll';
   const linkedBadge = attentionLines > 0 ? 'Needs attention' : committed && allLinesPaid ? 'Paid' : committed && unpaidLines > 0 ? 'Payment pending' : 'Added';
   const linkedBadgeTone = attentionLines > 0 || (committed && unpaidLines > 0) ? 'warning' : 'success';
   const linkedNeedsReview = aireRecordLinked && (attentionLines > 0 || (committed && unpaidLines > 0));
@@ -51,7 +51,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display text-lg font-bold text-neutral-950">
-                  {aireRecordLinked ? linkedTitle : 'time tracking hours are ready to add'}
+                  {aireRecordLinked ? linkedTitle : 'Time tracking hours are ready to add'}
                 </h3>
                 <Badge variant={aireRecordLinked ? linkedBadgeTone : 'info'}>{aireRecordLinked ? linkedBadge : 'Verified batch'}</Badge>
               </div>

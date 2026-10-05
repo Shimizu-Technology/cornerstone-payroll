@@ -186,6 +186,24 @@ RSpec.describe TimeTracking::Connector do
     expect(source.historical_reconciliation_complete?).to be(false)
   end
 
+  [
+    [ [ "time_summary_v1" ], "finalized_batch_v2" ],
+    [ [ "time_summary_v1" ], "exact_line_receipts_v2" ],
+    [ [ "time_summary_v1", "payroll_calendar_v2" ], "finalized_batch_v2" ],
+    [ [ "time_summary_v1", "finalized_batch_v2" ], "exact_line_receipts_v2" ]
+  ].each do |initial_capabilities, added_capability|
+    it "requires history when adding #{added_capability} to #{initial_capabilities.join(',')}" do
+      identity["integration"]["capabilities"] = initial_capabilities
+      pin!
+      create(:pay_period, :committed, company: company)
+      expect(source.reload.historical_reconciliation_required?).to be(false)
+      identity["integration"]["capabilities"] = initial_capabilities + [ added_capability ]
+      pin!
+      expect(source.reload.historical_reconciliation_required?).to be(true)
+      expect(source.historical_reconciliation_complete?).to be(false)
+    end
+  end
+
   it "rejects changed or missing descriptors before accepting a custom calendar acknowledgement" do
     pin!
     policy = TimeTracking::DestinationPolicy.new(environment: "test", resolver: ->(_host) { [ "8.8.8.8" ] })
@@ -242,10 +260,22 @@ RSpec.describe TimeTracking::Connector do
       source_user_id: "42", source_user_uuid: SecureRandom.uuid) }.to raise_error(TimeTrackingEmployeeMapping::IdentityConflict, /does not belong/)
   end
 
+  it "does not exempt newly enabled batch processing based on a calendar-only publication" do
+    identity["integration"]["capabilities"] = [ "time_summary_v1", "payroll_calendar_v2" ]
+    pin!
+    period = create(:pay_period, company: company)
+    create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+    period.update!(status: "committed")
+    identity["integration"]["capabilities"] += [ "finalized_batch_v2", "exact_line_receipts_v2" ]
+    pin!
+    expect(source.reload.historical_reconciliation_required?).to be(true)
+    expect(source.historical_reconciliation_complete?).to be(false)
+  end
+
   it "does not restart historical onboarding when a complete connection restores its capabilities" do
     pin!
     period = create(:pay_period, :committed, company: company)
-    create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+    create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source, status: "applied")
     source.update!(source_capabilities: [ "time_summary_v1" ])
     pin!
     expect(source.reload.historical_reconciliation_required?).to be(false)

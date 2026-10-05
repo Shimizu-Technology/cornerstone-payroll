@@ -177,7 +177,7 @@ describe('AireManualPaymentReconciliation', () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued',
       payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} payrollItems={[{ ...item, check_number: 'replacement-9999' }]} />);
-    expect(await screen.findByText(/time tracking issued receipt · reference original-0042/)).toBeTruthy();
+    expect(await screen.findByText(/Time tracking issued receipt · reference original-0042/)).toBeTruthy();
     expect(screen.getByText(/paid Aug 19, 2026/)).toBeTruthy();
     expect(screen.queryByText(/paid.*replacement-9999/)).toBeNull();
     expect(screen.getByRole('link', { name: 'Payroll item 12' }).getAttribute('href'))
@@ -189,7 +189,7 @@ describe('AireManualPaymentReconciliation', () => {
       payment_evidence: { reference: 'unissued-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} />);
     await screen.findByText('Verified issued receipt details are not available in this review.');
-    expect(screen.queryByText(/time tracking issued receipt/)).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
@@ -198,7 +198,7 @@ describe('AireManualPaymentReconciliation', () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', pay_period_id: 68,
       payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} />);
-    expect(await screen.findByText(/time tracking issued receipt · reference original-0042/)).toBeTruthy();
+    expect(await screen.findByText(/Time tracking issued receipt · reference original-0042/)).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
     expect(screen.getByText(/payroll item review needed/)).toBeTruthy();
   });
@@ -217,7 +217,7 @@ describe('AireManualPaymentReconciliation', () => {
     expect(await screen.findByText('Payment recorded in time tracking')).toBeTruthy();
     expect(screen.getByText(/Direct deposits require bank confirmation/)).toBeTruthy();
     expect(screen.getByText('Verified issued receipt details are not available in this review.')).toBeTruthy();
-    expect(screen.queryByText(/time tracking issued receipt/)).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
 });

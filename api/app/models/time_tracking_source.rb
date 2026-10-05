@@ -85,12 +85,17 @@ class TimeTrackingSource < ApplicationRecord
   end
 
   def require_history_when_enabling_complete_protocol
-    return unless source_type == "custom" && remote_source_identifier.present? &&
-      source_capabilities.include?("payroll_calendar_v2") && !source_capabilities_in_database.include?("payroll_calendar_v2")
+    return unless source_type == "custom" && remote_source_identifier.present?
 
-    # A temporary capability loss must not turn payroll already processed
-    # through this complete connection into a fresh historical onboarding.
-    return if aire_payroll_calendar_periods.exists? || time_tracking_imports.where(contract_version: "2.0").exists?
+    gated_capabilities = %w[payroll_calendar_v2 finalized_batch_v2 exact_line_receipts_v2]
+    newly_added = (Array(source_capabilities) & gated_capabilities) -
+      (Array(source_capabilities_in_database) & gated_capabilities)
+    return if newly_added.empty?
+
+    # Only an applied batch proves this source has already processed payroll.
+    # A calendar-only publication cannot exempt newly enabled batch receipts.
+    return if time_tracking_imports.where(contract_version: "2.0", status: "applied").exists?
+    return if newly_added == [ "payroll_calendar_v2" ] && aire_payroll_calendar_periods.exists?
 
     require_existing_payroll_history
   end

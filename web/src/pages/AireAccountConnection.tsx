@@ -28,12 +28,17 @@ function companyReturn(value: string | null, companyId: number): string {
   const path = safeInternalReturnPath(value, fallback);
   return path.startsWith(`/companies/${companyId}/`) ? path : fallback;
 }
+function connectionUrl(value: string): URL {
+  try { return new URL(value); } catch {
+    throw new Error('Time tracking returned an invalid connection link. Refresh and try again.');
+  }
+}
 function authorizationUrl(value: string, source: TimeTrackingSource): string {
-  const url = new URL(value);
+  const url = connectionUrl(value);
   const local = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password ||
       (source.source_type === 'aire_services' && (url.pathname !== '/admin/payroll-link' || !url.searchParams.get('token'))) || url.hash ||
-      (source.source_type !== 'aire_services' && (!source.authorization_origin || url.origin !== new URL(source.authorization_origin).origin))) {
+      (source.source_type !== 'aire_services' && (!source.authorization_origin || url.origin !== connectionUrl(source.authorization_origin).origin))) {
     throw new Error('Time tracking returned an invalid connection link. Refresh and try again.');
   }
   return url.toString();
