@@ -69,7 +69,7 @@ describe('TimeTrackingSources AIRE account connection', () => {
     render(<TimeTrackingSources navigateToAuthorization={navigateToAuthorization} />);
 
     expect(await screen.findByText('Connect once—no token copying or routine renewal')).toBeTruthy();
-    const connect = screen.getByRole('button', { name: 'Connect my AIRE account' });
+    const connect = screen.getByRole('button', { name: 'Connect my time tracking account' });
     expect((connect as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByLabelText(/delegation token/i)).toBeNull();
 

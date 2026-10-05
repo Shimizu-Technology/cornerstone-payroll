@@ -326,6 +326,7 @@ function AppRoutes() {
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
+        <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="employees" element={<LegacyCompanyRedirect destination="employees" />} />
         <Route path="employees/new" element={<LegacyCompanyRedirect destination="new-employee" />} />
         <Route path="employees/:id" element={<LegacyCompanyRedirect destination="employee" clientMode={isClient} />} />

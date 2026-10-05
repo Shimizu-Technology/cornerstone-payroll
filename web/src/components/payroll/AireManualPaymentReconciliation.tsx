@@ -30,9 +30,9 @@ function decimalHours(value: string): Decimal | null {
 
 const hours = (value: number) => Number(value).toFixed(2);
 const stateLabel = (allocation: AireManualAllocation) => ({
-  pending_commit: 'Saved locally; AIRE confirmation pending',
+  pending_commit: 'Saved locally; time tracking confirmation pending',
   committed: 'Linked; payment evidence pending',
-  issued: 'Payment recorded in AIRE',
+  issued: 'Payment recorded in time tracking',
   voided: 'Allocation voided',
 }[allocation.status] || 'Review allocation status');
 
@@ -153,24 +153,24 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
       await load();
       if (current === actionGeneration.current) onChanged();
     } catch (caught) {
-      if (current === actionGeneration.current) setError(caught instanceof Error ? caught.message : 'Could not retry AIRE sync');
+      if (current === actionGeneration.current) setError(caught instanceof Error ? caught.message : 'Could not retry time tracking sync');
     } finally { if (current === actionGeneration.current) setBusy(false); }
   };
 
   if (!allowed) return null;
-  return <Card aria-label="Manual AIRE payroll reconciliation"><CardContent className="space-y-4 py-5">
+  return <Card aria-label="Manual time tracking payroll reconciliation"><CardContent className="space-y-4 py-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="font-semibold text-neutral-900">Link manually entered hours to AIRE</h2>
-        <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-600">Match exact AIRE hours to an existing committed payroll item. The link records which hours it covers and follows the payment evidence already recorded in Payroll.</p></div>
+      <div><h2 className="font-semibold text-neutral-900">Link manually entered hours to time tracking</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-600">Match exact time tracking hours to an existing committed payroll item. The link records which hours it covers and follows the payment evidence already recorded in Payroll.</p></div>
       <Button type="button" variant="outline" size="sm" disabled={busy || loading} onClick={() => void load()}>Refresh reconciliation</Button>
     </div>
-    <p className="text-sm text-neutral-600">Printing prepares a check. Record its issuance when it is handed to AIRE; AIRE handles employee distribution. Direct deposits require bank confirmation. A reported-payment hold stays in place while its evidence is reviewed; retract it only if the payment report was incorrect.</p>
+    <p className="text-sm text-neutral-600">Printing prepares a check. Record its issuance when it is handed to time tracking; time tracking handles employee distribution. Direct deposits require bank confirmation. A reported-payment hold stays in place while its evidence is reviewed; retract it only if the payment report was incorrect.</p>
     {loading && <p role="status" className="text-sm">Loading exact source hours and existing links…</p>}
     {error && <p role="alert" className="rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-primary-50 p-3 text-sm text-primary-900">{notice}</p>}
     {hasCapability('manage_own_aire_account_link') && review?.command_access?.delegation_configured === false && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
-      <p>Your own AIRE access is needed before linking hours. Connecting does not grant manager approvals or configuration rights.</p>
-      <Link className="mt-2 inline-flex min-h-11 items-center font-semibold underline underline-offset-4" to={aireAccountConnectionPath(undefined, currentAppPath(location.pathname, location.search))}>Connect my AIRE account</Link>
+      <p>Your own time tracking access is needed before linking hours. Connecting does not grant manager approvals or configuration rights.</p>
+      <Link className="mt-2 inline-flex min-h-11 items-center font-semibold underline underline-offset-4" to={aireAccountConnectionPath(undefined, currentAppPath(location.pathname, location.search))}>Connect my time tracking account</Link>
     </div>}
     {allocations.length > 0 && <ul aria-label="Existing manual allocations" className="space-y-3">
       {allocations.map(allocation => <li key={allocation.id} className="rounded-xl border border-neutral-200 p-4 text-sm">
@@ -181,20 +181,20 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
             : 'payroll item review needed'}</p>
           <Badge className="mt-2" variant={allocation.status === 'issued' ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
           {allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
-            ? <p className="mt-2">AIRE issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
+            ? <p className="mt-2">time tracking issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
             : <p className="mt-2 text-neutral-600">Verified issued receipt details are not available in this review.</p>}
-          {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">AIRE status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
+          {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">time tracking status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button type="button" variant="outline" size="sm" disabled={busy || loading}
           onClick={() => void retry(allocation)}>Retry sync for entry {allocation.source_time_entry_id}</Button>}</div>
       </li>)}
     </ul>}
     {review && <>
-      {!canManage ? <p className="text-sm text-neutral-600">Linking is unavailable for this account and company. A permitted Payroll role and connected AIRE account or delegation are required.</p>
+      {!canManage ? <p className="text-sm text-neutral-600">Linking is unavailable for this account and company. A permitted Payroll role and connected time tracking account or delegation are required.</p>
         : !committed ? <p className="text-sm text-neutral-600">Commit a nonvoid payroll run before linking its manually entered hours.</p>
           : <form onSubmit={event => void submit(event)} className="space-y-4 border-t border-neutral-200 pt-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <Select label="Exact AIRE time entry" value={entryKey} disabled={busy || loading || needsRefresh}
+              <Select label="Exact time tracking time entry" value={entryKey} disabled={busy || loading || needsRefresh}
                 onChange={event => { const entry = candidates.find(row => row.key === event.target.value); setEntryKey(event.target.value); setItemId('');
                   setRegular(entry ? hours(entry.regular_hours) : ''); setOvertime(entry ? hours(entry.overtime_hours) : ''); }}>
                 <option value="">Choose approved, unallocated hours</option>
@@ -220,7 +220,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
             <Button type="submit" disabled={!canSubmit}>{busy ? 'Saving reconciliation…' : 'Link hours to payroll item'}</Button>
             {candidates.length === 0 && <p className="text-sm text-neutral-600">No eligible source hours with a confirmed employee identity and current version are available. Review held entries, mappings, and existing links.</p>}
           </form>}
-      {review.exclusions.length > 0 && <p className="text-sm text-warning-900">{review.exclusions.length} held entries remain outside this selection. Review their approval, cutoff, or payment evidence in AIRE Time Cards and reported-payment holds.</p>}
+      {review.exclusions.length > 0 && <p className="text-sm text-warning-900">{review.exclusions.length} held entries remain outside this selection. Review their approval, cutoff, or payment evidence in time tracking Time Cards and reported-payment holds.</p>}
     </>}
   </CardContent></Card>;
 }

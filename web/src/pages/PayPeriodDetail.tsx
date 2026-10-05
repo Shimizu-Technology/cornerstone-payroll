@@ -1136,7 +1136,7 @@ export function PayPeriodDetail({
   const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
   const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
-  const canLinkAireRecord = isCommitted && !isVoided && activeTimeTrackingSources.includes('aire_services');
+  const canLinkAireRecord = isCommitted && !isVoided && ((payPeriod.time_tracking?.active_source_capabilities || []).includes('finalized_batch_v2') || activeTimeTrackingSources.includes('aire_services'));
   const linkedAireRecords = payPeriod.time_tracking?.linked_aire_records || [];
   const finalizedAireBatchId = payPeriod.time_tracking?.aire_calendar?.finalized_batch?.payroll_batch_id;
   const currentAireRecord = finalizedAireBatchId
@@ -1502,7 +1502,7 @@ export function PayPeriodDetail({
   const workflowActions = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
       {hasLinkedAireRecord && (
-        <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View AIRE Record</Button>
+        <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View time tracking Record</Button>
       )}
       {isCommitted && !isVoided && (
         <>
@@ -1511,7 +1511,7 @@ export function PayPeriodDetail({
               setTimeTrackingAutoPreview(false);
               setTimeTrackingImportOpen(true);
             }}>
-              Link AIRE Record
+              Link time tracking Record
             </Button>
           )}
           <Button variant="outline" onClick={openPayDateCorrection}>
@@ -1838,7 +1838,7 @@ export function PayPeriodDetail({
           />
         )}
 
-        {payPeriod.time_tracking?.active_source_types.includes('aire_services') && (
+        {(payPeriod.time_tracking?.active_source_capabilities?.includes('payroll_cockpit') || payPeriod.time_tracking?.active_source_types.includes('aire_services')) && (
           <div className="space-y-4">
             <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
               onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
@@ -2951,8 +2951,8 @@ export function PayPeriodDetail({
                                     </span>
                                   )}
                                   {item.time_tracking_provenance && (
-                                    <span className="inline-flex items-center rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800" title={`${item.time_tracking_provenance.entry_count} AIRE entries · ${item.time_tracking_provenance.total_hours.toFixed(2)} hours${item.time_tracking_provenance.carryover_hours ? ` · ${item.time_tracking_provenance.carryover_hours.toFixed(2)} carryover hours` : ''}`}>
-                                      AIRE linked
+                                    <span className="inline-flex items-center rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800" title={`${item.time_tracking_provenance.entry_count} time tracking entries · ${item.time_tracking_provenance.total_hours.toFixed(2)} hours${item.time_tracking_provenance.carryover_hours ? ` · ${item.time_tracking_provenance.carryover_hours.toFixed(2)} carryover hours` : ''}`}>
+                                      time tracking linked
                                     </span>
                                   )}
                                   {isWorkbookPay && !isContractor && (

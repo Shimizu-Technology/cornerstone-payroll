@@ -24,12 +24,12 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   const unpaidLines = (lineStatus?.in_payroll.line_count || 0) + (lineStatus?.payment_pending.line_count || 0);
   const allLinesPaid = Boolean(lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count);
   const linkedTitle = attentionLines > 0
-    ? 'AIRE payment needs attention'
+    ? 'time tracking payment needs attention'
     : committed && allLinesPaid
-      ? 'AIRE hours are paid'
+      ? 'time tracking hours are paid'
       : committed && unpaidLines > 0
-        ? 'AIRE hours are linked; payment evidence is pending'
-        : 'AIRE hours are in this payroll';
+        ? 'time tracking hours are linked; payment evidence is pending'
+        : 'time tracking hours are in this payroll';
   const linkedBadge = attentionLines > 0 ? 'Needs attention' : committed && allLinesPaid ? 'Paid' : committed && unpaidLines > 0 ? 'Payment pending' : 'Added';
   const linkedBadgeTone = attentionLines > 0 || (committed && unpaidLines > 0) ? 'warning' : 'success';
   const linkedNeedsReview = aireRecordLinked && (attentionLines > 0 || (committed && unpaidLines > 0));
@@ -51,29 +51,29 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display text-lg font-bold text-neutral-950">
-                  {aireRecordLinked ? linkedTitle : 'AIRE hours are ready to add'}
+                  {aireRecordLinked ? linkedTitle : 'time tracking hours are ready to add'}
                 </h3>
                 <Badge variant={aireRecordLinked ? linkedBadgeTone : 'info'}>{aireRecordLinked ? linkedBadge : 'Verified batch'}</Badge>
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-700">
                 {aireRecordLinked
                   ? attentionLines > 0
-                    ? 'Cornerstone retained the exact affected AIRE lines. Review the check or payment history before deciding what to do next.'
+                    ? 'Cornerstone retained the exact affected time tracking lines. Review the check or payment history before deciding what to do next.'
                     : committed && allLinesPaid
-                      ? 'Cornerstone has delivery or settlement evidence for every linked payable line in this AIRE batch.'
+                      ? 'Cornerstone has delivery or settlement evidence for every linked payable line in this time tracking batch.'
                       : committed && unpaidLines > 0
-                        ? 'The exact AIRE lines are linked to this completed payroll. Prepared checks and committed payroll records remain unpaid until delivery or settlement is recorded.'
-                        : 'Cornerstone saved the exact AIRE cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
+                        ? 'The exact time tracking lines are linked to this completed payroll. Prepared checks and committed payroll records remain unpaid until delivery or settlement is recorded.'
+                        : 'Cornerstone saved the exact time tracking cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
                   : committed
-                    ? 'Review the locked AIRE batch and link it to this completed payroll. Cornerstone will verify every mapped employee without changing the payroll.'
-                    : 'Review the locked AIRE batch once, add its hours to this payroll, then select Calculate Payroll. No hours need to be typed again.'}
+                    ? 'Review the locked time tracking batch and link it to this completed payroll. Cornerstone will verify every mapped employee without changing the payroll.'
+                    : 'Review the locked time tracking batch once, add its hours to this payroll, then select Calculate Payroll. No hours need to be typed again.'}
               </p>
             </div>
           </div>
 
           {!aireRecordLinked && (
             <Button type="button" onClick={onReview} className="shrink-0">
-              {committed ? 'Review and link AIRE record' : 'Review and add AIRE hours'}
+              {committed ? 'Review and link time tracking record' : 'Review and add time tracking hours'}
               <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
             </Button>
           )}
@@ -124,10 +124,10 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                 ? attentionLines > 0
                   ? 'The payment history remains preserved. Failed and voided payments require an explicit follow-up; they are never turned back into new unpaid hours automatically.'
                   : allLinesPaid
-                    ? 'Paid means Cornerstone recorded check delivery or deposit settlement and sent that exact status back to AIRE.'
-                    : 'Check preparation and delivery are reported back to AIRE automatically. Delivery or settlement establishes paid status.'
+                    ? 'Paid means Cornerstone recorded check delivery or deposit settlement and sent that exact status back to time tracking.'
+                    : 'Check preparation and delivery are reported back to time tracking automatically. Delivery or settlement establishes paid status.'
                 : 'Next: select Calculate Payroll. Adding the batch records hours in payroll; it does not mark anyone paid.'
-              : 'Held entries stay visible in AIRE and Cornerstone and are not added to this payroll.'}
+              : 'Held entries stay visible in time tracking and Cornerstone and are not added to this payroll.'}
           </p>
         </div>
       </CardContent>

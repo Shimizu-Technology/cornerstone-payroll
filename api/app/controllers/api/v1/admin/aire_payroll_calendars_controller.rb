@@ -7,7 +7,8 @@ module Api
         before_action :set_pay_period
 
         def show
-          render json: { aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period) }
+          state = AirePayrollCalendar::Presenter.call(@pay_period)
+          render json: { time_tracking_calendar: state, aire_payroll_calendar: state }
         end
 
         def publish
@@ -28,7 +29,7 @@ module Api
 
         def retry_delivery
           publication = @pay_period.aire_payroll_calendar_period&.latest_publication
-          return render json: { error: "Publish this pay period to AIRE first" }, status: :unprocessable_entity unless publication
+          return render json: { error: "Publish this pay period to time tracking first" }, status: :unprocessable_entity unless publication
           return render json: { aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period) } if publication.delivered?
 
           publication.update!(next_delivery_attempt_at: Time.current, delivery_enqueued_until: nil)
@@ -43,9 +44,9 @@ module Api
         end
 
         def active_aire_source!
-          current_company.time_tracking_sources.active.find_by!(source_type: "aire_services")
+          current_company.time_tracking_sources.active.find { |candidate| candidate.supports?(:payroll_calendar_v2) } || raise(ActiveRecord::RecordNotFound)
         rescue ActiveRecord::RecordNotFound
-          raise AirePayrollCalendar::Publisher::Error, "This client does not have an active AIRE Services source"
+          raise AirePayrollCalendar::Publisher::Error, "This client does not have an active calendar-capable time tracking source"
         end
       end
     end

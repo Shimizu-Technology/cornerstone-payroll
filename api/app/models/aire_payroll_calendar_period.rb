@@ -48,8 +48,8 @@ class AirePayrollCalendarPeriod < ApplicationRecord
     if time_tracking_source && time_tracking_source.company_id != company_id
       errors.add(:time_tracking_source, "must belong to the same company")
     end
-    if time_tracking_source && time_tracking_source.source_type != "aire_services"
-      errors.add(:time_tracking_source, "must be an AIRE Services source")
+    if time_tracking_source && !time_tracking_source.supports?(:payroll_calendar_v2)
+      errors.add(:time_tracking_source, "must support payroll calendar publication")
     end
   end
 

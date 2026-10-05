@@ -209,7 +209,7 @@ module TimeTracking
       @company = Company.find_by(id: manifest.fetch("company_id"))
       raise Error, "AIRE rollout company changed" unless @company&.name == manifest.fetch("company_name")
       @source = @company.time_tracking_sources.find_by(id: manifest.fetch("source_id"))
-      raise Error, "AIRE rollout source changed" unless @source&.active? && @source.source_type == "aire_services"
+      raise Error, "AIRE rollout source changed" unless @source&.active? && @source.supports?(:payroll_cockpit)
       if manifest["source_instance_id"].present? && (!@source.remote_identity_pinned? || @source.expected_source_instance_id != manifest["source_instance_id"])
         raise Error, "AIRE rollout installation identity changed"
       end
@@ -298,7 +298,7 @@ module TimeTracking
       @company.reload
       @actor = User.find(actor.id)
       unless @company.id == manifest.fetch("company_id").to_i && @company.name == manifest.fetch("company_name") &&
-             @source.company_id == @company.id && @source.active? && @source.source_type == "aire_services"
+             @source.company_id == @company.id && @source.active? && @source.supports?(:payroll_cockpit)
         raise Error, "Historical rollout company or source changed before completion"
       end
       if manifest["source_instance_id"].present? && (!@source.remote_identity_pinned? || @source.expected_source_instance_id != manifest["source_instance_id"])

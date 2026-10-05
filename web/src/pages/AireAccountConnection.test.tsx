@@ -36,7 +36,7 @@ describe('Personal AIRE connection', () => {
   it('connects an assigned accountant without configuration controls and preserves the work context', async () => {
     const user = userEvent.setup(); const navigate = vi.fn();
     view('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork', navigate);
-    await user.click(await screen.findByRole('button', { name: 'Connect my AIRE account' }));
+    await user.click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
     expect(mocks.create).toHaveBeenCalledWith(4);
     expect(navigate).toHaveBeenCalledWith(url);
     expect(JSON.parse(sessionStorage.getItem('aire-own-link-return:4')!)).toEqual({ companyId: 7, returnTo: '/companies/7/pay-runs/67/work' });
@@ -57,7 +57,7 @@ describe('Personal AIRE connection', () => {
       { ...source, id: 5, active: false, name: 'Inactive AIRE' },
       { ...source, id: 6, source_type: 'custom', name: 'Custom source' },
       { ...source, id: 7, company_id: 8, name: 'Other client AIRE' }] });
-    view(); await screen.findByRole('button', { name: 'Connect my AIRE account' });
+    view(); await screen.findByRole('button', { name: 'Connect my time tracking account' });
     expect(screen.getByRole('option', { name: 'Assigned AIRE' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'Inactive AIRE' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Custom source' })).toBeNull();
@@ -68,21 +68,21 @@ describe('Personal AIRE connection', () => {
     view('/app/aire-account-connection?source_id=900');
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('unavailable for this company'));
     expect(mocks.read).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Connect my AIRE account' })).toBeNull();
-    await userEvent.setup().selectOptions(screen.getByLabelText('Active AIRE source'), '4');
-    await screen.findByRole('button', { name: 'Connect my AIRE account' });
+    expect(screen.queryByRole('button', { name: 'Connect my time tracking account' })).toBeNull();
+    await userEvent.setup().selectOptions(screen.getByLabelText('Active time tracking source'), '4');
+    await screen.findByRole('button', { name: 'Connect my time tracking account' });
     expect(mocks.read).toHaveBeenCalledWith(4);
   });
   it('gives an explicit administrator next step when the company has no active source', async () => {
     mocks.list.mockResolvedValue({ time_tracking_sources: [] }); view('/app/aire-account-connection');
-    expect(await screen.findByText(/no active AIRE source/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Connect my AIRE account' })).toBeNull();
+    expect(await screen.findByText(/no active time tracking source/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect my time tracking account' })).toBeNull();
   });
   it('leaves connection state unknown during an outage and recovers through refresh', async () => {
     mocks.read.mockRejectedValueOnce(new Error('AIRE is unavailable')).mockResolvedValue({ account_link: linked });
     view(); expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'AIRE is unavailable');
     expect(screen.queryByText('Not connected')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Connect my AIRE account' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Connect my time tracking account' })).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh connection status' }));
     expect(await screen.findByText('Connected as AIRE operator')).toBeTruthy();
   });
@@ -95,7 +95,7 @@ describe('Personal AIRE connection', () => {
     await user.click(screen.getByRole('button', { name: 'Disconnect my account' }));
     await user.click(screen.getByRole('button', { name: 'Confirm disconnection' }));
     expect(mocks.disconnect).toHaveBeenCalledWith(4);
-    expect(await screen.findByRole('button', { name: 'Connect my AIRE account' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Connect my time tracking account' })).toBeTruthy();
   });
   it('does not claim OAuth success based on a query parameter', async () => {
     view('/app/aire-account-connection?source_id=4&aire_link=connected');
@@ -111,9 +111,9 @@ describe('Personal AIRE connection', () => {
     'https://aire.example.test/other?token=x', 'http://aire.example.test/admin/payroll-link?token=x',
     'https://aire.example.test/admin/payroll-link'])('blocks unsafe authorization response %s', async value => {
     mocks.create.mockResolvedValue({ authorization_url: value }); const navigate = vi.fn(); view(undefined, navigate);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my AIRE account' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
     await screen.findByRole('alert'); expect(navigate).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Connect my AIRE account' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Connect my time tracking account' })).toBeNull();
   });
   it('never returns to another company or an external location supplied in a query', async () => {
     view('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F8%2Fpay-runs%2F67');
@@ -138,7 +138,7 @@ describe('Personal AIRE connection', () => {
     await screen.findByText('Not connected');
     mocks.companyId = 8; mocks.list.mockResolvedValue({ time_tracking_sources: [] });
     rendered.rerender(<MemoryRouter initialEntries={['/app/aire-account-connection?source_id=4&aire_link=connected']}><AireAccountConnection /></MemoryRouter>);
-    await screen.findByText(/no active AIRE source/);
+    await screen.findByText(/no active time tracking source/);
     expect(mocks.switchCompany).not.toHaveBeenCalled();
     expect(screen.getByRole('link', { name: 'Return to payroll' }).getAttribute('href')).toBe('/companies/8/pay-runs');
   });
@@ -146,11 +146,11 @@ describe('Personal AIRE connection', () => {
     let complete!: (result: { authorization_url: string }) => void;
     mocks.create.mockReturnValue(new Promise(resolve => { complete = resolve; }));
     const navigate = vi.fn(); const rendered = view(undefined, navigate);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my AIRE account' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
     mocks.companyId = 8; mocks.list.mockResolvedValue({ time_tracking_sources: [] });
     rendered.rerender(<MemoryRouter initialEntries={['/app/aire-account-connection?source_id=4']}><AireAccountConnection navigateToAuthorization={navigate} /></MemoryRouter>);
     complete({ authorization_url: url });
-    await screen.findByText(/no active AIRE source/);
+    await screen.findByText(/no active time tracking source/);
     expect(navigate).not.toHaveBeenCalled();
     expect(sessionStorage.getItem('aire-own-link-return:4')).toBeNull();
   });

@@ -74,13 +74,13 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
       if (action === 'retry') await payPeriodsApi.retryAireCalendarDelivery(payPeriodId);
       await onRefresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not update the AIRE payroll calendar');
+      setError(caught instanceof Error ? caught.message : 'Could not update the time tracking payroll calendar');
     } finally {
       setBusy(null);
     }
   };
 
-  const primaryAction = calendar.needs_revision ? 'Update AIRE schedule' : 'Publish cutoff to AIRE';
+  const primaryAction = calendar.needs_revision ? 'Update time tracking schedule' : 'Publish cutoff to time tracking';
   const transitionInProgress = calendar.cutoff_state === 'publishing' || calendar.cutoff_state === 'batch_verifying';
   const scheduleSetupNeeded = [
     'pay_schedule_not_effective',
@@ -99,12 +99,12 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-display text-base font-bold text-neutral-950">AIRE payroll cutoff</h3>
+                <h3 className="font-display text-base font-bold text-neutral-950">time tracking payroll cutoff</h3>
                 <Badge variant={statusTone(calendar.cutoff_state)}>{stateLabels[calendar.cutoff_state]}</Badge>
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                Cornerstone sets the payroll calendar. AIRE independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
+                Cornerstone sets the payroll calendar. time tracking independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             {distance && <p className="mt-2 text-xs text-neutral-500">{distance}</p>}
           </div>
           <div className="px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE delivery</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">time tracking delivery</p>
             <p className="mt-2 font-semibold text-neutral-950">
               {calendar.publication?.delivery_status === 'delivered'
                 ? 'Schedule received'
@@ -159,7 +159,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">This run is not ready for AIRE scheduling</p>
+              <p className="font-semibold">This run is not ready for time tracking scheduling</p>
               <p className="mt-2 leading-6 text-warning-800">{calendar.eligibility_error}</p>
               {scheduleSetupNeeded && (
                 <Link
@@ -177,15 +177,15 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
         {calendar.eligible && !cutoffPassed && calendar.cutoff_state === 'unpublished' && (
           <div className="flex flex-col gap-4 border-t border-primary-200 bg-primary-50/80 px-6 py-5 sm:flex-row sm:items-center sm:justify-between" role="status">
             <div className="max-w-3xl">
-              <p className="font-semibold text-primary-950">Next: publish this cutoff to AIRE</p>
+              <p className="font-semibold text-primary-950">Next: publish this cutoff to time tracking</p>
               <p className="mt-1 text-sm leading-6 text-primary-800">
-                This sends the pay-period dates and cutoff to AIRE so it can lock time automatically at {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}. It does not lock hours now or run payroll.
+                This sends the pay-period dates and cutoff to time tracking so it can lock time automatically at {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}. It does not lock hours now or run payroll.
               </p>
             </div>
             {isManager ? (
               <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null} className="shrink-0">
                 <Send className="mr-2 h-4 w-4" />
-                {busy === 'publish' ? 'Publishing…' : 'Publish cutoff to AIRE'}
+                {busy === 'publish' ? 'Publishing…' : 'Publish cutoff to time tracking'}
               </Button>
             ) : (
               <p className="shrink-0 text-xs font-semibold text-primary-800">A manager can publish this cutoff.</p>
@@ -196,7 +196,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
         {(error || calendar.publication?.last_error || batch?.last_error) && (
           <div className="flex items-start gap-4 border-t border-danger-200 bg-danger-50 px-6 py-4 text-sm text-danger-800" role="alert">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <div><p className="font-semibold">AIRE connection needs attention</p><p className="mt-2 break-words leading-6 text-danger-800">{error || batch?.last_error || calendar.publication?.last_error}</p></div>
+            <div><p className="font-semibold">time tracking connection needs attention</p><p className="mt-2 break-words leading-6 text-danger-800">{error || batch?.last_error || calendar.publication?.last_error}</p></div>
           </div>
         )}
 
@@ -205,7 +205,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             <div className="flex items-start gap-4">
               <CheckCircle2 className="h-5 w-5 shrink-0 text-success-700" aria-hidden="true" />
               <div className="min-w-0">
-                <p className="font-semibold text-success-800">AIRE’s finalized batch is verified and ready to review</p>
+                <p className="font-semibold text-success-800">the source’s finalized batch is verified and ready to review</p>
                 <p className="mt-2 text-sm leading-6 text-success-700">
                   Batch <span className="font-mono font-semibold">{batch.payroll_batch_id}</span> · checksum <span className="font-mono">{batch.payroll_batch_checksum.slice(0, 12)}…</span>
                 </p>

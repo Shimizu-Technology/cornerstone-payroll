@@ -64,16 +64,16 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await expect(printDialog.getByText('Prepared', { exact: true }).first()).toBeVisible();
   await printDialog.getByRole('button', { name: 'Close', exact: true }).click();
 
-  const reconciliation = page.getByLabel('Manual AIRE payroll reconciliation');
-  await expect(reconciliation.getByLabel('Exact AIRE time entry')).toBeVisible();
+  const reconciliation = page.getByLabel('Manual time tracking payroll reconciliation');
+  await expect(reconciliation.getByLabel('Exact time tracking time entry')).toBeVisible();
   const sourceOption = reconciliation.getByRole('option').filter({ hasText: `entry ${aire.manual_browser_entry_id} ·` });
   await expect(sourceOption).toHaveCount(1);
-  await reconciliation.getByLabel('Exact AIRE time entry').selectOption((await sourceOption.getAttribute('value'))!);
+  await reconciliation.getByLabel('Exact time tracking time entry').selectOption((await sourceOption.getAttribute('value'))!);
   await reconciliation.getByLabel('Existing committed payroll item').selectOption(String(item.id));
   await reconciliation.getByLabel('Evidence and reconciliation reason').fill('Synthetic browser QA: exact source hours covered by this existing committed check');
   await reconciliation.getByRole('button', { name: 'Link hours to payroll item', exact: true }).click();
   await expect(reconciliation.getByText('Linked; payment evidence pending').first()).toBeVisible();
-  await expect(reconciliation.getByText('Payment recorded in AIRE')).toHaveCount(0);
+  await expect(reconciliation.getByText('Payment recorded in time tracking')).toHaveCount(0);
   const reviewPath = `${apiBase}/admin/pay_periods/${periodId}/aire_payroll_cockpit/manual_review`;
   const pendingReview = await (await request.get(reviewPath)).json();
   const allocation = pendingReview.cornerstone_manual_allocations.find((value: { payroll_item_id: number }) => value.payroll_item_id === item.id);
@@ -92,7 +92,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   try {
     const phone = await mobile.newPage();
     await phone.goto(new URL(path, page.url()).href);
-    const mobileReview = phone.getByLabel('Manual AIRE payroll reconciliation');
+    const mobileReview = phone.getByLabel('Manual time tracking payroll reconciliation');
     await expect(mobileReview.getByText('Linked; payment evidence pending')).toBeVisible();
     await mobileReview.scrollIntoViewIfNeeded();
     expect(await mobileReview.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
@@ -109,7 +109,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await expect(delivery).toHaveCount(0);
   // Test queues do not run a hosted worker: exercise the operator's durable retry.
   await reconciliation.getByRole('button', { name: `Retry sync for entry ${aire.manual_browser_entry_id}`, exact: true }).click();
-  await expect(reconciliation.getByText('Payment recorded in AIRE').first()).toBeVisible();
+  await expect(reconciliation.getByText('Payment recorded in time tracking').first()).toBeVisible();
   const issuedReview = await (await request.get(reviewPath)).json();
   const issued = issuedReview.cornerstone_manual_allocations.find((value: { id: number }) => value.id === allocation.id);
   expect(issued.status).toBe('issued');
@@ -123,7 +123,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
     effective_on: policy.delivery_date, provenance: 'aire_issued_receipt' });
   const issuedDate = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
     .format(new Date(`${policy.delivery_date}T00:00:00Z`));
-  await expect(reconciliation.getByText(`AIRE issued receipt · reference ${finalItem.check_number} · paid ${issuedDate}`)).toBeVisible();
+  await expect(reconciliation.getByText(`time tracking issued receipt · reference ${finalItem.check_number} · paid ${issuedDate}`)).toBeVisible();
   for (const field of ['hours_worked', 'overtime_hours', 'gross_pay', 'net_pay']) expect(finalItem[field]).toEqual(item[field]);
   await reconciliation.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('manual-issued-desktop.png'), fullPage: false });

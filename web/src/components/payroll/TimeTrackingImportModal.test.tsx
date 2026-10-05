@@ -42,7 +42,7 @@ const payPeriod = {
 const source = {
   id: 12,
   company_id: 3,
-  name: 'AIRE Services',
+  name: 'time tracking Services',
   source_type: 'aire_services' as const,
   base_url: 'https://aire.example.com',
   active: true,
@@ -80,7 +80,7 @@ beforeEach(() => {
         summary: { total_hours: 72.5 },
         issues: {},
       },
-      external_batch_id: 'AIRE-PAY-17',
+      external_batch_id: 'time tracking-PAY-17',
       external_batch_checksum: 'checksum',
       contract_version: 'payroll_batch_v2',
       source_cutoff_at: '2026-10-23T00:00:00+10:00',
@@ -94,8 +94,8 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe('TimeTrackingImportModal guided AIRE review', () => {
-  it('opens the configured AIRE batch directly in review', async () => {
+describe('TimeTrackingImportModal guided time tracking review', () => {
+  it('opens the configured time tracking batch directly in review', async () => {
     render(
       <TimeTrackingImportModal
         open
@@ -113,9 +113,9 @@ describe('TimeTrackingImportModal guided AIRE review', () => {
       start_date: payPeriod.start_date,
       end_date: payPeriod.end_date,
     }));
-    expect(await screen.findByText('Review AIRE hours for this payroll')).toBeTruthy();
+    expect(await screen.findByText('Review time tracking hours for this payroll')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Retrieve Finalized Batch' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Add AIRE Hours to Payroll' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' })).toBeTruthy();
   });
 
   it('keeps the first configured provider for the general import action', async () => {

@@ -135,7 +135,7 @@ test.describe('AIRE record timestamps', () => {
       type: 'module',
       content: `import { mountAireRecordsHarness } from '${modulePath}'; mountAireRecordsHarness();`,
     });
-    const dialog = page.getByRole('dialog', { name: 'Linked AIRE records' });
+    const dialog = page.getByRole('dialog', { name: 'Linked time tracking records' });
     const value = (label: string) => dialog.getByText(label, { exact: true }).locator('..').locator('dd');
     await expect(value('Source cutoff')).toHaveText(/May 1, 2026, 6:00:00 AM (GMT\+10|ChST)/);
     await expect(value('Imported')).toHaveText(/May 1, 2026, 6:30:00 AM (GMT\+10|ChST)/);

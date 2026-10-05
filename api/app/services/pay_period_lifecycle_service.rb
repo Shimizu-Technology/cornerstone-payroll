@@ -186,7 +186,7 @@ class PayPeriodLifecycleService
   def record_aire_processing_acknowledgements
     result = { batch: [], entries: [] }
     pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
-      next unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+      next unless import.finalized_batch?
 
       result[:batch] << AirePayrollAcknowledgement.record!(
         time_tracking_import: import,

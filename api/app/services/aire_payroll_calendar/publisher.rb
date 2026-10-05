@@ -25,7 +25,7 @@ module AirePayrollCalendar
     def queue_delivery(publication_id)
       AirePayrollCalendarPublication.dispatch_one!(publication_id, now: @now)
     rescue StandardError => e
-      Rails.logger.error("AIRE calendar publication was retained but could not be queued: #{e.class}: #{e.message}")
+      Rails.logger.error("Time tracking calendar publication was retained but could not be queued: #{e.class}: #{e.message}")
     end
 
     def publish_transaction!
@@ -36,20 +36,20 @@ module AirePayrollCalendar
           @pay_period.lock!
           @source.lock!
           validate_source!
-          Contract.new(@pay_period).validate!
+          @source.connector.calendar_contract(@pay_period).validate!
 
           calendar_period = find_or_create_calendar_period!
           latest = calendar_period.publications.lock.order(schedule_version: :desc).first
-          contract_fields = Contract.new(@pay_period).payload
+          contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
           if latest && same_contract?(latest.payload, contract_fields)
             return Result.new(calendar_period: calendar_period, publication: latest, created: false)
           end
           if Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now
-            raise ConflictError, "This period's AIRE cutoff has already passed. Create a correction or supplemental run instead."
+            raise ConflictError, "This period's time tracking cutoff has already passed. Create a correction or supplemental run instead."
           end
           if latest && latest.delivered? && latest.cutoff_at <= @now
-            raise ConflictError, "This AIRE cutoff has passed, so its published dates cannot be changed. Create a correction or supplemental run instead."
+            raise ConflictError, "This time tracking cutoff has passed, so its published dates cannot be changed. Create a correction or supplemental run instead."
           end
 
           version = latest ? latest.schedule_version + 1 : 1
@@ -79,11 +79,14 @@ module AirePayrollCalendar
     end
 
     def validate_source!
-      raise Error, "This client does not have an active AIRE Services source" unless @source.active? && @source.source_type == "aire_services"
-      raise Error, "The AIRE source does not belong to this client" unless @source.company_id == @pay_period.company_id
+      raise Error, "This client does not have an active compatible time source" unless @source.active?
+      @source.connector.require!(:payroll_calendar_v2)
+      raise Error, "The time tracking source does not belong to this client" unless @source.company_id == @pay_period.company_id
       unless @source.historical_reconciliation_complete?
-        raise Error, "Approve complete historical payroll reconciliation for this AIRE connection before publishing a calendar"
+        raise Error, "Approve complete historical payroll reconciliation for this time tracking connection before publishing a calendar"
       end
+    rescue ArgumentError => e
+      raise Error, e.message
     end
 
     def find_or_create_calendar_period!
@@ -106,7 +109,7 @@ module AirePayrollCalendar
         action: "aire_payroll_calendar#published",
         record_type: "AirePayrollCalendarPublication",
         record_id: publication.id,
-        subject_name: "AIRE payroll calendar #{calendar_period.external_pay_period_id}",
+        subject_name: "Time tracking payroll calendar #{calendar_period.external_pay_period_id}",
         event_category: "payroll",
         metadata: {
           pay_period_id: @pay_period.id,

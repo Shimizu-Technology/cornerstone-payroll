@@ -40,7 +40,6 @@ module AirePayrollEvents
     def validate_shape!
       raise Error, "Event payload must be a JSON object" unless @payload.is_a?(Hash)
       raise Error, "Unsupported event schema version" unless @payload["schema_version"] == SCHEMA_VERSION
-      raise Error, "Unsupported event source" unless @payload["source"] == "aire_services"
       raise Error, "Unsupported event type" unless @payload["event_type"] == AirePayrollEvent::EVENT_TYPE
       raise Error, "Idempotency-Key must match event_id" unless valid_uuid?(@idempotency_key) && @idempotency_key == @payload["event_id"].to_s.downcase
       @occurred_at = Time.iso8601(@payload.fetch("occurred_at").to_s)
@@ -64,7 +63,12 @@ module AirePayrollEvents
                       ActiveSupport::SecurityUtils.secure_compare(expected, @shared_secret)
       raise UnauthorizedError, "Invalid AIRE integration credentials" unless authenticated
 
+      raise Error, "Unsupported event source" unless @payload["source"] == source.connector.source_identifier
+      source.connector.require!(:finalized_batch_v2)
+      source.connector.require!(:payroll_calendar_v2)
       calendar_period
+    rescue ArgumentError => e
+      raise Error, e.message
     end
 
     def find_publication!(calendar_period)

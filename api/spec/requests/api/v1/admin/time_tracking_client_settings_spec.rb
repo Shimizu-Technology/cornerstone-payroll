@@ -23,7 +23,7 @@ RSpec.describe "Per-client time tracking settings", type: :request do
 
   it "keeps integration actions off for a client with no source, even if another client uses AIRE" do
     create(:time_tracking_source, source_type: "aire_services", company: create(:company))
-    expect(summary).to eq("active_source_types" => [], "linked_aire_records" => [])
+    expect(summary).to eq("active_source_types" => [], "active_source_capabilities" => [], "linked_aire_records" => [], "linked_source_records" => [])
   end
 
   it "uses the saved client source enable/disable setting without a second feature flag" do
@@ -62,12 +62,13 @@ RSpec.describe "Per-client time tracking settings", type: :request do
     other_source = create(:time_tracking_source, company: create(:company), source_type: "aire_services")
     create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: other_source, status: "applied")
     custom_source = create(:time_tracking_source, company: company, source_type: "custom", active: false)
-    create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: custom_source, status: "applied")
+    custom_applied = create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: custom_source, status: "applied")
 
     expect(TimeTracking::Client).not_to receive(:new)
     result = summary
     expect(result.fetch("active_source_types")).to eq([])
-    expect(result.fetch("linked_aire_records").map { |record| record.fetch("id") }).to eq([ applied.id ])
+    expect(result.fetch("linked_aire_records").map { |record| record.fetch("id") }).to eq([ applied.id, custom_applied.id ])
+    expect(result.fetch("linked_source_records")).to eq(result.fetch("linked_aire_records"))
     record = result.fetch("linked_aire_records").first
     expect(record).to include("source_active" => false, "external_batch_checksum" => applied.external_batch_checksum)
     expect(record.fetch("reconciliation_exceptions")).to eq(applied.reconciliation_exceptions)

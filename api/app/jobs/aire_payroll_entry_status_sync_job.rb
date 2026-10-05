@@ -13,7 +13,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
     return if acknowledgement.delivered_at.present?
 
     import = acknowledgement.time_tracking_import
-    return unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+    return unless import.finalized_batch?
 
     payable_line = if acknowledgement.contract_version.present?
       {
