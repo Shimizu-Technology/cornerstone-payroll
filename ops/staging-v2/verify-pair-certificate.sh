@@ -87,7 +87,15 @@ if [[ "${candidates_only}" == 1 ]]; then
   exit 0
 fi
 if [[ -z "${requested_run_id}" ]]; then
-  gh api --paginate --slurp "repos/${repo}/actions/workflows/quality.yml/runs?branch=staging-v2&event=workflow_dispatch&per_page=100" > "${temporary_dir}/runs.json" || {
+  # Expired artifacts cannot certify a deployment. Capture one UTC retention
+  # window for discovery and its freshness recheck so old dispatches do not
+  # exhaust GitHub's filtered workflow inventory limit.
+  certificate_since="$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d"))
+PY
+)"
+  gh api --paginate --slurp "repos/${repo}/actions/workflows/quality.yml/runs?branch=staging-v2&event=workflow_dispatch&created=%3E%3D${certificate_since}&per_page=100" > "${temporary_dir}/runs.json" || {
     echo "Connected Payroll: certificate inventory unavailable; deployment held." >&2; exit 1;
   }
   requested_run_id="$(python3 "${validator}" certificate-run "${temporary_dir}/runs.json" "${payroll_sha}" "${aire_sha}")" || exit 1
@@ -110,7 +118,7 @@ python3 "${validator}" certificate "${temporary_dir}/run.json" "${temporary_dir}
 gh api "repos/${repo}/actions/runs/${requested_run_id}" > "${temporary_dir}/recheck.json"
 python3 "${validator}" unchanged "${temporary_dir}/run.json" "${temporary_dir}/recheck.json"
 if [[ "${automatic_certificate}" == 1 ]]; then
-  gh api --paginate --slurp "repos/${repo}/actions/workflows/quality.yml/runs?branch=staging-v2&event=workflow_dispatch&per_page=100" > "${temporary_dir}/latest-runs.json" || {
+  gh api --paginate --slurp "repos/${repo}/actions/workflows/quality.yml/runs?branch=staging-v2&event=workflow_dispatch&created=%3E%3D${certificate_since}&per_page=100" > "${temporary_dir}/latest-runs.json" || {
     echo "Connected Payroll: final certificate inventory unavailable; deployment held." >&2; exit 1;
   }
   [[ "$(python3 "${validator}" certificate-run "${temporary_dir}/latest-runs.json" "${payroll_sha}" "${aire_sha}")" == "${requested_run_id}" ]] || {

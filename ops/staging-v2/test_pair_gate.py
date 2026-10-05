@@ -2,12 +2,14 @@
 
 import json
 import hashlib
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
 
 
 SOURCE = Path(__file__).resolve().parent
@@ -85,6 +87,7 @@ class PairGateTest(unittest.TestCase):
         self.install_mock("gh", '''#!/usr/bin/env python3
 import base64, json, os, sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 model = json.load(open(os.environ["MOCK_MODEL"]))
 args = sys.argv[1:]
 def run_pages(rows, run):
@@ -133,7 +136,14 @@ elif args[0] == "api":
         counter=Path(os.environ["MOCK_MODEL"]+".certificate.reads")
         reads=int(counter.read_text()) if counter.exists() else 0
         counter.write_text(str(reads+1))
-        pages=run_pages(model["runs"],model["run"])
+        rows=model["runs"]
+        if model.get("filter_certificate_retention"):
+            with open(os.environ["MOCK_MODEL"]+".certificate.queries","a") as log:
+                print(endpoint,file=log)
+            created=parse_qs(urlsplit(endpoint).query).get("created",[""])[0]
+            if created.startswith(">="):
+                rows=[row for row in rows if row["createdAt"][:10]>=created[2:]]
+        pages=run_pages(rows,model["run"])
         if reads and model.get("new_certificate_during_verification"):
             pages[0]["total_count"]+=1
             pages[0]["workflow_runs"].append({**pages[0]["workflow_runs"][0],"id":999,"created_at":"2026-10-04T09:00:00Z","status":"queued","conclusion":None})
@@ -252,6 +262,24 @@ else: print(json.dumps(job_pages(row)))
     def test_explicit_certificate_retains_deliberate_operator_selection(self):
         self.model["new_certificate_during_verification"]=True
         self.assertEqual(self.execute("verify-pair-certificate.sh", (PAYROLL_SHA,AIRE_SHA,"101")).returncode,0)
+
+    def test_expired_dispatches_do_not_exhaust_automatic_certificate_inventory(self):
+        before=datetime.now(timezone.utc).date()
+        self.certify()
+        self.model["runs"][0]["createdAt"]=before.isoformat()+"T10:00:00Z"
+        expired=(before-timedelta(days=100)).isoformat()+"T10:00:00Z"
+        self.model["runs"].extend({"databaseId":1000+n,"createdAt":expired,
+            "displayTitle":"Connected payroll expired pair"} for n in range(1001))
+        self.model["filter_certificate_retention"]=True
+        result=self.execute()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue(self.deploy_log.exists())
+        queries=Path(str(self.model_file)+".certificate.queries").read_text().splitlines()
+        self.assertEqual(len(queries),2)
+        filters=[parse_qs(urlsplit(query).query)["created"][0] for query in queries]
+        self.assertEqual(filters[0],filters[1])
+        after=datetime.now(timezone.utc).date()
+        self.assertIn(filters[0],{">="+(day-timedelta(days=90)).isoformat() for day in (before,after)})
 
     def test_attempt_change_during_verification_is_held(self):
         self.model["recheck_change"]={"run_attempt":2}
