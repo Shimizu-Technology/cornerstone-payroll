@@ -351,6 +351,11 @@ export class ApiError extends Error {
 // Create singleton instance
 const api = new ApiClient(API_BASE_URL);
 
+export const timeTrackingSourceHealthApi = {
+  read: (sourceId: number, companyId: number, signal?: AbortSignal) =>
+    api.get<import('@/lib/connector-health').ConnectorHealth>(`/admin/time_tracking_sources/${sourceId}/health`, undefined, { companyId, signal }),
+};
+
 export default api;
 export { api as apiClient };
 export const setAuthToken = (token: string | null) => api.setAuthToken(token);

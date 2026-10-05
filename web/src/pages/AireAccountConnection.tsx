@@ -1,4 +1,5 @@
 import { supportsSourceOperation } from '@/lib/time-tracking';
+import { SourceConnectorHealth } from '@/components/payroll/SourceConnectorHealth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
@@ -174,6 +175,7 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
         </div>}
         <Button variant="outline" disabled={busy || loading || checking} onClick={() => sourceId ? void check() : void loadSources()}><RefreshCw className="mr-2 h-4 w-4" />Refresh connection status</Button>
       </CardContent></Card>
+      {source && <SourceConnectorHealth sourceId={source.id} companyId={companyId} />}
     </div>
     <Dialog open={disconnectOpen} onOpenChange={open => { if (!busy) setDisconnectOpen(open); }}><DialogContent>
       <DialogHeader><DialogTitle>Disconnect your time tracking account?</DialogTitle><DialogDescription>This removes your personal connection for {companyName}. Other staff connections, source settings and saved payroll records remain unchanged. You can reconnect later.</DialogDescription></DialogHeader>
