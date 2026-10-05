@@ -182,7 +182,7 @@ module Api
             TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @source.company,
               request_method: "POST", capability: :manage_own_aire_account_link)
 
-          render json: { error: "You do not have permission to connect your AIRE account for this company" }, status: :forbidden
+          render json: { error: "You do not have permission to connect your time tracking account for this company" }, status: :forbidden
         end
 
         def account_link_client
@@ -190,10 +190,10 @@ module Api
             raise TimeTracking::Client::Error.new("This source does not support account linking", response_status: 422)
           end
           unless @source.active? && @source.company_id == current_company_id
-            raise TimeTracking::Client::Error.new("This AIRE source is inactive. Ask your payroll administrator to review the current connection.", response_status: 422)
+            raise TimeTracking::Client::Error.new("This time tracking source is inactive. Ask your payroll administrator to review the current connection.", response_status: 422)
           end
           unless @source.shared_secret_configured?
-            raise TimeTracking::Client::Error.new("This AIRE source needs its integration credential configured by your payroll administrator before connecting your account", response_status: 422)
+            raise TimeTracking::Client::Error.new("This time tracking source needs its integration credential configured by your payroll administrator before connecting your account", response_status: 422)
           end
 
           TimeTracking::Client.new(@source)

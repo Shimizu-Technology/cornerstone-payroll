@@ -23,7 +23,7 @@ describe('RecordCheckDeliveryDialog', () => {
 
     expect(screen.getByText(/released to the business or employee/)).toBeTruthy();
     expect(screen.getByText(/later distribution does not change this issue date/)).toBeTruthy();
-    expect(screen.getByText(/Any linked AIRE hours will be marked as paid/i)).toBeTruthy();
+    expect(screen.getByText(/Any linked time tracking hours will be marked as paid/i)).toBeTruthy();
     const save = screen.getByRole('button', { name: 'Record Issued' }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     await user.selectOptions(screen.getByLabelText('How it was issued'), 'mail');
