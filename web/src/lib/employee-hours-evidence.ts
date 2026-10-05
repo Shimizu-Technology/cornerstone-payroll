@@ -4,6 +4,7 @@ export interface EvidenceTotals {
   current_regular_hours: number; current_overtime_hours: number; frozen_regular_hours: number; frozen_overtime_hours: number; open_case_count: number; identity_review_count?: number; uncategorized_entry_count?: number;
 }
 export interface EvidencePeriod {
+  // Compatible producer ID: original work-period start date, YYYY-MM-DD.
   id: string; start_date: string; end_date: string; summary: EvidenceTotals; review_required: boolean;
   detail_pagination?: { per_page: number; offset: number; counts: { entries: number; coverage_lines: number; settlement_cases: number }; next_cursor: string | null };
   entries?: Array<{ id: string; source_entry_url?: string | null; work_date: string; description: string | null; approval_status: string | null; overtime_status: string;
@@ -20,7 +21,7 @@ export interface EmployeeHoursEvidence {
   evidence?: { contract_version: string; as_of: string; employee: { id: string; payroll_integration_id: string; full_name: string };
     totals?: EvidenceTotals; periods?: EvidencePeriod[]; period?: EvidencePeriod;
     pagination?: { total_count: number; per_page: number; next_cursor: string | null } };
-  payroll_records?: Array<{ payroll_item_id: number; pay_period_id: number; check_number: string | null; pay_date: string; period_description: string;
+  payroll_records?: Array<{ payroll_item_id: number; pay_period_id: number; check_number: string | null; pay_date: string; period_description: string; pay_period_status: string;
     regular_hours: number | null; overtime_hours: number | null; holiday_hours: number | null; pto_hours: number | null;
     gross_pay: number | null; net_pay: number | null; payment_evidence: { status: string; label: string; effective_on: string | null } }>;
 }

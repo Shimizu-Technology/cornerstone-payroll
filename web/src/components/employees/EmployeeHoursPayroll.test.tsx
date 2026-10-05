@@ -61,6 +61,16 @@ describe('Employee hours and payroll evidence', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('23 original work periods match these dates.')).toBeTruthy();
   });
+  it('explains invalid work dates without contacting the source or offering an outage retry', async () => {
+    mount('/companies/1/employees/2/hours-payroll?hours_start=2026-09-01&hours_end=2026-08-01');
+    expect(screen.getByRole('alert').textContent).toBe('Work through must be on or after Work from.');
+    expect(mocks.evidence).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Work through'), { target: { value: '2026-09-15' } });
+    expect(await screen.findByText('23 original work periods match these dates.')).toBeTruthy();
+    expect(mocks.evidence).toHaveBeenCalledWith(2, expect.objectContaining({ start_date: '2026-09-01', end_date: '2026-09-15' }));
+  });
   it('preserves unknown and signed imported hours instead of silently zeroing them', () => {
     const { rerender } = render(<SavedHours item={{ ...item, record_type: 'imported', overtime_hours: null }} />);
     expect(screen.getByText('Total unavailable')).toBeTruthy();
@@ -72,11 +82,12 @@ describe('Employee hours and payroll evidence', () => {
   it('opens a source entry and exact verified payroll result from period detail', async () => {
     mocks.evidence.mockResolvedValue({ ...evidence, source_workspace_url: 'https://example.com/employee/42',
       evidence: { ...evidence.evidence, period: { ...period, entries: [{ id: '18', work_date: '2026-08-05', regular_hours: 40.5, overtime_hours: 0.5, issued_hours: 41, needs_reconciliation_hours: 0, source_entry_url: 'https://example.com/employee/42?entry=18' }], coverage_lines: [] } },
-      payroll_records: [{ payroll_item_id: 9, pay_period_id: 5, check_number: '1003', pay_date: '2026-08-30', period_description: 'August 1–15', regular_hours: 41, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, net_pay: 300, payment_evidence: { label: 'Check delivered' } }] });
+      payroll_records: [{ payroll_item_id: 9, pay_period_id: 5, check_number: '1003', pay_date: '2026-08-30', period_description: 'August 1–15', pay_period_status: 'draft', regular_hours: 41, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, net_pay: 300, payment_evidence: { label: 'Check delivered' } }] });
     mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
     expect(await screen.findByRole('link', { name: /Open exact source entry/ })).toHaveProperty('href', 'https://example.com/employee/42?entry=18');
     const actual = screen.getByText('Exact linked payroll results').parentElement!;
     expect(within(actual).getByText('Saved REG 41.00 · OT 0.00 · Holiday 0.00 · PTO 0.00')).toBeTruthy();
+    expect(within(actual).getByText(/Pay run status: draft/)).toBeTruthy();
     expect(screen.getByRole('link', { name: /Open exact payroll item/ }).getAttribute('href')).toContain('/pay-runs/5/payroll-items/9');
   });
 });

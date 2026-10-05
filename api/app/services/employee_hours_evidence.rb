@@ -83,9 +83,19 @@ class EmployeeHoursEvidence
     else
       valid = payload["periods"].is_a?(Array) && payload["totals"].is_a?(Hash) && payload["pagination"].is_a?(Hash) &&
         payload["pagination"]["total_count"].is_a?(Integer) && payload["pagination"]["total_count"] >= 0 &&
-        payload["periods"].all? { |period| period.is_a?(Hash) && period["summary"].is_a?(Hash) }
+        payload["periods"].all? { |period| period.is_a?(Hash) && valid_work_period_id?(period["id"]) && period["summary"].is_a?(Hash) }
     end
     raise TimeTracking::Client::Error, "The source returned incomplete employee period evidence. Please retry." unless valid
+  end
+
+  # Compatible producers identify an original work period by its start date.
+  def valid_work_period_id?(value)
+    return false unless value.is_a?(String) && value.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+
+    Date.iso8601(value)
+    true
+  rescue Date::Error
+    false
   end
 
   def source_metadata(mapping)
@@ -127,6 +137,7 @@ class EmployeeHoursEvidence
 
         { payroll_item_id: item.id, pay_period_id: item.pay_period_id, check_number: item.check_number,
           pay_date: item.pay_period.pay_date, period_description: item.pay_period.period_description,
+          pay_period_status: item.pay_period.status,
           regular_hours: item.hours_worked&.to_f, overtime_hours: item.overtime_hours&.to_f,
           holiday_hours: item.holiday_hours&.to_f, pto_hours: item.pto_hours&.to_f,
           gross_pay: item.gross_pay&.to_f, net_pay: item.net_pay&.to_f,

@@ -38,6 +38,13 @@ for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 
     await page.getByRole('button', { name: 'Review period' }).focus();
     await page.keyboard.press('Enter');
     await expect(page.getByText('Maintenance shift')).toBeVisible();
+    await page.getByLabel('Work from').fill('2026-09-01');
+    await expect(page.getByRole('alert')).toHaveText('Work through must be on or after Work from.');
+    await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+    await expect(page.getByText('Check delivered · $350.00 net')).toBeVisible();
+    await page.getByLabel('Work through').fill('2026-09-15');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Review period' })).toBeVisible();
   });
 }
 test('a disabled source leaves saved payroll and exact record navigation available', async ({ page }) => {

@@ -24,10 +24,12 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
   const endDate = params.get('hours_end') || undefined;
   const cursor = params.get('hours_cursor') || undefined;
   const detailCursor = params.get('detail_cursor') || undefined;
+  const rangeError = startDate && endDate && startDate > endDate ? 'Work through must be on or after Work from.' : null;
   useEffect(() => { setSources([]); }, [employeeId, companyId]);
   useEffect(() => {
     let current = true;
     setLoading(true); setResult(null); setError(null);
+    if (rangeError) { setLoading(false); return; }
     employeesApi.hoursEvidence(employeeId, { source_id: sourceId, period_id: periodId,
       start_date: startDate, end_date: endDate, cursor, per_page: 20, detail_cursor: detailCursor, detail_per_page: 25 }).then((data) => {
       if (current) { setResult(data); setSources(data.sources); }
@@ -35,7 +37,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
       if (current) setError(caught instanceof Error ? caught.message : 'Source hours could not be loaded. Please retry.');
     }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [employeeId, companyId, sourceId, periodId, startDate, endDate, cursor, detailCursor, retry]);
+  }, [employeeId, companyId, sourceId, periodId, startDate, endDate, cursor, detailCursor, retry, rangeError]);
 
   const update = (key: string, value: string | undefined): void => {
     const next = new URLSearchParams(params);
@@ -58,9 +60,10 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
             {!sources.length && <option value="">No linked connection</option>}
             {sources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.active ? '' : ' (disabled)'}</option>)}
           </select></label>
-          <label className="text-sm font-semibold">Work from<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={startDate || ''} onChange={(event) => update('hours_start', event.target.value)} /></label>
-          <label className="text-sm font-semibold">Work through<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={endDate || ''} onChange={(event) => update('hours_end', event.target.value)} /></label>
+          <label className="text-sm font-semibold">Work from<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={startDate || ''} aria-invalid={!!rangeError} aria-describedby={rangeError ? 'hours-date-range-error' : undefined} onChange={(event) => update('hours_start', event.target.value)} /></label>
+          <label className="text-sm font-semibold">Work through<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={endDate || ''} aria-invalid={!!rangeError} aria-describedby={rangeError ? 'hours-date-range-error' : undefined} onChange={(event) => update('hours_end', event.target.value)} /></label>
         </div>
+        {rangeError && <p id="hours-date-range-error" role="alert" className="text-sm font-semibold text-red-700">{rangeError}</p>}
         {selectedSource && <p className="text-xs text-neutral-500">Last source import preview: {selectedSource.last_synced_at ? formatGuamDateTime(selectedSource.last_synced_at) : 'Not recorded'}. Employee review is read-only; manage approvals and payments from the payroll run.</p>}
         {loading && <p role="status">Loading source hours…</p>}
         {(error || (result && result.status !== 'available')) && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -90,7 +93,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
             {!!period.settlement_cases?.length && <><h4 className="font-semibold">Settlement review</h4>{period.settlement_cases.map((item) => <p key={item.public_id} className="rounded-xl border p-3 text-sm">Entry #{item.source_time_entry_id} · {item.status} · {item.origin_reason} · {item.held_total_hours} held hours</p>)}</>}
             {period.detail_pagination && <div className="flex flex-wrap items-center gap-3 text-sm"><p>{period.detail_pagination.counts.entries} entries · {period.detail_pagination.counts.coverage_lines} retained coverage lines · {period.detail_pagination.counts.settlement_cases} settlement cases</p>{detailCursor && <Button variant="outline" onClick={() => update('detail_cursor', undefined)}>First detail page</Button>}{period.detail_pagination.next_cursor && <Button variant="outline" onClick={() => update('detail_cursor', period.detail_pagination?.next_cursor || undefined)}>Next detail page</Button>}</div>}
             {!!result.payroll_records?.length && <><h4 className="font-semibold">Exact linked payroll results</h4>{result.payroll_records.map((record) => <div key={record.payroll_item_id} className="space-y-2 rounded-xl border p-4 text-sm">
-              <p className="font-semibold">{record.period_description} · Pay date {formatDate(record.pay_date)}</p>
+              <p className="font-semibold">{record.period_description} · Pay date {formatDate(record.pay_date)} · Pay run status: {record.pay_period_status || 'Unknown'}</p>
               <p>Saved REG {hours(record.regular_hours)} · OT {hours(record.overtime_hours)} · Holiday {hours(record.holiday_hours)} · PTO {hours(record.pto_hours)}</p>
               <p>{record.payment_evidence.label}{record.check_number ? ` · Check #${record.check_number}` : ''} · {record.net_pay == null ? 'Net unavailable' : `${formatCurrency(record.net_pay)} net`}</p>
               <Link className="inline-flex min-h-11 items-center font-semibold text-primary-700" to={payrollItemPath(companyId, record.pay_period_id, record.payroll_item_id, { returnTo })}>Open exact payroll item <ArrowRight className="ml-2 h-4 w-4" /></Link>

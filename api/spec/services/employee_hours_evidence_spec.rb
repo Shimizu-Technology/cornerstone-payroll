@@ -76,6 +76,15 @@ RSpec.describe EmployeeHoursEvidence do
     result = described_class.new(employee: employee, actor: actor, params: { period_id: "2026-08-01" }).call
     expect(result[:payroll_records].map { |row| row[:payroll_item_id] }).to eq([ item.id ])
     expect(result[:payroll_records].first.dig(:payment_evidence, :status)).to eq("printed")
+    expect(result[:payroll_records].first[:pay_period_status]).to eq("committed")
+  end
+
+  it "rejects list identifiers outside the compatible producer's original start-date contract" do
+    [ "opaque-id", "2026-02-30", nil ].each do |id|
+      allow(client).to receive(:payroll_employee_periods).and_return({ "periods" => [ { "id" => id, "summary" => {} } ],
+        "totals" => {}, "pagination" => { "total_count" => 1 } })
+      expect(described_class.new(employee: employee, actor: actor).call[:status]).to eq("unavailable")
+    end
   end
 
   it "does not label a malformed successful source response as zero work" do
