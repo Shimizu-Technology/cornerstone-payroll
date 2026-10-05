@@ -6,7 +6,7 @@ RSpec.describe EmployeeHoursEvidence do
   let(:employee) { create(:employee) }
   let(:actor) { create(:user, company: employee.company) }
   let(:connector) { double("Connector", authorization_origins: [ "https://time.example.com" ], employee_evidence_path: nil) }
-  let(:source) { double("Source", id: 5, name: "Other business", active?: true, remote_identity_pinned?: true, supports?: true, connector: connector, expected_source_instance_id: "7944ba1c-f8f2-4ef1-a4bf-edf1b23d245c") }
+  let(:source) { double("Source", id: 5, name: "Other business", last_synced_at: nil, active?: true, remote_identity_pinned?: true, supports?: true, connector: connector, expected_source_instance_id: "7944ba1c-f8f2-4ef1-a4bf-edf1b23d245c") }
   let(:mapping) { double("Mapping", time_tracking_source: source, time_tracking_source_id: 5, source_user_id: "42", source_user_uuid: "7f8a1940-a73f-4499-9506-aed78b9be5ea") }
   let(:client) { double("Client", payroll_employee_periods: { "periods" => [], "totals" => { "worked_hours" => 82 }, "pagination" => { "total_count" => 0 } }) }
 

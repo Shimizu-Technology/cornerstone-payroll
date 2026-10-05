@@ -15,7 +15,7 @@ export interface EvidencePeriod {
 }
 export interface EmployeeHoursEvidence {
   status: 'available' | 'unavailable' | 'not_linked' | 'unsupported'; message?: string; source_id: number | null;
-  sources: Array<{ id: number; name: string; active: boolean; employee_identity_verified: boolean }>;
+  sources: Array<{ id: number; name: string; active: boolean; employee_identity_verified: boolean; last_synced_at?: string | null }>;
   source_workspace_url?: string | null;
   evidence?: { contract_version: string; as_of: string; employee: { id: string; payroll_integration_id: string; full_name: string };
     totals?: EvidenceTotals; periods?: EvidencePeriod[]; period?: EvidencePeriod;

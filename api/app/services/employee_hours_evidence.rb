@@ -84,7 +84,8 @@ class EmployeeHoursEvidence
 
   def source_metadata(mapping)
     { id: mapping.time_tracking_source_id, name: mapping.time_tracking_source.name,
-      active: mapping.time_tracking_source.active?, employee_identity_verified: mapping.source_user_uuid.present? }
+      active: mapping.time_tracking_source.active?, employee_identity_verified: mapping.source_user_uuid.present?,
+      last_synced_at: mapping.time_tracking_source.last_synced_at }
   end
 
   def workspace_url(mapping, entry_id: nil)

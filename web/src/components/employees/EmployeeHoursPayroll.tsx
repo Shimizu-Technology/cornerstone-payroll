@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react';
 import { employeesApi, type EmployeePayHistoryReport } from '@/services/api';
 import type { EmployeeHoursEvidence, EvidenceTotals } from '@/lib/employee-hours-evidence';
 import { payrollItemPath, payRunPath } from '@/lib/routes';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SavedHours } from './SavedHours';
@@ -46,6 +46,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
     setParams(next);
   };
   const period = result?.evidence?.period;
+  const selectedSource = sources.find((source) => String(source.id) === (sourceId || String(result?.source_id)));
   return <div className="space-y-6">
     <Card>
       <CardHeader><CardTitle>Time tracking evidence</CardTitle>
@@ -60,12 +61,13 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
           <label className="text-sm font-semibold">Work from<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={startDate || ''} onChange={(event) => update('hours_start', event.target.value)} /></label>
           <label className="text-sm font-semibold">Work through<input type="date" className="mt-1 block min-h-11 w-full rounded-xl border border-neutral-300 px-3" value={endDate || ''} onChange={(event) => update('hours_end', event.target.value)} /></label>
         </div>
+        {selectedSource && <p className="text-xs text-neutral-500">Last source import preview: {selectedSource.last_synced_at ? formatGuamDateTime(selectedSource.last_synced_at) : 'Not recorded'}. Employee review is read-only; manage approvals and payments from the payroll run.</p>}
         {loading && <p role="status">Loading source hours…</p>}
         {(error || (result && result.status !== 'available')) && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <p>{error || result?.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => setRetry((value) => value + 1)}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>
         </div>}
         {result?.status === 'available' && <>
-          <p className="text-xs text-neutral-500">Source evidence as of {result.evidence?.as_of ? new Date(result.evidence.as_of).toLocaleString() : 'unknown'}</p>
+          <p className="text-xs text-neutral-500">Source evidence as of {result.evidence?.as_of ? formatGuamDateTime(result.evidence.as_of) : 'unknown'}</p>
           {result.source_workspace_url && <a href={result.source_workspace_url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 font-semibold text-primary-700">Open employee in time tracking <ArrowRight className="h-4 w-4" /></a>}
           {period ? <>
             <Button variant="outline" onClick={() => update('period', undefined)}><ArrowLeft className="mr-2 h-4 w-4" />All work periods</Button>
