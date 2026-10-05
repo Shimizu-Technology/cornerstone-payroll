@@ -141,6 +141,8 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
         : [];
     };
     const focusFrame = window.requestAnimationFrame(() => {
+      // Preserve autofocus and any control the user chose before this frame.
+      if (dialogElement()?.contains(document.activeElement)) return;
       (focusableElements()[0] || dialogElement())?.focus();
     });
     const handleKeyDown = (event: KeyboardEvent): void => {
