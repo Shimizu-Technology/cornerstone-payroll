@@ -7,6 +7,7 @@ import {
   BadgeDollarSign,
   Banknote,
   CalendarDays,
+  Clock3,
   CheckCircle2,
   Pencil,
   ReceiptText,
@@ -52,6 +53,8 @@ import { employeesApi, payStubsApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
+import { SavedHours } from '@/components/employees/SavedHours';
+import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
@@ -71,6 +74,7 @@ const tabs: Array<{ id: EmployeeWorkspaceTab; label: string; icon: typeof UserRo
   { id: 'overview', label: 'Overview', icon: UserRound },
   { id: 'pay-setup', label: 'Pay setup', icon: Settings2 },
   { id: 'pay-history', label: 'Pay history', icon: ReceiptText },
+  { id: 'hours-payroll', label: 'Hours & payroll', icon: Clock3 },
   { id: 'activity', label: 'Activity', icon: Activity },
 ];
 const tabIds = new Set(tabs.map((tab) => tab.id));
@@ -288,7 +292,15 @@ export function EmployeeWorkspace(): ReactElement {
         label="Employee workspace sections"
         tabs={tabs.map((tab) => ({
           ...tab,
-          href: employeePath(companyId, employeeId, tab.id, { returnTo }),
+          href: (() => {
+            const href = employeePath(companyId, employeeId, tab.id, { returnTo });
+            const query = new URLSearchParams(href.split('?')[1]);
+            ['hours_source', 'hours_start', 'hours_end', 'hours_cursor', 'detail_cursor', 'period', 'history_year', 'history_source'].forEach((key) => {
+              const value = searchParams.get(key);
+              if (value) query.set(key, value);
+            });
+            return `${href.split('?')[0]}?${query}`;
+          })(),
           count: tab.id === 'pay-history' ? history.length : undefined,
         }))}
       />
@@ -330,6 +342,7 @@ export function EmployeeWorkspace(): ReactElement {
         {activeTab === 'pay-history' && (
           <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} />
         )}
+        {activeTab === 'hours-payroll' && <EmployeeHoursPayroll employeeId={employeeId} companyId={companyId} report={payHistory} returnTo={currentPath} />}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
       </main>
     </div>
@@ -588,8 +601,14 @@ interface PayHistoryProps {
 }
 
 function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
-  const [yearFilter, setYearFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'cornerstone' | 'quickbooks'>('all');
+  const [historyParams, setHistoryParams] = useSearchParams();
+  const yearFilter = historyParams.get('history_year') || 'all';
+  const sourceFilter = historyParams.get('history_source') || 'all';
+  const setHistoryFilter = (key: string, value: string): void => {
+    const next = new URLSearchParams(historyParams);
+    if (value === 'all') next.delete(key); else next.set(key, value);
+    setHistoryParams(next);
+  };
   const [stubLoadingId, setStubLoadingId] = useState<number | null>(null);
   const [stubError, setStubError] = useState<string | null>(null);
   const [stubArtifact, setStubArtifact] = useState<PdfArtifact | null>(null);
@@ -626,13 +645,13 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
         {report && report.history.length > 0 && (
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs font-semibold text-neutral-600">Year
-              <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+              <select value={yearFilter} onChange={(event) => setHistoryFilter('history_year', event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
                 <option value="all">All years</option>
                 {years.map((year) => <option key={year} value={year}>{year}</option>)}
               </select>
             </label>
             <label className="text-xs font-semibold text-neutral-600">Source
-              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+              <select value={sourceFilter} onChange={(event) => setHistoryFilter('history_source', event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
                 <option value="all">All sources</option>
                 <option value="cornerstone">Cornerstone</option>
                 <option value="quickbooks">QuickBooks / adjustments</option>
@@ -667,6 +686,8 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <div><p className="text-xs text-neutral-500">Deductions</p><p className="tabular-nums">{formatCurrency(item.total_deductions)}</p></div>
                   <div><p className="text-xs text-neutral-500">Payment</p><p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</p></div>
                 </div>
+                <SavedHours item={item} />
+                <p className="text-sm text-neutral-600">{item.payment_evidence?.label || 'Payment evidence not available'}</p>
                 <div className="grid grid-cols-2 gap-2">
                   {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
                     <Button variant="outline" size="sm" className="min-h-11" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
@@ -680,7 +701,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
           </div>
           <div className="hidden sm:block">
           <Table>
-            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Saved hours</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
             <TableBody striped>
               {visibleHistory.map((item) => (
                 <TableRow key={item.key}>
@@ -694,10 +715,11 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   </TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
                   <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge></TableCell>
+                  <TableCell><SavedHours item={item} /></TableCell>
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
+                  <TableCell><p className="text-xs text-neutral-500">{item.payment_evidence?.label || 'Payment evidence not available'}</p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
                   <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
                     <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
                   </div></TableCell>
