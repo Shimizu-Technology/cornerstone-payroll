@@ -88,6 +88,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
               <p className="font-semibold">Entry #{line.source_time_entry_id} · Receipt {line.coverage_state}</p>
               {line.identity_state && line.identity_state !== 'verified' && <p className="font-semibold text-amber-800">Employee identity needs review: {line.identity_state.replaceAll('_', ' ')}</p>}
               {line.source_category_id === null && <p className="font-semibold text-amber-800">Frozen work category unknown · Needs review</p>}
+              {line.receipt_scope && <p className="text-neutral-600">Receipt scope: {line.receipt_scope.replaceAll('_', ' ')}</p>}
               <p>Source REG {hours(line.regular_hours)} · OT {hours(line.overtime_hours)}{line.batch_id ? ` · Frozen batch ${line.batch_id}` : ''}</p>
               <p>{line.provenance}{line.payment_reference ? ` · Payment ${line.payment_reference}` : ''}</p>{line.reason && <p>{line.reason}</p>}
             </div>)}</div> : <p className="text-sm text-neutral-600">No retained coverage recorded for this period.</p>}
@@ -131,6 +132,7 @@ function SourceTotals({ totals, allPeriods = false }: { totals: EvidenceTotals; 
     {!!totals.identity_review_count && <p className="mt-3 font-semibold text-amber-800">{totals.identity_review_count} retained lines need employee identity review.</p>}
     {!!totals.uncategorized_entry_count && <p className="mt-2 font-semibold text-amber-800">{totals.uncategorized_entry_count} entries have no work category.</p>}
     {!!totals.retained_uncategorized_line_count && <p className="mt-2 font-semibold text-amber-800">{totals.retained_uncategorized_line_count} retained {totals.retained_uncategorized_line_count === 1 ? 'line has' : 'lines have'} no frozen work category.</p>}
+    {!!totals.receipt_review_count && <p className="mt-2 font-semibold text-amber-800">{totals.receipt_review_count} retained {totals.receipt_review_count === 1 ? 'line needs' : 'lines need'} a receipt review. Confirm payment coverage for each frozen line.</p>}
     <p className="mt-3 text-neutral-600">Current classification: REG {hours(totals.current_regular_hours)} · OT {hours(totals.current_overtime_hours)}. Frozen source lines: REG {hours(totals.frozen_regular_hours)} · OT {hours(totals.frozen_overtime_hours)}. Coverage can be partial or signed corrections; it is not the actual check classification.</p>
   </div>;
 }

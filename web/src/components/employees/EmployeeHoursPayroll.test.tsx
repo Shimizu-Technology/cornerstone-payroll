@@ -90,6 +90,18 @@ describe('Employee hours and payroll evidence', () => {
     expect(screen.getByText('Source REG Unknown · OT Unknown')).toBeTruthy();
     expect(screen.queryByText('0 entries have no work category.')).toBeNull();
   });
+  it('shows receipt review scope without converting a batch payment into entry coverage', async () => {
+    mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+      ...period, summary: { ...totals, issued_hours: 0, committed_hours: 0, receipt_review_count: 1 }, entries: [],
+      coverage_lines: [{ id: 'frozen:18', source_time_entry_id: '18', source_user_id: '42', receipt_scope: 'batch', coverage_state: 'receipt_review', regular_hours: 8, overtime_hours: 0, provenance: 'frozen_batch_with_batch_receipt' }],
+    } } });
+    mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+    expect(await screen.findByText('1 retained line needs a receipt review. Confirm payment coverage for each frozen line.')).toBeTruthy();
+    expect(screen.getByText('Receipt scope: batch')).toBeTruthy();
+    expect(screen.getByText('Entry #18 · Receipt receipt_review')).toBeTruthy();
+    expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage0.00');
+    expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+  });
   it('opens a source entry and exact verified payroll result from period detail', async () => {
     mocks.evidence.mockResolvedValue({ ...evidence, source_workspace_url: 'https://example.com/employee/42',
       evidence: { ...evidence.evidence, period: { ...period, entries: [{ id: '18', work_date: '2026-08-05', regular_hours: 40.5, overtime_hours: 0.5, issued_hours: 41, needs_reconciliation_hours: 0, source_entry_url: 'https://example.com/employee/42?entry=18' }], coverage_lines: [] } },
