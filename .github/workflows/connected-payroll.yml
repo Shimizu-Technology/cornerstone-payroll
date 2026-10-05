@@ -8,6 +8,8 @@ on:
       - ops/staging-v2/**
       - scripts/certify_aire_payroll_integration.sh
       - scripts/local_certification/**
+      - scripts/certify_independent_payroll_connector.sh
+      - scripts/connector_certification/**
   workflow_call:
     inputs:
       payroll_sha:
@@ -46,6 +48,8 @@ jobs:
           python3 ops/staging-v2/test_pair_gate.py
           python3 -m unittest discover -s ops/staging-v2 -p "test_public_aire_actions.py"
           python3 scripts/local_certification/test_operator_result.py
+          bash -n scripts/certify_independent_payroll_connector.sh
+          python3 -m unittest discover -s scripts/connector_certification -p "test_*.py"
 
   certify:
     # Reusable workflows inherit the caller's workflow_dispatch event.
@@ -147,6 +151,11 @@ jobs:
         run: payroll/scripts/certify_aire_payroll_integration.sh
       - name: Require assigned-accountant browser and source-receipt acceptance
         run: python3 gate/scripts/local_certification/verify_operator_result.py connected-operator-result.json "$PAYROLL_SHA" "$AIRE_SHA"
+      - name: Certify an independent time producer over real HTTP
+        env:
+          PAYROLL_REPO_PATH: ${{ github.workspace }}/payroll
+          NEUTRAL_CERTIFICATION_RESULT: ${{ github.workspace }}/independent-producer-result.json
+        run: gate/scripts/certify_independent_payroll_connector.sh
       - name: Retain synthetic operator browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -169,11 +178,20 @@ jobs:
               "payroll_sha": os.environ["PAYROLL_SHA"],
               "aire_sha": os.environ["AIRE_SHA"],
               "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "independent_producer": "passed",
+              "independent_result_sha256": __import__("hashlib").sha256(Path("independent-producer-result.json").read_bytes()).hexdigest(),
               "run_id": int(os.environ["GITHUB_RUN_ID"]),
               "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
           }
           Path("pair-certificate.json").write_text(json.dumps(certificate, indent=2) + "\n")
           PY
+      - name: Retain independent producer evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: independent-payroll-producer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: independent-producer-result.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Retain only the pair certificate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

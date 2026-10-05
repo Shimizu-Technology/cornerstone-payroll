@@ -123,7 +123,9 @@ details = consent.call("get", "", 200).fetch("account_link_session")
 assert.call(details.fetch("external_actor_email") == payroll.fetch("manual_accountant_email"),
   "account-link identity was not pinned to the signed-in accountant")
 callback = URI.parse(details.fetch("return_url"))
-assert.call(callback.path == "/app/aire-account-connection" &&
+assert.call(callback.scheme == "http" && callback.host == "localhost" &&
+  callback.port == Integer(ENV.fetch("CONNECTED_WEB_PORT", "44339")) &&
+  callback.path == "/app/time-account-connection" &&
   URI.decode_www_form(callback.query.to_s).to_h["source_id"] == payroll.fetch("source_id").to_s,
   "own-account callback lost its source context")
 consent.call("post", "/authorize", 200)
