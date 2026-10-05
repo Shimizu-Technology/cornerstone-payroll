@@ -83,6 +83,9 @@ connection page is `/app/time-account-connection`; the old page is an alias.
 
 The additive employee evidence capability `employee_period_evidence_v1` uses
 `GET /api/v1/payroll/cockpit/employees/:id/periods` and `/periods/:work_period_id`.
+For every compatible producer, `work_period_id` is the original work-period
+start date in `YYYY-MM-DD` format. It identifies when the work occurred, not a
+payroll run, payment date or internal database record.
 Requests require the mapped `source_user_uuid`; date filters are original work
 dates, with signed cursor pagination and totals covering the complete filter.
 Response contract 1.0 must identify the same employee UUID and installation.
