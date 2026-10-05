@@ -472,6 +472,9 @@ describe('AirePayrollCockpit', () => {
     await user.click(screen.getByRole('button', { name: 'Approve time' }));
     const submit = within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
+    // JSDOM has no layout; let the dialog finish its initial focus frame
+    // before user-event focuses and types into the reason field.
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     await user.type(screen.getByRole('textbox', { name: /reason/i }), 'Verified against manager note');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
 

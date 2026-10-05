@@ -410,6 +410,8 @@ import type {
 
 // Employees (Admin API)
 export const employeesApi = {
+  hoursEvidence: (id: number, params: Record<string, string | number | undefined>) =>
+    api.get<import('@/lib/employee-hours-evidence').EmployeeHoursEvidence>(`/admin/employees/${id}/hours_evidence`, params),
   list: (params?: {
     company_id?: number;
     eligible_pay_period_id?: number;
@@ -2219,6 +2221,11 @@ export interface PayrollSourceSummary {
 }
 
 export interface EmployeePayHistoryRecord {
+  period_start?: string;
+  period_end?: string;
+  total_hours?: number;
+  hours_basis?: 'saved_payroll_item' | 'signed_payroll_correction';
+  payment_evidence?: { status: 'issued' | 'printed' | 'prepared' | 'unissued' | 'voided'; label: string; effective_on: string | null };
   key: string;
   record_type: 'native' | 'imported' | 'adjustment';
   payroll_item_id: number | null;

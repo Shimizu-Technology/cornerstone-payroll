@@ -238,6 +238,7 @@ Rails.application.routes.draw do
             post :transition_tax_classification
             post :resolve_configuration_review_item
           end
+          resource :hours_evidence, only: :show, controller: :employee_hours_evidence
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements

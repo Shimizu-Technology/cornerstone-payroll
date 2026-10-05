@@ -1,4 +1,4 @@
-export type EmployeeWorkspaceTab = 'overview' | 'pay-setup' | 'pay-history' | 'activity';
+export type EmployeeWorkspaceTab = 'overview' | 'pay-setup' | 'pay-history' | 'hours-payroll' | 'activity';
 export type PayRunWorkspaceTab = 'overview' | 'work' | 'checks' | 'activity';
 
 interface ReturnContext {

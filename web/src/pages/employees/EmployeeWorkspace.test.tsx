@@ -162,7 +162,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
     );
 
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
-    expect(screen.getByRole('cell', { name: 'Direct deposit' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: /Direct deposit/ })).toBeTruthy();
     const phoneCard = screen.getByRole('group', { name: 'Pay history for Sep 19, 2026' });
     expect(within(phoneCard).getByText('Direct deposit')).toBeTruthy();
     expect(within(phoneCard).getByText('$800.00')).toBeTruthy();

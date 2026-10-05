@@ -36,6 +36,7 @@ class StaffRolePolicy
   }.freeze
 
   CONTROLLER_CAPABILITIES = {
+    "api/v1/admin/employee_hours_evidence" => :payroll_operations,
     "api/v1/admin/organizations" => :manage_platform,
     "api/v1/admin/users" => :manage_organization,
     "api/v1/admin/user_invitations" => :manage_organization,

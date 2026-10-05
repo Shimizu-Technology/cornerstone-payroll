@@ -1865,7 +1865,7 @@ module Api
         def employee_pay_history_items(employee, period)
           scope = employee.payroll_items
                           .joins(:pay_period)
-                          .includes(:pay_period, :payroll_item_field_entries)
+                          .includes(:pay_period, :payroll_item_field_entries, :check_events, :direct_deposit_payment_confirmation)
                           .not_voided.reportable
                           .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
                           .order("pay_periods.pay_date DESC, payroll_items.id DESC")
@@ -2309,6 +2309,11 @@ module Api
             net_pay: item.net_pay.to_f,
             check_number: item.check_number,
             payment_delivery_method: item.effective_payment_delivery_method,
+            payment_evidence: EmployeePayrollPaymentEvidence.new(item).call,
+            period_start: item.pay_period.start_date,
+            period_end: item.pay_period.end_date,
+            total_hours: item.total_hours,
+            hours_basis: item.correction_entry? ? "signed_payroll_correction" : "saved_payroll_item",
             payroll_field_entries: payroll_field_entry_rows(item),
             payroll_field_totals: payroll_field_totals(item),
             source: {
