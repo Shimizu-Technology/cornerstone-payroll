@@ -1736,6 +1736,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("ytd", "total_deductions").to_f).to eq(275.63)
     end
 
+    it "returns saved hours and distinguishes printed checks from delivery evidence" do
+      item = employee.payroll_items.first
+      item.update!(hours_worked: 40.5, overtime_hours: 0, holiday_hours: 2, pto_hours: 4,
+        check_number: "HOURS-100", check_printed_at: Time.current)
+      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "history", 0)).to include(
+        "hours_worked" => 40.5, "overtime_hours" => 0.0, "holiday_hours" => 2.0,
+        "pto_hours" => 4.0, "total_hours" => 46.5, "hours_basis" => "saved_payroll_item",
+        "payment_evidence" => include("status" => "printed")
+      )
+    end
+
     it "reports the recorded payment method for a direct-deposit paycheck" do
       employee.payroll_items.first.update!(payment_delivery_method: "direct_deposit", check_number: nil)
 
