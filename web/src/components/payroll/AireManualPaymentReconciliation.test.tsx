@@ -42,7 +42,7 @@ afterEach(cleanup);
 async function choose() {
   const user = userEvent.setup();
   await screen.findByRole('option', { name: /Manual Employee.*entry 40/ });
-  await user.selectOptions(screen.getByLabelText('Exact AIRE time entry'), `${uuid}:40:carryover`);
+  await user.selectOptions(screen.getByLabelText('Exact time tracking time entry'), `${uuid}:40:carryover`);
   await user.selectOptions(screen.getByLabelText('Existing committed payroll item'), '12');
   await user.type(screen.getByLabelText('Evidence and reconciliation reason'), 'Verified hours against existing check 0012');
   return user;
@@ -61,12 +61,12 @@ describe('AireManualPaymentReconciliation', () => {
       note: 'Verified hours against existing check 0012',
     }));
     expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(2);
-    expect(screen.queryByText('Payment recorded in AIRE')).toBeNull();
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
     expect(props.onChanged).toHaveBeenCalled();
   });
 
   it('keeps an outage record visible and retries its existing ID without another allocation', async () => {
-    const pending = { ...allocation, status: 'pending_commit', last_sync_error: 'AIRE unavailable' };
+    const pending = { ...allocation, status: 'pending_commit', last_sync_error: 'time tracking unavailable' };
     mocks.create.mockResolvedValue({ manual_allocation: pending });
     mocks.review.mockResolvedValueOnce(review).mockRejectedValueOnce(new Error('Review temporarily unavailable'))
       .mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
@@ -74,15 +74,15 @@ describe('AireManualPaymentReconciliation', () => {
     render(<AireManualPaymentReconciliation {...props} />);
     const user = await choose();
     await user.click(screen.getByRole('button', { name: 'Link hours to payroll item' }));
-    expect(await screen.findByText('AIRE unavailable')).toBeTruthy();
-    expect(screen.getAllByText('Saved locally; AIRE confirmation pending')).toHaveLength(2);
+    expect(await screen.findByText('time tracking unavailable')).toBeTruthy();
+    expect(screen.getAllByText('Saved locally; time tracking confirmation pending')).toHaveLength(2);
     // A failed review removes current authorization, so refresh before retrying.
     mocks.review.mockResolvedValueOnce({ ...review, cornerstone_manual_allocations: [pending] });
     await user.click(screen.getByRole('button', { name: 'Refresh reconciliation' }));
     await user.click(await screen.findByRole('button', { name: 'Retry sync for entry 40' }));
     await waitFor(() => expect(mocks.retry).toHaveBeenCalledWith(67, 9));
     expect(mocks.create).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('Payment recorded in AIRE')).toBeNull();
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
   });
 
   it('requires refresh after an uncertain create response and uses the saved pending link', async () => {
@@ -127,7 +127,7 @@ describe('AireManualPaymentReconciliation', () => {
     view.rerender(<AireManualPaymentReconciliation {...props} />);
     expect(await screen.findByText(/Linking is unavailable for this account and company/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Retry sync/ })).toBeNull();
-    expect(screen.queryByLabelText('Exact AIRE time entry')).toBeNull();
+    expect(screen.queryByLabelText('Exact time tracking time entry')).toBeNull();
   });
 
   it('excludes missing versions, identities, corrections, void and batched items', async () => {
@@ -151,7 +151,7 @@ describe('AireManualPaymentReconciliation', () => {
     render(<AireManualPaymentReconciliation {...props} payrollItems={[item, { ...item, id: 15 }]} />);
     const user = userEvent.setup();
     await screen.findByRole('option', { name: /Manual Employee.*entry 40/ });
-    await user.selectOptions(screen.getByLabelText('Exact AIRE time entry'), `${uuid}:40:carryover`);
+    await user.selectOptions(screen.getByLabelText('Exact time tracking time entry'), `${uuid}:40:carryover`);
     expect(screen.queryByRole('option', { name: /Item 12/ })).toBeNull();
     expect(screen.getByRole('option', { name: /Item 15/ })).toBeTruthy();
   });
@@ -177,7 +177,7 @@ describe('AireManualPaymentReconciliation', () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued',
       payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} payrollItems={[{ ...item, check_number: 'replacement-9999' }]} />);
-    expect(await screen.findByText(/AIRE issued receipt · reference original-0042/)).toBeTruthy();
+    expect(await screen.findByText(/Time tracking issued receipt · reference original-0042/)).toBeTruthy();
     expect(screen.getByText(/paid Aug 19, 2026/)).toBeTruthy();
     expect(screen.queryByText(/paid.*replacement-9999/)).toBeNull();
     expect(screen.getByRole('link', { name: 'Payroll item 12' }).getAttribute('href'))
@@ -189,7 +189,7 @@ describe('AireManualPaymentReconciliation', () => {
       payment_evidence: { reference: 'unissued-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} />);
     await screen.findByText('Verified issued receipt details are not available in this review.');
-    expect(screen.queryByText(/AIRE issued receipt/)).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
@@ -198,7 +198,7 @@ describe('AireManualPaymentReconciliation', () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', pay_period_id: 68,
       payment_evidence: { reference: 'original-0042', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
     render(<AireManualPaymentReconciliation {...props} />);
-    expect(await screen.findByText(/AIRE issued receipt · reference original-0042/)).toBeTruthy();
+    expect(await screen.findByText(/Time tracking issued receipt · reference original-0042/)).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Payroll item 12' })).toBeNull();
     expect(screen.getByText(/payroll item review needed/)).toBeTruthy();
   });
@@ -206,7 +206,7 @@ describe('AireManualPaymentReconciliation', () => {
   it('offers personal connection with the work context when its delegation is missing', async () => {
     mocks.review.mockResolvedValue({ ...review, command_access: { can_manage_manual_allocations: false, delegation_configured: false } });
     render(<AireManualPaymentReconciliation {...props} />);
-    expect((await screen.findByRole('link', { name: 'Connect my AIRE account' })).getAttribute('href'))
+    expect((await screen.findByRole('link', { name: 'Connect my time tracking account' })).getAttribute('href'))
       .toBe('/app/aire-account-connection?return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
     expect(screen.queryByRole('button', { name: 'Link hours to payroll item' })).toBeNull();
   });
@@ -214,10 +214,10 @@ describe('AireManualPaymentReconciliation', () => {
   it('only labels a confirmed issued allocation paid and preserves the bank-confirmation guidance', async () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued', payment_method: 'direct_deposit' }] });
     render(<AireManualPaymentReconciliation {...props} />);
-    expect(await screen.findByText('Payment recorded in AIRE')).toBeTruthy();
+    expect(await screen.findByText('Payment recorded in time tracking')).toBeTruthy();
     expect(screen.getByText(/Direct deposits require bank confirmation/)).toBeTruthy();
     expect(screen.getByText('Verified issued receipt details are not available in this review.')).toBeTruthy();
-    expect(screen.queryByText(/AIRE issued receipt/)).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
 });

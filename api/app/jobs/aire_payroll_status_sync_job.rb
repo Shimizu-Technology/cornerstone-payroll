@@ -14,7 +14,7 @@ class AirePayrollStatusSyncJob < ApplicationJob
 
     import = acknowledgement.time_tracking_import
     status = acknowledgement.status
-    return unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+    return unless import.finalized_batch?
 
     TimeTracking::Client.new(import.time_tracking_source).record_payroll_batch_processing_event(
       batch_id: import.external_batch_id,

@@ -41,7 +41,7 @@ describe('reported payment holds', () => {
     await user.type(screen.getByLabelText('Retraction reason'), 'Owner withdrew the report after checking delivery records');
     await user.click(screen.getByRole('button', { name: 'Confirm retraction' }));
     await waitFor(() => expect(mocks.retract).toHaveBeenCalledWith(12, '501', expect.objectContaining({ expected_version: 3, source_user_uuid: uuid })));
-    expect(await screen.findByText(/Review settlement routing in AIRE Time Cards/)).toBeTruthy();
+    expect(await screen.findByText(/Review settlement routing in time tracking Time Cards/)).toBeTruthy();
   });
   it('keeps reason and idempotency identity on uncertain retries and surfaces conflicts', async () => {
     const user = userEvent.setup(); mocks.create.mockRejectedValue(new Error('Source version changed'));
@@ -63,7 +63,7 @@ describe('reported payment holds', () => {
   });
   it('clears stale evidence when refresh fails', async () => {
     const user = userEvent.setup(); render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
-    await screen.findByLabelText('Source hours to hold'); mocks.read.mockRejectedValue(new Error('AIRE unavailable'));
+    await screen.findByLabelText('Source hours to hold'); mocks.read.mockRejectedValue(new Error('time tracking unavailable'));
     await user.click(screen.getByRole('button', { name: 'Refresh payment evidence' }));
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.queryByLabelText('Source hours to hold')).toBeNull();

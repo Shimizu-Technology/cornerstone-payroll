@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_03_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3530,6 +3530,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_050000) do
 
   create_table "time_tracking_sources", force: :cascade do |t|
     t.boolean "active", default: true, null: false
+    t.string "authorization_origin"
     t.string "base_url", null: false
     t.bigint "company_id", null: false
     t.uuid "connection_uuid", default: -> { "gen_random_uuid()" }, null: false
@@ -3539,8 +3540,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_03_050000) do
     t.datetime "identity_verified_at"
     t.datetime "last_synced_at"
     t.string "name", null: false
+    t.string "remote_source_identifier"
     t.text "shared_secret"
     t.jsonb "source_capabilities", default: [], null: false
+    t.jsonb "source_policy_constraints", default: {}, null: false
     t.string "source_protocol"
     t.string "source_protocol_version"
     t.string "source_type", null: false

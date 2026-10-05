@@ -1,3 +1,4 @@
+import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
@@ -27,12 +28,18 @@ function companyReturn(value: string | null, companyId: number): string {
   const path = safeInternalReturnPath(value, fallback);
   return path.startsWith(`/companies/${companyId}/`) ? path : fallback;
 }
-function authorizationUrl(value: string): string {
-  const url = new URL(value);
+function connectionUrl(value: string): URL {
+  try { return new URL(value); } catch {
+    throw new Error('Time tracking returned an invalid connection link. Refresh and try again.');
+  }
+}
+function authorizationUrl(value: string, source: TimeTrackingSource): string {
+  const url = connectionUrl(value);
   const local = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password ||
-      url.pathname !== '/admin/payroll-link' || !url.searchParams.get('token') || url.hash) {
-    throw new Error('AIRE returned an invalid connection link. Refresh and try again.');
+      (source.source_type === 'aire_services' && (url.pathname !== '/admin/payroll-link' || !url.searchParams.get('token'))) || url.hash ||
+      (source.source_type !== 'aire_services' && (!source.authorization_origin || url.origin !== connectionUrl(source.authorization_origin).origin))) {
+    throw new Error('Time tracking returned an invalid connection link. Refresh and try again.');
   }
   return url.toString();
 }
@@ -55,9 +62,9 @@ export function AireAccountConnection({ navigateToAuthorization = (url: string) 
     if (restoreCompany !== activeCompanyId) switchCompany(restoreCompany);
     else setRestoredCallbackKey(callbackKey);
   }, [allowed, companyLoading, activeCompanyId, switchCompany, restoreCompany, callbackKey]);
-  if (!allowed) return <div className="p-6"><p role="alert">Your account cannot manage a personal AIRE connection. Ask your payroll administrator to review your assigned company access.</p></div>;
+  if (!allowed) return <div className="p-6"><p role="alert">Your account cannot manage a personal time tracking connection. Ask your payroll administrator to review your assigned company access.</p></div>;
   if (companyLoading || (restoreCompany && restoreCompany !== activeCompanyId)) return <p role="status" className="p-6">Loading your payroll company…</p>;
-  if (!activeCompanyId) return <p className="p-6">Choose an assigned payroll company before connecting AIRE.</p>;
+  if (!activeCompanyId) return <p className="p-6">Choose an assigned payroll company before connecting time tracking.</p>;
   return <ConnectionForCompany key={activeCompanyId} companyId={activeCompanyId}
     companyName={activeCompany?.name || 'Selected company'} requestedSourceId={sourceId}
     returnTo={companyReturn(params.get('return_to') || context?.returnTo || null, activeCompanyId)}
@@ -85,13 +92,13 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
     try {
       const response = await timeTrackingSourcesApi.list();
       if (current !== generation.current) return;
-      const active = response.time_tracking_sources.filter(row => row.company_id === companyId && row.active && row.source_type === 'aire_services');
+      const active = response.time_tracking_sources.filter(row => row.company_id === companyId && row.active && supportsSourceOperation(row, 'account_linking'));
       setSources(active);
       const requested = active.find(row => row.id === requestedSourceId);
       setSourceId(requested?.id || (!requestedSourceId && active.length === 1 ? active[0].id : null));
-      if (requestedSourceId && !requested) setError('That AIRE source is unavailable for this company. Choose an active source or ask your administrator.');
+      if (requestedSourceId && !requested) setError('That time tracking source is unavailable for this company. Choose an active source or ask your administrator.');
     } catch (caught) {
-      if (current === generation.current) { setSources([]); setSourceId(null); setError(caught instanceof Error ? caught.message : 'Could not load the company’s AIRE connection.'); }
+      if (current === generation.current) { setSources([]); setSourceId(null); setError(caught instanceof Error ? caught.message : 'Could not load the company’s time tracking connection.'); }
     } finally { if (current === generation.current) setLoading(false); }
   }, [companyId, requestedSourceId]);
   useEffect(() => { void loadSources(); return () => { generation.current += 1; }; }, [loadSources]);
@@ -105,10 +112,10 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
       if (current !== generation.current) return;
       setAccount(response.account_link);
       if (result === 'connected') setNotice(response.account_link.connected
-        ? 'AIRE confirmed your connection. Return to payroll to continue.' : 'AIRE returned, but your connection is not active. Connect again or ask your AIRE administrator.');
+        ? 'Time tracking confirmed your connection. Return to payroll to continue.' : 'Time tracking returned, but your connection is not active. Connect again or ask your time tracking administrator.');
       else if (result === 'cancelled') setNotice('The connection was cancelled. Your current access is shown below.');
     } catch (caught) {
-      if (current === generation.current) setError(caught instanceof Error ? caught.message : 'Could not confirm your AIRE access. Refresh before connecting or disconnecting.');
+      if (current === generation.current) setError(caught instanceof Error ? caught.message : 'Could not confirm your time tracking access. Refresh before connecting or disconnecting.');
     } finally { if (current === generation.current) setChecking(false); }
   }, [sourceId, result]);
   useEffect(() => { setNotice(''); setBusy(false); setDisconnectOpen(false); void check(); return () => { generation.current += 1; }; }, [check]);
@@ -120,11 +127,11 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
     try {
       const response = await timeTrackingSourcesApi.createAireAccountLink(source.id);
       if (current !== generation.current) return;
-      const url = authorizationUrl(response.authorization_url);
+      const url = authorizationUrl(response.authorization_url, source);
       sessionStorage.setItem(contextKey(source.id), JSON.stringify({ companyId, returnTo }));
       navigateToAuthorization(url);
     } catch (caught) {
-      if (current === generation.current) { setAccount(null); setError(caught instanceof Error ? caught.message : 'Could not start your AIRE connection. Refresh your connection status.'); setBusy(false); }
+      if (current === generation.current) { setAccount(null); setError(caught instanceof Error ? caught.message : 'Could not start your time tracking connection. Refresh your connection status.'); setBusy(false); }
     }
   };
   const disconnect = async () => {
@@ -134,42 +141,42 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
     try {
       const response = await timeTrackingSourcesApi.disconnectAireAccountLink(source.id);
       if (current !== generation.current) return;
-      setAccount(response.account_link); setDisconnectOpen(false); setNotice('Your personal AIRE connection was disconnected. Existing payroll and payment records remain available.');
+      setAccount(response.account_link); setDisconnectOpen(false); setNotice('Your personal time tracking connection was disconnected. Existing payroll and payment records remain available.');
     } catch (caught) {
       if (current === generation.current) { setAccount(null); setDisconnectOpen(false); setError(caught instanceof Error ? caught.message : 'Could not confirm disconnection. Refresh your connection status.'); }
     } finally { if (current === generation.current) setBusy(false); }
   };
   return <div>
-    <Header title="My AIRE connection" description={`Personal payroll access for ${companyName}`} />
+    <Header title="My time tracking connection" description={`Personal payroll access for ${companyName}`} />
     <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6 lg:p-8">
       <Link to={returnTo} className="inline-flex min-h-11 items-center gap-2 font-medium text-primary-800"><ArrowLeft className="h-4 w-4" />Return to payroll</Link>
       <Card><CardContent className="space-y-5 py-6">
         <div className="flex items-start gap-3"><ShieldCheck className="mt-1 h-5 w-5 shrink-0 text-primary-700" /><div>
-          <h1 className="text-lg font-semibold text-neutral-950">Connect your own AIRE account</h1>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">Sign in to AIRE with your own account that has payroll access and confirm the connection. This connects your identity for this company; it does not change your Payroll role. Managers still handle time approvals, employee mappings, settlement routing and calendar setup.</p>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">No tokens to copy. Access remains active until disconnected or your AIRE payroll access is disabled.</p>
+          <h1 className="text-lg font-semibold text-neutral-950">Connect your own time tracking account</h1>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">Sign in to your time tracking system with your own account that has payroll access and confirm the connection. This connects your identity for this company; it does not change your Payroll role. Managers still handle time approvals, employee mappings, settlement routing and calendar setup.</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">No tokens to copy. Access remains active until disconnected or your time tracking payroll access is disabled.</p>
         </div></div>
-        {loading && <p role="status">Loading active AIRE sources…</p>}
+        {loading && <p role="status">Loading active time tracking sources…</p>}
         {error && <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-900">{notice}</p>}
-        {!loading && sources.length === 0 && <p className="text-sm leading-6 text-neutral-600">This company has no active AIRE source. Ask your payroll administrator to configure one, then refresh. Existing source settings and credentials are managed separately.</p>}
-        {!loading && sources.length > 0 && <Select label="Active AIRE source" value={sourceId || ''} disabled={busy} onChange={event => setSourceId(positiveId(event.target.value))}>
-          <option value="">Choose this company’s AIRE source</option>{sources.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+        {!loading && sources.length === 0 && <p className="text-sm leading-6 text-neutral-600">This company has no active time tracking source. Ask your payroll administrator to configure one, then refresh. Existing source settings and credentials are managed separately.</p>}
+        {!loading && sources.length > 0 && <Select label="Active time tracking source" value={sourceId || ''} disabled={busy} onChange={event => setSourceId(positiveId(event.target.value))}>
+          <option value="">Choose this company’s time tracking source</option>{sources.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
         </Select>}
-        {checking && <p role="status">Checking your current AIRE access…</p>}
+        {checking && <p role="status">Checking your current time tracking access…</p>}
         {source && account && !checking && <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
           <Badge variant={account.connected ? 'success' : 'warning'}>{account.connected ? 'Connected' : 'Not connected'}</Badge>
-          {account.connected ? <><p className="mt-3 font-semibold text-neutral-900">Connected as {account.aire_user_name || account.aire_user_email || 'your AIRE account'}</p>
-            {account.aire_user_email && <p className="mt-1 text-sm text-neutral-600">{account.aire_user_email}</p>}
+          {account.connected ? <><p className="mt-3 font-semibold text-neutral-900">Connected as {account.source_user_name || account.aire_user_name || account.source_user_email || account.aire_user_email || 'your time tracking account'}</p>
+            {(account.source_user_email || account.aire_user_email) && <p className="mt-1 text-sm text-neutral-600">{account.source_user_email || account.aire_user_email}</p>}
             <Button className="mt-4" variant="outline" disabled={busy} onClick={() => setDisconnectOpen(true)}><Unplug className="mr-2 h-4 w-4" />Disconnect my account</Button></>
-            : <><p className="mt-3 text-sm leading-6 text-neutral-600">AIRE will ask you to sign in and approve this connection, then return here. A Payroll administrator cannot sign in on your behalf.</p>
-              <Button className="mt-4" disabled={busy} onClick={() => void connect()}><Link2 className="mr-2 h-4 w-4" />{busy ? 'Opening AIRE…' : 'Connect my AIRE account'}</Button></>}
+            : <><p className="mt-3 text-sm leading-6 text-neutral-600">Your time tracking system will ask you to sign in and approve this connection, then return here. A Payroll administrator cannot sign in on your behalf.</p>
+              <Button className="mt-4" disabled={busy} onClick={() => void connect()}><Link2 className="mr-2 h-4 w-4" />{busy ? 'Opening time tracking…' : 'Connect my time tracking account'}</Button></>}
         </div>}
         <Button variant="outline" disabled={busy || loading || checking} onClick={() => sourceId ? void check() : void loadSources()}><RefreshCw className="mr-2 h-4 w-4" />Refresh connection status</Button>
       </CardContent></Card>
     </div>
     <Dialog open={disconnectOpen} onOpenChange={open => { if (!busy) setDisconnectOpen(open); }}><DialogContent>
-      <DialogHeader><DialogTitle>Disconnect your AIRE account?</DialogTitle><DialogDescription>This removes your personal connection for {companyName}. Other staff connections, source settings and saved payroll records remain unchanged. You can reconnect later.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Disconnect your time tracking account?</DialogTitle><DialogDescription>This removes your personal connection for {companyName}. Other staff connections, source settings and saved payroll records remain unchanged. You can reconnect later.</DialogDescription></DialogHeader>
       <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setDisconnectOpen(false)}>Keep connected</Button><Button disabled={busy} onClick={() => void disconnect()}>{busy ? 'Disconnecting…' : 'Confirm disconnection'}</Button></DialogFooter>
     </DialogContent></Dialog>
   </div>;

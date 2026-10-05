@@ -8,9 +8,9 @@ import type { AirePayrollRecord } from '@/types';
 
 const record: AirePayrollRecord = {
   id: 9,
-  source_name: 'AIRE Services',
+  source_name: 'time tracking Services',
   source_active: true,
-  external_batch_id: 'AIRE-PAY-20260915',
+  external_batch_id: 'time tracking-PAY-20260915',
   external_batch_checksum: 'a'.repeat(64),
   contract_version: '2.0',
   source_cutoff_at: '2026-09-23T09:00:00+10:00',
@@ -42,7 +42,7 @@ describe('AirePayrollRecordsDialog', () => {
     const onClose = vi.fn();
     render(<AirePayrollRecordsDialog open onClose={onClose} records={[record]} />);
 
-    const closeButton = screen.getByRole('button', { name: 'Close linked AIRE records' });
+    const closeButton = screen.getByRole('button', { name: 'Close linked time tracking records' });
     await waitFor(() => expect(document.activeElement).toBe(closeButton));
     expect(screen.getByText('Exact payable-line status')).toBeTruthy();
 

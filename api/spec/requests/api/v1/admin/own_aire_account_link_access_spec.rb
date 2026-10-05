@@ -37,7 +37,7 @@ RSpec.describe "Scoped own AIRE account connection", type: :request do
     expect(response).to have_http_status(:created)
     expect(client).to have_received(:create_payroll_account_link_session).with(
       external_actor_id: actor.id, external_actor_email: actor.email,
-      return_url: "https://payroll.example.test/app/aire-account-connection?source_id=#{source.id}")
+      return_url: "https://payroll.example.test/app/time-account-connection?source_id=#{source.id}")
     expect(source.reload.attributes).to eq(before_state)
     expect(StaffRolePolicy.capabilities_for(actor)).to include("manage_own_aire_account_link")
     expect(StaffRolePolicy.capabilities_for(actor)).not_to include("manage_client_configuration", "manage_organization")

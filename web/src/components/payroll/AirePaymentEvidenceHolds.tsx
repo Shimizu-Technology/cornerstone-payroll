@@ -51,7 +51,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged }: { payPeriod
       if (retracting) await payPeriodsApi.retractAirePaymentHold(payPeriodId, retracting.id, { ...payload, command_id: command.current.id });
       else await payPeriodsApi.createAirePaymentHold(payPeriodId, { ...payload, source_time_entry_id: entry!.source_time_entry_id, command_id: command.current.id });
       if (current !== generation.current) return;
-      setNotice(retracting ? 'Payment hold retracted. Review settlement routing in AIRE Time Cards. Frozen payroll batches remain unchanged.'
+      setNotice(retracting ? 'Payment hold retracted. Review settlement routing in time tracking Time Cards. Frozen payroll batches remain unchanged.'
         : 'Reported-payment hold recorded. Check evidence is still required; no payroll payment was created.');
       setReason(''); setEntryId(''); setRetracting(null); command.current = null;
       await load(); onChanged();

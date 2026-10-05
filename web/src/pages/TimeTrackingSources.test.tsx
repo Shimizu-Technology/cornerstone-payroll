@@ -57,6 +57,20 @@ describe('TimeTrackingSources AIRE account connection', () => {
     window.history.replaceState({}, '', '/time-tracking-sources');
   });
 
+  it.each(['aire_services', 'custom'] as const)('sends visible authorization configuration only for %s', async sourceType => {
+    const configured = { ...source, source_type: sourceType, authorization_origin: 'https://neutral.example.test',
+      supported_operations: sourceType === 'custom' ? ['time_summary_v1'] : undefined };
+    apiMocks.list.mockResolvedValue({ time_tracking_sources: [configured] });
+    apiMocks.getAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
+    apiMocks.update.mockResolvedValue({ time_tracking_source: configured });
+    render(<TimeTrackingSources />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Save source' }));
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalled());
+    const payload = apiMocks.update.mock.calls[0][1];
+    if (sourceType === 'custom') expect(payload.authorization_origin).toBe('https://neutral.example.test');
+    else expect(payload).not.toHaveProperty('authorization_origin');
+  });
+
   it('walks an unlinked operator through a one-time AIRE connection', async () => {
     const user = userEvent.setup();
     const navigateToAuthorization = vi.fn();
@@ -69,7 +83,7 @@ describe('TimeTrackingSources AIRE account connection', () => {
     render(<TimeTrackingSources navigateToAuthorization={navigateToAuthorization} />);
 
     expect(await screen.findByText('Connect once—no token copying or routine renewal')).toBeTruthy();
-    const connect = screen.getByRole('button', { name: 'Connect my AIRE account' });
+    const connect = screen.getByRole('button', { name: 'Connect my time tracking account' });
     expect((connect as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByLabelText(/delegation token/i)).toBeNull();
 

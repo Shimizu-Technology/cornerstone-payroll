@@ -28,6 +28,13 @@ module TimeTracking
       # Hold the source row through the enclosing payroll transaction so a
       # concurrent settings update cannot disable it midway through application.
       raise ArgumentError, "Time tracking source is inactive" unless @source.lock!.active?
+      if finalized_batch?
+        @source.connector.require!(:finalized_batch_v2)
+        @source.connector.require!(:exact_line_receipts_v2)
+        unless @source.historical_reconciliation_complete?
+          raise ArgumentError, "Approve complete historical payroll reconciliation before applying new payroll time"
+        end
+      end
       results = nil
 
       @import.with_lock(requires_new: true) do
@@ -55,7 +62,7 @@ module TimeTracking
           include_value = override.key?(:include) || override.key?("include") ? (override[:include] || override["include"]) : true
           include_row = ActiveModel::Type::Boolean.new.cast(include_value)
           if finalized_batch? && !include_row
-            results[:errors] << { source_user_id: source_user_id, error: "Finalized AIRE batch rows cannot be skipped" }
+            results[:errors] << { source_user_id: source_user_id, error: "Finalized time tracking batch rows cannot be skipped" }
             next
           end
           unless include_row
@@ -91,7 +98,7 @@ module TimeTracking
               results[:errors] << {
                 source_user_id: source_user_id,
                 employee_id: employee.id,
-                error: "Finalized AIRE batch includes an employee excluded from this pay period; resolve the exclusion before importing"
+                error: "Finalized time tracking batch includes an employee excluded from this pay period; resolve the exclusion before importing"
               }
             else
               results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
@@ -220,7 +227,8 @@ module TimeTracking
       PayrollBatchPayloadValidator.new(
         payload: raw,
         start_date: @import.start_date,
-        end_date: @import.end_date
+        end_date: @import.end_date,
+        expected_source: @source.connector.source_identifier
       ).validate!
       checksum = raw.dig("export", "checksum")
       unless payload["validation_version"] == BatchImportPreviewService::VALIDATION_VERSION &&
@@ -232,10 +240,10 @@ module TimeTracking
              @import.source_payload_hash == checksum &&
              @import.contract_version == raw["schema_version"] &&
              @import.source_cutoff_at == Time.iso8601(raw.fetch("cutoff_at"))
-        raise ArgumentError, "AIRE payroll batch provenance changed; refresh and investigate before applying"
+        raise ArgumentError, "Time tracking payroll batch provenance changed; refresh and investigate before applying"
       end
     rescue PayrollBatchPayloadValidator::Error
-      raise ArgumentError, "AIRE payroll batch integrity check failed; refresh and investigate before applying"
+      raise ArgumentError, "Time tracking payroll batch integrity check failed; refresh and investigate before applying"
     end
 
     def validate_negative_adjustment_acknowledgement!
@@ -270,7 +278,7 @@ module TimeTracking
 
     def apply_imported_hours!(item, employee, row, override, preserved_holiday_hours:, preserved_pto_hours:)
       if finalized_batch? && [ row["total_hours"], row["regular_hours"], row["overtime_hours"] ].any? { |value| value.to_d.negative? }
-        return "This AIRE correction produces negative payroll hour totals; use the payroll correction workflow instead."
+        return "This time tracking correction produces negative payroll hour totals; use the payroll correction workflow instead."
       end
 
       categories = Array(row["categories"] || row[:categories]).select do |category|
@@ -278,7 +286,7 @@ module TimeTracking
       end
       active_rates = employee.active_wage_rates.to_a
       if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
-        return "This AIRE correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
+        return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
       uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && categories.any? &&
                         (finalized_batch? || active_rates.length > 1)
@@ -417,7 +425,7 @@ module TimeTracking
       else
         "current period"
       end
-      "#{rate.label} · AIRE #{provenance} · $#{format('%.2f', rate.rate.to_f)}/hr"
+      "#{rate.label} · #{@source.connector.aire_policy? ? 'AIRE' : @source.name} #{provenance} · $#{format('%.2f', rate.rate.to_f)}/hr"
     end
 
     def date_range_label(first_date, last_date)

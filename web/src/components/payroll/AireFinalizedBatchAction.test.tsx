@@ -12,7 +12,7 @@ const batch = {
   verification_attempts: 1,
   occurred_at: '2026-09-23T09:00:00+10:00',
   verified_at: '2026-09-23T09:01:00+10:00',
-  payroll_batch_id: 'AIRE-PAY-20260915',
+  payroll_batch_id: 'time tracking-PAY-20260915',
   payroll_batch_checksum: 'a'.repeat(64),
   summary: {
     employee_count: 2,
@@ -32,7 +32,7 @@ const bucket = (lineCount: number, totalHours: number) => ({
 
 const linkedRecord = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}): AirePayrollRecord => ({
   id: 9,
-  source_name: 'AIRE Services',
+  source_name: 'time tracking Services',
   source_active: true,
   external_batch_id: batch.payroll_batch_id,
   external_batch_checksum: batch.payroll_batch_checksum,
@@ -67,13 +67,13 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('AIRE hours are ready to add')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are ready to add')).toBeTruthy();
     expect(screen.getByText('72.50 hrs')).toBeTruthy();
     expect(screen.getByText('69.00 hrs')).toBeTruthy();
     expect(screen.getByText('3.50 hrs')).toBeTruthy();
     expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /review and add AIRE hours/i }));
+    await user.click(screen.getByRole('button', { name: /review and add time tracking hours/i }));
     expect(onReview).toHaveBeenCalledTimes(1);
   });
 
@@ -86,7 +86,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /review and link AIRE record/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /review and link time tracking record/i })).toBeTruthy();
     expect(screen.getByText(/without changing the payroll/i)).toBeTruthy();
   });
 
@@ -100,7 +100,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('AIRE hours are in this payroll')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are in this payroll')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByText(/Next: select Calculate Payroll/i)).toBeTruthy();
   });
@@ -115,7 +115,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('AIRE hours are linked; payment evidence is pending')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are linked; payment evidence is pending')).toBeTruthy();
     expect(screen.getByText('Payment pending')).toBeTruthy();
     expect(screen.getByText('72.50 hrs', { selector: '.font-display.text-lg' })).toBeTruthy();
     expect(screen.getByText(/Added to payroll; payment not yet recorded/i)).toBeTruthy();
@@ -135,7 +135,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('AIRE hours are paid')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours are paid')).toBeTruthy();
     expect(screen.getByText(/delivery or settlement evidence for every linked payable line/i)).toBeTruthy();
   });
 
@@ -154,7 +154,7 @@ describe('AireFinalizedBatchAction', () => {
       />
     );
 
-    expect(screen.getByText('AIRE payment needs attention')).toBeTruthy();
+    expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText(/failed and voided payments require an explicit follow-up/i)).toBeTruthy();
   });

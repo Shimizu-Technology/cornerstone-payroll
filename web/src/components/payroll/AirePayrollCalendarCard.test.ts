@@ -29,7 +29,7 @@ vi.mock('@/services/api', () => ({
 const baseCalendar: AirePayrollCalendarState = {
   enabled: true,
   source_id: 1,
-  source_name: 'AIRE Services',
+  source_name: 'time tracking Services',
   eligible: true,
   cutoff_at: '2026-10-18T17:00:00+10:00',
   cutoff_state: 'unpublished',
@@ -85,7 +85,7 @@ describe('lockedBatchCopy', () => {
     verification_status: 'verified' as const,
     verification_attempts: 1,
     occurred_at: '2026-10-18T17:00:00+10:00',
-    payroll_batch_id: 'AIRE-PAY-1',
+    payroll_batch_id: 'time tracking-PAY-1',
     payroll_batch_checksum: 'a'.repeat(64),
     summary: { total_hours: 12.5 },
     issues: { held: 2 },
@@ -118,36 +118,36 @@ describe('AirePayrollCalendarCard', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-18T06:59:00Z'));
     renderCard(baseCalendar);
-    expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /publish cutoff to time tracking/i })).toBeTruthy();
 
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.queryByRole('button', { name: /publish cutoff to aire/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /publish cutoff to time tracking/i })).toBeNull();
 
     cleanup();
     vi.setSystemTime(new Date('2026-10-18T06:59:00Z'));
     renderCard({ ...baseCalendar, cutoff_state: 'schedule_changed', needs_revision: true });
-    expect(screen.getByRole('button', { name: /update aire schedule/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /update time tracking schedule/i })).toBeTruthy();
 
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.queryByRole('button', { name: /update aire schedule/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /update time tracking schedule/i })).toBeNull();
   });
 
   it('shows the publish action only to managers when the calendar is eligible', () => {
     renderCard(baseCalendar);
-    expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /publish cutoff to time tracking/i })).toBeTruthy();
 
     cleanup();
     authState.isManager = false;
     renderCard(baseCalendar);
-    expect(screen.queryByRole('button', { name: /publish cutoff to aire/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /publish cutoff to time tracking/i })).toBeNull();
   });
 
   it('explains the unpublished state and makes publishing the next step', () => {
     renderCard(baseCalendar);
 
-    expect(screen.getByText(/next: publish this cutoff to aire/i)).toBeTruthy();
+    expect(screen.getByText(/next: publish this cutoff to time tracking/i)).toBeTruthy();
     expect(screen.getByText(/does not lock hours now or run payroll/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /publish cutoff to aire/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /publish cutoff to time tracking/i })).toBeTruthy();
   });
 
   it('links an ineligible period directly to pay schedule setup', () => {
@@ -176,12 +176,12 @@ describe('AirePayrollCalendarCard', () => {
         publication_id: 'publication-1',
         delivery_status: 'failed',
         delivery_attempts: 2,
-        last_error: 'AIRE unavailable',
+        last_error: 'time tracking unavailable',
       },
     });
 
     expect(screen.getByRole('button', { name: /retry sync/i })).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('AIRE unavailable');
+    expect(screen.getByRole('alert').textContent).toContain('time tracking unavailable');
   });
 
   it('labels verified hours without implying they were imported, processed, or paid', () => {
@@ -194,7 +194,7 @@ describe('AirePayrollCalendarCard', () => {
         verification_status: 'verified',
         verification_attempts: 1,
         occurred_at: '2026-10-18T17:00:00+10:00',
-        payroll_batch_id: 'AIRE-PAY-1',
+        payroll_batch_id: 'time tracking-PAY-1',
         payroll_batch_checksum: 'a'.repeat(64),
         summary: { total_hours: 12.5 },
         issues: { held: 0 },
@@ -212,7 +212,7 @@ describe('AirePayrollCalendarCard', () => {
     apiMocks.publish.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
     renderCard(baseCalendar, onRefresh);
 
-    const publish = screen.getByRole('button', { name: /publish cutoff to aire/i }) as HTMLButtonElement;
+    const publish = screen.getByRole('button', { name: /publish cutoff to time tracking/i }) as HTMLButtonElement;
     await user.click(publish);
 
     expect(apiMocks.publish).toHaveBeenCalledWith(42);
@@ -224,7 +224,7 @@ describe('AirePayrollCalendarCard', () => {
 
   it('calls the retry API and presents a rejected request as an actionable error', async () => {
     const user = userEvent.setup();
-    apiMocks.retry.mockRejectedValue(new Error('AIRE is temporarily unavailable'));
+    apiMocks.retry.mockRejectedValue(new Error('time tracking is temporarily unavailable'));
     renderCard({
       ...baseCalendar,
       cutoff_state: 'publication_failed',
@@ -235,6 +235,6 @@ describe('AirePayrollCalendarCard', () => {
     await user.click(screen.getByRole('button', { name: /retry sync/i }));
 
     expect(apiMocks.retry).toHaveBeenCalledWith(42);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('AIRE is temporarily unavailable'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('time tracking is temporarily unavailable'));
   });
 });

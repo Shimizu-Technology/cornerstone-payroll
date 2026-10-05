@@ -6,7 +6,7 @@ class PayPeriodTimeTrackingSummary
   def self.call(pay_period)
     imports = pay_period.time_tracking_imports
                         .joins(:time_tracking_source)
-                        .where(status: "applied", time_tracking_sources: { company_id: pay_period.company_id, source_type: "aire_services" })
+                        .where(status: "applied", time_tracking_sources: { company_id: pay_period.company_id })
                         .includes(:time_tracking_source, :time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements)
                         .order(:id)
     summary = {
@@ -32,6 +32,9 @@ class PayPeriodTimeTrackingSummary
     }
     calendar = AirePayrollCalendar::Presenter.call(pay_period)
     summary[:aire_calendar] = calendar if calendar
+    summary[:linked_source_records] = summary[:linked_aire_records]
+    summary[:payroll_calendar] = summary[:aire_calendar] if summary[:aire_calendar]
+    summary[:active_source_capabilities] = pay_period.company.time_tracking_sources.active.flat_map { |source| source.connector.capabilities }.uniq
     summary
   end
 end

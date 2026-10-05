@@ -519,7 +519,7 @@ RSpec.describe TimeTracking::Client do
           expected_version: 1,
           reason: "Cutoff review complete"
         )
-      end.to raise_error(TimeTracking::Client::Error, /Connect your payroll-capable AIRE account/)
+      end.to raise_error(TimeTracking::Client::Error, /Connect your payroll-capable time tracking account/)
     end
 
     it "surfaces only bounded JSON operator errors from cockpit endpoints" do
@@ -559,7 +559,7 @@ RSpec.describe TimeTracking::Client do
       end.to raise_error(TimeTracking::Client::Error, /Invalid payroll calendar period ID/)
       expect do
         client_for(source).payroll_cockpit_employee(employee_id: "../91")
-      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE employee ID/)
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source employee ID/)
       expect do
         client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
           .approve_payroll_time_entry(
@@ -569,7 +569,7 @@ RSpec.describe TimeTracking::Client do
             decision: "approve",
             reason: "Verified"
           )
-      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE time entry ID/)
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source time entry ID/)
       expect do
         client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
           .route_payroll_settlement_case(
@@ -579,7 +579,7 @@ RSpec.describe TimeTracking::Client do
             reason: "Invalid identifier",
             destination_kind: "not_payable"
           )
-      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE settlement case ID/)
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source settlement case ID/)
       expect(request).not_to have_been_requested
     end
 

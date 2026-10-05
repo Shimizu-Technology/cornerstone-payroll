@@ -19,12 +19,12 @@ afterEach(cleanup);
 describe('Accountant personal connection navigation', () => {
   it('offers personal connection without source or calendar configuration rights', () => {
     render(<MemoryRouter><Sidebar /></MemoryRouter>);
-    expect(screen.getByRole('link', { name: 'My AIRE connection' }).getAttribute('href')).toBe('/app/aire-account-connection');
+    expect(screen.getByRole('link', { name: 'Time tracking account' }).getAttribute('href')).toBe('/app/aire-account-connection');
     expect(screen.queryByRole('link', { name: /Time Tracking Sources|Pay Schedule|Payroll Fields/ })).toBeNull();
   });
   it('hides personal connection when the server does not grant its capability', () => {
     actor.allowed = false;
     render(<MemoryRouter><Sidebar /></MemoryRouter>);
-    expect(screen.queryByRole('link', { name: 'My AIRE connection' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Time tracking account' })).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -13,6 +14,7 @@ interface FormState {
   name: string;
   source_type: TimeTrackingSource['source_type'];
   base_url: string;
+  authorization_origin: string;
   shared_secret: string;
   active: boolean;
 }
@@ -21,6 +23,7 @@ const blankForm: FormState = {
   name: '',
   source_type: 'aire_services',
   base_url: '',
+  authorization_origin: '',
   shared_secret: '',
   active: false,
 };
@@ -28,7 +31,7 @@ const blankForm: FormState = {
 const sourceTypeOptions: Array<{ value: TimeTrackingSource['source_type']; label: string; hint: string }> = [
   { value: 'aire_services', label: 'AIRE Services Guam', hint: 'Use for the AIRE time clock.' },
   { value: 'cornerstone_tax', label: 'Cornerstone Tax', hint: 'Use for Cornerstone Tax staff time.' },
-  { value: 'custom', label: 'Custom compatible source', hint: 'Use only for another app that implements the payroll time summary API.' },
+  { value: 'custom', label: 'Custom compatible source', hint: 'Use only for another app that implements the shared time and payroll protocol. Test connection to discover its supported operations.' },
 ];
 
 function reconcileSavedSource(sources: TimeTrackingSource[], source: TimeTrackingSource) {
@@ -47,6 +50,7 @@ function normalizeForm(source?: TimeTrackingSource): FormState {
     name: source.name,
     source_type: source.source_type,
     base_url: source.base_url,
+    authorization_origin: source.authorization_origin || '',
     shared_secret: '',
     active: source.active,
   };
@@ -56,8 +60,8 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   const count = result.employee_count ?? 0;
   const source = result.source ? ` Source responded as ${result.source}.` : '';
   const cockpit = result.cockpit_ready === true
-    ? ' The AIRE payroll workspace is available.'
-    : result.cockpit_ready === false ? ' The AIRE payroll workspace is unavailable.' : '';
+    ? ' The source payroll workspace is available.'
+    : result.cockpit_ready === false ? ' The source payroll workspace is unavailable.' : '';
   const identity = result.identity_verified
     ? ' The source installation identity is verified.'
     : ' This source uses the legacy contract without an installation identity.';
@@ -117,8 +121,10 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     loadSources();
   }, [loadSources]);
 
+  const accountLinkSupported = supportsSourceOperation(sources.find((source) => source.id === form.id), 'account_linking');
+
   useEffect(() => {
-    if (!form.id || form.source_type !== 'aire_services') {
+    if (!form.id || !accountLinkSupported) {
       setAccountLink(null);
       setAccountLinkLoading(false);
       return;
@@ -133,7 +139,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       .catch((err) => {
         if (active) {
           setAccountLink(null);
-          setError(err instanceof Error ? err.message : 'Could not check your AIRE account connection.');
+          setError(err instanceof Error ? err.message : 'Could not check your time tracking account connection.');
         }
       })
       .finally(() => {
@@ -141,7 +147,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       });
 
     return () => { active = false; };
-  }, [form.id, form.source_type]);
+  }, [form.id, accountLinkSupported]);
 
   useEffect(() => {
     if (loading) return;
@@ -150,8 +156,8 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     const result = url.searchParams.get('aire_link');
     if (!result) return;
 
-    if (result === 'connected') showSuccess('Your AIRE administrator account is connected. You can now manage AIRE payroll work here.');
-    if (result === 'cancelled') setError('AIRE account connection was cancelled. Nothing was changed.');
+    if (result === 'connected') showSuccess('Your time tracking administrator account is connected. You can now manage source payroll work here.');
+    if (result === 'cancelled') setError('Time tracking account connection was cancelled. Nothing was changed.');
     url.searchParams.delete('aire_link');
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, [loading]);
@@ -219,6 +225,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       const basePayload = {
         name: form.name.trim(),
         base_url: form.base_url.trim().replace(/\/+$/, ''),
+        ...(form.source_type === 'custom' ? { authorization_origin: form.authorization_origin.trim() } : {}),
         active: form.active,
       };
 
@@ -250,7 +257,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
 
   const connectAireAccount = async () => {
     if (!form.id) {
-      setError('Save the AIRE source before connecting your account.');
+      setError('Save the time tracking source before connecting your account.');
       return;
     }
 
@@ -261,13 +268,13 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       const response = await timeTrackingSourcesApi.createAireAccountLink(form.id);
       navigateToAuthorization(response.authorization_url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start the AIRE account connection.');
+      setError(err instanceof Error ? err.message : 'Could not start the time tracking account connection.');
       setAccountLinkBusy(false);
     }
   };
 
   const disconnectAireAccount = async () => {
-    if (!form.id || !window.confirm('Disconnect your AIRE administrator account? Read-only AIRE details will remain available.')) return;
+    if (!form.id || !window.confirm('Disconnect your time tracking administrator account? Read-only source details will remain available.')) return;
 
     setAccountLinkBusy(true);
     setError(null);
@@ -278,9 +285,9 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       setSources((previous) => previous.map((source) => (
         source.id === form.id ? { ...source, delegation_token_configured: false } : source
       )));
-      showSuccess('Your AIRE administrator account was disconnected.');
+      showSuccess('Your time tracking administrator account was disconnected.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not disconnect your AIRE account.');
+      setError(err instanceof Error ? err.message : 'Could not disconnect your time tracking account.');
     } finally {
       setAccountLinkBusy(false);
     }
@@ -318,6 +325,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
         source_protocol: result.source_protocol,
         source_protocol_version: result.source_protocol_version,
         source_capabilities: result.source_capabilities || [],
+        supported_operations: result.supported_operations || item.supported_operations,
         identity_verified_at: result.identity_verified_at || item.identity_verified_at,
       } : item));
       showSuccess(summarizeTestResult(result));
@@ -344,7 +352,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <p className="font-medium">Active client: {activeCompany?.name || 'Loading client...'}</p>
-              <p className="mt-1">Enable a source only for clients that use it. An enabled AIRE source shows AIRE import and linking actions on that client’s payroll. With no enabled source, new import and linking actions are hidden. Previously linked records remain available for review.</p>
+              <p className="mt-1">Enable a source only for clients that use it. An enabled time tracking source shows time tracking import and linking actions on that client’s payroll. With no enabled source, new import and linking actions are hidden. Previously linked records remain available for review.</p>
             </div>
           </div>
         </div>
@@ -439,6 +447,17 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                 </span>
               </label>
 
+              {form.source_type === 'custom' && (
+                <label className="block text-sm font-medium text-gray-700">
+                  Account sign-in site
+                  <input value={form.authorization_origin}
+                    onChange={(event) => setForm((previous) => ({ ...previous, authorization_origin: event.target.value }))}
+                    placeholder="https://time.example.com"
+                    className="mt-1 w-full rounded-md border px-3 py-2 text-sm" />
+                  <span className="mt-1 block text-xs text-gray-500">Approved website origin for connecting your account. Leave blank for a summary-only source.</span>
+                </label>
+              )}
+
               <label className="block text-sm font-medium text-gray-700">
                 Shared secret {editing && <span className="font-normal text-gray-500">({sources.find((source) => source.id === form.id)?.shared_secret_configured ? 'leave blank to keep current' : 'required — none saved yet'})</span>}
                 <input
@@ -452,7 +471,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                 <span className="mt-1 block text-xs text-gray-500">Must match the source app’s payroll export secret.</span>
               </label>
 
-              {form.source_type === 'aire_services' && (
+              {supportsSourceOperation(selectedSource, 'account_linking') && (
                 <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 lg:col-span-2">
                   <div className="flex items-start gap-3">
                     {accountLink?.connected
@@ -460,7 +479,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                       : <Link2 className="mt-2 h-5 w-5 shrink-0 text-primary-700" aria-hidden="true" />}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-neutral-950">Your AIRE payroll access</p>
+                        <p className="text-sm font-semibold text-neutral-950">Your time tracking payroll access</p>
                         {editing && (
                           <Badge variant={accountLink?.connected ? 'success' : 'warning'}>
                             {accountLinkLoading ? 'Checking…' : accountLink?.connected ? 'Connected' : 'Connection needed'}
@@ -470,14 +489,14 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                       <div className="mt-2 rounded-lg border border-primary-100 bg-white/80 px-4 py-2 text-xs leading-5 text-neutral-700">
                         {accountLink?.connected ? (
                           <>
-                            <p className="font-semibold text-neutral-900">Connected as {accountLink.aire_user_name || accountLink.aire_user_email || 'your AIRE administrator account'}</p>
+                            <p className="font-semibold text-neutral-900">Connected as {accountLink.source_user_name || accountLink.aire_user_name || accountLink.source_user_email || accountLink.aire_user_email || 'your time tracking administrator account'}</p>
                             {accountLink.aire_user_email && <p className="mt-1 text-neutral-600">{accountLink.aire_user_email}</p>}
-                            <p className="mt-2 text-neutral-600">This connection does not expire on a timer. It stops if you disconnect it or your AIRE administrator access is disabled.</p>
+                            <p className="mt-2 text-neutral-600">This connection does not expire on a timer. It stops if you disconnect it or your time tracking administrator access is disabled.</p>
                           </>
                         ) : (
                           <>
                             <p className="font-semibold text-neutral-900">Connect once—no token copying or routine renewal</p>
-                            <p className="mt-1 text-neutral-600">Cornerstone will take you to AIRE to sign in and confirm the connection, then bring you straight back. After that, approvals, corrections, and payroll cutoff work stay in Cornerstone.</p>
+                            <p className="mt-1 text-neutral-600">Cornerstone will take you to your time tracking system to sign in and confirm the connection, then bring you straight back. After that, approvals, corrections, and payroll cutoff work stay in Cornerstone.</p>
                             {sources.find((source) => source.id === form.id)?.delegation_token_configured && (
                               <p className="mt-2 font-medium text-amber-800">Your legacy 90-day access still works. Connect now to replace it with the permanent account link.</p>
                             )}
@@ -485,11 +504,11 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                         )}
                       </div>
                       <div className="mt-4 flex flex-wrap gap-2">
-                        {!editing && <p className="text-xs text-neutral-600">Save this source first, then connect your AIRE administrator account.</p>}
+                        {!editing && <p className="text-xs text-neutral-600">Save this source first, then connect your time tracking administrator account.</p>}
                         {editing && !accountLink?.connected && (
                           <Button type="button" onClick={() => void connectAireAccount()} disabled={saving || accountLinkBusy || accountLinkLoading}>
                             <Link2 className="mr-2 h-4 w-4" />
-                            {accountLinkBusy ? 'Opening AIRE…' : 'Connect my AIRE account'}
+                            {accountLinkBusy ? 'Opening time tracking…' : 'Connect my time tracking account'}
                           </Button>
                         )}
                         {editing && accountLink?.connected && (
@@ -562,9 +581,9 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
                       <Badge variant={source.identity_verified ? 'success' : 'warning'}>{source.identity_verified ? 'Source verified' : 'Test source'}</Badge>
-                      {source.source_type === 'aire_services' && (
+                      {supportsSourceOperation(source, 'account_linking') && (
                         <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
-                          {source.id === form.id && accountLink?.connected ? 'My AIRE account connected' : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
+                          {source.id === form.id && accountLink?.connected ? 'My time tracking account connected' : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
                         </Badge>
                       )}
                     </div>
@@ -601,10 +620,10 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                             <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
                             {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
                             <Badge variant={source.identity_verified ? 'success' : 'warning'}>{source.identity_verified ? 'Source verified' : 'Test source'}</Badge>
-                            {source.source_type === 'aire_services' && (
+                            {supportsSourceOperation(source, 'account_linking') && (
                               <Badge variant={source.id === form.id && accountLink?.connected ? 'success' : 'warning'}>
                                 {source.id === form.id && accountLink?.connected
-                                  ? 'My AIRE account connected'
+                                  ? 'My time tracking account connected'
                                   : source.delegation_token_configured ? 'Legacy access active' : 'Open to connect'}
                               </Badge>
                             )}

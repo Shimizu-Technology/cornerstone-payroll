@@ -126,7 +126,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(client).to have_received(:create_payroll_account_link_session).with(
       external_actor_id: manager.id,
       external_actor_email: "chels@example.com",
-      return_url: "https://payroll.shimizu-technology.com/app/aire-account-connection?source_id=#{source.id}"
+      return_url: "https://payroll.shimizu-technology.com/app/time-account-connection?source_id=#{source.id}"
     )
   end
 
@@ -164,7 +164,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     post "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to include("only available for AIRE Services")
+    expect(response.parsed_body.fetch("error")).to include("does not support account linking")
   end
 
   it "keeps a successful source connection result when the optional cockpit probe is unavailable" do

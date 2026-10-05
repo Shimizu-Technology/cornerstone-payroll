@@ -67,7 +67,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
-  it('shows exact AIRE regular, overtime, carryover, and the Payroll correction to make', async () => {
+  it('shows exact time tracking regular, overtime, carryover, and the Payroll correction to make', async () => {
     render(
       <AireManualHoursReview
         payPeriodId={67}
@@ -77,7 +77,7 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('Live AIRE readiness')).toBeTruthy();
+    expect(await screen.findByText('Live time tracking readiness')).toBeTruthy();
     expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
@@ -143,7 +143,7 @@ describe('AireManualHoursReview', () => {
     expect(within(attentionCard as HTMLElement).getByText('1')).toBeTruthy();
   });
 
-  it('refreshes live AIRE totals and explains automatic paid-state sync for a linked run', async () => {
+  it('refreshes live time tracking totals and explains automatic paid-state sync for a linked run', async () => {
     const user = userEvent.setup();
     render(
       <AireManualHoursReview
@@ -153,14 +153,14 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/reports check preparation and delivery back to AIRE/i);
+    await screen.findByText(/reports check preparation and delivery back to time tracking/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
   });
 
-  it('keeps manual payroll available when AIRE cannot be reached', async () => {
-    apiMocks.manualReview.mockRejectedValue(new Error('AIRE is temporarily unavailable'));
+  it('keeps manual payroll available when time tracking cannot be reached', async () => {
+    apiMocks.manualReview.mockRejectedValue(new Error('time tracking is temporarily unavailable'));
     render(
       <AireManualHoursReview
         payPeriodId={67}
@@ -170,8 +170,8 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('The live AIRE preview could not load.')).toBeTruthy();
-    expect(screen.getByText(/Refresh before using AIRE hours for payroll/i)).toBeTruthy();
+    expect(await screen.findByText('The live time tracking preview could not load.')).toBeTruthy();
+    expect(screen.getByText(/Refresh before using time tracking hours for payroll/i)).toBeTruthy();
   });
 });
 
@@ -199,7 +199,7 @@ it('shows the direction when issued check wages exceed the source estimate', asy
     gross_wage_difference: -5, status: 'complete', note: 'Retained for review',
   }] });
   render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
-  expect(await screen.findByText(/Gross wage difference: −\$5.00 \(issued check wages exceed AIRE estimate\)/)).toBeTruthy();
+  expect(await screen.findByText(/Gross wage difference: −\$5.00 \(issued check wages exceed time tracking estimate\)/)).toBeTruthy();
 });
 
 it('keeps owner-reported historical payments visibly held pending check evidence', async () => {

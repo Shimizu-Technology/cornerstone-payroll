@@ -21,6 +21,7 @@ module TimeTracking
       raw = client.payroll_batch(batch_id: batch_summary.fetch("id"))
       PayrollBatchPayloadValidator.new(
         payload: raw,
+        expected_source: source.connector.source_identifier,
         start_date: start_date,
         end_date: end_date,
         allow_legacy_uncategorized: pay_period.committed?
@@ -42,12 +43,16 @@ module TimeTracking
     private
 
     def validate_request!
-      raise ArgumentError, "Finalized batch import is only available for AIRE Services" unless source.source_type == "aire_services"
+      source.connector.require!(:finalized_batch_v2)
+      source.connector.require!(:exact_line_receipts_v2)
       raise ArgumentError, "Time tracking source is inactive" unless source.active?
       raise ArgumentError, "Source does not belong to this company" unless source.company_id == pay_period.company_id
+      unless pay_period.committed? || source.historical_reconciliation_complete?
+        raise ArgumentError, "Approve complete historical payroll reconciliation before importing new payroll time"
+      end
       raise ArgumentError, "end_date must be on or after start_date" if end_date < start_date
       unless start_date == pay_period.start_date && end_date == pay_period.end_date
-        raise ArgumentError, "AIRE finalized batches must exactly match the selected pay period dates"
+        raise ArgumentError, "Finalized source batches must exactly match the selected pay period dates"
       end
     end
 
@@ -56,7 +61,7 @@ module TimeTracking
       raise ArgumentError, "Confirm the legal overtime workweek before importing time" unless workweek&.confirmed?
       if workweek.starts_at_minutes.to_i != 0
         raise ArgumentError,
-              "AIRE payroll batches currently require a legal workweek that starts at midnight; " \
+              "Source payroll batches currently require a legal workweek that starts at midnight; " \
               "timestamp-based boundaries are not supported yet"
       end
 
@@ -68,8 +73,8 @@ module TimeTracking
       matches = response.fetch("payroll_batches").select do |batch|
         batch.is_a?(Hash) && batch["start_date"] == start_date.iso8601 && batch["end_date"] == end_date.iso8601
       end
-      raise ArgumentError, "AIRE has not finalized a payroll batch for these exact dates" if matches.empty?
-      raise ArgumentError, "AIRE returned more than one finalized payroll batch for these dates" if matches.many?
+      raise ArgumentError, "The source has not finalized a payroll batch for these exact dates" if matches.empty?
+      raise ArgumentError, "The source returned more than one finalized payroll batch for these dates" if matches.many?
 
       matches.first
     end
@@ -77,7 +82,7 @@ module TimeTracking
     def validate_summary_identity!(summary, raw)
       unless summary["id"] == raw["batch_id"] && summary["checksum"] == raw.dig("export", "checksum") &&
              summary["cutoff_at"] == raw["cutoff_at"]
-        raise ArgumentError, "AIRE payroll batch list and detail metadata do not match"
+        raise ArgumentError, "Source payroll batch list and detail metadata do not match"
       end
     end
 
@@ -88,7 +93,7 @@ module TimeTracking
       return unless mismatched
 
       raise ArgumentError,
-            "AIRE's source workweek does not match this company's confirmed legal workweek; " \
+            "The source workweek does not match this company's confirmed legal workweek; " \
             "review the workweek settings before importing"
     end
 
@@ -255,7 +260,7 @@ module TimeTracking
     def warnings_for(source_employee, match, categories, requires_category_mapping, total_hours:, regular_hours:, overtime_hours:, estimated_gross_delta_cents:)
       warnings = []
       if match[:employee_id].blank? && (total_hours.nonzero? || categories.any?)
-        warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this AIRE user'} to a payroll employee before importing")
+        warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this source employee'} to a payroll employee before importing")
       end
       if total_hours.negative? || regular_hours.negative? || overtime_hours.negative?
         warnings << warning(
@@ -322,10 +327,10 @@ module TimeTracking
 
     def validate_existing_import!(import, checksum)
       unless ActiveSupport::SecurityUtils.secure_compare(import.external_batch_checksum, checksum)
-        raise ArgumentError, "AIRE returned a different checksum for an existing payroll batch ID"
+        raise ArgumentError, "The source returned a different checksum for an existing payroll batch ID"
       end
       if import.pay_period_id != pay_period.id || import.start_date != start_date || import.end_date != end_date
-        raise ArgumentError, "This AIRE payroll batch is already linked to a different pay period"
+        raise ArgumentError, "This time tracking payroll batch is already linked to a different pay period"
       end
 
       import
