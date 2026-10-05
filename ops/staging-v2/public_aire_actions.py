@@ -35,37 +35,36 @@ def positive_id(value):
     return value
 
 
+def pages(endpoint, key, query=None):
+    result_pages, count, seen = [], None, 0
+    for page in range(1, 11):
+        result = read(endpoint, {**(query or {}), "per_page": 100, "page": page})
+        total, rows = result["total_count"], result[key]
+        if type(total) is not int or not 0 <= total <= 1000 or not isinstance(rows, list):
+            raise ValueError("Public workflow inventory is malformed or exceeds its bound")
+        if count is None:
+            count = total
+        if total != count or len(rows) != min(100, max(count - seen, 0)):
+            raise ValueError("Public workflow inventory changed or is incomplete")
+        result_pages.append(result)
+        seen += len(rows)
+        if seen == count:
+            return result_pages
+    raise ValueError("Public workflow inventory exceeded its page limit")
+
+
 def evidence(arguments):
     if len(arguments) == 2 and arguments[0] == "runs":
         sha = arguments[1]
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise ValueError("A full immutable AIRE SHA is required")
-        result = read("workflows/staging-v2.yml/runs", {
-            "branch": "staging-v2", "event": "push", "head_sha": sha, "per_page": 100})
-        return [{"databaseId": row["id"], "headSha": row["head_sha"], "createdAt": row["created_at"]}
-                for row in result["workflow_runs"]]
+        return pages("workflows/staging-v2.yml/runs", "workflow_runs", {
+            "branch": "staging-v2", "event": "push", "head_sha": sha})
     if len(arguments) == 2 and arguments[0] == "run":
         return read("runs/" + positive_id(arguments[1]))
     if len(arguments) == 3 and arguments[0] == "jobs":
         run, attempt = map(positive_id, arguments[1:])
-        pages = []
-        count = None
-        seen = 0
-        for page in range(1, 101):
-            result = read(f"runs/{run}/attempts/{attempt}/jobs", {"per_page": 100, "page": page})
-            total = result["total_count"]
-            jobs = result["jobs"]
-            if type(total) is not int or total < 0 or not isinstance(jobs, list):
-                raise ValueError("Public job inventory is malformed")
-            if count is None:
-                count = total
-            if total != count or len(jobs) != min(100, max(count - seen, 0)):
-                raise ValueError("Public job inventory changed or is incomplete")
-            pages.append(result)
-            seen += len(jobs)
-            if seen == count:
-                return pages
-        raise ValueError("Public job inventory exceeded its page limit")
+        return pages(f"runs/{run}/attempts/{attempt}/jobs", "jobs")
     raise ValueError("Use runs SHA, run ID, or jobs ID ATTEMPT")
 
 

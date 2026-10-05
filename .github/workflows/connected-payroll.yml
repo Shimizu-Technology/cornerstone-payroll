@@ -45,8 +45,7 @@ jobs:
       - name: Check shell syntax and exact-pair gate behavior
         run: |
           bash -n ops/staging-v2/*.sh scripts/certify_aire_payroll_integration.sh scripts/local_certification/runtime.sh
-          python3 ops/staging-v2/test_pair_gate.py
-          python3 -m unittest discover -s ops/staging-v2 -p "test_public_aire_actions.py"
+          python3 -m unittest discover -s ops/staging-v2 -p "test_*.py"
           python3 scripts/local_certification/test_operator_result.py
           bash -n scripts/certify_independent_payroll_connector.sh
           python3 -m unittest discover -s scripts/connector_certification -p "test_*.py"
@@ -172,9 +171,9 @@ jobs:
           import json, os
           from pathlib import Path
           certificate = {
-              "schema_version": 1,
+              "schema_version": 2,
               "certification": "passed",
-              "lane": "real-http-synthetic-v1",
+              "lane": "real-http-synthetic-v2",
               "payroll_sha": os.environ["PAYROLL_SHA"],
               "aire_sha": os.environ["AIRE_SHA"],
               "workflow_sha": os.environ["WORKFLOW_SHA"],
