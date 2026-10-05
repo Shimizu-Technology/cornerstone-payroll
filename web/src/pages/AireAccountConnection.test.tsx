@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,10 +58,15 @@ describe('Personal AIRE connection', () => {
       { ...source, id: 6, source_type: 'custom', name: 'Custom source' },
       { ...source, id: 7, company_id: 8, name: 'Other client AIRE' }] });
     view(); await screen.findByRole('button', { name: 'Connect my time tracking account' });
-    expect(screen.getByRole('option', { name: 'Assigned AIRE' })).toBeTruthy();
-    expect(screen.queryByRole('option', { name: 'Inactive AIRE' })).toBeNull();
-    expect(screen.queryByRole('option', { name: 'Custom source' })).toBeNull();
-    expect(screen.queryByRole('option', { name: 'Other client AIRE' })).toBeNull();
+    const personalSources = within(screen.getByLabelText('Active time tracking source'));
+    expect(personalSources.getByRole('option', { name: 'Assigned AIRE' })).toBeTruthy();
+    expect(personalSources.queryByRole('option', { name: 'Inactive AIRE' })).toBeNull();
+    expect(personalSources.queryByRole('option', { name: 'Custom source' })).toBeNull();
+    expect(personalSources.queryByRole('option', { name: 'Other client AIRE' })).toBeNull();
+    const storedSources = within(screen.getByLabelText('Stored time tracking connection'));
+    expect(storedSources.getByRole('option', { name: 'Inactive AIRE (disabled)' })).toBeTruthy();
+    expect(storedSources.getByRole('option', { name: 'Custom source' })).toBeTruthy();
+    expect(storedSources.queryByRole('option', { name: 'Other client AIRE' })).toBeNull();
     expect(mocks.read).toHaveBeenCalledWith(4);
   });
   it('does not silently substitute a stale or foreign requested source', async () => {

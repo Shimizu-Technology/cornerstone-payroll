@@ -258,6 +258,7 @@ Rails.application.routes.draw do
         post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
         resources :departments, only: [ :index, :create, :update ]
 
+        get "time_tracking_sources/:source_id/health", to: "time_tracking_source_health#show"
         resources :time_tracking_sources, except: [ :new, :edit ] do
           member do
             post :test_connection
