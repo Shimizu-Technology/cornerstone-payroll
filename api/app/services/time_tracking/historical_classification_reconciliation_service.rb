@@ -101,6 +101,8 @@ module TimeTracking
     end
 
     def prepare!(item:, uuid:)
+      raise Error, "This source does not support manual payroll allocations" unless source&.supports?(:manual_allocations)
+
       validate_preparable_item!(item)
       delivery = item.check_events.deliveries.where(check_number: item.check_number).order(:id).last
 

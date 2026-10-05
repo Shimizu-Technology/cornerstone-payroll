@@ -110,3 +110,10 @@ are validated.
 The AIRE adapter provides validated relative links to employee work periods.
 Custom producers have no employee navigation link until a verified navigation
 contract is available. The consumer does not infer routes from an origin.
+
+Required historical reconciliation must be approved before a new draft can
+preview or apply finalized time. The locked apply boundary rechecks capabilities
+and history completion so an older preview cannot bypass admission. Committed
+historical review and reconciliation remain available for the approval work;
+legacy summary admission keeps its existing behavior. Restoring capabilities on
+an already established complete connection does not restart onboarding.

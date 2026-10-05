@@ -41,6 +41,8 @@ module TimeTracking
     def reconcile_locked!(ids)
       # The enclosing payroll transaction retains this lock through all writes.
       raise ArgumentError, "Time tracking source is inactive" unless source.lock!.active?
+      source.connector.require!(:finalized_batch_v2)
+      source.connector.require!(:exact_line_receipts_v2)
       unless pay_period.committed? && !pay_period.voided?
         raise ArgumentError, "Historical reconciliation requires a committed, active pay period"
       end

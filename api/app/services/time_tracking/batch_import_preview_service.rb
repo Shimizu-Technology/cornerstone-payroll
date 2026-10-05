@@ -47,6 +47,9 @@ module TimeTracking
       source.connector.require!(:exact_line_receipts_v2)
       raise ArgumentError, "Time tracking source is inactive" unless source.active?
       raise ArgumentError, "Source does not belong to this company" unless source.company_id == pay_period.company_id
+      unless pay_period.committed? || source.historical_reconciliation_complete?
+        raise ArgumentError, "Approve complete historical payroll reconciliation before importing new payroll time"
+      end
       raise ArgumentError, "end_date must be on or after start_date" if end_date < start_date
       unless start_date == pay_period.start_date && end_date == pay_period.end_date
         raise ArgumentError, "Finalized source batches must exactly match the selected pay period dates"

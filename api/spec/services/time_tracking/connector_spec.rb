@@ -235,11 +235,20 @@ RSpec.describe TimeTracking::Connector do
   it "rejects employee mapping associations across client connections" do
     foreign_source = create(:time_tracking_source)
     employee = create(:employee, company: company)
-    mapping = build(:time_tracking_employee_mapping, company: company, time_tracking_source: foreign_source, employee: employee)
+    mapping = TimeTrackingEmployeeMapping.new(company: company, time_tracking_source: foreign_source, employee: employee, source_user_id: "42")
     expect(mapping).not_to be_valid
     expect(mapping.errors[:time_tracking_source]).to include("must belong to the same company")
     expect { TimeTrackingEmployeeMapping.resolve_source_identity!(company: company, source: foreign_source,
       source_user_id: "42", source_user_uuid: SecureRandom.uuid) }.to raise_error(TimeTrackingEmployeeMapping::IdentityConflict, /does not belong/)
   end
 
+  it "does not restart historical onboarding when a complete connection restores its capabilities" do
+    pin!
+    period = create(:pay_period, :committed, company: company)
+    create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+    source.update!(source_capabilities: [ "time_summary_v1" ])
+    pin!
+    expect(source.reload.historical_reconciliation_required?).to be(false)
+    expect(source.supports?(:payroll_calendar_v2)).to be(true)
+  end
 end

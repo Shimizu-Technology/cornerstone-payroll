@@ -28,6 +28,13 @@ module TimeTracking
       # Hold the source row through the enclosing payroll transaction so a
       # concurrent settings update cannot disable it midway through application.
       raise ArgumentError, "Time tracking source is inactive" unless @source.lock!.active?
+      if finalized_batch?
+        @source.connector.require!(:finalized_batch_v2)
+        @source.connector.require!(:exact_line_receipts_v2)
+        unless @source.historical_reconciliation_complete?
+          raise ArgumentError, "Approve complete historical payroll reconciliation before applying new payroll time"
+        end
+      end
       results = nil
 
       @import.with_lock(requires_new: true) do

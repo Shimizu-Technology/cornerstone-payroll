@@ -88,6 +88,10 @@ class TimeTrackingSource < ApplicationRecord
     return unless source_type == "custom" && remote_source_identifier.present? &&
       source_capabilities.include?("payroll_calendar_v2") && !source_capabilities_in_database.include?("payroll_calendar_v2")
 
+    # A temporary capability loss must not turn payroll already processed
+    # through this complete connection into a fresh historical onboarding.
+    return if aire_payroll_calendar_periods.exists? || time_tracking_imports.where(contract_version: "2.0").exists?
+
     require_existing_payroll_history
   end
 
