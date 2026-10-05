@@ -5,6 +5,27 @@ import type { ConnectorHealth, DeliveryHealth } from '@/lib/connector-health';
 import { formatGuamDateTime } from '@/lib/utils';
 import { payRunPath, payRunsPath } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
+
+export function SourceConnectorReview({ sources, defaultSourceId, companyId }: {
+  sources: Array<{ id: number; company_id: number; name: string; active: boolean }>;
+  defaultSourceId?: number; companyId: number;
+}) {
+  const [params, setParams] = useSearchParams();
+  const requested = params.get('health_source_id');
+  const companySources = sources.filter(source => source.company_id === companyId);
+  const selected = companySources.find(source => String(source.id) === (requested ?? String(defaultSourceId ?? (companySources.length === 1 ? companySources[0].id : ''))));
+  return <div className="space-y-3">
+    <Select label="Stored time tracking connection" value={selected?.id ?? ''} onChange={event => {
+      const next = new URLSearchParams(params); next.set('health_source_id', event.target.value); setParams(next);
+    }}>
+      <option value="">Choose a stored connection to review</option>
+      {companySources.map(source => <option key={source.id} value={source.id}>{source.name}{source.active ? '' : ' (disabled)'}</option>)}
+    </Select>
+    {requested && !selected && <p role="alert" className="text-sm text-amber-800">That stored connection is unavailable for this company. Choose an available connection to review.</p>}
+    {selected && <SourceConnectorHealth key={selected.id} sourceId={selected.id} companyId={companyId} />}
+  </div>;
+}
 
 export function SourceConnectorHealth({ sourceId, companyId }: { sourceId: number; companyId: number }) {
   const [params, setParams] = useSearchParams();
@@ -23,8 +44,8 @@ export function SourceConnectorHealth({ sourceId, companyId }: { sourceId: numbe
     }).catch(caught => { if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Connection review unavailable.'); });
     return () => controller.abort();
   }, [sourceId, companyId, expanded, retry]);
-  const toggle = () => { const next = new URLSearchParams(params); next.set('source_id', String(sourceId)); if (expanded) next.delete('connection_health'); else next.set('connection_health', 'open'); setParams(next); };
-  const returnParams = new URLSearchParams(params); returnParams.set('source_id', String(sourceId));
+  const toggle = () => { const next = new URLSearchParams(params); next.set('health_source_id', String(sourceId)); if (expanded) next.delete('connection_health'); else next.set('connection_health', 'open'); setParams(next); };
+  const returnParams = new URLSearchParams(params); returnParams.set('health_source_id', String(sourceId));
   const returnTo = `${location.pathname}?${returnParams}`;
   const links = (ids: number[]) => <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">{ids.map(id => <Link key={id} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={payRunPath(companyId, id, 'work', { returnTo })}>Review pay run #{id}</Link>)}</div>;
   return <section className="rounded-xl border border-neutral-200 bg-white p-4 sm:p-5" aria-label="Connection delivery review">

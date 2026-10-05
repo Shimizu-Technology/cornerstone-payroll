@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SourceConnectorHealth } from './SourceConnectorHealth';
+import { SourceConnectorHealth, SourceConnectorReview } from './SourceConnectorHealth';
 import type { ConnectorHealth } from '@/lib/connector-health';
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('@/services/api', () => ({ timeTrackingSourceHealthApi: { read: mocks.read } }));
@@ -22,7 +22,7 @@ describe('Protected source delivery review', () => {
     expect(screen.getAllByText('2 pending · 1 failed deliveries').length).toBe(2);
     expect(screen.getAllByRole('link', { name: 'Review pay run #21' })[0].getAttribute('href')).toContain('/companies/7/pay-runs/21/work?return_to=');
     expect(screen.getAllByRole('link', { name: 'Review pay run #21' })[0].getAttribute('href')).toContain('connection_health%3Dopen');
-    expect(screen.getAllByRole('link', { name: 'Review pay run #21' })[0].getAttribute('href')).toContain('source_id%3D4');
+    expect(screen.getAllByRole('link', { name: 'Review pay run #21' })[0].getAttribute('href')).toContain('health_source_id%3D4');
     expect(screen.getByText(/Current source settlement holds/).textContent).toContain('not fetched');
   });
   it('keeps unavailable health separate from an empty successful queue and permits retry', async () => {
@@ -48,5 +48,24 @@ describe('Protected source delivery review', () => {
     await waitFor(() => expect(mocks.read).toHaveBeenCalledWith(5, 7, expect.any(AbortSignal)));
     resolve(health);
     await waitFor(() => expect(screen.queryByText('Batch receipts')).toBeNull());
+  });
+});
+
+describe('Stored connection selection', () => {
+  it('reviews a disabled company-owned producer without requiring account linking', async () => {
+    mocks.read.mockResolvedValue({ ...health, active: false });
+    render(<MemoryRouter initialEntries={['/app/time-account-connection?health_source_id=4&connection_health=open']}><SourceConnectorReview companyId={7} sources={[{ id: 4, company_id: 7, name: 'Generic stored producer', active: false }]} /></MemoryRouter>);
+    expect(await screen.findByText('Connection disabled. Retained delivery records remain available.')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Generic stored producer (disabled)' })).toBeTruthy();
+    expect(mocks.read).toHaveBeenCalledWith(4, 7, expect.any(AbortSignal));
+    expect(screen.getAllByRole('link', { name: 'Review pay run #21' })[0].getAttribute('href')).toContain('health_source_id%3D4');
+  });
+  it('refuses a stored source from another company and permits an explicit safe selection', async () => {
+    render(<MemoryRouter initialEntries={['/app/time-account-connection?health_source_id=5&connection_health=open']}><SourceConnectorReview companyId={7} sources={[{ id: 4, company_id: 7, name: 'Company source', active: true }, { id: 5, company_id: 8, name: 'Foreign source', active: false }]} /></MemoryRouter>);
+    expect(screen.getByRole('alert').textContent).toContain('unavailable for this company');
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(screen.queryByRole('option', { name: /Foreign source/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Stored time tracking connection'), { target: { value: '4' } });
+    expect(await screen.findByText('Batch receipts')).toBeTruthy();
   });
 });
