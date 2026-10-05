@@ -18,6 +18,7 @@ module AirePayrollEvents
       payload = @client_factory.call(calendar_period.time_tracking_source).payroll_batch(batch_id: event.payroll_batch_id)
       TimeTracking::PayrollBatchPayloadValidator.new(
         payload: payload,
+        expected_source: calendar_period.time_tracking_source.connector.source_identifier,
         start_date: calendar_period.pay_period.start_date,
         end_date: calendar_period.pay_period.end_date
       ).validate!

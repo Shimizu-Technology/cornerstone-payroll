@@ -56,7 +56,9 @@ class CompanyPaySchedule < ApplicationRecord
   end
 
   def scheduled_pay_date_for(period_end)
-    return unless pay_date_rule == "semimonthly_15th_and_month_end" && period_end
+    return unless period_end
+    return period_end + pay_date_offset_days.days if pay_date_rule == "days_after_period_end" && pay_date_offset_days
+    return unless pay_date_rule == "semimonthly_15th_and_month_end"
 
     # The first half is paid at month end; the second half is paid on the
     # following month's 15th. Scheduled dates never shift for non-working days.

@@ -76,7 +76,7 @@ vi.mock('@/services/api', () => ({
 const calendar: AirePayrollCalendarState = {
   enabled: true,
   source_id: 1,
-  source_name: 'AIRE Services',
+  source_name: 'time tracking Services',
   eligible: true,
   external_pay_period_id: '068f6f66-3b03-4ad0-9c90-042e408dac68',
   cutoff_at: '2026-10-18T17:00:00+10:00',
@@ -212,7 +212,7 @@ function fixtures(canCommand = true) {
       },
       origin: {
         reason: 'pending_approval',
-        payroll_batch_id: 'AIRE-PAY-ORIGIN',
+        payroll_batch_id: 'time tracking-PAY-ORIGIN',
         payroll_period_id: calendar.external_pay_period_id,
         excluded_at: calendar.cutoff_at!,
       },
@@ -273,7 +273,7 @@ beforeEach(() => {
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
   apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
   apiMocks.routeSettlement.mockResolvedValue({ settlement_case: { ...fixtures().settlements.settlement_cases[0], status: 'scheduled', version: 3 } });
-  apiMocks.finalize.mockResolvedValue({ result: { status: 'finalized', payroll_batch_id: 'AIRE-PAY-1' } });
+  apiMocks.finalize.mockResolvedValue({ result: { status: 'finalized', payroll_batch_id: 'time tracking-PAY-1' } });
   apiMocks.confirmEmployeeMapping.mockResolvedValue({
     employee_mapping: {
       source_user_id: '91',
@@ -300,7 +300,7 @@ describe('AirePayrollCockpit', () => {
         verification_attempts: 1,
         occurred_at: '2026-10-23T00:01:00+10:00',
         verified_at: '2026-10-23T00:01:10+10:00',
-        payroll_batch_id: 'AIRE-PAY-17',
+        payroll_batch_id: 'time tracking-PAY-17',
         payroll_batch_checksum: 'checksum',
         summary: {
           employee_count: 4,
@@ -321,17 +321,17 @@ describe('AirePayrollCockpit', () => {
       />
     );
 
-    expect(await screen.findByText('AIRE hours are ready to add')).toBeTruthy();
-    expect(screen.queryByText('Live AIRE readiness')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Review and add AIRE hours' }));
+    expect(await screen.findByText('Time tracking hours are ready to add')).toBeTruthy();
+    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
     expect(apiMocks.manualReview).not.toHaveBeenCalled();
   });
 
-  it('shows exact AIRE time, readiness, and mapping in one payroll workspace', async () => {
+  it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
-    expect(await screen.findByText('AIRE payroll workspace')).toBeTruthy();
+    expect(await screen.findByText('Time tracking payroll workspace')).toBeTruthy();
     expect(screen.getByText('16.08 hrs')).toBeTruthy();
     expect(screen.getAllByText('8.08 hrs').length).toBe(2);
     expect(screen.getByText('08:04 AM – 05:09 PM')).toBeTruthy();
@@ -388,7 +388,7 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await screen.findByText('AIRE payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Payment history 4/i }));
 
     const paymentSection = screen.getByRole('heading', { name: 'Hour and payment status' }).closest('section');
@@ -409,10 +409,10 @@ describe('AirePayrollCockpit', () => {
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await screen.findByText('AIRE payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Payment history 0/i }));
 
-    expect(screen.getByText('Payment history will appear after AIRE’s hours are added to payroll.')).toBeTruthy();
+    expect(screen.getByText('Payment history will appear after the source’s hours are added to payroll.')).toBeTruthy();
   });
 
   it('shows an identity suggestion without auto-linking and saves only an explicit confirmation', async () => {
@@ -435,7 +435,7 @@ describe('AirePayrollCockpit', () => {
         <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
       </MemoryRouter>
     );
-    await screen.findByText('AIRE payroll workspace');
+    await screen.findByText('Time tracking payroll workspace');
     await user.click(screen.getByRole('button', { name: /Team 1/i }));
 
     expect(screen.getByText('Not mapped')).toBeTruthy();
@@ -453,14 +453,14 @@ describe('AirePayrollCockpit', () => {
     }));
   });
 
-  it('shows a payroll profile mapping failure after returning to the AIRE workspace', async () => {
+  it('shows a payroll profile mapping failure after returning to the time tracking workspace', async () => {
     routerMocks.locationState = {
-      aireMappingNotice: 'The payroll profile was created, but AIRE could not be linked. Link the new employee from the payroll team list.',
+      aireMappingNotice: 'The payroll profile was created, but time tracking could not be linked. Link the new employee from the payroll team list.',
     };
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
-    expect((await screen.findByRole('alert')).textContent).toContain('The payroll profile was created, but AIRE could not be linked.');
+    expect((await screen.findByRole('alert')).textContent).toContain('The payroll profile was created, but time tracking could not be linked.');
     expect(routerMocks.navigate).toHaveBeenCalledWith('/companies/1/pay-periods/17', { replace: true, state: null });
   });
 
@@ -496,7 +496,7 @@ describe('AirePayrollCockpit', () => {
     expect(await screen.findByText('Payment confirmation needed')).toBeTruthy();
   });
 
-  it('reviews ordinary clock-entry overtime in AIRE without requiring a base-time approval', async () => {
+  it('reviews ordinary clock-entry overtime in time tracking without requiring a base-time approval', async () => {
     const user = userEvent.setup();
     const data = fixtures();
     const overtimeEntry = {
@@ -540,7 +540,7 @@ describe('AirePayrollCockpit', () => {
       command_id: expect.any(String),
     })));
     expect(apiMocks.review).not.toHaveBeenCalled();
-    expect(await screen.findByText('Overtime approved in AIRE and saved in both audit histories.')).toBeTruthy();
+    expect(await screen.findByText('Overtime approved in time tracking and saved in both audit histories.')).toBeTruthy();
   });
 
   it('shows who approved time and overtime, when, and why', async () => {
@@ -549,7 +549,7 @@ describe('AirePayrollCockpit', () => {
       ...timeEntry,
       capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
       state: { ...timeEntry.state, approval_status: 'approved', overtime_status: 'approved', payable_now: true },
-      approval: { actor: { name: 'AIRE Admin' }, occurred_at: '2026-10-15T08:00:00+10:00', note: 'Matched the schedule' },
+      approval: { actor: { name: 'time tracking Admin' }, occurred_at: '2026-10-15T08:00:00+10:00', note: 'Matched the schedule' },
       overtime_approval: { actor: { name: 'Chels Shimizu' }, occurred_at: '2026-10-15T08:05:00+10:00', note: 'Authorized overtime' },
     };
     data.entries.time_entries = [reviewedEntry];
@@ -557,7 +557,7 @@ describe('AirePayrollCockpit', () => {
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
-    expect(await screen.findByText(/Time approved by AIRE Admin/)).toBeTruthy();
+    expect(await screen.findByText(/Time approved by time tracking Admin/)).toBeTruthy();
     expect(screen.getByText(/Oct 15, 2026, 8:00:00 AM/)).toBeTruthy();
     expect(screen.getByText(/Matched the schedule/)).toBeTruthy();
     expect(screen.getByText(/Overtime approved by Chels Shimizu/)).toBeTruthy();
@@ -565,7 +565,7 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getByText(/Authorized overtime/)).toBeTruthy();
   });
 
-  it('corrects a manual timecard in AIRE and makes the new approval requirement explicit', async () => {
+  it('corrects a manual timecard in time tracking and makes the new approval requirement explicit', async () => {
     const user = userEvent.setup();
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
@@ -635,7 +635,7 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getByText('Overtime approval needed')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Correct' }));
-    expect(screen.getByText(/AIRE has 60 total break minutes but no exact break times/i)).toBeTruthy();
+    expect(screen.getByText(/time tracking has 60 total break minutes but no exact break times/i)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Correcting the description only' } });
     const save = screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement;
     expect(save.disabled).toBe(false);
@@ -699,18 +699,18 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
   });
 
-  it('keeps the workspace readable but disables commands without an AIRE account connection', async () => {
+  it('keeps the workspace readable but disables commands without a time tracking account connection', async () => {
     mockLoads(false);
     render(
       <MemoryRouter>
         <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
       </MemoryRouter>
     );
-    await screen.findByText(/actions need your AIRE access/i);
+    await screen.findByText(/actions need your time tracking access/i);
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: /lock AIRE cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole('link', { name: /connect my AIRE account/i }).getAttribute('href'))
+    expect((screen.getByRole('button', { name: /lock time tracking cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('link', { name: /connect my time tracking account/i }).getAttribute('href'))
       .toBe('/app/aire-account-connection?source_id=1&return_to=%2Fcompanies%2F1%2Fpay-periods%2F17');
   });
 
@@ -753,11 +753,11 @@ describe('AirePayrollCockpit', () => {
     const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
     await user.click(screen.getByRole('button', { name: 'Correct' }));
-    expect(screen.getByRole('heading', { name: 'Correct time in AIRE' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Correct time in time tracking' })).toBeTruthy();
 
     view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
 
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Correct time in AIRE' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull());
     expect(apiMocks.correct).not.toHaveBeenCalled();
   });
 
@@ -767,20 +767,20 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: /lock AIRE cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
     await user.click(screen.getByRole('button', { name: /lock eligible time/i }));
 
     await waitFor(() => expect(apiMocks.finalize).toHaveBeenCalledWith(17, expect.objectContaining({
       expected_version: 2,
-      reason: 'Reviewed AIRE readiness and confirmed eligible time for cutoff',
+      reason: 'Reviewed time tracking readiness and confirmed eligible time for cutoff',
       command_id: expect.any(String),
     })));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledOnce());
   });
 
-  it('keeps a command failure visible after reloading the latest AIRE details', async () => {
+  it('keeps a command failure visible after reloading the latest time tracking details', async () => {
     const user = userEvent.setup();
-    apiMocks.review.mockRejectedValueOnce(new Error('AIRE could not record this approval'));
+    apiMocks.review.mockRejectedValueOnce(new Error('time tracking could not record this approval'));
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
 
@@ -793,9 +793,9 @@ describe('AirePayrollCockpit', () => {
     await user.click(submit);
 
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledOnce());
-    await waitFor(() => expect(document.body.textContent).toContain('AIRE could not record this approval'));
+    await waitFor(() => expect(document.body.textContent).toContain('time tracking could not record this approval'));
     expect(screen.getAllByRole('alert', { hidden: true }).some((alert) => (
-      alert.textContent?.includes('AIRE could not record this approval')
+      alert.textContent?.includes('time tracking could not record this approval')
     ))).toBe(true);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
 
@@ -804,17 +804,17 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.review.mock.calls[1][2].command_id).toBe(apiMocks.review.mock.calls[0][2].command_id);
   });
 
-  it('reports a post-lock Cornerstone refresh failure separately from the successful AIRE command', async () => {
+  it('reports a post-lock Cornerstone refresh failure separately from the successful time tracking command', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockRejectedValue(new Error('pay period reload failed'));
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: /lock AIRE cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
     await user.click(screen.getByRole('button', { name: /lock eligible time/i }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'AIRE was locked, but Cornerstone could not refresh: pay period reload failed'
+      'Time tracking was locked, but Cornerstone could not refresh: pay period reload failed'
     );
     expect(apiMocks.finalize).toHaveBeenCalledOnce();
   });

@@ -12,7 +12,7 @@ module TimeTracking
     end
 
     def call
-      if source.source_type == "aire_services"
+      if source.source_type == "aire_services" || source.supports?(:finalized_batch_v2)
         return BatchImportPreviewService.new(
           pay_period: pay_period,
           source: source,

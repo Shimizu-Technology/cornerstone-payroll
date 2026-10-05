@@ -56,7 +56,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
       </div>
       <label className="flex items-start gap-2 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-5 text-primary-900">
         <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
-        <span>I verified this transfer completed at the bank. Recording it will mark any linked AIRE hours paid.</span>
+        <span>I verified this transfer completed at the bank. Recording it will mark any linked time tracking hours paid.</span>
       </label>
       {error && <div role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">{error}</div>}
       <DialogFooter>

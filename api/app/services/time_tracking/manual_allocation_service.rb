@@ -16,6 +16,8 @@ module TimeTracking
       raise Error, "Commit the payroll before linking paid AIRE hours" unless pay_period.committed? && !pay_period.voided?
       raise Error, "Connect an active AIRE source first" unless source&.active? && source.company_id == pay_period.company_id
 
+      raise Error, "This source does not support manual payroll allocations" unless source.supports?(:manual_allocations)
+
       item = pay_period.payroll_items.find(payroll_item_id)
       raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
       raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?

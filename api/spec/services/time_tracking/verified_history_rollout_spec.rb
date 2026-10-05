@@ -78,6 +78,25 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     expect(item.check_events.deliveries.count).to eq(0)
   end
 
+  context "with a verified compatible producer" do
+    let(:source) do
+      create(:time_tracking_source, company: company, source_type: "custom", name: "Neutral time",
+        remote_source_identifier: "neutral_time", expected_source_instance_id: SecureRandom.uuid,
+        source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0", identity_verified_at: Time.current,
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
+    end
+
+    it "preflights only the manifest-bound installation and identities without local writes" do
+      manifest["source_instance_id"] = source.expected_source_instance_id
+      expect(described_class.new(manifest: manifest, actor: actor).preview!).to include(identity_links: 1, exact_entries: 1)
+      expect(TimeTrackingEmployeeMapping.count).to eq(0)
+      manifest["source_instance_id"] = SecureRandom.uuid
+      expect { described_class.new(manifest: manifest, actor: actor).preview! }
+        .to raise_error(described_class::Error, /installation identity changed/)
+      expect(TimeTrackingManualAllocation.count).to eq(0)
+    end
+  end
+
   it "rejects a local numeric employee ID belonging to another company" do
     other = create(:employee)
     manifest["identity_links"].first["employee_id"] = other.id

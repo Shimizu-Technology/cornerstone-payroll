@@ -1134,6 +1134,7 @@ export interface PayPeriod {
   payroll_review?: PayrollReviewPackage | null;
   time_tracking?: {
     active_source_types: string[];
+    active_source_capabilities?: string[];
     aire_calendar?: AirePayrollCalendarState | null;
     linked_aire_records: AirePayrollRecord[];
   };

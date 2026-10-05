@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
-  def setup_records
+  def setup_records(source_type: "aire_services")
     company = create(:company)
     workweek = CompanyWorkweek.create!(
       company: company,
@@ -27,11 +27,18 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     )
     source = TimeTrackingSource.create!(
       company: company,
-      name: "AIRE",
-      source_type: "aire_services",
+      name: source_type == "aire_services" ? "AIRE" : "Neutral time",
+      source_type: source_type,
       base_url: "https://aire.example.com",
       shared_secret: "secret"
     )
+    if source_type == "custom"
+      TimeTracking::ConnectionIdentity.verify_and_pin!(source: source, payload: {
+        "source" => "neutral_time", "integration" => { "source_type" => "neutral_time", "protocol" => "shimizu_time_payroll",
+          "protocol_version" => "1.0", "source_instance_id" => SecureRandom.uuid,
+          "capabilities" => TimeTracking::Connector::AIRE_CAPABILITIES }
+      })
+    end
     [ company, pay_period, source ]
   end
 
@@ -689,7 +696,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       applied_by: create(:user, company: company)
     ).call
 
-    expect(results[:errors]).to contain_exactly(include(error: "Finalized AIRE batch rows cannot be skipped"))
+    expect(results[:errors]).to contain_exactly(include(error: "Finalized time tracking batch rows cannot be skipped"))
     expect(import.reload.status).to eq("previewed")
     expect(pay_period.payroll_items).to be_empty
   end
@@ -804,6 +811,69 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     ).call
 
     expect(results[:errors]).to contain_exactly(include(error: /negative Cornerstone payroll gross adjustment/))
+    expect(pay_period.payroll_items).to be_empty
+  end
+  it "previews and applies a neutral producer's exact lines using the same payroll calculation and receipt path" do
+    company, pay_period, source = setup_records(source_type: "custom")
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "neutral-worker@example.com")
+    rate = create(:employee_wage_rate, employee: employee, label: "Work", rate: 25, is_primary: true, active: true)
+    uuid = SecureRandom.uuid
+    adjustment = { "source_time_entry_id" => "101", "line_key" => "work:2500", "source_kind" => "current",
+      "original_work_date" => "2026-08-20", "original_week_start" => "2026-08-16", "source_category_id" => "work",
+      "category" => { "id" => "work", "key" => "work", "name" => "Work" },
+      "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0 }
+    payload = payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "NEUTRAL-101")
+    payload["source"] = "neutral_time"
+    payload["employees"].first["source_user_uuid"] = uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: uuid)
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+    expect(results[:errors]).to be_empty
+    item = pay_period.payroll_items.find_by!(employee: employee)
+    expect(item.wage_rate_hours).to contain_exactly(include("employee_wage_rate_id" => rate.id,
+      "regular_hours" => 8.0, "overtime_hours" => 2.0, "label" => /Neutral time current period/))
+    expect(import.reload).to have_attributes(status: "applied", external_batch_id: "NEUTRAL-101")
+    expect(import.time_tracking_entry_allocations).to contain_exactly(have_attributes(source_user_uuid: uuid,
+      source_time_entry_id: "101", line_key: "work:2500", regular_hours: 8, overtime_hours: 2))
+    expect(import.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id))
+      .to contain_exactly([ "imported", "101" ])
+  end
+  it "fails closed without payroll writes when a preview's required capability is revoked" do
+    company, pay_period, source = setup_records(source_type: "custom")
+    payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [])
+    payload["source"] = "neutral_time"
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    source.update!(source_capabilities: [ "time_summary_v1" ])
+    expect { described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call }
+      .to raise_error(ArgumentError, /does not support finalized batch/)
+    expect(import.reload.status).to eq("previewed")
+    expect(pay_period.payroll_items).to be_empty
+    expect(import.time_tracking_entry_allocations).to be_empty
+    expect(import.aire_payroll_acknowledgements).to be_empty
+  end
+
+  it "requires history approval for draft preview and apply while keeping committed historical review available" do
+    company, pay_period, source = setup_records(source_type: "custom")
+    payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [])
+    payload["source"] = "neutral_time"
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    source.update!(historical_reconciliation_required: true)
+    expect { TimeTracking::BatchImportPreviewService.new(pay_period: pay_period, source: source).call }
+      .to raise_error(ArgumentError, /historical payroll reconciliation/)
+    expect { described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call }
+      .to raise_error(ArgumentError, /historical payroll reconciliation/)
+    expect(import.reload.status).to eq("previewed")
+    expect(pay_period.payroll_items).to be_empty
+    expect(import.aire_payroll_acknowledgements).to be_empty
+    pay_period.update!(status: "committed", committed_at: Time.current)
+    expect(preview_import(pay_period: pay_period, source: source, payload: payload)).to eq(import)
+    result = TimeTracking::ReconcileCommittedImportService.new(import: import, mappings: [], reconciled_by: create(:user, company: company),
+      reconciliation_note: "Verified empty historical source batch").call
+    expect(result[:errors]).to be_empty
+    expect(import.reload.status).to eq("applied")
     expect(pay_period.payroll_items).to be_empty
   end
 end

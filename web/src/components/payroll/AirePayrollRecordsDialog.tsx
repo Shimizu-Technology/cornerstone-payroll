@@ -18,10 +18,10 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
       <DialogContent className="dialog-wide">
         <DialogHeader className="flex-row items-start justify-between space-y-0 text-left">
           <div>
-            <DialogTitle>Linked AIRE records</DialogTitle>
-            <p className="mt-1 text-sm text-neutral-600">Saved records for this payroll. Reviewing them does not contact AIRE or change payroll.</p>
+            <DialogTitle>Linked time tracking records</DialogTitle>
+            <p className="mt-1 text-sm text-neutral-600">Saved records for this payroll. Reviewing them does not contact time tracking or change payroll.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close linked AIRE records" className="-mr-2 -mt-2 rounded-full p-2 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+          <button type="button" onClick={onClose} aria-label="Close linked time tracking records" className="-mr-2 -mt-2 rounded-full p-2 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </DialogHeader>
@@ -60,7 +60,7 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
                   </p>
                   {record.payable_line_status.synchronization.failed_event_count > 0 && (
                     <p className="mt-2 text-xs font-medium text-danger-700">
-                      {record.payable_line_status.synchronization.failed_event_count} AIRE status update{record.payable_line_status.synchronization.failed_event_count === 1 ? ' is' : 's are'} retrying after a delivery error.
+                      {record.payable_line_status.synchronization.failed_event_count} time tracking status update{record.payable_line_status.synchronization.failed_event_count === 1 ? ' is' : 's are'} retrying after a delivery error.
                     </p>
                   )}
                 </div>
@@ -72,7 +72,7 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
                   <ul className="mt-2 space-y-2">
                     {record.reconciliation_exceptions.map((exception, index) => (
                       <li key={index}>
-                        <span className="font-medium">{exception.employee_name}</span>: AIRE regular {exception.aire_regular_hours} / overtime {exception.aire_overtime_hours} hours;
+                        <span className="font-medium">{exception.employee_name}</span>: time tracking regular {exception.aire_regular_hours} / overtime {exception.aire_overtime_hours} hours;
                         {' '}Cornerstone regular {exception.cornerstone_regular_hours} / overtime {exception.cornerstone_overtime_hours} hours.
                         {' '}Total difference: {exception.total_difference_hours} hours.
                       </li>

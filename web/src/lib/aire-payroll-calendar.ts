@@ -22,7 +22,7 @@ export function lockedBatchCopy(batch: AirePayrollCalendarState['finalized_batch
   if (!batch) {
     return {
       headline: 'No finalized batch received',
-      detail: 'AIRE has not sent locked hours for this period.',
+      detail: 'The time tracking system has not sent locked hours for this period.',
     };
   }
 

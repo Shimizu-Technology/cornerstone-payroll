@@ -58,9 +58,9 @@ for (const scenario of [
     await expect(page.getByText('Failed to load pay period', { exact: false })).toHaveCount(0);
     // Wait for the actual processing component, not just its loading container.
     await expect(page.getByRole('button', { name: scenario.status === 'draft' ? 'Calculate Payroll' : 'Correct Pay Date', exact: true })).toHaveCount(scenario.voided ? 0 : 1);
-    await expect(page.getByRole('button', { name: 'Link AIRE Record', exact: true })).toHaveCount(scenario.link ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Link time tracking Record', exact: true })).toHaveCount(scenario.link ? 1 : 0);
     await expect(page.getByRole('button', { name: 'Import Time Tracking', exact: true })).toHaveCount(scenario.import ? 1 : 0);
-    await expect(page.getByRole('button', { name: 'View AIRE Record', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'View time tracking Record', exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }
@@ -68,8 +68,8 @@ for (const scenario of [
 test('reviews saved AIRE records while disabled without fetching or mutating the source', async ({ page }) => {
   const { requests, errors } = await mockWorkspace(page, { linked: true });
   await page.goto('/companies/1/pay-runs/71/work');
-  await page.getByRole('button', { name: 'View AIRE Record', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Linked AIRE records' });
+  await page.getByRole('button', { name: 'View time tracking Record', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Linked time tracking records' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Saved AIRE source · AIRE-REVIEW-81')).toBeVisible();
   await expect(dialog.getByText('Integration disabled for this client')).toBeVisible();
@@ -79,7 +79,7 @@ test('reviews saved AIRE records while disabled without fetching or mutating the
   expect(requests.some((request) => /time_tracking_sources|time_tracking_import/.test(request))).toBe(false);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'View AIRE Record', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'View time tracking Record', exact: true })).toBeFocused();
   expect(errors).toEqual([]);
 });
 

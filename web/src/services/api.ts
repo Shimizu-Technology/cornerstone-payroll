@@ -925,6 +925,10 @@ export interface TimeTrackingSource {
   source_protocol?: string | null;
   source_protocol_version?: string | null;
   source_capabilities: string[];
+  supported_operations?: string[];
+  remote_source_identifier?: string | null;
+  authorization_origin?: string | null;
+  source_policy_constraints?: Record<string, string[]>;
   identity_verified_at?: string | null;
   last_synced_at: string | null;
 }
@@ -934,6 +938,7 @@ export interface TimeTrackingSourceCreatePayload {
   source_type: TimeTrackingSourceType;
   base_url: string;
   shared_secret: string;
+  authorization_origin?: string;
   delegation_token?: string;
   active: boolean;
 }
@@ -951,6 +956,7 @@ export interface TimeTrackingSourceTestResponse {
   source_protocol?: string | null;
   source_protocol_version?: string | null;
   source_capabilities?: string[];
+  supported_operations?: string[];
   identity_verified_at?: string | null;
   cockpit_ready?: boolean;
   delegation_token_configured?: boolean;
@@ -961,12 +967,15 @@ export interface TimeTrackingSourceUpdatePayload {
   name: string;
   base_url: string;
   shared_secret?: string;
+  authorization_origin?: string;
   delegation_token?: string;
   active: boolean;
 }
 
 export interface AireAccountLink {
   connected: boolean;
+  source_user_name?: string;
+  source_user_email?: string | null;
   aire_user_name?: string;
   aire_user_email?: string | null;
   linked_at?: string;

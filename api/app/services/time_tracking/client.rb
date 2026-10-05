@@ -21,7 +21,7 @@ module TimeTracking
     ].freeze
 
     def self.for_payroll_actor(source, actor:)
-      raise Error, "Sign in as payroll staff before reviewing AIRE hours" unless actor
+      raise Error, "Sign in as payroll staff before reviewing source hours" unless actor
 
       delegation = source.delegation_for(actor)
       # A transport or rate-limit failure is not evidence that the account is
@@ -34,7 +34,7 @@ module TimeTracking
       elsif delegation.present?
         new(source, delegation: delegation)
       else
-        raise Error, "Connect your payroll-capable AIRE account in payroll before reviewing AIRE hours"
+        raise Error, "Connect your payroll-capable time tracking account in payroll before reviewing source hours"
       end
     end
 
@@ -53,6 +53,7 @@ module TimeTracking
     end
 
     def payroll_batches(start_date:, end_date:)
+      require_capability!(:finalized_batch_v2)
       payload = request_json(payroll_batches_uri(start_date: start_date, end_date: end_date), validate_source: false)
       raise Error, "#{@source.name} returned an invalid payroll batch list" unless payload["payroll_batches"].is_a?(Array)
 
@@ -60,10 +61,12 @@ module TimeTracking
     end
 
     def payroll_batch(batch_id:)
+      require_capability!(:finalized_batch_v2)
       request_json(payroll_batch_uri(batch_id), validate_source: true)
     end
 
     def publish_payroll_calendar_period(external_pay_period_id:, payload:, idempotency_key:)
+      require_capability!(:payroll_calendar_v2)
       request_json(
         payroll_calendar_period_uri(external_pay_period_id),
         validate_source: false,
@@ -74,10 +77,12 @@ module TimeTracking
     end
 
     def payroll_calendar_period(external_pay_period_id:)
+      require_capability!(:payroll_calendar_v2)
       request_json(payroll_calendar_period_uri(external_pay_period_id), validate_source: false)
     end
 
     def create_payroll_account_link_session(external_actor_id:, external_actor_email:, return_url:)
+      require_capability!(:account_linking)
       uri = payroll_account_link_sessions_uri
       require_secure_payroll_transport!(uri)
       payload = request_json(
@@ -95,6 +100,7 @@ module TimeTracking
     end
 
     def payroll_account_link(external_actor_id:)
+      require_capability!(:account_linking)
       uri = payroll_account_link_uri(external_actor_id)
       require_secure_payroll_transport!(uri)
       request_json(
@@ -105,6 +111,7 @@ module TimeTracking
     end
 
     def disconnect_payroll_account_link(external_actor_id:)
+      require_capability!(:account_linking)
       uri = payroll_account_link_uri(external_actor_id)
       require_secure_payroll_transport!(uri)
       request_json(
@@ -116,10 +123,12 @@ module TimeTracking
     end
 
     def payroll_cockpit_period(external_pay_period_id:)
+      require_capability!(:payroll_cockpit)
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
     end
 
     def payroll_cockpit_manual_review(start_date:, end_date:, external_pay_period_id: nil)
+      require_capability!(:payroll_cockpit)
       query = { start_date: start_date, end_date: end_date }
       query[:external_pay_period_id] = external_pay_period_id if external_pay_period_id.present?
       uri = payroll_cockpit_uri("/manual_review", query)
@@ -133,6 +142,7 @@ module TimeTracking
     end
 
     def payroll_cockpit_manual_allocations(external_pay_period_id:, page: 1)
+      require_capability!(:manual_allocations)
       uri = payroll_cockpit_uri("/manual_allocations", external_pay_period_id: external_pay_period_id, page: page, per_page: 250)
       require_secure_payroll_transport!(uri)
       request_json(uri, validate_source: false, surface_remote_error: true)
@@ -141,6 +151,7 @@ module TimeTracking
     def commit_payroll_manual_allocation(entry_id:, command_id:, expected_version:, source_user_uuid:,
                                          regular_hours:, overtime_hours:, external_pay_period_id:,
                                          external_payroll_item_id:, pay_date:, reason:)
+      require_capability!(:manual_allocations)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations"),
         body: {
@@ -160,6 +171,7 @@ module TimeTracking
 
     def issue_payroll_manual_allocation(allocation_id:, command_id:, expected_version:,
                                         payment_method:, payment_reference:, payment_effective_on:, occurred_at:, reason:)
+      require_capability!(:manual_allocations)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
         body: {
@@ -175,6 +187,7 @@ module TimeTracking
     end
 
     def void_payroll_manual_allocation(allocation_id:, command_id:, expected_version:, occurred_at:, reason:)
+      require_capability!(:manual_allocations)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/void"),
         body: { command_id: command_id, expected_version: expected_version, occurred_at: occurred_at, reason: reason }
@@ -182,14 +195,16 @@ module TimeTracking
     end
 
     def payroll_cockpit_employees(page: 1, per_page: 100, active: nil)
+      require_capability!(:employee_directory)
       query = bounded_pagination(page, per_page, maximum: MAX_COCKPIT_EMPLOYEES_PER_PAGE)
       query[:active] = active unless active.nil?
       request_json(payroll_cockpit_uri("/employees", query), validate_source: false, surface_remote_error: true)
     end
 
     def payroll_cockpit_employee(employee_id:)
+      require_capability!(:employee_directory)
       normalized_id = employee_id.to_s
-      raise Error, "Invalid AIRE employee ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+      raise Error, "Invalid source employee ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
 
       request_json(
         payroll_cockpit_uri("/employees/#{normalized_id}"),
@@ -198,19 +213,39 @@ module TimeTracking
       )
     end
 
+    def payroll_employee_periods(employee_id:, source_user_uuid:, start_date: nil, end_date: nil, per_page: 20, cursor: nil)
+      require_capability!(:employee_period_evidence_v1)
+      query = { source_user_uuid: source_user_uuid, start_date: start_date, end_date: end_date,
+        per_page: per_page, cursor: cursor }.compact
+      employee_period_request(employee_id, query)
+    end
+
+    def payroll_employee_period(employee_id:, period_id:, source_user_uuid:, start_date: nil, end_date: nil, detail_per_page: 100, detail_cursor: nil)
+      require_capability!(:employee_period_evidence_v1)
+      unless period_id.to_s.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+        raise Error, "Invalid employee work period ID"
+      end
+      query = { source_user_uuid: source_user_uuid, start_date: start_date, end_date: end_date,
+        detail_per_page: detail_per_page, detail_cursor: detail_cursor }.compact
+      employee_period_request(employee_id, query, period_id: period_id)
+    end
+
     def payroll_cockpit_history_entries(through_work_date:, page: 1)
+      require_capability!(:payroll_cockpit)
       uri = payroll_cockpit_uri("/history_entries", through_work_date: through_work_date, page: page, per_page: 250)
       require_secure_payroll_transport!(uri)
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
     def payroll_payment_attestations(source_user_uuid:, page: 1)
+      require_capability!(:payment_attestations)
       uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
       require_secure_payroll_transport!(uri)
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
     def create_payroll_payment_attestation(source_time_entry_id:, source_user_uuid:, command_id:, expected_version:, reason:)
+      require_capability!(:payment_attestations)
       delegated_request_json(payroll_cockpit_uri("/payment_attestations"), body: {
         source_time_entry_id: normalized_cockpit_id(source_time_entry_id), source_user_uuid: source_user_uuid,
         command_id: command_id, expected_version: expected_version, reason: reason
@@ -218,16 +253,19 @@ module TimeTracking
     end
 
     def retract_payroll_payment_attestation(attestation_id:, command_id:, expected_version:, reason:)
+      require_capability!(:payment_attestations)
       delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/retract"),
         body: { command_id: command_id, expected_version: expected_version, reason: reason })
     end
 
     def payroll_cockpit_time_entry(entry_id:)
+      require_capability!(:payroll_cockpit)
       request_json(payroll_cockpit_uri("/time_entries/#{normalized_cockpit_id(entry_id)}"),
         validate_source: false, surface_remote_error: true)
     end
 
     def payroll_cockpit_time_entries(external_pay_period_id:, page: 1, per_page: 250, employee_id: nil, approval_status: nil)
+      require_capability!(:payroll_cockpit)
       query = {
         external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
       }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
@@ -237,6 +275,7 @@ module TimeTracking
     end
 
     def payroll_cockpit_exceptions(external_pay_period_id:, page: 1, per_page: 250, leave_page: 1, leave_per_page: 100)
+      require_capability!(:payroll_cockpit)
       query = {
         external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
       }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
@@ -248,6 +287,7 @@ module TimeTracking
     end
 
     def payroll_cockpit_settlement_cases(external_pay_period_id:, page: 1, per_page: 250, status: nil)
+      require_capability!(:payroll_cockpit)
       query = {
         external_pay_period_id: normalize_external_pay_period_id(external_pay_period_id)
       }.merge(bounded_pagination(page, per_page, maximum: MAX_COCKPIT_ENTRIES_PER_PAGE))
@@ -256,6 +296,7 @@ module TimeTracking
     end
 
     def approve_payroll_time_entry(entry_id:, command_id:, expected_version:, decision:, reason:)
+      require_capability!(:payroll_cockpit)
       delegated_request_json(
         payroll_cockpit_time_entry_approval_uri(entry_id),
         body: {
@@ -268,6 +309,7 @@ module TimeTracking
     end
 
     def approve_payroll_overtime(entry_id:, command_id:, expected_version:, decision:, reason:)
+      require_capability!(:payroll_cockpit)
       delegated_request_json(
         payroll_cockpit_time_entry_approval_uri(entry_id, overtime: true),
         body: {
@@ -280,6 +322,7 @@ module TimeTracking
     end
 
     def correct_payroll_time_entry(entry_id:, command_id:, expected_version:, reason:, attributes:)
+      require_capability!(:payroll_cockpit)
       delegated_request_json(
         payroll_cockpit_time_entry_correction_uri(entry_id),
         body: attributes.to_h.merge(
@@ -292,6 +335,7 @@ module TimeTracking
 
     def route_payroll_settlement_case(case_id:, command_id:, expected_version:, reason:, destination_kind:,
                                       target_external_pay_period_id: nil, action_due_on: nil)
+      require_capability!(:payroll_cockpit)
       delegated_request_json(
         payroll_cockpit_settlement_case_uri(case_id, action: "route"),
         body: {
@@ -306,6 +350,7 @@ module TimeTracking
     end
 
     def finalize_payroll_cockpit_period(external_pay_period_id:, command_id:, expected_version:, reason:)
+      require_capability!(:payroll_cockpit)
       delegated_request_json(
         payroll_cockpit_finalize_uri(external_pay_period_id),
         body: {
@@ -317,6 +362,7 @@ module TimeTracking
     end
 
     def record_payroll_batch_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, metadata: {})
+      require_capability!(:exact_line_receipts_v2)
       request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
@@ -333,6 +379,7 @@ module TimeTracking
     end
 
     def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, contract_version: nil, source_line_key: nil, source_kind: nil, total_hours: nil, regular_hours: nil, overtime_hours: nil, payment_method: nil, payment_reference: nil, payment_effective_on: nil, metadata: {})
+      require_capability!(:exact_line_receipts_v2)
       request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
@@ -404,7 +451,14 @@ module TimeTracking
       payload = JSON.parse(body)
       raise Error, "#{@source.name} returned an invalid payload" unless payload.is_a?(Hash)
 
-      validate_source_identity!(payload) if validate_source
+      # Deployed AIRE acknowledgements predate response descriptors. Keep that
+      # adapter compatible, while validating any descriptor it returns. Other
+      # complete producers must bind every successful response to the pin.
+      if validate_source
+        validate_source_identity!(payload)
+      elsif @source.source_type != "aire_services" || payload["integration"].present? || payload.dig("export", "integration").present?
+        validate_integration_response!(payload)
+      end
       payload
     rescue JSON::ParserError
       raise Error, "#{@source.name} returned invalid JSON"
@@ -466,7 +520,7 @@ module TimeTracking
 
     def payroll_cockpit_time_entry_approval_uri(entry_id, overtime: false)
       normalized_id = entry_id.to_s
-      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+      raise Error, "Invalid source time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
 
       action = overtime ? "overtime_approval" : "approval"
       source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/#{action}")
@@ -474,7 +528,7 @@ module TimeTracking
 
     def payroll_cockpit_time_entry_correction_uri(entry_id)
       normalized_id = entry_id.to_s
-      raise Error, "Invalid AIRE time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
+      raise Error, "Invalid source time entry ID" unless normalized_id.match?(/\A[1-9]\d*\z/)
 
       source_uri("/api/v1/payroll/cockpit/time_entries/#{normalized_id}/correction")
     end
@@ -482,7 +536,7 @@ module TimeTracking
     def payroll_cockpit_settlement_case_uri(case_id, action: nil)
       normalized_id = case_id.to_s.downcase
       unless normalized_id.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
-        raise Error, "Invalid AIRE settlement case ID"
+        raise Error, "Invalid source settlement case ID"
       end
 
       suffix = action ? "/#{action}" : ""
@@ -511,9 +565,28 @@ module TimeTracking
       normalized_id
     end
 
+    def employee_period_request(employee_id, query, period_id: nil)
+      uuid = query.fetch(:source_user_uuid).to_s.downcase
+      raise Error, "A stable employee identity is required" unless uuid.match?(TimeTrackingSource::UUID_PATTERN)
+
+      suffix = "/employees/#{normalized_cockpit_id(employee_id, label: 'employee')}/periods"
+      suffix += "/#{period_id}" if period_id
+      uri = payroll_cockpit_uri(suffix, query.merge(source_user_uuid: uuid))
+      require_secure_payroll_transport!(uri)
+      payload = request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      ConnectionIdentity.validate!(source: @source, payload: payload)
+      unless payload.dig("employee", "payroll_integration_id").to_s.downcase == uuid &&
+        payload.dig("employee", "id").to_s == employee_id.to_s && payload["contract_version"] == "1.0"
+        raise Error, "Employee period evidence does not match the requested identity or contract"
+      end
+      payload
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
+    end
+
     def normalized_cockpit_id(value, label: "record")
       normalized = value.to_s
-      raise Error, "Invalid AIRE #{label} ID" unless normalized.match?(/\A[1-9]\d*\z/)
+      raise Error, "Invalid source #{label} ID" unless normalized.match?(/\A[1-9]\d*\z/)
 
       normalized
     end
@@ -542,26 +615,34 @@ module TimeTracking
 
     def payroll_actor_headers
       if @actor.present?
-        { "X-Cornerstone-Actor-Id" => normalize_external_actor_id(@actor.id) }
+        { (@source.connector.aire_policy? ? "X-Cornerstone-Actor-Id" : "X-Payroll-Actor-Id") => normalize_external_actor_id(@actor.id) }
       else
         token = @delegation&.token.to_s
-        raise Error, "Connect your payroll-capable AIRE account before using payroll actions" if token.blank?
+        raise Error, "Connect your payroll-capable time tracking account before using payroll actions" if token.blank?
 
-        { "X-Aire-Delegation-Token" => token }
+        { (@source.connector.aire_policy? ? "X-Aire-Delegation-Token" : "X-Payroll-Delegation-Token") => token }
       end
+    end
+
+    def require_capability!(capability)
+      @source.connector.require!(capability)
+    rescue ArgumentError => e
+      raise Error, e.message
     end
 
     def require_secure_payroll_transport!(uri)
       return if uri.scheme == "https" || development_loopback?(uri) || @destination_policy.staging_private_destination?(uri)
 
-      raise Error, "AIRE payroll actions and account linking require HTTPS"
+      raise Error, "Payroll actions and account linking require HTTPS"
     end
 
     def validate_account_link_authorization_url!(payload)
       uri = URI.parse(payload["authorization_url"].to_s)
-      allowed_hosts = AIRE_ACCOUNT_LINK_HOSTS +
-                      ENV.fetch("AIRE_ACCOUNT_LINK_ALLOWED_HOSTS", "").split(",") +
-                      [ URI.parse(@source.base_url.to_s).host ]
+      allowed_origins = @source.connector.authorization_origins
+      allowed_hosts = allowed_origins.map { |origin| URI.parse(origin).host }
+      if @source.connector.aire_policy?
+        allowed_hosts += ENV.fetch("AIRE_ACCOUNT_LINK_ALLOWED_HOSTS", "").split(",") + [ URI.parse(@source.base_url.to_s).host ]
+      end
       allowed_hosts = allowed_hosts.filter_map { |host| DestinationPolicy.normalize_host(host) }.uniq
       secure_url = uri.scheme == "https" && uri.port == 443 && uri.host.present? && uri.userinfo.blank?
       approved_host = allowed_hosts.include?(DestinationPolicy.normalize_host(uri.host))
@@ -685,8 +766,24 @@ module TimeTracking
       nil
     end
 
+    def validate_integration_response!(payload)
+      result = ConnectionIdentity.validate!(source: @source, payload: payload)
+      if @source.source_type != "aire_services" && result.legacy
+        raise Error, "#{@source.name} omitted its verified integration descriptor"
+      end
+      # A response may narrow support only after a fresh operator connection
+      # verification. Never accept an acknowledgement from a changed contract.
+      if @source.remote_identity_pinned? && !result.legacy &&
+        (result.protocol != @source.source_protocol || result.protocol_version != @source.source_protocol_version ||
+          result.capabilities != @source.source_capabilities.sort || result.policy_constraints != @source.source_policy_constraints)
+        raise Error, "#{@source.name} integration contract changed; test the connection before continuing"
+      end
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
+    end
+
     def validate_source_identity!(payload)
-      validate_declared_source_type!(payload) unless @source.source_type == "custom"
+      validate_declared_source_type!(payload) if @source.connector.source_identifier.present?
       ConnectionIdentity.validate!(source: @source, payload: payload)
     rescue ConnectionIdentity::Error => e
       raise Error, e.message
@@ -696,9 +793,9 @@ module TimeTracking
       raise Error, "#{@source.name} response omitted source identity" if payload["source"].blank?
 
       returned_source = payload["source"].to_s
-      return if returned_source == @source.source_type
+      return if returned_source == @source.connector.source_identifier
 
-      raise Error, "#{@source.name} responded as #{returned_source.presence || 'an unknown source'}, expected #{@source.source_type}"
+      raise Error, "#{@source.name} responded as #{returned_source.presence || 'an unknown source'}, expected #{@source.connector.source_identifier}"
     end
   end
 end

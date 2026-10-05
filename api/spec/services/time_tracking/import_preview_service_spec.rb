@@ -60,6 +60,16 @@ RSpec.describe TimeTracking::ImportPreviewService do
       expect(described_class.new(pay_period: pay_period, source: source).call).to eq(:finalized_preview)
     end
 
+    it "does not route unverified stored batch capabilities into finalized import" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_capabilities: [ "finalized_batch_v2" ])
+      period = create(:pay_period, company: company)
+      expect(TimeTracking::BatchImportPreviewService).not_to receive(:new)
+      expect { described_class.new(pay_period: period, source: source).call }
+        .to raise_error(ArgumentError, /Confirm the legal overtime workweek/)
+      expect(TimeTrackingImport.count).to eq(0)
+    end
+
     it "surfaces category buckets and warns when a multi-rate employee needs earning-type mapping" do
       company = create(:company)
       confirm_workweek!(company)

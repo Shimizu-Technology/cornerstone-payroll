@@ -46,7 +46,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
       if (generation === requestGeneration.current) setReview(result);
     } catch (caught) {
       if (generation === requestGeneration.current) {
-        setError(caught instanceof Error ? caught.message : 'Could not compare AIRE and Payroll hours');
+        setError(caught instanceof Error ? caught.message : 'Could not compare time tracking and Payroll hours');
       }
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
@@ -91,11 +91,11 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
         <div className="flex flex-col gap-4 border-b border-primary-100 bg-primary-50/60 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-display text-lg font-bold text-neutral-950">Live AIRE readiness</h3>
+              <h3 className="font-display text-lg font-bold text-neutral-950">Live time tracking readiness</h3>
               <Badge variant="info">Before cutoff</Badge>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-700">
-              Review current hours, mappings, carryover, and held entries before cutoff. After AIRE locks the period, this area switches to the verified batch that can be added to payroll.
+              Review current hours, mappings, carryover, and held entries before cutoff. After time tracking locks the period, this area switches to the verified batch that can be added to payroll.
             </p>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
@@ -106,18 +106,18 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
         {loading && !review ? (
           <div className="flex items-center justify-center gap-4 px-6 py-10 text-sm text-neutral-600">
-            <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Comparing AIRE with the hours entered in Payroll…
+            <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Comparing time tracking with the hours entered in Payroll…
           </div>
         ) : error ? (
           <div role="alert" className="flex items-start gap-4 px-6 py-6 text-sm text-danger-800">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            <div><p className="font-semibold">The live AIRE preview could not load.</p><p className="mt-2 leading-5">{error} Refresh before using AIRE hours for payroll.</p></div>
+            <div><p className="font-semibold">The live time tracking preview could not load.</p><p className="mt-2 leading-5">{error} Refresh before using time tracking hours for payroll.</p></div>
           </div>
         ) : review && (
           <>
             <div className="grid gap-4 border-b border-neutral-200 bg-white p-4 sm:grid-cols-3 sm:p-6">
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE payable now</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking payable now</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(review.summary.total_hours)} hrs</p>
                 <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
               </div>
@@ -148,7 +148,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE currently shows</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking currently shows</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
                       {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
                       {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
@@ -161,13 +161,13 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   </div>
                 </article>
               ))}
-              {rows.length === 0 && <p className="px-6 py-8 text-center text-sm text-neutral-500">AIRE has no payable time for {formatDateRange(review.start_date, review.end_date)}.</p>}
+              {rows.length === 0 && <p className="px-6 py-8 text-center text-sm text-neutral-500">Time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</p>}
             </div>
 
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
-                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">AIRE currently shows</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
+                  <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">Time tracking currently shows</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {rows.map(({ employee, payrollRegular, payrollOvertime, carryover, corrections, categories, matched }) => (
@@ -195,7 +195,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       </td>
                     </tr>
                   ))}
-                  {rows.length === 0 && <tr><td colSpan={4} className="px-6 py-8 text-center text-neutral-500">AIRE has no payable time for {formatDateRange(review.start_date, review.end_date)}.</td></tr>}
+                  {rows.length === 0 && <tr><td colSpan={4} className="px-6 py-8 text-center text-neutral-500">Time tracking has no payable time for {formatDateRange(review.start_date, review.end_date)}.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -235,8 +235,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 {review.historical_classification_reviews?.map((item) => (
                   <article key={item.id} className="mt-4 rounded-lg border border-warning-200 bg-white p-4 text-sm">
                     <p className="font-semibold">{item.employee_name} · check {item.check_number} · {item.source_entry_count} source entries</p>
-                    <p className="mt-2">AIRE: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
-                    <p className="mt-2">Gross wage difference: {item.gross_wage_difference < 0 ? '−' : '+'}${Math.abs(item.gross_wage_difference).toFixed(2)} ({item.gross_wage_difference < 0 ? 'issued check wages exceed AIRE estimate' : item.gross_wage_difference > 0 ? 'AIRE estimate exceeds issued check wages' : 'estimates match'}) · {item.status}</p>
+                    <p className="mt-2">Time tracking: {hours(item.source_regular_hours)} regular · {hours(item.source_overtime_hours)} OT. Payroll: {hours(item.payroll_regular_hours)} regular · {hours(item.payroll_overtime_hours)} OT.</p>
+                    <p className="mt-2">Gross wage difference: {item.gross_wage_difference < 0 ? '−' : '+'}${Math.abs(item.gross_wage_difference).toFixed(2)} ({item.gross_wage_difference < 0 ? 'issued check wages exceed time tracking estimate' : item.gross_wage_difference > 0 ? 'time tracking estimate exceeds issued check wages' : 'estimates match'}) · {item.status}</p>
                     <p className="mt-2 text-neutral-600">{item.note}</p>
                   </article>
                 ))}
@@ -246,7 +246,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             {review.exclusions.length > 0 && (
               <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">
                 <h4 className="font-semibold text-neutral-950">Held outside the current payable total</h4>
-                <p className="mt-2 text-sm text-neutral-600">Resolve these in AIRE when appropriate. They stay tracked and will not be silently added to this payroll.</p>
+                <p className="mt-2 text-sm text-neutral-600">Resolve these in time tracking when appropriate. They stay tracked and will not be silently added to this payroll.</p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {review.exclusions.map((exclusion) => (
                     <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-lg border border-warning-200 bg-white p-4 text-sm">
@@ -261,7 +261,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <div className="border-t border-neutral-200 bg-neutral-950 px-6 py-6 text-sm text-neutral-200">
               <p className="font-semibold text-white">What happens at cutoff</p>
               <ol className="mt-2 grid gap-2 leading-5 md:grid-cols-4">
-                <li><span className="font-semibold text-white">1.</span> AIRE freezes eligible time.</li>
+                <li><span className="font-semibold text-white">1.</span> Time tracking freezes eligible time.</li>
                 <li><span className="font-semibold text-white">2.</span> Cornerstone verifies the batch.</li>
                 <li><span className="font-semibold text-white">3.</span> Review and add the hours once.</li>
                 <li><span className="font-semibold text-white">4.</span> Calculate the payroll.</li>
@@ -269,8 +269,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <p className="mt-4 text-xs leading-5 text-neutral-300">
                 {isCommitted
                   ? aireRecordLinked
-                    ? 'Cornerstone reports check preparation and delivery back to AIRE automatically.'
-                    : 'This run is committed. Link the verified AIRE record so both systems retain the same history.'
+                    ? 'Cornerstone reports check preparation and delivery back to time tracking automatically.'
+                    : 'This run is committed. Link the verified time tracking record so both systems retain the same history.'
                   : 'After the verified batch is added, Cornerstone carries its exact entry links through calculation, checks, and payment status.'}
               </p>
             </div>

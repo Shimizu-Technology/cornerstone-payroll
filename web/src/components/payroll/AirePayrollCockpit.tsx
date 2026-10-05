@@ -277,7 +277,7 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   return (
     <div className="grid gap-3 border-t border-neutral-100 px-4 py-4 first:border-t-0 lg:grid-cols-[1.2fr_1fr_0.8fr_1.1fr_auto] lg:items-center">
       <div>
-        <p className="font-semibold text-neutral-950">{entry.employee.name || 'Unknown AIRE employee'}</p>
+        <p className="font-semibold text-neutral-950">{entry.employee.name || 'Unknown time tracking employee'}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
           <span>{formatDate(entry.work_date)}</span>
           <MappingBadge status={entry.employee.cornerstone.status} />
@@ -298,13 +298,13 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         {entry.state.missing_punch && <Badge variant="danger">Missing punch</Badge>}
         {entry.approval?.occurred_at && (
           <p className="basis-full text-xs leading-5 text-neutral-500">
-            Time {entry.state.approval_status} by {entry.approval.actor?.name || 'AIRE administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
+            Time {entry.state.approval_status} by {entry.approval.actor?.name || 'time tracking administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
             {entry.approval.note ? ` · ${entry.approval.note}` : ''}
           </p>
         )}
         {entry.overtime_approval?.occurred_at && (
           <p className="basis-full text-xs leading-5 text-neutral-500">
-            Overtime {entry.state.overtime_status} by {entry.overtime_approval.actor?.name || 'AIRE administrator'} · {formatGuamDateTime(entry.overtime_approval.occurred_at)}
+            Overtime {entry.state.overtime_status} by {entry.overtime_approval.actor?.name || 'time tracking administrator'} · {formatGuamDateTime(entry.overtime_approval.occurred_at)}
             {entry.overtime_approval.note ? ` · ${entry.overtime_approval.note}` : ''}
           </p>
         )}
@@ -370,7 +370,7 @@ export function AirePayrollCockpit({
   const [reason, setReason] = useState('');
   const [showFinalize, setShowFinalize] = useState(false);
   const [finalizeCommand, setFinalizeCommand] = useState<FinalizeCommand | null>(null);
-  const [finalizeReason, setFinalizeReason] = useState('Reviewed AIRE readiness and confirmed eligible time for cutoff');
+  const [finalizeReason, setFinalizeReason] = useState('Reviewed time tracking readiness and confirmed eligible time for cutoff');
   const [timePage, setTimePage] = useState(1);
   const [exceptionPage, setExceptionPage] = useState(1);
   const [leavePage, setLeavePage] = useState(1);
@@ -427,7 +427,7 @@ export function AirePayrollCockpit({
       setSettlementCases(settlementResult);
     } catch (caught) {
       if (generation !== requestGeneration.current) return;
-      setRefreshError(caught instanceof Error ? caught.message : 'Could not refresh AIRE payroll details');
+      setRefreshError(caught instanceof Error ? caught.message : 'Could not refresh time tracking payroll details');
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
@@ -506,7 +506,7 @@ export function AirePayrollCockpit({
       setCommandSuccess(`${employeeMapping.employee.full_name} is now linked to the confirmed payroll employee.`);
       setEmployeeMapping(null);
     } catch (caught) {
-      setCommandError(caught instanceof Error ? caught.message : 'Could not link this AIRE employee');
+      setCommandError(caught instanceof Error ? caught.message : 'Could not link this time tracking employee');
     } finally {
       await load();
       setBusy(false);
@@ -544,12 +544,12 @@ export function AirePayrollCockpit({
         await payPeriodsApi.reviewAireTimeEntry(payPeriodId, review.entry.id, request);
       }
       const subject = review.kind === 'overtime' ? 'Overtime' : 'Time';
-      setCommandSuccess(`${subject} ${review.decision === 'approve' ? 'approved' : 'denied'} in AIRE and saved in both audit histories.`);
+      setCommandSuccess(`${subject} ${review.decision === 'approve' ? 'approved' : 'denied'} in time tracking and saved in both audit histories.`);
       setReview(null);
       setReason('');
     } catch (caught) {
       setCommandError(caught instanceof ApiError && caught.status === 409
-        ? 'That time entry changed in AIRE. The latest details have been reloaded; review it again before deciding.'
+        ? 'That time entry changed in time tracking. The latest details have been reloaded; review it again before deciding.'
         : caught instanceof Error ? caught.message : 'Could not update the time entry');
     } finally {
       await load();
@@ -580,11 +580,11 @@ export function AirePayrollCockpit({
         ...detailedBreaks,
       });
       setCorrection(null);
-      setCommandSuccess('Time corrected in AIRE. It now needs administrator approval before it can be paid.');
+      setCommandSuccess('Time corrected in time tracking. It now needs administrator approval before it can be paid.');
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
         setCorrection(null);
-        setCommandError('That time entry changed in AIRE. The latest details have been reloaded; open the correction again before saving.');
+        setCommandError('That time entry changed in time tracking. The latest details have been reloaded; open the correction again before saving.');
       } else {
         setCommandError(caught instanceof Error ? caught.message : 'Could not correct the time entry');
       }
@@ -612,12 +612,12 @@ export function AirePayrollCockpit({
       });
       setSettlementRoute(null);
       setCommandSuccess(settlementRoute.destinationKind === 'regular'
-        ? 'Held time routed to the selected regular payroll in AIRE.'
-        : 'Held time marked not payable in AIRE with your review reason.');
+        ? 'Held time routed to the selected regular payroll in time tracking.'
+        : 'Held time marked not payable in time tracking with your review reason.');
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
         setSettlementRoute(null);
-        setCommandError('That held-time case changed in AIRE. The latest details have been reloaded; review it again.');
+        setCommandError('That held-time case changed in time tracking. The latest details have been reloaded; review it again.');
       } else {
         setCommandError(caught instanceof Error ? caught.message : 'Could not update the held-time destination');
       }
@@ -643,8 +643,8 @@ export function AirePayrollCockpit({
       setFinalizeCommand(null);
     } catch (caught) {
       setCommandError(caught instanceof ApiError && caught.status === 409
-        ? 'The AIRE period changed before it could be locked. The latest details have been reloaded.'
-        : caught instanceof Error ? caught.message : 'Could not lock the AIRE payroll period');
+        ? 'The time tracking period changed before it could be locked. The latest details have been reloaded.'
+        : caught instanceof Error ? caught.message : 'Could not lock the time tracking payroll period');
     } finally {
       await load();
       if (commandSucceeded) {
@@ -652,8 +652,8 @@ export function AirePayrollCockpit({
           await onRefresh();
         } catch (caught) {
           setRefreshError(caught instanceof Error
-            ? `AIRE was locked, but Cornerstone could not refresh: ${caught.message}`
-            : 'AIRE was locked, but Cornerstone could not refresh its payroll status.');
+            ? `Time tracking was locked, but Cornerstone could not refresh: ${caught.message}`
+            : 'Time tracking was locked, but Cornerstone could not refresh its payroll status.');
         }
       }
       setBusy(false);
@@ -700,16 +700,16 @@ export function AirePayrollCockpit({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-display text-lg font-bold">AIRE payroll workspace</h3>
-                    <Badge className="bg-white/10 text-white">Live from AIRE</Badge>
+                    <h3 className="font-display text-lg font-bold">Time tracking payroll workspace</h3>
+                    <Badge className="bg-white/10 text-white">Live from time tracking</Badge>
                   </div>
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-300">
-                    Review the exact AIRE timecards, resolve manual entries, lock the cutoff, and follow every hour through payroll without leaving Cornerstone.
+                    Review the exact time tracking timecards, resolve manual entries, lock the cutoff, and follow every hour through payroll without leaving Cornerstone.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant="secondary" onClick={() => void load()} disabled={loading || busy}>
-                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh AIRE
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
                   {overview?.payroll_period.status !== 'finalized' && (
                     <Button type="button" size="sm" onClick={() => {
@@ -723,7 +723,7 @@ export function AirePayrollCockpit({
                       setShowFinalize(true);
                     }} disabled={!canCommand || !periodCanFinalize || busy || loading}>
                       <LockKeyhole className="mr-2 h-4 w-4" />
-                      Lock AIRE cutoff
+                      Lock time tracking cutoff
                     </Button>
                   )}
                 </div>
@@ -746,12 +746,12 @@ export function AirePayrollCockpit({
 
             {loading && !overview ? (
               <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-neutral-600">
-                <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Loading live AIRE payroll details…
+                <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Loading live time tracking payroll details…
               </div>
             ) : overview && (
               <>
                 <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5 sm:p-6">
-                  <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in AIRE`} />
+                  <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in time tracking`} />
                   <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
                   <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecard${overview.readiness.held_entries === 1 ? '' : 's'} · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
                   <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
@@ -769,13 +769,13 @@ export function AirePayrollCockpit({
                   <div className="flex items-start gap-3 border-b border-warning-200 bg-warning-50 px-5 py-4 text-sm text-warning-900 sm:px-6">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold">Live details are available, but actions need your AIRE access</p>
-                      <p className="mt-1 leading-5">Connect your own AIRE account with payroll access for permitted reconciliation. Your Payroll role still controls approvals, mappings, routing and calendar setup.</p>
+                      <p className="font-semibold">Live details are available, but actions need your time tracking access</p>
+                      <p className="mt-1 leading-5">Connect your own time tracking account with payroll access for permitted reconciliation. Your Payroll role still controls approvals, mappings, routing and calendar setup.</p>
                       {hasCapability('manage_own_aire_account_link') ? <Link
                         to={aireAccountConnectionPath(calendar.source_id, currentAppPath(location.pathname, location.search))}
                         className="mt-2 inline-flex min-h-9 items-center gap-2 rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2"
                       >
-                        Connect my AIRE account
+                        Connect my time tracking account
                         <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                       </Link> : <p className="mt-2">Ask your payroll administrator to review your company access.</p>}
                     </div>
@@ -792,12 +792,12 @@ export function AirePayrollCockpit({
                 {overview.payroll_period.status === 'finalized' && (
                   <div className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p><span className="font-semibold">AIRE cutoff locked.</span> Batch {overview.finalized_batch?.id || overview.payroll_period.payroll_batch_id || 'is being prepared'} contains the eligible hours. Held hours remain visible below for the next available payroll.</p>
+                    <p><span className="font-semibold">Time tracking cutoff locked.</span> Batch {overview.finalized_batch?.id || overview.payroll_period.payroll_batch_id || 'is being prepared'} contains the eligible hours. Held hours remain visible below for the next available payroll.</p>
                   </div>
                 )}
 
                 <div className="border-b border-neutral-200 px-4 pt-4 sm:px-6">
-                  <div className="flex gap-1 overflow-x-auto" aria-label="AIRE payroll details">
+                  <div className="flex gap-1 overflow-x-auto" aria-label="Time tracking payroll details">
                     {([
                       ['timecards', 'Timecards', timeEntries?.pagination.total_count || 0],
                       ['exceptions', 'Needs attention', (exceptions?.time_exception_pagination.total_count || 0) + (exceptions?.leave_exception_pagination.total_count || 0)],
@@ -830,13 +830,13 @@ export function AirePayrollCockpit({
                       />
                     )) : (
                       <div className="px-6 py-10 text-center text-sm text-neutral-500">
-                        {view === 'exceptions' ? 'No timecard exceptions need attention.' : 'AIRE has no timecards in this pay period.'}
+                        {view === 'exceptions' ? 'No timecard exceptions need attention.' : 'Time tracking has no timecards in this pay period.'}
                       </div>
                     )}
 
                     {view === 'exceptions' && exceptions?.leave_exceptions.map((leave) => (
                       <div key={`leave-${leave.id}`} className="grid gap-2 border-t border-neutral-100 px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                        <div><p className="font-semibold text-neutral-950">{leave.employee.name} · {leave.leave_type}</p><p className="mt-1 text-sm text-neutral-600">{formatDateRange(leave.start_date, leave.end_date)} · {leave.total_days} day{leave.total_days === 1 ? '' : 's'} · pending in AIRE</p></div>
+                        <div><p className="font-semibold text-neutral-950">{leave.employee.name} · {leave.leave_type}</p><p className="mt-1 text-sm text-neutral-600">{formatDateRange(leave.start_date, leave.end_date)} · {leave.total_days} day{leave.total_days === 1 ? '' : 's'} · pending in time tracking</p></div>
                         <MappingBadge status={leave.employee.cornerstone.status} />
                       </div>
                     ))}
@@ -844,7 +844,7 @@ export function AirePayrollCockpit({
                     {view === 'exceptions' && exceptions?.carryovers.items?.length ? (
                       <div className="border-t border-neutral-200 bg-warning-50/50 px-4 py-5 sm:px-6">
                         <h4 className="font-semibold text-neutral-950">Held hours carried forward</h4>
-                        <p className="mt-1 text-sm text-neutral-600">These hours were not eligible at an earlier cutoff. Their current payment state comes directly from AIRE.</p>
+                        <p className="mt-1 text-sm text-neutral-600">These hours were not eligible at an earlier cutoff. Their current payment state comes directly from time tracking.</p>
                         <div className="mt-4 space-y-2">
                           {exceptions.carryovers.items.map((item) => (
                             <div key={`${item.latest_excluded_batch_id}-${item.source_time_entry_id}`} className="flex flex-col gap-2 rounded-lg border border-warning-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -914,7 +914,7 @@ export function AirePayrollCockpit({
                                     {settlementCase.time.category?.name ? ` · ${settlementCase.time.category.name}` : ''}
                                   </p>
                                   <p className="mt-1 text-xs leading-5 text-neutral-500">
-                                    Excluded because {settlementCase.origin.reason.replaceAll('_', ' ')} · AIRE batch {settlementCase.origin.payroll_batch_id}
+                                    Excluded because {settlementCase.origin.reason.replaceAll('_', ' ')} · time tracking batch {settlementCase.origin.payroll_batch_id}
                                   </p>
                                   {settlementCase.time.current_total_hours != null
                                     && Math.abs(Number(settlementCase.time.current_total_hours) - Number(settlementCase.time.held_total_hours)) >= 0.005 && (
@@ -938,7 +938,7 @@ export function AirePayrollCockpit({
                                       <p className="mt-1 text-xs text-neutral-500">
                                         {settlementCase.processing?.payment_reference
                                           ? `Reference ${settlementCase.processing.payment_reference}`
-                                          : settlementCase.included_payroll_batch_id ? `AIRE batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
+                                          : settlementCase.included_payroll_batch_id ? `Time tracking batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
                                       </p>
                                     </div>
                                   </div>
@@ -986,7 +986,7 @@ export function AirePayrollCockpit({
                 {view === 'team' && (
                   <div className="divide-y divide-neutral-100">
                     {overview.employees.length === 0 && (
-                      <p className="px-6 py-10 text-center text-sm text-neutral-500">AIRE has no employees on this page.</p>
+                      <p className="px-6 py-10 text-center text-sm text-neutral-500">Time tracking has no employees on this page.</p>
                     )}
                     {overview.employees.map((employee) => (
                       <div key={employee.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -1044,7 +1044,7 @@ export function AirePayrollCockpit({
                           </section>
                         )}
                       </div>
-                    ) : <p className="py-6 text-center text-sm text-neutral-500">Payment history will appear after AIRE’s hours are added to payroll.</p>}
+                    ) : <p className="py-6 text-center text-sm text-neutral-500">Payment history will appear after the source’s hours are added to payroll.</p>}
                   </div>
                 )}
               </>
@@ -1061,16 +1061,16 @@ export function AirePayrollCockpit({
         {employeeMapping && (
           <DialogContent className="max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="text-left">
-              <DialogTitle className="font-display font-bold text-neutral-950">Link AIRE staff to payroll</DialogTitle>
+              <DialogTitle className="font-display font-bold text-neutral-950">Link time tracking staff to payroll</DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
                 Confirm which payroll employee is the same person as {employeeMapping.employee.full_name}. This saved link is reused for every payroll.
               </DialogDescription>
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">AIRE identity</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking identity</p>
               <p className="mt-2 font-semibold text-neutral-950">{employeeMapping.employee.full_name}</p>
-              <p className="mt-1 text-sm text-neutral-600">{employeeMapping.employee.email || 'No email in AIRE'}</p>
+              <p className="mt-1 text-sm text-neutral-600">{employeeMapping.employee.email || 'No email in time tracking'}</p>
             </div>
             {employeeMapping.employee.cornerstone.suggestions?.length ? (
               <div className="mt-4 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-900">
@@ -1144,9 +1144,9 @@ export function AirePayrollCockpit({
         {correction && (
           <DialogContent className="relative max-h-[90vh] max-w-2xl overflow-y-auto rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
-              <DialogTitle className="font-display font-bold text-neutral-950">Correct time in AIRE</DialogTitle>
+              <DialogTitle className="font-display font-bold text-neutral-950">Correct time in time tracking</DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
-                {correction.entry.employee.name} · Changes are written to AIRE and will require a separate administrator approval.
+                {correction.entry.employee.name} · Changes are written to time tracking and will require a separate administrator approval.
               </DialogDescription>
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
@@ -1161,7 +1161,7 @@ export function AirePayrollCockpit({
               <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-neutral-900">Breaks</p><p className="mt-1 text-xs text-neutral-500">Include the complete corrected break list.</p></div><Button type="button" size="sm" variant="outline" onClick={() => setCorrection({ ...correction, breaks: [...correction.breaks, { start_time: '', end_time: '' }] })}>Add break</Button></div>
               {correction.breaks.length === 0 && correction.preservesLegacyBreakMinutes ? (
                 <div className="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm leading-5 text-warning-900">
-                  AIRE has {correction.entry.break_minutes} total break minutes but no exact break times. That total will stay unchanged unless you add detailed break times.
+                  time tracking has {correction.entry.break_minutes} total break minutes but no exact break times. That total will stay unchanged unless you add detailed break times.
                 </div>
               ) : correction.breaks.length === 0 ? <p className="mt-3 text-sm text-neutral-500">No breaks recorded.</p> : (
                 <div className="mt-3 space-y-3">
@@ -1203,10 +1203,10 @@ export function AirePayrollCockpit({
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-5 grid gap-3">
               <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">The hours will be included automatically once they are approved and that payroll reaches cutoff.</span></span></span></label>
-              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in AIRE’s history.</span></span></span></label>
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in the source’s history.</span></span></span></label>
             </div>
             {settlementRoute.destinationKind === 'regular' && (
-              <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">Publish the next regular pay period to AIRE before routing these hours.</span>}</label>
+              <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">Publish the next regular pay period to time tracking before routing these hours.</span>}</label>
             )}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
@@ -1223,11 +1223,11 @@ export function AirePayrollCockpit({
         {overview && (
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
-              <DialogTitle className="font-display font-bold text-neutral-950">Lock the AIRE cutoff</DialogTitle>
-              <DialogDescription className="leading-6 text-neutral-600">AIRE will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
+              <DialogTitle className="font-display font-bold text-neutral-950">Lock the time tracking cutoff</DialogTitle>
+              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
-            <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in AIRE only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
+            <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review note<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={finalizeReason} onChange={(event) => setFinalizeReason(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setShowFinalize(false)} disabled={busy} aria-label="Close cutoff confirmation" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setShowFinalize(false)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void finalize()} disabled={busy || !finalizeCommand || finalizeReason.trim().length < 3}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LockKeyhole className="mr-2 h-4 w-4" />}Lock eligible time</Button></DialogFooter>

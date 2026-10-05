@@ -412,14 +412,14 @@ module Api
         def set_pay_period_and_source
           @pay_period = PayPeriod.find_by!(id: params[:pay_period_id], company_id: current_company_id)
           @source = @pay_period.aire_payroll_calendar_period&.time_tracking_source ||
-            @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+            @pay_period.company.time_tracking_sources.active.find { |candidate| candidate.supports?(:payroll_cockpit) }
         end
 
         def external_pay_period_id
           @pay_period.aire_payroll_calendar_period&.external_pay_period_id ||
             raise(
               TimeTracking::Client::Error.new(
-                "Publish this pay period to AIRE before opening its payroll cockpit",
+                "Publish this pay period to the time source before opening its payroll cockpit",
                 response_status: 422
               )
             )
@@ -442,7 +442,7 @@ module Api
           return if @source
 
           raise TimeTracking::Client::Error.new(
-            "Publish this pay period to AIRE before opening its payroll cockpit",
+            "Publish this pay period to the time source before opening its payroll cockpit",
             response_status: 422
           )
         end
@@ -451,7 +451,7 @@ module Api
           return if @source
 
           raise TimeTracking::Client::Error.new(
-            "Connect AIRE Services before reviewing manual payroll hours",
+            "Connect a compatible time source before reviewing manual payroll hours",
             response_status: 422
           )
         end
@@ -460,8 +460,8 @@ module Api
           delegation = current_delegation
           account_link_configured = account_link_connected?
           {
-            can_read: true,
-            can_manage_manual_allocations: manual_reconciliation_allowed? &&
+            can_read: @source.supports?(:payroll_cockpit),
+            can_manage_manual_allocations: @source.supports?(:manual_allocations) && manual_reconciliation_allowed? &&
               (account_link_configured || delegation.present?),
             can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration),
             can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&

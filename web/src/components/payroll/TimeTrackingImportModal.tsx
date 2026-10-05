@@ -1,3 +1,4 @@
+import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -197,7 +198,7 @@ export function TimeTrackingImportModal({
 
         const active = res.time_tracking_sources.filter((source) => source.active);
         const eligible = payPeriod.status === 'committed'
-          ? active.filter((source) => source.source_type === 'aire_services')
+          ? active.filter((source) => supportsSourceOperation(source, 'finalized_batch_v2'))
           : active;
         const preferred = eligible.find((source) => source.id === initialSourceId);
         setSources(eligible);
@@ -219,7 +220,7 @@ export function TimeTrackingImportModal({
     () => sources.find((source) => source.id === sourceId) || null,
     [sources, sourceId]
   );
-  const selectedSourceIsAire = selectedSource?.source_type === 'aire_services';
+  const selectedSourceSupportsFinalizedBatch = supportsSourceOperation(selectedSource, 'finalized_batch_v2');
   const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
   const isFinalizedBatch = preview?.processed_payload?.validation_version === 'payroll_batch_v2';
@@ -316,8 +317,8 @@ export function TimeTrackingImportModal({
     try {
       const res = await payPeriodsApi.previewTimeTrackingImport(payPeriod.id, {
         source_id: selectedSource.id,
-        start_date: selectedSource.source_type === 'aire_services' ? payPeriod.start_date : startDate,
-        end_date: selectedSource.source_type === 'aire_services' ? payPeriod.end_date : endDate,
+        start_date: selectedSourceSupportsFinalizedBatch ? payPeriod.start_date : startDate,
+        end_date: selectedSourceSupportsFinalizedBatch ? payPeriod.end_date : endDate,
       });
       const finalized = res.import.processed_payload.validation_version === 'payroll_batch_v2';
       const nextMappings = new Map<string, number | null>();
@@ -391,7 +392,7 @@ export function TimeTrackingImportModal({
       if (res.results.errors.length > 0) {
         if (isHistoricalReconciliation) {
           setPreview(withReconciliationErrors(res.import, res.results.errors, mappings));
-          setError(`Cornerstone could not link this AIRE record. ${res.results.errors.map((item) => item.error).join(' ')}`);
+          setError(`Cornerstone could not link this time tracking record. ${res.results.errors.map((item) => item.error).join(' ')}`);
         } else {
           setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
         }
@@ -413,7 +414,7 @@ export function TimeTrackingImportModal({
         if (payload?.data?.source_user_id || payload?.data?.employee_id != null) {
           setPreview(withReconciliationErrors(preview, [ { ...payload.data, error: message } ], mappings));
         }
-        setError(`Cornerstone could not link this AIRE record. ${message}`);
+        setError(`Cornerstone could not link this time tracking record. ${message}`);
       } else {
         setError(message);
       }
@@ -431,12 +432,12 @@ export function TimeTrackingImportModal({
         <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-4 sm:px-8 sm:py-6">
           <div>
             <h2 id="time-import-title" className="text-lg font-semibold tracking-tight text-neutral-950 sm:text-xl">
-              {isFinalizedBatch ? 'Review AIRE hours for this payroll' : 'Import time tracking'}
+              {isFinalizedBatch ? 'Review time tracking hours for this payroll' : 'Import time tracking'}
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-neutral-600">
               {isFinalizedBatch
                 ? isHistoricalReconciliation
-                  ? 'Link this committed payroll to its immutable AIRE cutoff without recalculating or changing any pay.'
+                  ? 'Link this committed payroll to its immutable time tracking cutoff without recalculating or changing any pay.'
                   : 'Verify the immutable cutoff, employee mappings, and any corrections before adding the batch to this payroll.'
                 : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
@@ -465,7 +466,7 @@ export function TimeTrackingImportModal({
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                   <div className="flex items-start gap-2">
                     <Link2 className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <p>{isHistoricalReconciliation ? 'No active AIRE time tracking source is configured for this client.' : 'No active time tracking source is configured for this client.'} {isAdmin ? 'Enable one in Time Tracking Source settings, then return to this pay period.' : 'Ask an administrator to configure the client’s time tracking integration.'}</p>
+                    <p>No active time tracking source is configured for this client. {isAdmin ? 'Enable one in Time Tracking Source settings, then return to this pay period.' : 'Ask an administrator to configure the client’s time tracking integration.'}</p>
                   </div>
                   {isAdmin && <Button
                     type="button"
@@ -486,14 +487,14 @@ export function TimeTrackingImportModal({
                     <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                       <div className="text-sm font-semibold text-neutral-950">{selectedSource.name}</div>
                       <div className="mt-2 text-sm text-neutral-600">
-                        {selectedSourceIsAire
-                          ? 'Cornerstone will retrieve the one finalized AIRE batch that exactly matches this pay period.'
+                        {selectedSourceSupportsFinalizedBatch
+                          ? 'Cornerstone will retrieve the one finalized time tracking batch that exactly matches this pay period.'
                           : 'This is the active time source configured for the client.'}
                       </div>
                     </div>
                   )}
 
-                  {selectedSourceIsAire ? (
+                  {selectedSourceSupportsFinalizedBatch ? (
                     <div className="grid gap-4 sm:grid-cols-3">
                       <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 sm:col-span-2">
                         <div className="flex items-center gap-2 text-sm font-semibold text-primary-900">
@@ -553,7 +554,7 @@ export function TimeTrackingImportModal({
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">Contract</div>
-                      <div className="mt-2 text-primary-950">AIRE payroll batch v{preview.contract_version}</div>
+                      <div className="mt-2 text-primary-950">Time tracking payroll batch v{preview.contract_version}</div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">SHA-256</div>
@@ -575,7 +576,7 @@ export function TimeTrackingImportModal({
               {(warningCount > 0 || unmappedIncludedCount > 0 || duplicateMappingCount > 0 || rowsNeedingWageRateMapping.length > 0) && (
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">
                   {isFinalizedBatch
-                    ? 'Resolve every employee and earning-type mapping before applying. Finalized AIRE rows cannot be skipped; AIRE’s exclusions are shown separately and remain unpaid.'
+                    ? 'Resolve every employee and earning-type mapping before applying. Finalized time tracking rows cannot be skipped; the source’s exclusions are shown separately and remain unpaid.'
                     : 'Resolve included employee and earning-type mappings before applying. Ordinary import rows may be skipped when they should not be added to this payroll.'}
                 </div>
               )}
@@ -689,7 +690,7 @@ export function TimeTrackingImportModal({
                       {categories.length > 0 && (
                         <div className="mt-4 border-t border-neutral-200 pt-4">
                           <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                            {isHistoricalReconciliation ? 'AIRE earning breakdown' : 'Payable earning dimensions'}
+                            {isHistoricalReconciliation ? 'time tracking earning breakdown' : 'Payable earning dimensions'}
                           </div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
                             {categories.map((category) => {
@@ -779,7 +780,7 @@ export function TimeTrackingImportModal({
                     <Clock3 className="h-4 w-4 text-neutral-600" aria-hidden="true" />
                     <h3 className="font-semibold text-neutral-950">Tracked but not paid in this batch</h3>
                   </div>
-                  <p className="mt-2 text-sm text-neutral-600">These entries stay in AIRE. A later approval can appear as a carryover in a future finalized batch.</p>
+                  <p className="mt-2 text-sm text-neutral-600">These entries stay in time tracking. A later approval can appear as a carryover in a future finalized batch.</p>
                   <div className="mt-4 grid gap-2 lg:grid-cols-2">
                     {exclusions.map((exclusion) => (
                       <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -828,7 +829,7 @@ export function TimeTrackingImportModal({
                   <div className="flex items-center gap-2 font-semibold text-primary-950">
                     <History className="h-4 w-4" aria-hidden="true" /> Historical reconciliation note
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from AIRE.</p>
+                  <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from time tracking.</p>
                   <label htmlFor="reconciliation-note" className="mt-4 block text-sm font-medium text-primary-950">
                     Audit note
                   </label>
@@ -840,7 +841,7 @@ export function TimeTrackingImportModal({
                     minLength={10}
                     aria-describedby="reconciliation-note-help"
                     aria-invalid={reconciliationNoteTooShort}
-                    placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff"
+                    placeholder="Example: Compared committed Aug 1–15 payroll to finalized time tracking cutoff"
                     className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-4 text-sm text-neutral-900"
                   />
                   <p id="reconciliation-note-help" className={`mt-2 text-xs ${reconciliationNoteTooShort ? 'text-danger-700' : 'text-primary-700'}`}>
@@ -855,7 +856,7 @@ export function TimeTrackingImportModal({
             <div className="py-10 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success-600" aria-hidden="true" />
               <h3 className="mt-4 text-lg font-semibold text-neutral-950">
-                {!appliedThisSession && alreadyApplied ? 'These AIRE hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'AIRE hours added to payroll' : 'Time tracking imported'}
+                {!appliedThisSession && alreadyApplied ? 'These time tracking hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Time tracking hours added to payroll' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
                 {!appliedThisSession && alreadyApplied
@@ -873,10 +874,10 @@ export function TimeTrackingImportModal({
                   <div className="font-semibold">What happens next</div>
                   <p className="mt-1">
                     {isHistoricalReconciliation
-                      ? 'Cornerstone recorded the existing payroll link and is delivering the acknowledgement to AIRE. If delivery is interrupted, it will retry automatically until confirmed. Payment is reported separately only when the check is prepared and then delivered.'
-                      : 'Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.'}
+                      ? 'Cornerstone recorded the existing payroll link and is delivering the acknowledgement to time tracking. If delivery is interrupted, it will retry automatically until confirmed. Payment is reported separately only when the check is prepared and then delivered.'
+                      : 'Cornerstone queues an import acknowledgement for time tracking. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.'}
                   </p>
-                  {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">AIRE status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
+                  {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">Time tracking status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
                 </div>
               )}
             </div>
@@ -887,13 +888,13 @@ export function TimeTrackingImportModal({
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceIsAire ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
             </>
           )}
           {step === 'review' && (
             <>
               <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
-              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link AIRE Record' : isFinalizedBatch ? 'Add AIRE Hours to Payroll' : 'Apply Import'}</Button>
+              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}
           {step === 'done' && <Button onClick={onClose}>Close</Button>}

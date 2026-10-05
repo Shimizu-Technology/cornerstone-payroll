@@ -6,6 +6,20 @@ RSpec.describe CompanyPaySchedule do
   let(:company) { create(:company) }
   let(:confirmer) { create(:user, company: company) }
 
+  describe "scheduled_pay_date_for" do
+    it "returns no scheduled date without a period end" do
+      schedule = described_class.new(pay_date_rule: "days_after_period_end", pay_date_offset_days: 5)
+      expect(schedule.scheduled_pay_date_for(nil)).to be_nil
+    end
+
+    [ 0, 5 ].each do |offset|
+      it "keeps the fixed period-end offset of #{offset} days" do
+        schedule = described_class.new(pay_date_rule: "days_after_period_end", pay_date_offset_days: offset)
+        expect(schedule.scheduled_pay_date_for(Date.new(2026, 10, 31))).to eq(Date.new(2026, 10, 31) + offset)
+      end
+    end
+  end
+
   it "resolves the configuration effective for a payroll date" do
     old_schedule = described_class.create!(
       company: company,

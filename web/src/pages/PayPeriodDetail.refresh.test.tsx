@@ -57,7 +57,7 @@ vi.mock('@/components/payroll/AirePaymentEvidenceHolds', () => ({ AirePaymentEvi
 vi.mock('@/components/payroll/AireManualPaymentReconciliation', () => ({ AireManualPaymentReconciliation: () => null }));
 vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
   AirePayrollCockpit: ({ onReviewFinalizedBatch }: { onReviewFinalizedBatch?: () => void }) => (
-    <button type="button" onClick={onReviewFinalizedBatch}>Review verified AIRE batch</button>
+    <button type="button" onClick={onReviewFinalizedBatch}>Review verified time tracking batch</button>
   ),
 }));
 vi.mock('@/components/payroll/PayrollLiabilityPanel', () => ({ PayrollLiabilityPanel: () => null }));
@@ -78,7 +78,7 @@ const initialPayPeriod = {
 
 afterEach(cleanup);
 
-it('reserves the AIRE source preference for the guided verified-batch review', async () => {
+it('reserves the time tracking source preference for the guided verified-batch review', async () => {
   vi.clearAllMocks();
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
@@ -92,7 +92,7 @@ it('reserves the AIRE source preference for the guided verified-batch review', a
       aire_calendar: {
         enabled: true,
         source_id: 12,
-        source_name: 'AIRE Services',
+        source_name: 'time tracking Services',
         eligible: true,
         cutoff_state: 'scheduled',
         needs_revision: false,
@@ -118,7 +118,7 @@ it('reserves the AIRE source preference for the guided verified-batch review', a
   expect(modal.getAttribute('data-auto-preview')).toBe('false');
   expect(modal.getAttribute('data-source-id')).toBe('');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Review verified AIRE batch' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review verified time tracking batch' }));
   await waitFor(() => {
     expect(modal.getAttribute('data-auto-preview')).toBe('true');
     expect(modal.getAttribute('data-source-id')).toBe('12');

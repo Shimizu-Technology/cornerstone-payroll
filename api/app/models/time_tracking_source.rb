@@ -19,6 +19,7 @@ class TimeTrackingSource < ApplicationRecord
 
   before_validation :assign_connection_uuid, on: :create
   before_validation :require_existing_payroll_history, on: :create
+  before_validation :require_history_when_enabling_complete_protocol, on: :update
 
   validates :name, :source_type, :base_url, :shared_secret, presence: true
   validates :connection_uuid, presence: true, uniqueness: true
@@ -26,6 +27,9 @@ class TimeTrackingSource < ApplicationRecord
   validates :expected_source_instance_id, format: { with: UUID_PATTERN }, allow_nil: true
   validates :source_protocol, :source_protocol_version, :identity_verified_at, presence: true, if: :remote_identity_pinned?
   validate :history_gate_cannot_be_disabled, on: :update
+  validate :authorization_origin_is_secure
+  validate :producer_identity_is_immutable, on: :update
+  validates :remote_source_identifier, format: { with: /\A[a-z0-9_]+\z/ }, allow_nil: true
   validate :source_capabilities_are_strings
   validate :remote_identity_fields_are_complete
   validates :name, uniqueness: { scope: :company_id }
@@ -34,6 +38,14 @@ class TimeTrackingSource < ApplicationRecord
   validate :source_type_must_not_change, on: :update
 
   scope :active, -> { where(active: true) }
+
+  def connector
+    TimeTracking::Connector.new(self)
+  end
+
+  def supports?(capability)
+    connector.supports?(capability)
+  end
 
   def historical_reconciliation_complete?
     return true unless historical_reconciliation_required?
@@ -65,11 +77,27 @@ class TimeTrackingSource < ApplicationRecord
   private
 
   def require_existing_payroll_history
-    return unless source_type == "aire_services" && company
+    return unless company
 
     if company.pay_periods.where(status: "committed", cycle: "regular", run_purpose: "regular").exists?
       self.historical_reconciliation_required = true
     end
+  end
+
+  def require_history_when_enabling_complete_protocol
+    return unless source_type == "custom" && remote_source_identifier.present?
+
+    gated_capabilities = %w[payroll_calendar_v2 finalized_batch_v2 exact_line_receipts_v2]
+    newly_added = (Array(source_capabilities) & gated_capabilities) -
+      (Array(source_capabilities_in_database) & gated_capabilities)
+    return if newly_added.empty?
+
+    # Only an applied batch proves this source has already processed payroll.
+    # A calendar-only publication cannot exempt newly enabled batch receipts.
+    return if time_tracking_imports.where(contract_version: "2.0", status: "applied").exists?
+    return if newly_added == [ "payroll_calendar_v2" ] && aire_payroll_calendar_periods.exists?
+
+    require_existing_payroll_history
   end
 
   def history_gate_cannot_be_disabled
@@ -92,6 +120,23 @@ class TimeTrackingSource < ApplicationRecord
     errors.add(:base_url, e.message)
   rescue URI::InvalidURIError
     errors.add(:base_url, "must be an HTTP or HTTPS URL with a host and no embedded credentials")
+  end
+
+  def producer_identity_is_immutable
+    if remote_source_identifier_in_database.present? && will_save_change_to_remote_source_identifier?
+      errors.add(:remote_source_identifier, "cannot change after verification")
+    end
+  end
+
+  def authorization_origin_is_secure
+    return if authorization_origin.blank?
+
+    uri = URI.parse(authorization_origin)
+    unless uri.scheme == "https" && uri.port == 443 && uri.host.present? && uri.userinfo.nil? && uri.query.nil? && uri.fragment.nil? && uri.path.in?([ "", "/" ])
+      errors.add(:authorization_origin, "must be an HTTPS origin without a path or credentials")
+    end
+  rescue URI::InvalidURIError
+    errors.add(:authorization_origin, "must be a valid HTTPS origin")
   end
 
   def source_type_must_not_change

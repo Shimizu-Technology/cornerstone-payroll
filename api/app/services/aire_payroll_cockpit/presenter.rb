@@ -8,6 +8,7 @@ module AirePayrollCockpit
 
     def overview(period_payload:, employees_payload:, command_access:, routing_options: [])
       {
+        source: { id: @source.id, name: @source.name, supported_operations: @source.connector.capabilities },
         payroll_period: required(period_payload, "payroll_period"),
         readiness: required(period_payload, "readiness"),
         finalized_batch: period_payload["finalized_batch"],

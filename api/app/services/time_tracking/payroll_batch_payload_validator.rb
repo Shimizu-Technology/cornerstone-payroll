@@ -12,9 +12,10 @@ module TimeTracking
 
     class Error < StandardError; end
 
-    attr_reader :payload, :start_date, :end_date, :allow_legacy_uncategorized
+    attr_reader :payload, :start_date, :end_date, :allow_legacy_uncategorized, :expected_source
 
-    def initialize(payload:, start_date:, end_date:, allow_legacy_uncategorized: false)
+    def initialize(payload:, start_date:, end_date:, allow_legacy_uncategorized: false, expected_source: SOURCE)
+      @expected_source = expected_source
       @payload = payload
       @start_date = parse_expected_date(start_date, "start_date")
       @end_date = parse_expected_date(end_date, "end_date")
@@ -39,7 +40,7 @@ module TimeTracking
     private
 
     def validate_header!
-      raise Error, "Unsupported payroll batch source" unless payload["source"] == SOURCE
+      raise Error, "Unsupported payroll batch source" unless expected_source.present? && payload["source"] == expected_source
       raise Error, "Unsupported payroll batch schema version" unless payload["schema_version"] == CONTRACT_VERSION
       raise Error, "Payroll batch ID is required" if payload["batch_id"].blank?
       raise Error, "Payroll batch start date does not match the requested period" unless iso_date!(payload["start_date"], "start_date") == start_date
