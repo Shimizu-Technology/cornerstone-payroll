@@ -105,6 +105,7 @@ class EmployeeHoursEvidence
 
     query = URI.decode_www_form(url.query.to_s)
     query.concat([ [ "source_user_uuid", mapping.source_user_uuid ], [ "source_instance_id", @source.expected_source_instance_id ] ])
+    %i[start_date end_date].each { |key| query << [ key.to_s, @params[key] ] if @params[key].present? }
     url.query = URI.encode_www_form(query)
     url.to_s
   rescue URI::InvalidURIError, ArgumentError

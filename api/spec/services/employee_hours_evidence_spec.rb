@@ -29,10 +29,10 @@ RSpec.describe EmployeeHoursEvidence do
   it "builds only a trusted approved-origin route with both permanent employee and installation identity" do
     allow(connector).to receive(:employee_evidence_path).with(employee_id: "42", period_id: nil, entry_id: nil)
       .and_return("/admin/users/42?tab=hours")
-    url = URI(described_class.new(employee: employee, actor: actor).call[:source_workspace_url])
+    url = URI(described_class.new(employee: employee, actor: actor, params: { start_date: "2026-08-01", end_date: "2026-09-15" }).call[:source_workspace_url])
     expect(url.host).to eq("time.example.com")
     expect(URI.decode_www_form(url.query).to_h).to include("source_user_uuid" => mapping.source_user_uuid,
-      "source_instance_id" => source.expected_source_instance_id)
+      "source_instance_id" => source.expected_source_instance_id, "start_date" => "2026-08-01", "end_date" => "2026-09-15")
     allow(connector).to receive(:employee_evidence_path).and_return("//evil.example.com/users/42")
     expect(described_class.new(employee: employee, actor: actor).call[:source_workspace_url]).to be_nil
   end
