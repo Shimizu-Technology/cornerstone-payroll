@@ -2,6 +2,8 @@
 // API Client for Cornerstone Payroll
 // ========================================
 
+import type { ConnectorHealth } from '@/lib/connector-health';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 export function resolveApiUrl(baseUrl: string, endpoint: string, origin = globalThis.location?.origin || 'http://localhost'): URL {
@@ -352,8 +354,8 @@ export class ApiError extends Error {
 const api = new ApiClient(API_BASE_URL);
 
 export const timeTrackingSourceHealthApi = {
-  read: (sourceId: number, companyId: number, signal?: AbortSignal) =>
-    api.get<import('@/lib/connector-health').ConnectorHealth>(`/admin/time_tracking_sources/${sourceId}/health`, undefined, { companyId, signal }),
+  read: (sourceId: number, companyId: number, signal?: AbortSignal): Promise<ConnectorHealth> =>
+    api.get<ConnectorHealth>(`/admin/time_tracking_sources/${sourceId}/health`, undefined, { companyId, signal }),
 };
 
 export default api;

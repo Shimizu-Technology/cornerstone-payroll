@@ -52,6 +52,17 @@ describe('Protected source delivery review', () => {
 });
 
 describe('Stored connection selection', () => {
+  it('keeps an explicitly opened review open while replacing evidence for a deliberate source selection', async () => {
+    mocks.read.mockResolvedValueOnce(health).mockResolvedValue({ ...health, source_id: 5,
+      receipts: { batch: { ...delivery, pending_count: 7 }, entry: { ...delivery, pending_count: 7 } } });
+    render(<MemoryRouter initialEntries={['/app/time-account-connection?health_source_id=4&connection_health=open']}><SourceConnectorReview companyId={7} sources={[{ id: 4, company_id: 7, name: 'First source', active: true }, { id: 5, company_id: 7, name: 'Second source', active: false }]} /></MemoryRouter>);
+    expect(await screen.findByText('Batch receipts')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Stored time tracking connection'), { target: { value: '5' } });
+    expect((await screen.findAllByText('7 pending · 1 failed deliveries')).length).toBe(2);
+    expect(screen.queryByText('2 pending · 1 failed deliveries')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide connection review' })).toBeTruthy();
+    expect(mocks.read).toHaveBeenCalledWith(5, 7, expect.any(AbortSignal));
+  });
   it('reviews a disabled company-owned producer without requiring account linking', async () => {
     mocks.read.mockResolvedValue({ ...health, active: false });
     render(<MemoryRouter initialEntries={['/app/time-account-connection?health_source_id=4&connection_health=open']}><SourceConnectorReview companyId={7} sources={[{ id: 4, company_id: 7, name: 'Generic stored producer', active: false }]} /></MemoryRouter>);

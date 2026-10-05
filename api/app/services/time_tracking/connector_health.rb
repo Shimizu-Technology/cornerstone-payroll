@@ -49,8 +49,7 @@ module TimeTracking
         last_success_at: scope.maximum(:delivered_at),
         failure_record_updated_at: failed.maximum(:updated_at),
         oldest_pending_at: oldest, oldest_pending_age_seconds: age(oldest),
-        pay_period_ids: imports.where(id: pending.select(:time_tracking_import_id))
-          .order(:created_at, :id).limit(LINK_LIMIT).pluck(:pay_period_id).uniq
+        pay_period_ids: pay_period_links(imports.where(id: pending.select(:time_tracking_import_id)))
       }
     end
 
@@ -71,8 +70,7 @@ module TimeTracking
         failed_revision_count: pending.where(delivery_status: "failed").count,
         last_success_at: publications.maximum(:delivered_at),
         oldest_pending_at: oldest, oldest_pending_age_seconds: age(oldest),
-        pay_period_ids: periods.where(id: pending.select(:aire_payroll_calendar_period_id))
-          .order(:created_at, :id).limit(LINK_LIMIT).pluck(:pay_period_id)
+        pay_period_ids: pay_period_links(periods.where(id: pending.select(:aire_payroll_calendar_period_id)))
       }
     end
 
@@ -108,10 +106,22 @@ module TimeTracking
         pending_classification_count: reviews.count,
         manual_pending_commit_count: manual.where(status: "pending_commit").count,
         manual_sync_failed_count: failed.count,
-        pay_period_ids: (reviews.order(:created_at, :id).limit(LINK_LIMIT).pluck(:pay_period_id) +
-          manual.where(status: "pending_commit").or(failed)
-            .order(:created_at, :id).limit(LINK_LIMIT).pluck(:pay_period_id)).uniq.first(LINK_LIMIT)
+        pay_period_ids: pay_period_links(reviews, manual.where(status: "pending_commit").or(failed))
       }
+    end
+
+    def pay_period_links(*scopes)
+      # Group before limiting so repeated rows cannot hide another affected run.
+      # The earliest five distinct runs per scope suffice for the combined five.
+      priorities = scopes.flat_map do |scope|
+        table = scope.klass.quoted_table_name
+        period = "#{table}.pay_period_id"
+        oldest = "MIN(#{table}.created_at)"
+        scope.reorder(nil).group(Arel.sql(period)).order(Arel.sql("#{oldest} ASC, #{period} ASC"))
+          .limit(LINK_LIMIT).pluck(Arel.sql(period), Arel.sql(oldest))
+      end
+      priorities.group_by(&:first).map { |id, rows| [ id, rows.map(&:last).min ] }
+        .sort_by { |id, timestamp| [ timestamp, id ] }.first(LINK_LIMIT).map(&:first)
     end
 
     def age(timestamp)
