@@ -1,4 +1,5 @@
 import { supportsSourceOperation } from '@/lib/time-tracking';
+import { SourceConnectorReview } from '@/components/payroll/SourceConnectorHealth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
@@ -76,6 +77,7 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
   result: string | null; navigateToAuthorization: (url: string) => void;
 }) {
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
+  const [healthSources, setHealthSources] = useState<TimeTrackingSource[]>([]);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [account, setAccount] = useState<AireAccountLink | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,13 +94,15 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
     try {
       const response = await timeTrackingSourcesApi.list();
       if (current !== generation.current) return;
-      const active = response.time_tracking_sources.filter(row => row.company_id === companyId && row.active && supportsSourceOperation(row, 'account_linking'));
+      const companySources = response.time_tracking_sources.filter(row => row.company_id === companyId);
+      setHealthSources(companySources);
+      const active = companySources.filter(row => row.active && supportsSourceOperation(row, 'account_linking'));
       setSources(active);
       const requested = active.find(row => row.id === requestedSourceId);
       setSourceId(requested?.id || (!requestedSourceId && active.length === 1 ? active[0].id : null));
       if (requestedSourceId && !requested) setError('That time tracking source is unavailable for this company. Choose an active source or ask your administrator.');
     } catch (caught) {
-      if (current === generation.current) { setSources([]); setSourceId(null); setError(caught instanceof Error ? caught.message : 'Could not load the company’s time tracking connection.'); }
+      if (current === generation.current) { setSources([]); setHealthSources([]); setSourceId(null); setError(caught instanceof Error ? caught.message : 'Could not load the company’s time tracking connection.'); }
     } finally { if (current === generation.current) setLoading(false); }
   }, [companyId, requestedSourceId]);
   useEffect(() => { void loadSources(); return () => { generation.current += 1; }; }, [loadSources]);
@@ -159,7 +163,7 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
         {loading && <p role="status">Loading active time tracking sources…</p>}
         {error && <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm text-primary-900">{notice}</p>}
-        {!loading && sources.length === 0 && <p className="text-sm leading-6 text-neutral-600">This company has no active time tracking source. Ask your payroll administrator to configure one, then refresh. Existing source settings and credentials are managed separately.</p>}
+        {!loading && sources.length === 0 && <p className="text-sm leading-6 text-neutral-600">This company has no active time tracking source supporting personal connections. Ask your payroll administrator to review source setup. {healthSources.length > 0 ? 'Stored connection deliveries remain available below.' : 'Source settings are managed separately.'}</p>}
         {!loading && sources.length > 0 && <Select label="Active time tracking source" value={sourceId || ''} disabled={busy} onChange={event => setSourceId(positiveId(event.target.value))}>
           <option value="">Choose this company’s time tracking source</option>{sources.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
         </Select>}
@@ -174,6 +178,7 @@ function ConnectionForCompany({ companyId, companyName, requestedSourceId, retur
         </div>}
         <Button variant="outline" disabled={busy || loading || checking} onClick={() => sourceId ? void check() : void loadSources()}><RefreshCw className="mr-2 h-4 w-4" />Refresh connection status</Button>
       </CardContent></Card>
+      {!loading && healthSources.length > 0 && <SourceConnectorReview sources={healthSources} defaultSourceId={source?.id} companyId={companyId} />}
     </div>
     <Dialog open={disconnectOpen} onOpenChange={open => { if (!busy) setDisconnectOpen(open); }}><DialogContent>
       <DialogHeader><DialogTitle>Disconnect your time tracking account?</DialogTitle><DialogDescription>This removes your personal connection for {companyName}. Other staff connections, source settings and saved payroll records remain unchanged. You can reconnect later.</DialogDescription></DialogHeader>
