@@ -79,6 +79,17 @@ describe('Employee hours and payroll evidence', () => {
     expect(screen.getByText('-0.50 total hours')).toBeTruthy();
     expect(screen.getByText('Signed adjustment')).toBeTruthy();
   });
+  it('retains missing frozen-category evidence even when the current entry is gone', async () => {
+    mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+      ...period, summary: { ...totals, uncategorized_entry_count: 0, retained_uncategorized_line_count: 1 }, entries: [],
+      coverage_lines: [{ id: 'frozen:18', source_time_entry_id: '18', source_category_id: null, coverage_state: 'issued', regular_hours: null, overtime_hours: null, provenance: 'historical_attestation' }],
+    } } });
+    mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+    expect(await screen.findByText('1 retained line has no frozen work category.')).toBeTruthy();
+    expect(screen.getByText('Frozen work category unknown · Needs review')).toBeTruthy();
+    expect(screen.getByText('Source REG Unknown · OT Unknown')).toBeTruthy();
+    expect(screen.queryByText('0 entries have no work category.')).toBeNull();
+  });
   it('opens a source entry and exact verified payroll result from period detail', async () => {
     mocks.evidence.mockResolvedValue({ ...evidence, source_workspace_url: 'https://example.com/employee/42',
       evidence: { ...evidence.evidence, period: { ...period, entries: [{ id: '18', work_date: '2026-08-05', regular_hours: 40.5, overtime_hours: 0.5, issued_hours: 41, needs_reconciliation_hours: 0, source_entry_url: 'https://example.com/employee/42?entry=18' }], coverage_lines: [] } },
