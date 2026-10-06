@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementElectionPanel } from './EmployeeRetirementElectionPanel';
 import type { Employee, EmployeeRetirementElection } from '@/types';
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
@@ -44,6 +47,7 @@ function election(overrides: Partial<EmployeeRetirementElection> = {}): Employee
 }
 
 describe('retirement election setup', () => {
+  afterEach(cleanup);
   it('shows a future-only first election as scheduled instead of reopening a blank setup form', () => {
     const upcoming = election();
     const employee = {
@@ -63,4 +67,26 @@ describe('retirement election setup', () => {
     expect(html).not.toContain('Save retirement election');
     expect(html).not.toContain('Record a dated election before the next payroll');
   });
+  it('uses the positive legacy Roth match instead of a zero Traditional match', async () => {
+    const user = userEvent.setup();
+    render(<EmployeeRetirementElectionPanel employee={{ id: 5, employer_retirement_match_rate: 0, employer_roth_match_rate: 0.03 } as Employee} onSaved={async () => undefined} />);
+    await user.click(screen.getByRole('button', { name: 'Set up retirement' }));
+    expect((screen.getByLabelText('Employer match percentage') as HTMLInputElement).value).toBe('3.00');
+    expect((screen.getByLabelText('Employer contribution destination') as HTMLSelectElement).value).toBe('roth');
+  });
+  it('retains an explicit dated-election zero match even when legacy Roth match is positive', async () => {
+    const user = userEvent.setup();
+    render(<EmployeeRetirementElectionPanel employee={{ id: 5, employer_retirement_match_rate: 0, employer_roth_match_rate: 0.03, current_retirement_election: election({ employer_match_rate: 0 }) } as Employee} onSaved={async () => undefined} />);
+    await user.click(screen.getByRole('button', { name: 'New election' }));
+    expect((screen.getByLabelText('Employer match percentage') as HTMLInputElement).value).toBe('0.00');
+    expect((screen.getByLabelText('Employer contribution destination') as HTMLSelectElement).value).toBe('traditional');
+  });
+  it('blocks saving when legacy employer match has two positive destinations', async () => {
+    const user = userEvent.setup();
+    render(<EmployeeRetirementElectionPanel employee={{ id: 5, employer_retirement_match_rate: 0.02, employer_roth_match_rate: 0.03 } as Employee} onSaved={async () => undefined} />);
+    expect(screen.getByRole('alert').textContent).toContain('cannot preserve the split');
+    await user.click(screen.getByRole('button', { name: 'Set up retirement' }));
+    expect((screen.getByRole('button', { name: 'Save retirement election' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
 });

@@ -9,20 +9,39 @@ import { annualRetirementLimitsApi, employeesApi } from '@/services/api';
 import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { retirementErrorMessage } from '@/lib/retirement-error';
 import { useAuth } from '@/contexts/AuthContext';
-import type { AnnualRetirementLimit, Employee, EmployeeRetirementYearInput, EmployeeRetirementYearInputDraft } from '@/types';
+import type { AnnualRetirementLimit, Employee, EmployeeRetirementYearInput, EmployeeRetirementYearInputDraft, HistoricalRetirementReportingGroup, HistoricalRetirementReview, HistoricalRetirementSource } from '@/types';
 
 const blank = (taxYear: number): EmployeeRetirementYearInputDraft => ({
   tax_year: taxYear, prior_year_wage_status: 'unknown', prior_year_fica_wages: null,
   prior_year_wage_source: '', external_traditional_deferrals: 0, external_roth_deferrals: 0,
   eligible_compensation_before_system: 0, employer_additions_before_system: 0,
-  non_roth_after_tax_before_system: 0, opening_balances_verified: false, source_reference: '', reason: '',
+  non_roth_after_tax_before_system: 0, opening_balances_verified: false, historical_retirement_review: {}, source_reference: '', reason: '',
 });
+
+const reportingLabels: Record<HistoricalRetirementReportingGroup, string> = {
+  '401k_pre_tax': 'Traditional 401(k)',
+  '401k_after_tax': 'Roth 401(k)',
+  '401k_non_roth_after_tax': '401(k) non-Roth after-tax',
+};
+const bucketLabel = (bucket: string): string => bucket === 'pretax_deduction_breakdown' ? 'Pre-tax deductions' : 'After-tax deductions';
+
+function isCurrentReview(review: HistoricalRetirementReview | undefined, source: HistoricalRetirementSource | undefined): boolean {
+  const classifications = review?.classifications;
+  return Boolean(source && source.classifications.length > 0 && review?.balance_digest === source.balance_digest &&
+    classifications?.length === source.classifications.length && source.classifications.every((retained) =>
+      classifications.some((entry) => entry.source_bucket === retained.source_bucket && entry.source_label === retained.source_label &&
+        entry.amount === retained.amount && Object.hasOwn(reportingLabels, entry.reporting_group))));
+}
 
 export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }): ReactElement {
   const { hasCapability } = useAuth();
   const canManage = hasCapability('manage_client_configuration');
   const [year, setYear] = useState(new Date().getFullYear());
   const [records, setRecords] = useState<EmployeeRetirementYearInput[]>([]);
+  const [historicalSources, setHistoricalSources] = useState<HistoricalRetirementSource[]>([]);
+  const [reviewingHistorical, setReviewingHistorical] = useState(false);
+  const [classifications, setClassifications] = useState<(HistoricalRetirementReportingGroup | '')[]>([]);
+  const [historicalConfirmed, setHistoricalConfirmed] = useState(false);
   const [limits, setLimits] = useState<AnnualRetirementLimit[]>([]);
   const [draft, setDraft] = useState(() => blank(year));
   const [editing, setEditing] = useState(false);
@@ -38,15 +57,23 @@ export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }
     setError(null);
     setRecords([]);
     setLimits([]);
+    setHistoricalSources([]);
     setEditing(false);
     Promise.all([employeesApi.retirementYearInputs(employee.id), annualRetirementLimitsApi.list()])
-      .then(([inputs, annual]) => { if (active) { setRecords(inputs.data); setLimits(annual.data); } })
+      .then(([inputs, annual]) => { if (active) { setRecords(inputs.data); setHistoricalSources(inputs.historical_retirement_sources || []); setLimits(annual.data); } })
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : 'Could not load retirement evidence.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [employee.id, reload]);
 
   const current = records.find((record) => Number(record.tax_year) === year);
+  const historicalSource = historicalSources.find((source) => Number(source.tax_year) === year && source.classifications.length > 0);
+  const historicalReviewed = isCurrentReview(current?.historical_retirement_review, historicalSource);
+  const startHistoricalReview = (): void => {
+    setReviewingHistorical(true);
+    setClassifications(historicalSource?.classifications.map(() => '') || []);
+    setHistoricalConfirmed(false);
+  };
   const annual = limits.find((limit) => Number(limit.tax_year) === year);
   const election = [...(employee.retirement_elections || []), ...[employee.current_retirement_election, employee.upcoming_retirement_election].filter((entry) => entry != null)]
     .filter((entry) => entry.effective_on <= `${year}-12-31`).sort((a, b) => b.effective_on.localeCompare(a.effective_on))[0];
@@ -59,7 +86,10 @@ export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }
   const ceiling = annual ? Number(annual.elective_deferral_limit) + catchUp : null;
   const set = <K extends keyof EmployeeRetirementYearInputDraft>(key: K, value: EmployeeRetirementYearInputDraft[K]): void => setDraft((old) => ({ ...old, [key]: value }));
   const edit = (): void => {
-    setDraft(current ? { ...blank(year), ...current, tax_year: year, reason: '' } : blank(year));
+    setDraft(current ? { ...blank(year), ...current, tax_year: year, reason: '', historical_retirement_review: historicalReviewed ? current.historical_retirement_review : {} } : blank(year));
+    setReviewingHistorical(false);
+    setHistoricalConfirmed(false);
+    if (historicalSource && !historicalReviewed) startHistoricalReview();
     setEditing(true);
     setError(null);
     setNotice(null);
@@ -73,10 +103,25 @@ export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }
       setError(`Add the source used to verify ${year - 1} employer wages.`);
       return;
     }
+    let historicalReview = draft.historical_retirement_review || {};
+    if (historicalSource && reviewingHistorical) {
+      if (classifications.length !== historicalSource.classifications.length || classifications.some((group) => !group)) {
+        setError('Choose the contribution type for every retained historical amount. Labels and current elections do not confirm its type.');
+        return;
+      }
+      if (!historicalConfirmed) {
+        setError('Confirm the retained historical contribution classifications against the evidence before saving.');
+        return;
+      }
+      historicalReview = {
+        balance_digest: historicalSource.balance_digest,
+        classifications: historicalSource.classifications.map((source, index) => ({ ...source, reporting_group: classifications[index] as HistoricalRetirementReportingGroup })),
+      };
+    }
     try {
       setSaving(true);
       setError(null);
-      const result = await employeesApi.createRetirementYearInput(employee.id, draft);
+      const result = await employeesApi.createRetirementYearInput(employee.id, { ...draft, historical_retirement_review: historicalReview });
       setRecords((old) => [result.data, ...old]);
       setEditing(false);
       setNotice(`${year} retirement evidence saved. Recalculate affected draft payroll to use it.`);
@@ -104,6 +149,23 @@ export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }
           <Value label={wageEvidencePending && catchUp > 0 ? 'Potential employee ceiling' : 'Employee statutory ceiling'} value={formatCurrency(ceiling || 0)} />
         </div>}
         {annual && <p className="text-xs leading-5 text-neutral-500">Age at year end: {age == null ? 'DOB needs verification' : age}. This preview uses {election ? `the election effective ${election.effective_on}` : 'legacy settings'} at year end; each paycheck uses its actual pay-date election. The ceiling combines Traditional and Roth. Plan restrictions, outside contributions, and available compensation may reduce it.</p>}
+        {historicalSource && <fieldset disabled={saving} className={`min-w-0 rounded-xl border p-4 ${historicalReviewed ? 'border-neutral-200 bg-neutral-50' : 'border-warning-200 bg-warning-50'}`} aria-label="Retained historical retirement contributions">
+          <p className="text-sm font-semibold text-neutral-900">{historicalReviewed ? 'Retained historical contributions reviewed' : 'Retained historical contributions need classification review'}</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-700">Classify the retained retirement totals using the source evidence. This review does not rewrite gross pay, net pay, or taxes already paid. A separate historical tax-bucket or filing review may still be needed.</p>
+          <div className="mt-3 space-y-3">{historicalSource.classifications.map((source, index) => <div key={`${source.source_bucket}:${source.source_label}`} className="rounded-lg border border-neutral-200 bg-white p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2"><p className="break-words text-sm font-semibold text-neutral-900">{source.source_label}</p><p className="text-sm font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(source.amount))}</p></div>
+            <p className="mt-1 text-xs leading-5 text-neutral-600">Original source bucket: {bucketLabel(source.source_bucket)}</p>
+            {editing && reviewingHistorical ? <div className="mt-3"><Field label={`Contribution type for ${source.source_label} (${bucketLabel(source.source_bucket)})`}><Select value={classifications[index] || ''} onChange={(event) => {
+              const group = event.target.value as HistoricalRetirementReportingGroup | '';
+              setClassifications((old) => old.map((value, position) => position === index ? group : value));
+              setHistoricalConfirmed(false);
+            }}><option value="">Choose a verified contribution type</option>{Object.entries(reportingLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Field></div>
+              : historicalReviewed && <p className="mt-2 text-sm text-neutral-700">Reviewed as: {reportingLabels[current!.historical_retirement_review!.classifications!.find((entry) => entry.source_bucket === source.source_bucket && entry.source_label === source.source_label)!.reporting_group]}</p>}
+          </div>)}</div>
+          {editing && reviewingHistorical && <label className="mt-4 flex gap-3 text-sm leading-6 text-neutral-700"><input className="mt-1 h-4 w-4 shrink-0 accent-primary-700" type="checkbox" checked={historicalConfirmed} onChange={(event) => setHistoricalConfirmed(event.target.checked)} />I confirmed each retained historical contribution type against the source evidence, including whether after-tax amounts are designated Roth or non-Roth.</label>}
+          {editing && historicalReviewed && !reviewingHistorical && <Button className="mt-3" variant="outline" onClick={startHistoricalReview}>Review retained classifications again</Button>}
+          {!editing && !historicalReviewed && !error && canManage && <Button className="mt-3" variant="outline" onClick={edit}>Review annual evidence</Button>}
+        </fieldset>}
         {!editing ? <>
           <div className={`rounded-xl border p-4 text-sm leading-6 ${current && current.prior_year_wage_status !== 'unknown' ? 'border-success-200 bg-success-50 text-success-900' : 'border-warning-200 bg-warning-50 text-warning-900'}`}>
             <p className="font-semibold">{current?.prior_year_wage_status === 'verified' ? `${year - 1} employer Social Security wages verified: ${formatCurrency(Number(current.prior_year_fica_wages))}` : current?.prior_year_wage_status === 'no_prior_employer_wages' ? `Verified: no covered wages from this employer in ${year - 1}` : `${year - 1} employer wages need verification before catch-up`}</p>
@@ -115,7 +177,7 @@ export function EmployeeRetirementYearPanel({ employee }: { employee: Employee }
           {current && <><div className="grid gap-3 sm:grid-cols-2"><Value label="Other-employer Traditional deferrals" value={formatCurrency(Number(current.external_traditional_deferrals))} /><Value label="Other-employer Roth deferrals" value={formatCurrency(Number(current.external_roth_deferrals))} /></div>
             <details className="rounded-xl border border-neutral-200 p-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Recorded opening balances</summary><div className="mt-4 grid gap-3 sm:grid-cols-3"><Value label="Eligible compensation" value={formatCurrency(Number(current.eligible_compensation_before_system))} /><Value label="Employer additions" value={formatCurrency(Number(current.employer_additions_before_system))} /><Value label="Non-Roth after-tax" value={formatCurrency(Number(current.non_roth_after_tax_before_system))} /></div><p className="mt-3 text-sm text-neutral-600">Opening balance verification: {current.opening_balances_verified ? 'Confirmed' : 'Not recorded'}.</p></details>
             <p className="break-words text-sm leading-6 text-neutral-600">Evidence: {current.source_reference}<br />Review note: {current.reason}{current.created_at && <><br />Recorded {formatGuamDateTime(current.created_at)}{current.created_by_name ? ` by ${current.created_by_name}` : ''}</>}</p></>}
-          {!error && canManage && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record a new review' : 'Review annual evidence'}</Button>}
+          {!error && canManage && (!historicalSource || historicalReviewed) && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record a new review' : 'Review annual evidence'}</Button>}
         </> : <fieldset disabled={saving} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={`${year - 1} sponsoring-employer wages`}><Select value={draft.prior_year_wage_status} onChange={(event) => {

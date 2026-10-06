@@ -381,6 +381,23 @@ export interface AnnualRetirementLimit {
 }
 export type AnnualRetirementLimitInput = Omit<AnnualRetirementLimit, 'id'> & { reason: string };
 
+export type HistoricalRetirementReportingGroup = '401k_pre_tax' | '401k_after_tax' | '401k_non_roth_after_tax';
+export interface HistoricalRetirementClassificationSource {
+  source_bucket: 'pretax_deduction_breakdown' | 'after_tax_deduction_breakdown';
+  source_label: string;
+  amount: string;
+}
+export interface HistoricalRetirementSource {
+  tax_year: number;
+  balance_digest: string;
+  historical_balance_id: number;
+  classifications: HistoricalRetirementClassificationSource[];
+}
+export interface HistoricalRetirementReview {
+  balance_digest?: string;
+  classifications?: (HistoricalRetirementClassificationSource & { reporting_group: HistoricalRetirementReportingGroup })[];
+}
+
 export interface EmployeeRetirementYearInput {
   id: number;
   tax_year: number;
@@ -393,6 +410,7 @@ export interface EmployeeRetirementYearInput {
   employer_additions_before_system: number;
   non_roth_after_tax_before_system: number;
   opening_balances_verified: boolean;
+  historical_retirement_review?: HistoricalRetirementReview;
   source_reference: string;
   reason: string;
   created_at?: string;
