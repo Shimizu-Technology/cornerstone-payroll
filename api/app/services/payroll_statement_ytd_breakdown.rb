@@ -153,7 +153,11 @@ class PayrollStatementYtdBreakdown
       "after_tax_deduction_breakdown" => :post_tax
     }.each do |field, bucket|
       historical_breakdown(field).each do |label, amount|
-        value = component(label, amount, semantic_for_label(label, bucket: bucket))
+        classification = historical_retirement_classifications.find do |row|
+          row["source_bucket"] == field && row["source_label"] == label && row["amount"].to_d == amount.to_d
+        end
+        semantic = classification ? classification.fetch("reporting_group").to_sym : semantic_for_label(label, bucket: bucket)
+        value = component(label, amount, semantic)
         components << value if value
       end
     end
@@ -163,6 +167,17 @@ class PayrollStatementYtdBreakdown
       components << Component.new(label: "Tips Paid Out", amount: tips_paid_out, semantic: :tips_paid_out)
     end
     aggregate_components(components)
+  end
+
+  def historical_retirement_classifications
+    @historical_retirement_classifications ||= begin
+      snapshot = payroll_item.retirement_rule_snapshot.to_h
+      review = if snapshot.present? || !pay_period.draft?
+        snapshot.dig("year_input", "historical_retirement_review") || {}
+      end
+      HistoricalRetirementProjection.new(employee: employee, tax_year: (pay_period.pay_date || Date.current).year,
+        balance: historical_balance, review: review).reviewed_classifications
+    end
   end
 
   def historical_breakdown(field)

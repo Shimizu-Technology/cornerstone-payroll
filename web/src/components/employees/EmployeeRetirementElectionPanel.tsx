@@ -22,6 +22,8 @@ const rate = (value: number | null): number => Number(value || 0) / 100;
 
 function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
   const current = employee.current_retirement_election || employee.upcoming_retirement_election;
+  const traditionalMatch = Number(employee.employer_retirement_match_rate || 0);
+  const rothMatch = Number(employee.employer_roth_match_rate || 0);
   return {
     effective_on: '',
     plan_name: current?.plan_name || '401(k)',
@@ -49,12 +51,12 @@ function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
         ? 'compensation_percentage'
         : 'none'
     ),
-    employer_match_rate: Number(current?.employer_match_rate ?? employee.employer_retirement_match_rate ?? employee.employer_roth_match_rate ?? 0),
+    employer_match_rate: Number(current?.employer_match_rate ?? (traditionalMatch > 0 ? traditionalMatch : rothMatch)),
     employer_match_deferral_cap_rate: current?.employer_match_deferral_cap_rate ?? null,
     employer_match_period_cap: current?.employer_match_period_cap ?? null,
     employer_match_annual_cap: current?.employer_match_annual_cap ?? null,
     employer_match_ytd_before_system: Number(current?.employer_match_ytd_before_system || 0),
-    employer_match_destination: current?.employer_match_destination || (Number(employee.employer_roth_match_rate || 0) > 0 ? 'roth' : 'traditional'),
+    employer_match_destination: current?.employer_match_destination || (traditionalMatch > 0 ? 'traditional' : rothMatch > 0 ? 'roth' : 'traditional'),
     true_up_policy: current?.true_up_policy || 'none',
     reason: '',
   };
@@ -64,6 +66,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
   const { hasCapability } = useAuth();
   const canManage = hasCapability('manage_client_configuration');
   const hasDatedElection = Boolean(employee.current_retirement_election || employee.upcoming_retirement_election || employee.retirement_elections?.length);
+  const legacySplitMatch = !employee.current_retirement_election && !employee.upcoming_retirement_election && Number(employee.employer_retirement_match_rate || 0) > 0 && Number(employee.employer_roth_match_rate || 0) > 0;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EmployeeRetirementElectionInput>(() => initialDraft(employee));
   const [saving, setSaving] = useState(false);
@@ -81,6 +84,10 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
   };
 
   const save = async (): Promise<void> => {
+    if (legacySplitMatch) {
+      setError('This legacy setup has both Traditional and Roth employer match. Have the plan administrator resolve the split before saving a single-destination election.');
+      return;
+    }
     if (!draft.effective_on) {
       setError('Choose the first pay date that should use this election.');
       return;
@@ -124,6 +131,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
     <CardContent className="space-y-5 p-5 sm:p-6">
       {notice && <p className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-800" role="status">{notice}</p>}
       {error && <p className="rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800" role="alert">{error}</p>}
+      {legacySplitMatch && <p role="alert" className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm leading-6 text-warning-900">Both Traditional and Roth employer match are configured in the legacy setup. Administrator review is required: this election supports one employer contribution destination and cannot preserve the split. Saving is blocked until the legacy setup is resolved.</p>}
       {upcoming && <p className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900"><strong>Scheduled:</strong> {upcoming.plan_name} becomes effective {formatDate(upcoming.effective_on)}.</p>}
 
       {!editing ? <ElectionSummary election={current} upcoming={upcoming} employee={employee} /> : <fieldset disabled={saving} className="space-y-6">
@@ -198,7 +206,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
           <Field label={hasDatedElection ? 'Reason for this change' : 'Setup note'} helper="Saved permanently with this election."><Input value={draft.reason} onChange={(event) => set('reason', event.target.value)} placeholder={hasDatedElection ? 'Example: New signed election received' : 'Example: Verified against signed plan election'} /></Field>
           <div className="mt-5 flex flex-wrap justify-end gap-3">
             {hasDatedElection && <Button variant="outline" onClick={() => { setEditing(false); setError(null); }}><X className="mr-2 h-4 w-4" />Cancel</Button>}
-            <Button disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save retirement election'}</Button>
+            <Button disabled={saving || legacySplitMatch} onClick={() => void save()}>{saving ? 'Saving…' : 'Save retirement election'}</Button>
           </div>
         </section>
       </fieldset>}

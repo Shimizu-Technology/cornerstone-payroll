@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementYearPanel } from './EmployeeRetirementYearPanel';
-import type { Employee } from '@/types';
+import type { Employee, HistoricalRetirementReview, HistoricalRetirementSource } from '@/types';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), inputs: vi.fn(), create: vi.fn(), canManage: true }));
 vi.mock('@/services/api', () => ({
@@ -15,6 +15,22 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () =
 const year = new Date().getFullYear();
 const employee = { id: 5, date_of_birth: `${year - 61}-12-31`, retirement_elections: [{ effective_on: `${year}-01-01`, catch_up_enabled: true }] } as unknown as Employee;
 const limit = { tax_year: year, elective_deferral_limit: 24500, catch_up_limit: 8000, enhanced_catch_up_limit: 11250, roth_catch_up_wage_threshold: 150000 };
+
+const historicalSource: HistoricalRetirementSource = {
+  tax_year: year, balance_digest: 'retained-digest', historical_balance_id: 7,
+  classifications: [
+    { source_bucket: 'pretax_deduction_breakdown', source_label: '401(k) After Tax', amount: '1234.56' },
+    { source_bucket: 'after_tax_deduction_breakdown', source_label: '401(k) Voluntary', amount: '50.00' },
+  ],
+};
+const reviewed: HistoricalRetirementReview = {
+  balance_digest: historicalSource.balance_digest,
+  classifications: historicalSource.classifications.map((source, index) => ({ ...source, reporting_group: index === 0 ? '401k_after_tax' : '401k_non_roth_after_tax' })),
+};
+async function enterReviewNote(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.type(screen.getByLabelText('Evidence reference'), 'Retained payroll / signed election');
+  await user.type(screen.getByLabelText('Review note'), 'Verified retained retirement types');
+}
 
 describe('annual retirement evidence', () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.canManage = true; mocks.list.mockResolvedValue({ data: [limit] }); mocks.inputs.mockResolvedValue({ data: [] }); });
@@ -85,4 +101,74 @@ describe('annual retirement evidence', () => {
     await user.click(screen.getByRole('button', { name: 'Retry loading evidence' }));
     expect(await screen.findByRole('button', { name: 'Review annual evidence' })).toBeTruthy();
   });
+  it('requires explicit types for every retained amount and a separate confirmation', async () => {
+    const user = userEvent.setup();
+    mocks.inputs.mockResolvedValue({ data: [], historical_retirement_sources: [historicalSource] });
+    mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 11 } }));
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(await screen.findByText('Retained historical contributions need classification review')).toBeTruthy();
+    expect(screen.getByText('Original source bucket: Pre-tax deductions')).toBeTruthy();
+    expect(screen.getByText('$1,234.56')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Review annual evidence' }));
+    const first = screen.getByLabelText('Contribution type for 401(k) After Tax (Pre-tax deductions)');
+    const second = screen.getByLabelText('Contribution type for 401(k) Voluntary (After-tax deductions)');
+    expect((first as HTMLSelectElement).value).toBe('');
+    await enterReviewNote(user);
+    await user.click(screen.getByLabelText(/I verified these opening balances/));
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    expect(screen.getByRole('alert').textContent).toContain('Choose the contribution type for every retained');
+    await user.selectOptions(first, '401k_after_tax');
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    expect(mocks.create).not.toHaveBeenCalled();
+    await user.selectOptions(second, '401k_non_roth_after_tax');
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    expect(screen.getByRole('alert').textContent).toContain('Confirm the retained historical');
+    await user.click(screen.getByLabelText(/I confirmed each retained historical contribution type/));
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({
+      historical_retirement_review: reviewed, external_roth_deferrals: 0, external_traditional_deferrals: 0,
+    })));
+    expect(await screen.findByText('Retained historical contributions reviewed')).toBeTruthy();
+    expect(screen.getByText('Reviewed as: Roth 401(k)')).toBeTruthy();
+  });
+  it('preserves a current retained classification when saving another wage review', async () => {
+    const user = userEvent.setup();
+    mocks.inputs.mockResolvedValue({ data: [{ id: 1, tax_year: year, prior_year_wage_status: 'unknown', historical_retirement_review: reviewed, source_reference: 'Prior review', reason: 'Confirmed' }], historical_retirement_sources: [historicalSource] });
+    mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 12 } }));
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await user.click(await screen.findByRole('button', { name: 'Record a new review' }));
+    expect(screen.queryByLabelText(/I confirmed each retained historical contribution type/)).toBeNull();
+    await user.type(screen.getByLabelText('Review note'), 'Wage review only');
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({ historical_retirement_review: reviewed })));
+  });
+  it.each([
+    { ...reviewed, balance_digest: 'stale-digest' },
+    { ...reviewed, classifications: reviewed.classifications!.map((entry) => ({ ...entry, amount: '1.00' })) },
+  ])('requires a new review for stale digest or changed retained amounts', async (staleReview) => {
+    const user = userEvent.setup();
+    mocks.inputs.mockResolvedValue({ data: [{ id: 1, tax_year: year, prior_year_wage_status: 'unknown', historical_retirement_review: staleReview }], historical_retirement_sources: [historicalSource] });
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(await screen.findByText('Retained historical contributions need classification review')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Review annual evidence' }));
+    expect((screen.getByLabelText('Contribution type for 401(k) After Tax (Pre-tax deductions)') as HTMLSelectElement).value).toBe('');
+  });
+  it('uses only the selected payroll year retained source and resets confirmation when a type changes', async () => {
+    const user = userEvent.setup();
+    mocks.inputs.mockResolvedValue({ data: [], historical_retirement_sources: [historicalSource, { ...historicalSource, tax_year: year - 1, balance_digest: 'prior-year', classifications: [{ ...historicalSource.classifications[0], source_label: 'Prior year only', amount: '300.00' }] }] });
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await user.click(await screen.findByRole('button', { name: 'Review annual evidence' }));
+    expect(screen.queryByText('Prior year only')).toBeNull();
+    const confirmation = screen.getByLabelText(/I confirmed each retained historical contribution type/) as HTMLInputElement;
+    await user.click(confirmation);
+    await user.selectOptions(screen.getByLabelText('Contribution type for 401(k) After Tax (Pre-tax deductions)'), '401k_pre_tax');
+    expect(confirmation.checked).toBe(false);
+    const input = screen.getByLabelText('Retirement evidence payroll year');
+    await user.clear(input);
+    await user.type(input, String(year - 1));
+    await user.tab();
+    expect(await screen.findByText('Prior year only')).toBeTruthy();
+    expect(screen.queryByText('401(k) After Tax')).toBeNull();
+  });
+
 });

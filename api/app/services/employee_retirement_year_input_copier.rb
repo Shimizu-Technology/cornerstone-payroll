@@ -21,6 +21,9 @@ class EmployeeRetirementYearInputCopier
     end
     entries = entries.group_by(&:tax_year).values.map(&:last) if mode == :latest_per_year
     entries.each do |input|
+      if input.historical_retirement_review.present? && mode == :latest_per_year
+        HistoricalRetirementProjection.new(employee: target, tax_year: input.tax_year, review: input.historical_retirement_review).validate_review!
+      end
       attributes = input.attributes.symbolize_keys.slice(*EmployeeRetirementYearInput::SNAPSHOT_ATTRIBUTES)
       if mode == :history
         existing = target.employee_retirement_year_inputs.where(attributes.merge(created_at: input.created_at)).exists?
@@ -39,6 +42,9 @@ class EmployeeRetirementYearInputCopier
         [ Time.current, latest&.created_at ].compact.max
       end
       copy = target.employee_retirement_year_inputs.build(values)
+      # Setup is copied before the archive. Keep review evidence dormant until
+      # its exact applied source is copied and revalidated by the archive cloner.
+      copy.defer_historical_review_validation = mode == :history
       copy.valid?
       if source.contractor? && target.contractor?
         # Evidence validly recorded while this person was a W-2 employee still
