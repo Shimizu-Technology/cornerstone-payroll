@@ -8,7 +8,7 @@ class EmployeeRetirementYearInput < ApplicationRecord
     eligible_compensation_before_system employer_additions_before_system non_roth_after_tax_before_system].freeze
   OPENING_AMOUNTS = %i[eligible_compensation_before_system employer_additions_before_system non_roth_after_tax_before_system].freeze
   SNAPSHOT_ATTRIBUTES = %i[tax_year prior_year_wage_status prior_year_fica_wages prior_year_wage_source
-    opening_balances_verified source_reference reason].concat(AMOUNTS).freeze
+    opening_balances_verified source_reference reason historical_retirement_review].concat(AMOUNTS).freeze
 
   belongs_to :company
   belongs_to :employee
@@ -21,6 +21,9 @@ class EmployeeRetirementYearInput < ApplicationRecord
   validates :source_reference, :reason, presence: true
   validate :evidence_is_consistent
   validate :tenant_is_consistent
+  before_validation :normalize_historical_review_amounts
+  validate :historical_review_is_consistent
+  attr_accessor :defer_historical_review_validation
   before_update :prevent_mutation
   before_destroy :prevent_mutation
 
@@ -31,6 +34,26 @@ class EmployeeRetirementYearInput < ApplicationRecord
   end
 
   private
+
+  def normalize_historical_review_amounts
+    return unless historical_retirement_review.is_a?(Hash) && historical_retirement_review["classifications"].is_a?(Array)
+
+    historical_retirement_review["classifications"].each do |row|
+      next unless row.is_a?(Hash)
+
+      amount = BigDecimal(row["amount"].to_s, exception: false)
+      row["amount"] = amount.to_s("F") if amount&.finite? && amount >= 0 && amount == amount.round(2)
+    end
+  end
+
+  def historical_review_is_consistent
+    return if historical_retirement_review == {} || defer_historical_review_validation
+    return unless employee
+
+    HistoricalRetirementProjection.new(employee: employee, tax_year: tax_year, review: historical_retirement_review).validate_review!
+  rescue ArgumentError => e
+    errors.add(:historical_retirement_review, e.message)
+  end
 
   def evidence_is_consistent
     if prior_year_wage_status == "unknown"
