@@ -19,7 +19,8 @@ const amountTypeOptions: PayrollFieldAmountType[] = ['fixed', 'percentage', 'man
 const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string; helper: string }> = [
   { value: '', label: 'No special report group', helper: 'Shows by its field name/category only.' },
   { value: '401k_pre_tax', label: '401(k) Pre-Tax', helper: 'Traditional 401(k) deduction or match.' },
-  { value: '401k_after_tax', label: '401(k) After Tax / Roth', helper: 'Roth or after-tax 401(k) deduction or match.' },
+  { value: '401k_after_tax', label: 'Roth 401(k)', helper: 'Designated Roth elective deferrals or an explicitly supported employer Roth contribution.' },
+  { value: '401k_non_roth_after_tax', label: '401(k) non-Roth after-tax', helper: 'Voluntary after-tax contributions. These do not count as Roth catch-up.' },
   { value: 'retirement_other', label: 'Other Retirement', helper: 'Retirement-related, but not a 401(k) bucket.' },
 ];
 
