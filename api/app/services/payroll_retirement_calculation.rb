@@ -31,6 +31,7 @@ class PayrollRetirementCalculation
     apply_source_caps!(sources, allowed)
     applied = totals_for(sources, :applied)
     apply_employer_match!(applied)
+    validate_employer_sources!
     validate_annual_additions!(applied) unless @defer_additions
 
     snapshot = build_snapshot(requested:, applied:, sources:)
@@ -44,12 +45,13 @@ class PayrollRetirementCalculation
         non_roth_after_tax: PayrollRetirementTotals.additions_for_item(payroll_item)[:non_roth_after_tax] }
     end
     apply_employer_match!(applied)
+    validate_employer_sources!
     validate_annual_additions!(applied)
     snapshot = payroll_item.retirement_rule_snapshot.to_h.deep_dup
     previous = snapshot.fetch("applied", {})
     snapshot["applied"] = serialize_hash(applied)
     snapshot["annual_additions"] = serialize_hash(@annual_additions || {})
-    snapshot["remaining_after"] = [ available_employee_deferral - applied.slice(:traditional, :roth).values.sum, 0.to_d ].max.to_s("F")
+    snapshot["remaining_after"] = [ available_employee_deferral(include_pending_catch_up: false) - applied.slice(:traditional, :roth).values.sum, 0.to_d ].max.to_s("F")
     snapshot["catch_up_amount"] = ((@annual_additions || {}).fetch(:prior_catch_up, 0).to_d + (@annual_additions || {}).fetch(:current_catch_up, 0).to_d).to_s("F")
     snapshot["employer_match"] = { "traditional" => payroll_item.employer_retirement_match.to_d.to_s("F"),
       "roth" => payroll_item.employer_roth_retirement_match.to_d.to_s("F"), "prior_ytd" => prior_employer_match.to_s("F") }
@@ -106,7 +108,7 @@ class PayrollRetirementCalculation
     if election[:catch_up_enabled] && (employee.date_of_birth.blank? || election[:plan_source_reference].blank?)
       raise ArgumentError, "Verify the employee's date of birth and the plan document reference before enabling catch-up contributions."
     end
-    if election[:election_id].present? && contribution_sources.any? { |entry| entry[:bucket] == :roth && entry[:requested].positive? } &&
+    if contribution_sources.any? { |entry| entry[:bucket] == :roth && entry[:requested].positive? } &&
         (!election[:roth_available] || election[:plan_source_reference].blank?)
       raise ArgumentError, "Verify that the plan permits designated Roth employee contributions before calculating this paycheck."
     end
@@ -331,25 +333,41 @@ class PayrollRetirementCalculation
     { traditional: traditional, roth: roth }
   end
 
-  def available_employee_deferral
+  def available_employee_deferral(include_pending_catch_up: true)
     return eligible_compensation unless annual_limit
 
-    catch_up = catch_up_available? ? catch_up_limit : 0.to_d
+    permitted = catch_up_available? || (include_pending_catch_up && catch_up_permission_status == "prior_wages_pending")
+    catch_up = permitted ? catch_up_limit : 0.to_d
     personal_remaining = annual_limit.fetch(:elective_deferral_limit).to_d + catch_up - ytd_employee_deferral
     local_remaining = regular_deferral_limit + catch_up - local_employee_deferral_before
-    plan_limit = election[:plan_annual_employee_limit].presence&.to_d
-    local_remaining = [ local_remaining, plan_limit - local_employee_deferral_before ].min if plan_limit&.positive?
+    plan_limit = optional_cap(:plan_annual_employee_limit)
+    local_remaining = [ local_remaining, plan_limit - local_employee_deferral_before ].min unless plan_limit.nil?
     [ [ personal_remaining, local_remaining ].min, 0.to_d ].max
   end
 
   def annual_employee_cap
     cap = regular_deferral_limit + (catch_up_available? ? catch_up_limit : 0.to_d)
-    plan_limit = election[:plan_annual_employee_limit].presence&.to_d
-    plan_limit&.positive? ? [ cap, plan_limit ].min : cap
+    plan_limit = optional_cap(:plan_annual_employee_limit)
+    plan_limit.nil? ? cap : [ cap, plan_limit ].min
+  end
+
+  def catch_up_age_eligible?
+    ActiveModel::Type::Boolean.new.cast(election[:catch_up_enabled]) && age_at_year_end && age_at_year_end >= 50
   end
 
   def catch_up_available?
-    ActiveModel::Type::Boolean.new.cast(election[:catch_up_enabled]) && age_at_year_end && age_at_year_end >= 50
+    catch_up_permission_status == "permitted"
+  end
+
+  def catch_up_permission_status
+    return "ineligible" unless catch_up_age_eligible?
+    return "permitted" if tax_year < 2026 || (historical_mode && historical_evidence.fetch(:version, 1).to_i < 2)
+    return "prior_wages_pending" unless year_input[:prior_year_wage_status].in?(%w[verified no_prior_employer_wages]) && year_input[:prior_year_wage_source].present?
+    if prior_year_fica_wages > annual_limit.fetch(:roth_catch_up_wage_threshold).to_d && !election[:roth_available]
+      return "roth_unavailable"
+    end
+
+    "permitted"
   end
 
   def catch_up_limit
@@ -366,12 +384,21 @@ class PayrollRetirementCalculation
     tax_year - employee.date_of_birth.year
   end
 
+  def optional_cap(attribute)
+    value = election[attribute].presence&.to_d
+    # Version-one snapshots were calculated with zero treated as no cap.
+    # Reproduce that saved behavior instead of silently rewriting corrections.
+    return nil if historical_mode && historical_evidence.fetch(:version, 1).to_i < 2 && value == 0
+
+    value
+  end
+
   def regular_deferral_limit
     return eligible_compensation unless annual_limit
 
     limit = annual_limit.fetch(:elective_deferral_limit).to_d
-    plan = election[:regular_plan_deferral_limit].presence&.to_d
-    plan&.positive? ? [ limit, plan ].min : limit
+    plan = optional_cap(:regular_plan_deferral_limit)
+    plan.nil? ? limit : [ limit, plan ].min
   end
 
   def attempted_catch_up?(current)
@@ -391,7 +418,7 @@ class PayrollRetirementCalculation
   end
 
   def roth_catch_up_required?
-    return false unless annual_limit && catch_up_available? && tax_year >= 2026
+    return false unless annual_limit && catch_up_age_eligible? && tax_year >= 2026
     return historical_evidence[:roth_catch_up_required] if historical_mode && historical_evidence.fetch(:version, 1).to_i < 2
 
     prior_year_fica_wages > annual_limit.fetch(:roth_catch_up_wage_threshold).to_d
@@ -466,9 +493,6 @@ class PayrollRetirementCalculation
 
     match = calculated_match(employee_applied.slice(:traditional, :roth).values.sum)
     if election[:employer_match_destination] == "roth"
-      unless historical_mode || (election[:employer_roth_available] && election[:plan_source_reference].present?)
-        raise ArgumentError, "Verify designated Roth employer contribution support with the plan administrator before processing this match."
-      end
       payroll_item.employer_retirement_match = 0
       payroll_item.employer_roth_retirement_match = match
     else
@@ -481,7 +505,10 @@ class PayrollRetirementCalculation
     rate = election.fetch(:employer_match_rate, 0).to_d
     return 0.to_d unless rate.positive? && election[:employer_match_mode] != "none"
 
-    if election[:true_up_policy] == "year_to_date"
+    if historical_mode && historical_evidence.fetch(:version, 1).to_i < 2 && election[:true_up_policy] == "year_to_date"
+      match_basis = match_basis_amount(local_employee_deferral_before + current_employee_deferral, ytd_before.fetch(:gross_pay, 0).to_d + eligible_compensation)
+      requested = (match_basis * rate).round(2) - prior_employer_match
+    elsif election[:true_up_policy] == "year_to_date"
       match_basis = match_basis_amount(local_employee_deferral_before + current_employee_deferral, [ prior_eligible_compensation + eligible_compensation, compensation_limit ].min)
       requested = (match_basis * rate).round(2) - prior_employer_match
     else
@@ -489,18 +516,23 @@ class PayrollRetirementCalculation
     end
 
     requested = [ requested, 0.to_d ].max
-    period_cap = election[:employer_match_period_cap].presence&.to_d
-    requested = [ requested, period_cap ].min if period_cap&.positive?
-    annual_cap = election[:employer_match_annual_cap].presence&.to_d
-    requested = [ requested, [ annual_cap - prior_employer_match, 0.to_d ].max ].min if annual_cap&.positive?
+    period_cap = optional_cap(:employer_match_period_cap)
+    requested = [ requested, period_cap ].min unless period_cap.nil?
+    annual_cap = optional_cap(:employer_match_annual_cap)
+    requested = [ requested, [ annual_cap - prior_employer_match, 0.to_d ].max ].min unless annual_cap.nil?
     requested.round(2)
   end
 
   def match_basis_amount(employee_deferral, compensation)
     return compensation if election[:employer_match_mode] == "compensation_percentage"
 
-    cap_rate = election[:employer_match_deferral_cap_rate].presence&.to_d
-    cap_rate&.positive? ? [ employee_deferral, compensation * cap_rate ].min : employee_deferral
+    cap_rate = optional_cap(:employer_match_deferral_cap_rate)
+    cap_rate.nil? ? employee_deferral : [ employee_deferral, compensation * cap_rate ].min
+  end
+
+  def election_opening_match
+    effective_on = election[:effective_on].presence&.to_date
+    effective_on&.year == tax_year ? election.fetch(:employer_match_ytd_before_system, 0).to_d : 0.to_d
   end
 
   def prior_employer_match
@@ -556,15 +588,44 @@ class PayrollRetirementCalculation
     [ eligible_compensation, [ compensation_limit - prior_eligible_compensation, 0.to_d ].max ].min
   end
 
-  def employer_sources_total
-    fields = payroll_item.payroll_item_field_entries.sum do |entry|
-      entry.active? && entry.employer_contribution? && retirement_group_for_field(entry) ? entry.amount.to_d : 0.to_d
+  def flexible_employer_sources
+    fields = payroll_item.payroll_item_field_entries.filter_map do |entry|
+      next unless entry.active? && entry.employer_contribution?
+      bucket = retirement_group_for_field(entry)
+      next unless bucket && entry.amount.to_d.positive?
+
+      { label: entry.label, bucket: bucket, amount: entry.amount.to_d,
+        percentage: entry.payroll_field_definition&.amount_type == "percentage" }
     end
-    recurring = employee_deductions.sum do |assignment|
+    recurring = employee_deductions.filter_map do |assignment|
       type = assignment.deduction_type
-      type.active? && type.employer_contribution? && retirement_group_for_deduction(assignment) ? assignment.calculate_amount(payroll_item.gross_pay).to_d : 0.to_d
+      next unless type.active? && type.employer_contribution?
+      bucket = retirement_group_for_deduction(assignment)
+      amount = assignment.calculate_amount(payroll_item.gross_pay).to_d
+      next unless bucket && amount.positive?
+
+      { label: type.name, bucket: bucket, amount: amount, percentage: assignment.is_percentage? }
     end
     fields + recurring
+  end
+
+  def employer_sources_total
+    flexible_employer_sources.sum { |source| source[:amount] }
+  end
+
+  def validate_employer_sources!
+    return if historical_mode
+
+    sources = flexible_employer_sources
+    roth_requested = payroll_item.employer_roth_retirement_match.to_d.positive? || sources.any? { |source| source[:bucket] == :roth }
+    if roth_requested && (!election[:employer_roth_available] || election[:plan_source_reference].blank?)
+      raise ArgumentError, "Verify designated Roth employer contribution support and provider reporting in an effective retirement plan election before processing legacy or flexible Roth employer contributions."
+    end
+    percentage_sources = sources.select { |source| source[:percentage] }
+    return if percentage_sources.empty? || payroll_item.gross_pay.to_d <= match_compensation
+
+    labels = percentage_sources.map { |source| source[:label] }.uniq.join(", ")
+    raise ArgumentError, "Employer retirement percentage contributions (#{labels}) use gross pay outside the permitted compensation basis or annual compensation ceiling. Move these contributions into a verified capped employer-match election, or obtain administrator review of the contribution basis before processing."
   end
 
   def prior_additions
@@ -590,7 +651,7 @@ class PayrollRetirementCalculation
       end
       # The older election opening match is an alternative statement of the
       # imported match. The new year-input amounts exclude the applied bridge.
-      employer_opening = [ imported_employer, election.fetch(:employer_match_ytd_before_system, 0).to_d ].max +
+      employer_opening = [ imported_employer, election_opening_match ].max +
         year_input.fetch(:employer_additions_before_system, 0).to_d
       local_employee_deferral_before + components.sum { |values| values[:employer] + values[:non_roth_after_tax] } +
         employer_opening + imported_after_tax + year_input.fetch(:non_roth_after_tax_before_system, 0).to_d
@@ -625,6 +686,7 @@ class PayrollRetirementCalculation
     current_additions = elective + applied.fetch(:non_roth_after_tax, 0).to_d + current_employer
     necessary_catch_up = [ prior_additions + current_additions - limit - prior_catch_up, current_personal_catch_up, 0.to_d ].max
     if necessary_catch_up.positive?
+      validate_catch_up_evidence! if catch_up_permission_status == "prior_wages_pending"
       capacity = catch_up_available? ? [ catch_up_limit - prior_catch_up, 0.to_d ].max : 0.to_d
       if necessary_catch_up > capacity || necessary_catch_up > elective
         raise ArgumentError, "Retirement annual additions exceed the lesser of the statutory limit and compensation. Review employer contributions, opening balances and plan limits with the administrator; promised employer contributions cannot be silently reduced."
@@ -653,6 +715,11 @@ class PayrollRetirementCalculation
     reasons = []
     reasons << "Recurring retirement items are excluded from this supplemental payroll." unless recurring_items_enabled
     reasons << "This employee is not eligible or is not participating in the plan." unless active_election?
+    if catch_up_permission_status == "prior_wages_pending"
+      reasons << "Potential catch-up eligibility requires verified prior-year employer wage evidence; permitted catch-up capacity is not established."
+    elsif catch_up_permission_status == "roth_unavailable"
+      reasons << "Catch-up contributions are unavailable because prior-year employer wages require designated Roth catch-up and this plan does not offer designated Roth employee contributions."
+    end
     if ActiveModel::Type::Boolean.new.cast(election[:catch_up_enabled]) && age_at_year_end.nil?
       reasons << "Catch-up contributions were not applied because the employee's date of birth is missing."
     end
@@ -672,10 +739,13 @@ class PayrollRetirementCalculation
       "year_input" => serialize_hash(year_input),
       "ytd_before" => serialize_hash(ytd_before),
       "regular_deferral_limit" => regular_deferral_limit.to_s("F"),
+      "catch_up_permission_status" => catch_up_permission_status,
+      "catch_up_age_eligible" => !!catch_up_age_eligible?,
+      "potential_catch_up_limit" => (catch_up_age_eligible? ? catch_up_limit : 0.to_d).to_s("F"),
       "catch_up_limit" => (catch_up_available? ? catch_up_limit : 0.to_d).to_s("F"),
       "employee_deferral_limit" => (regular_deferral_limit + (catch_up_available? ? catch_up_limit : 0.to_d)).to_s("F"),
       "annual_employee_cap" => annual_employee_cap.to_s("F"),
-      "remaining_after" => [ available_employee_deferral - applied.slice(:traditional, :roth).values.sum, 0.to_d ].max.to_s("F"),
+      "remaining_after" => [ available_employee_deferral(include_pending_catch_up: false) - applied.slice(:traditional, :roth).values.sum, 0.to_d ].max.to_s("F"),
       "catch_up_amount" => ((@annual_additions || {}).fetch(:prior_catch_up, 0).to_d + (@annual_additions || {}).fetch(:current_catch_up, 0).to_d).to_s("F"),
       "annual_additions" => serialize_hash(@annual_additions || {}),
       "eligible_compensation" => eligible_compensation.to_s("F"),
