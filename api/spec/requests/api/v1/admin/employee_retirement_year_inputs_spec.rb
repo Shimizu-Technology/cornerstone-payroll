@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe "Api::V1::Admin::EmployeeRetirementYearInputs", type: :request do
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
-  let(:user) { create(:user, company: company, organization: company.organization, role: :accountant) }
+  let(:user) { create(:user, company: company, organization: company.organization, role: :manager) }
   let(:path) { "/api/v1/admin/employees/#{employee.id}/retirement_year_inputs" }
   let(:values) do
     { tax_year: 2026, prior_year_wage_status: "verified", prior_year_fica_wages: 160_000,
@@ -49,5 +49,25 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementYearInputs", type: :request do
     user.update!(role: :employee)
     post path, params: { retirement_year_input: values }
     expect(response).to have_http_status(:forbidden)
+  end
+
+  it "lets accountants read evidence but prevents changing payroll configuration" do
+    user.update!(role: :accountant)
+    get path
+    expect(response).to have_http_status(:ok)
+    expect { post path, params: { retirement_year_input: values } }.not_to change(EmployeeRetirementYearInput, :count)
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it "prevents a manager assigned as a test-workspace operator from changing evidence" do
+    source = create(:company, organization: company.organization)
+    company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "training_replay",
+      migration_source_company: source, migration_rehearsal_status: "ready")
+    CompanyAssignment.create!(user: user, company: company, workspace_access_level: "operator")
+    post path, params: { retirement_year_input: values }
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to include("test workspace access")
+    get path
+    expect(response).to have_http_status(:ok)
   end
 end
