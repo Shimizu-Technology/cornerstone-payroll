@@ -736,6 +736,45 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions).to eq(1_000)
     end
 
+    it "preserves a standalone same-name employer contribution through rows, reports, snapshots and payable liabilities" do
+      employee.update!(additional_withholding: 0)
+      type = company.deduction_types.create!(name: "401(k) Employer Match", category: "employer_contribution",
+        sub_category: "retirement", reporting_group: "401k_pre_tax", active: true)
+      employee.employee_deductions.create!(deduction_type: type, amount: 100, is_percentage: false, active: true)
+      PayrollCalculator.for(employee, payroll_item).calculate
+      payroll_item.save!
+      row = payroll_item.payroll_item_deductions.find { |deduction| deduction.deduction_type_id == type.id }
+      expect(payroll_item.employer_retirement_match).to eq(0)
+      expect(row.amount).to eq(100)
+      expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "current_employer")).to eq("100.0")
+      expect(PayrollRetirementTotals.additions_for_item(payroll_item.reload)[:employer]).to eq(100)
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      actor = create(:user, company: company, organization: company.organization)
+      posting = PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
+      expect(posting.entries.where(category: %w[retirement_employer roth_retirement_employer]).sum(:amount)).to eq(100)
+    end
+
+    it "preserves an opposite-bucket flexible contribution using the inactive built-in match label" do
+      employee.update!(additional_withholding: 0)
+      verify_synthetic_retirement_plan!(employee, pay_period.pay_date)
+      field = create(:payroll_field_definition, company: company, name: "401(k) Employer Match",
+        kind: "employer_contribution", tax_treatment: "employer_contribution", category: "retirement",
+        reporting_group: "401k_after_tax", default_amount: 75)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 75, active: true)
+      PayrollCalculator.for(employee, payroll_item).calculate
+      payroll_item.save!
+      row = payroll_item.payroll_item_deductions.find(&:employer_contribution?)
+      expect(row).to have_attributes(amount: 75.to_d, reporting_group: "401k_after_tax")
+      expect(payroll_item.employer_retirement_match).to eq(0)
+      expect(payroll_item.employer_roth_retirement_match).to eq(0)
+      expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "current_employer")).to eq("75.0")
+      expect(PayrollRetirementTotals.additions_for_item(payroll_item.reload)[:employer]).to eq(75)
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      actor = create(:user, company: company, organization: company.organization)
+      posting = PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
+      expect(posting.entries.where(category: %w[retirement_employer roth_retirement_employer]).sum(:amount)).to eq(75)
+    end
+
     it "deducts a MoSa direct loan and an independently assigned loan field" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
