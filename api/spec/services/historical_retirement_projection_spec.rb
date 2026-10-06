@@ -97,7 +97,7 @@ RSpec.describe HistoricalRetirementProjection do
     expect(item.roth_retirement_payment).to eq(500)
     expect(result.snapshot.dig("annual_additions", "prior_additions").to_d).to eq(25_000)
     expect(result.snapshot["historical_filing_review_required"]).to be(true)
-    expect(result.snapshot.dig("employer_match", "prior_ytd").to_d).to eq(1000)
+    expect(result.snapshot.dig("employer_match", "prior_ytd").to_d).to eq(0)
     expect(PayrollStatementYtdBreakdown.new(item).deductions.find { |row| row.semantic == :"401k_after_tax" }.ytd).to eq(24_500)
     raw = balance.attributes
     year_input = employee.retirement_year_input_for(2026)

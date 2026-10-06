@@ -546,7 +546,7 @@ class PayrollRetirementCalculation
         .sum("payroll_items.employer_retirement_match + payroll_items.employer_roth_retirement_match").to_d
       effective_on = election[:effective_on].presence&.to_date
       imported = effective_on&.year == period.pay_date.year ? election.fetch(:employer_match_ytd_before_system, 0).to_d : 0.to_d
-      live + [ imported, historical_retirement_projection.employer_additions ].max
+      live + imported
     end
   end
 
