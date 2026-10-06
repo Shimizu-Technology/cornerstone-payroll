@@ -41,6 +41,11 @@ class EmployeeRetirementElectionChangeService
     values = EmployeeRetirementElection::SNAPSHOT_ATTRIBUTES.index_with { |attribute| attributes[attribute] }
     values[:effective_on] = attributes[:effective_on]
     values[:plan_name] = values[:plan_name].to_s.strip.presence || "401(k)"
+    values[:plan_type] ||= "standard_401k"
+    values[:limitation_year_type] ||= "calendar"
+    values[:related_plan_review_required] = false if values[:related_plan_review_required].nil?
+    values[:roth_available] = false if values[:roth_available].nil?
+    values[:employer_roth_available] = false if values[:employer_roth_available].nil?
     values[:eligible] = true if values[:eligible].nil?
     values[:participating] = false if values[:participating].nil?
     values[:traditional_contribution_type] ||= "percentage"

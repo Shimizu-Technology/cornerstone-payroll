@@ -4,13 +4,15 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
   let(:company) { create(:company) }
-  let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
+  let(:employee) { create(:employee, company: company, department: create(:department, company: company), date_of_birth: Date.new(1970, 1, 1)) }
   let(:user) { create(:user, company: company, organization: company.organization, role: :accountant) }
   let(:params) do
     {
       retirement_election: {
         effective_on: "2026-09-20",
         plan_name: "MoSa 401(k)",
+        plan_source_reference: "Signed test plan document, section 4",
+        roth_available: true,
         eligible: true,
         participating: true,
         traditional_contribution_type: "fixed",
@@ -19,7 +21,7 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
         roth_contribution_type: "percentage",
         roth_rate: 0.03,
         roth_amount: 0,
-        eligible_compensation: "gross_excluding_tips",
+        eligible_compensation: "gross_wages",
         catch_up_enabled: true,
         limit_priority: "traditional_first",
         employer_match_mode: "employee_deferral_percentage",
