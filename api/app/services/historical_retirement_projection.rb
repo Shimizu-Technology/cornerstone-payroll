@@ -9,7 +9,7 @@ class HistoricalRetirementProjection
   GROUP_KEYS = PayrollRetirementTotals::GROUP_KEYS.merge(
     PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX => :non_roth_after_tax
   ).freeze
-  REVIEW_MESSAGE = "Review the applied historical 401(k) classification in Retirement year evidence before calculating payroll. Historical wage/FIT filing corrections require a separate review."
+  REVIEW_MESSAGE = "Confirm imported 401(k) contribution types in Pay setup → Yearly retirement checks before calculating payroll. Historical wage/FIT filing corrections require a separate review."
 
   def initialize(employee:, tax_year:, balance: nil, review: nil)
     @employee = employee
@@ -36,8 +36,10 @@ class HistoricalRetirementProjection
     raise ArgumentError, REVIEW_MESSAGE unless balance && balance.employee_id == employee.id &&
       balance.company_id == employee.company_id && balance.tax_year == tax_year &&
       balance.historical_ytd_bridge.applied? && balance.historical_ytd_bridge.company_id == employee.company_id
-    raise ArgumentError, "#{REVIEW_MESSAGE} The retained source digest has changed." unless review.is_a?(Hash) &&
-      review["balance_digest"] == balance_digest
+    unless review.is_a?(Hash) && review["balance_digest"].present?
+      raise ArgumentError, "#{REVIEW_MESSAGE} No complete contribution-type review is recorded for #{tax_year}."
+    end
+    raise ArgumentError, "#{REVIEW_MESSAGE} The retained source digest has changed since the recorded review." unless review["balance_digest"] == balance_digest
 
     rows = review["classifications"]
     raise ArgumentError, "#{REVIEW_MESSAGE} Classify every retained candidate exactly once." unless rows.is_a?(Array) &&
