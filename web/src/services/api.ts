@@ -439,6 +439,10 @@ export const employeesApi = {
     api.get<{ data: import('@/types').EmployeeRetirementElection[] }>(`/admin/employees/${id}/retirement_elections`),
   createRetirementElection: (id: number, retirement_election: import('@/types').EmployeeRetirementElectionInput) =>
     api.post<{ data: import('@/types').EmployeeRetirementElection }>(`/admin/employees/${id}/retirement_elections`, { retirement_election }),
+  retirementYearInputs: (id: number) =>
+    api.get<{ data: import('@/types').EmployeeRetirementYearInput[] }>(`/admin/employees/${id}/retirement_year_inputs`),
+  createRetirementYearInput: (id: number, retirement_year_input: import('@/types').EmployeeRetirementYearInputDraft) =>
+    api.post<{ data: import('@/types').EmployeeRetirementYearInput }>(`/admin/employees/${id}/retirement_year_inputs`, { retirement_year_input }),
   timeRecords: (id: number, params?: { start_date?: string; end_date?: string }) =>
     api.get<{ data: import('@/types').DailyTimeRecord[] }>(`/admin/employees/${id}/time_records`, params),
   createTimeRecord: (id: number, time_record: import('@/types').DailyTimeRecordInput) =>
@@ -870,6 +874,14 @@ export interface TaxConfigAuditLog {
   ip_address: string | null;
   created_at: string;
 }
+
+export const annualRetirementLimitsApi = {
+  list: () => api.get<{ data: import('@/types').AnnualRetirementLimit[] }>('/admin/annual_retirement_limits'),
+  create: (annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
+    api.post<{ data: import('@/types').AnnualRetirementLimit }>('/admin/annual_retirement_limits', { annual_retirement_limit }),
+  update: (id: number, annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
+    api.patch<{ data: import('@/types').AnnualRetirementLimit }>(`/admin/annual_retirement_limits/${id}`, { annual_retirement_limit }),
+};
 
 export const taxConfigsApi = {
   list: () =>

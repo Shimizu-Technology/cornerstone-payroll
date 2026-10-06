@@ -179,7 +179,8 @@ const toCurrencyDraft = (value: number | null | undefined): string =>
 const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string }> = [
   { value: '', label: 'No special report group' },
   { value: '401k_pre_tax', label: '401(k) Pre-Tax' },
-  { value: '401k_after_tax', label: '401(k) After Tax / Roth' },
+  { value: '401k_after_tax', label: 'Roth 401(k)' },
+  { value: '401k_non_roth_after_tax', label: '401(k) non-Roth after-tax' },
   { value: 'retirement_other', label: 'Other Retirement' },
 ];
 
