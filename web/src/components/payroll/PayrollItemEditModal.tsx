@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useLayoutEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -63,6 +63,7 @@ interface PayrollItemEditModalProps {
 }
 
 type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean; applied_amount?: number };
+const EMPTY_WAGE_RATES: EmployeeWageRate[] = [];
 
 interface EditableFields {
   hours_worked: number;
@@ -94,7 +95,7 @@ export function PayrollItemEditModal({
   onSaved,
   onRemoved,
   contractorPayType,
-  wageRates = [],
+  wageRates = EMPTY_WAGE_RATES,
 }: PayrollItemEditModalProps) {
   const [fields, setFields] = useState<EditableFields>({
     hours_worked: 0,
@@ -124,7 +125,7 @@ export function PayrollItemEditModal({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (item) {
       const initialWageRateHours = item.wage_rate_hours && item.wage_rate_hours.length > 0
         ? item.wage_rate_hours
