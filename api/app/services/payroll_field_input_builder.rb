@@ -71,6 +71,7 @@ class PayrollFieldInputBuilder
         group = PayrollReportingGroups.infer_retirement_group(explicit_group: entry.reporting_group,
           label: entry.label, category: entry.category, tax_treatment: entry.tax_treatment)
         next unless group || entry.category == "retirement"
+        next unless PayrollFieldRequestIntent.requested_amount(entry).positive? || entry.amount.to_d.positive?
 
         { employee_id: entry.payroll_item.employee_id, field_id: entry.payroll_field_definition_id,
           label: entry.label, requested_amount: decimal(PayrollFieldRequestIntent.requested_amount(entry)),

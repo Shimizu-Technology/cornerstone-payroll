@@ -1157,6 +1157,7 @@ export interface RunPayrollAdjustmentEntry {
 export interface RunPayrollFieldInputEntry {
   mode: 'default' | 'override';
   amount?: number;
+  replace_request?: boolean;
 }
 
 export const payPeriodsApi = {

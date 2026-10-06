@@ -24,6 +24,8 @@ The ordinary Roth catch-up requirement applies in 2026 after the transition peri
 
 The year-end preview is informational. Paychecks use their actual pay-date election. A first future election preserves the existing legacy setup before its effective date. New rule snapshots retain annual rules, DOB/age, YTD baseline and evidence for later replay; old snapshots retain their original evidence limits.
 
+Catch-up is a plan permission and statutory classification, not a separate extra limit created by naming a column “catch-up.” Adding a second field adds another requested contribution. Paused recurring assignments can leave saved manual paycheck entries active; the worksheet identifies these retained entries and links to the paycheck for review. Requested and applied amounts are shown separately. Unchanged worksheet saves retain the original request, while an explicit new amount or zero replaces it. Clear an obsolete manual request before configuring a replacement, and preserve committed history.
+
 ## Rollout and operational acceptance
 
 The additive migration introduces annual-additions/compensation limits and append-only annual evidence. It completes the published 2026 rule row and preserves saved paycheck history. It does not fabricate signed plan terms, prior-year wages, or external contributions for existing employees. Before affected current payroll, staff must verify legacy/dated Roth support and catch-up evidence, including imported labels that say only “After Tax.” Use **Roth 401(k)** for designated Roth and **401(k) non-Roth after-tax** for genuine after-tax additions.
