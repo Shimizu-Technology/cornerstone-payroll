@@ -23,6 +23,7 @@ class PayrollRetirementCalculation
   end
 
   def apply!
+    historical_retirement_projection.totals(strict: true) unless historical_mode
     sources = contribution_sources
     validate_annual_limit!
     validate_plan!
@@ -545,7 +546,7 @@ class PayrollRetirementCalculation
         .sum("payroll_items.employer_retirement_match + payroll_items.employer_roth_retirement_match").to_d
       effective_on = election[:effective_on].presence&.to_date
       imported = effective_on&.year == period.pay_date.year ? election.fetch(:employer_match_ytd_before_system, 0).to_d : 0.to_d
-      live + imported
+      live + [ imported, historical_retirement_projection.employer_additions ].max
     end
   end
 
@@ -628,27 +629,18 @@ class PayrollRetirementCalculation
     raise ArgumentError, "Employer retirement percentage contributions (#{labels}) use gross pay outside the permitted compensation basis or annual compensation ceiling. Move these contributions into a verified capped employer-match election, or obtain administrator review of the contribution basis before processing."
   end
 
+  def historical_retirement_projection
+    @historical_retirement_projection ||= HistoricalRetirementProjection.new(employee: employee, tax_year: tax_year)
+  end
+
   def prior_additions
     return historical_evidence.dig(:annual_additions, :prior_additions).to_d if historical_mode
 
     @prior_additions ||= begin
       components = prior_payroll_items.map { |item| PayrollRetirementTotals.additions_for_item(item) }
-      bridge = employee.send(:applied_historical_ytd_balance, tax_year)
-      breakdown = bridge&.source_breakdown.to_h
-      imported_employer = breakdown.fetch("employer_contribution_breakdown", {}).to_h.sum do |label, amount|
-        group = PayrollReportingGroups.infer_retirement_group(label: label, deduction_category: "employer_contribution")
-        if group == PayrollReportingGroups::GROUP_RETIREMENT_OTHER && label.match?(/401\s*\(?k\)?/i)
-          raise ArgumentError, "The applied historical retirement bridge has ambiguous employer contribution labels. Verify the retained classification before calculating annual additions."
-        end
-        group && group != PayrollReportingGroups::GROUP_RETIREMENT_OTHER ? amount.to_d : 0.to_d
-      end
-      imported_after_tax = breakdown.fetch("after_tax_deduction_breakdown", {}).to_h.sum do |label, amount|
-        group = PayrollReportingGroups.infer_retirement_group(label: label, deduction_category: "post_tax")
-        if group == PayrollReportingGroups::GROUP_RETIREMENT_OTHER && label.match?(/401\s*\(?k\)?/i)
-          raise ArgumentError, "The applied historical bridge has ambiguous after-tax 401(k) labels. Verify Roth versus non-Roth classification before calculating retirement contributions."
-        end
-        group == PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ? amount.to_d : 0.to_d
-      end
+      projection = historical_retirement_projection
+      imported_employer = projection.employer_additions
+      imported_after_tax = projection.totals(strict: true)[:non_roth_after_tax]
       # The older election opening match is an alternative statement of the
       # imported match. The new year-input amounts exclude the applied bridge.
       employer_opening = [ imported_employer, election_opening_match ].max +
@@ -760,7 +752,8 @@ class PayrollRetirementCalculation
         "prior_ytd" => prior_employer_match.to_s("F")
       },
       "sources" => sources.map { |entry| entry.except(:record).transform_values { |value| value.is_a?(BigDecimal) ? value.to_s("F") : value } },
-      "explanations" => reasons
+      "historical_filing_review_required" => year_input[:historical_retirement_review].present?,
+      "explanations" => reasons + (year_input[:historical_retirement_review].present? ? [ "Historical retirement classification was reviewed separately; original source wage/FIT buckets and paid snapshots are unchanged. Review any historical wage/FIT filing correction separately." ] : [])
     }
   end
 
@@ -769,6 +762,8 @@ class PayrollRetirementCalculation
       case value
       when BigDecimal then value.to_s("F")
       when Date then value.iso8601
+      when Hash then serialize_hash(value)
+      when Array then value.map { |entry| entry.is_a?(Hash) ? serialize_hash(entry) : entry }
       else value
       end
     end

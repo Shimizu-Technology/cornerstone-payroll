@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_06_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -902,6 +902,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_090000) do
     t.string "prior_year_wage_status", default: "unknown", null: false
     t.text "reason", null: false
     t.text "source_reference", null: false
+    t.jsonb "historical_retirement_review", default: {}, null: false
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id"], name: "index_employee_retirement_year_inputs_on_company_id"
@@ -913,6 +914,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_090000) do
     t.check_constraint "prior_year_wage_status::text = 'unknown'::text AND prior_year_fica_wages IS NULL OR prior_year_wage_status::text <> 'unknown'::text AND prior_year_fica_wages IS NOT NULL AND prior_year_wage_source IS NOT NULL AND btrim(prior_year_wage_source) <> ''::text AND (prior_year_wage_status::text <> 'no_prior_employer_wages'::text OR prior_year_fica_wages = 0::numeric)", name: "retirement_year_input_wage_evidence"
     t.check_constraint "prior_year_wage_status::text = ANY (ARRAY['unknown'::character varying, 'verified'::character varying, 'no_prior_employer_wages'::character varying]::text[])", name: "retirement_year_input_wage_status"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "retirement_year_input_year"
+    t.check_constraint "jsonb_typeof(historical_retirement_review) = 'object'::text", name: "retirement_year_inputs_review_object"
   end
 
   create_table "employee_status_events", force: :cascade do |t|
