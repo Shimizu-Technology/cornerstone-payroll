@@ -1,0 +1,88 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EmployeeRetirementYearPanel } from './EmployeeRetirementYearPanel';
+import type { Employee } from '@/types';
+
+const mocks = vi.hoisted(() => ({ list: vi.fn(), inputs: vi.fn(), create: vi.fn(), canManage: true }));
+vi.mock('@/services/api', () => ({
+  annualRetirementLimitsApi: { list: mocks.list },
+  employeesApi: { retirementYearInputs: mocks.inputs, createRetirementYearInput: mocks.create },
+  ApiError: class ApiError extends Error { fieldErrors = {}; },
+}));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => mocks.canManage }) }));
+const year = new Date().getFullYear();
+const employee = { id: 5, date_of_birth: `${year - 61}-12-31`, retirement_elections: [{ effective_on: `${year}-01-01`, catch_up_enabled: true }] } as unknown as Employee;
+const limit = { tax_year: year, elective_deferral_limit: 24500, catch_up_limit: 8000, enhanced_catch_up_limit: 11250, roth_catch_up_wage_threshold: 150000 };
+
+describe('annual retirement evidence', () => {
+  beforeEach(() => { vi.clearAllMocks(); mocks.canManage = true; mocks.list.mockResolvedValue({ data: [limit] }); mocks.inputs.mockResolvedValue({ data: [] }); });
+  afterEach(cleanup);
+  it('shows year-end eligibility and missing evidence without pretending wages are zero', async () => {
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(await screen.findByText('$35,750.00')).toBeTruthy();
+    expect(screen.getByText(/employer wages need verification before catch-up/)).toBeTruthy();
+    expect(screen.getByText(/Missing history is not treated as zero/)).toBeTruthy();
+  });
+  it('shows zero catch-up when verified high wages require unavailable Roth support', async () => {
+    mocks.inputs.mockResolvedValue({ data: [{ id: 1, tax_year: year, prior_year_wage_status: 'verified', prior_year_fica_wages: '175000.0', prior_year_wage_source: 'Verified wage statement', source_reference: 'Review 1', reason: 'Confirmed' }] });
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(await screen.findByText(/Catch-up is unavailable until designated Roth support is verified/)).toBeTruthy();
+    expect(screen.queryByText('$35,750.00')).toBeNull();
+    expect(screen.getAllByText('$24,500.00').length).toBeGreaterThan(0);
+  });
+  it('lets staff read evidence while reserving changes for configuration administrators', async () => {
+    mocks.canManage = false;
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await screen.findByText(/employer wages need verification before catch-up/);
+    expect(screen.queryByRole('button', { name: 'Review annual evidence' })).toBeNull();
+  });
+  it('saves verified no-prior-employer wages with zero and retained provenance', async () => {
+    const user = userEvent.setup();
+    mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 9 } }));
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await user.click(await screen.findByRole('button', { name: 'Review annual evidence' }));
+    await user.selectOptions(screen.getByLabelText(`${year - 1} sponsoring-employer wages`), 'no_prior_employer_wages');
+    await user.type(screen.getByLabelText('Employer wage evidence reference'), 'New hire verification');
+    await user.type(screen.getByLabelText('Evidence reference'), 'Administrator review 12');
+    await user.type(screen.getByLabelText('Review note'), 'Verified employee joined this year');
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({
+      tax_year: year, prior_year_wage_status: 'no_prior_employer_wages', prior_year_fica_wages: 0,
+      prior_year_wage_source: 'New hire verification', source_reference: 'Administrator review 12',
+    })));
+    expect(await screen.findByText(/retirement evidence saved/)).toBeTruthy();
+  });
+  it('keeps unknown wages null when recording other evidence', async () => {
+    const user = userEvent.setup();
+    mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 10 } }));
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await user.click(await screen.findByRole('button', { name: 'Review annual evidence' }));
+    await user.type(screen.getByLabelText('Evidence reference'), 'Outside plan statement');
+    await user.type(screen.getByLabelText('Review note'), 'Employer wages pending');
+    await user.click(screen.getByRole('button', { name: 'Save annual evidence' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({ prior_year_wage_status: 'unknown', prior_year_fica_wages: null })));
+  });
+  it('allows replacing the year with keyboard entry and avoids current-election historical assumptions', async () => {
+    const user = userEvent.setup();
+    mocks.list.mockResolvedValue({ data: [{ ...limit, tax_year: year - 1 }] });
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    await screen.findByRole('button', { name: 'Review annual evidence' });
+    const input = screen.getByLabelText('Retirement evidence payroll year');
+    await user.clear(input);
+    await user.type(input, String(year - 1));
+    await user.tab();
+    expect((input as HTMLInputElement).value).toBe(String(year - 1));
+    expect(screen.getAllByText('$24,500.00').length).toBeGreaterThan(0);
+    expect(screen.queryByText('$35,750.00')).toBeNull();
+  });
+  it('recovers failed loading without showing invented evidence', async () => {
+    const user = userEvent.setup();
+    mocks.inputs.mockRejectedValueOnce(new Error('Evidence service unavailable')).mockResolvedValueOnce({ data: [] });
+    render(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Evidence service unavailable'));
+    await user.click(screen.getByRole('button', { name: 'Retry loading evidence' }));
+    expect(await screen.findByRole('button', { name: 'Review annual evidence' })).toBeTruthy();
+  });
+});

@@ -49,6 +49,9 @@ class StaffRolePolicy
     "api/v1/admin/check_register" => :payroll_operations,
     "api/v1/admin/payroll_final_records" => :payroll_operations,
     "api/v1/admin/tax_configs" => :manage_organization,
+    "api/v1/admin/annual_retirement_limits" => :payroll_operations,
+    "api/v1/admin/employee_retirement_year_inputs" => :payroll_operations,
+    "api/v1/admin/employee_retirement_elections" => :payroll_operations,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
     "api/v1/admin/invoice_chat_sessions" => :manage_organization,
@@ -59,6 +62,10 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/annual_retirement_limits#create" => :manage_platform,
+    "api/v1/admin/annual_retirement_limits#update" => :manage_platform,
+    "api/v1/admin/employee_retirement_year_inputs#create" => :manage_client_configuration,
+    "api/v1/admin/employee_retirement_elections#create" => :manage_client_configuration,
     "api/v1/admin/companies#create" => :manage_organization,
     "api/v1/admin/companies#migration_rehearsal_preview" => :manage_organization,
     "api/v1/admin/companies#create_migration_rehearsal" => :manage_organization,

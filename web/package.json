@@ -27,7 +27,6 @@
     "dompurify": "^3.4.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",
-    "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.3.289",
     "posthog-js": "^1.364.2",
     "react": "^19.2.8",

@@ -20,6 +20,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 ## Current authority
 
+- [Retirement limits and evidence](RETIREMENT_LIMITS_AND_EVIDENCE.md) — supported 401(k) rules, annual evidence, staff workflow, administrator-review boundaries and rollout verification.
+
 - [Product strategy and platform boundaries](PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md) — product position, module ownership, packaging, and accounting decision boundary.
 - [Gate 0 trust and release plan](GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md) — verified release blockers, PR sequence, acceptance criteria, and operational evidence.
 - [Deterministic payroll release lane](DETERMINISTIC_RELEASE_LANE.md) — disposable full-stack browser fixture, deidentified PDF corpus, commands, and evidence rules.

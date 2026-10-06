@@ -4,13 +4,15 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
   let(:company) { create(:company) }
-  let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
-  let(:user) { create(:user, company: company, organization: company.organization, role: :accountant) }
+  let(:employee) { create(:employee, company: company, department: create(:department, company: company), date_of_birth: Date.new(1970, 1, 1)) }
+  let(:user) { create(:user, company: company, organization: company.organization, role: :manager) }
   let(:params) do
     {
       retirement_election: {
         effective_on: "2026-09-20",
         plan_name: "MoSa 401(k)",
+        plan_source_reference: "Signed test plan document, section 4",
+        roth_available: true,
         eligible: true,
         participating: true,
         traditional_contribution_type: "fixed",
@@ -19,7 +21,7 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
         roth_contribution_type: "percentage",
         roth_rate: 0.03,
         roth_amount: 0,
-        eligible_compensation: "gross_excluding_tips",
+        eligible_compensation: "gross_wages",
         catch_up_enabled: true,
         limit_priority: "traditional_first",
         employer_match_mode: "employee_deferral_percentage",
@@ -70,5 +72,25 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
     post "/api/v1/admin/employees/#{other.id}/retirement_elections", params: params
 
     expect(response).to have_http_status(:not_found)
+  end
+
+  it "allows accountants to read elections but requires configuration access to create them" do
+    user.update!(role: :accountant)
+    get "/api/v1/admin/employees/#{employee.id}/retirement_elections"
+    expect(response).to have_http_status(:ok)
+    expect do
+      post "/api/v1/admin/employees/#{employee.id}/retirement_elections", params: params
+    end.not_to change(EmployeeRetirementElection, :count)
+    expect(response).to have_http_status(:forbidden)
+  end
+
+  it "prevents a manager assigned as a test-workspace operator from changing elections" do
+    source = create(:company, organization: company.organization)
+    company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "training_replay",
+      migration_source_company: source, migration_rehearsal_status: "ready")
+    CompanyAssignment.create!(user: user, company: company, workspace_access_level: "operator")
+    post "/api/v1/admin/employees/#{employee.id}/retirement_elections", params: params
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to include("test workspace access")
   end
 end

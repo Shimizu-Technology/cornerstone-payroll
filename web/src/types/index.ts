@@ -108,7 +108,7 @@ export type PayrollAdjustmentTreatment =
 export type PayrollFieldKind = 'addition' | 'deduction' | 'employer_contribution';
 export type PayrollFieldTaxTreatment = PayrollAdjustmentTreatment | 'employer_contribution';
 export type PayrollFieldCategory = 'loan' | 'retirement' | 'insurance' | 'rent' | 'allotment' | 'reimbursement' | 'garnishment' | 'child_support' | 'phone' | 'benefit' | 'other';
-export type PayrollFieldReportingGroup = '401k_pre_tax' | '401k_after_tax' | 'retirement_other';
+export type PayrollFieldReportingGroup = '401k_pre_tax' | '401k_after_tax' | '401k_non_roth_after_tax' | 'retirement_other';
 export type PayrollFieldAmountType = 'manual' | 'fixed' | 'percentage';
 
 export interface PayrollFieldDefinition {
@@ -157,6 +157,7 @@ export interface PayPeriodPayrollFieldAssignment {
   default_percentage?: number | null;
   suggested_amount?: number | null;
   current_amount?: number | null;
+  requested_amount?: number | null;
   current_source?: PayrollItemFieldEntry['source'] | null;
   overridden: boolean;
   editable: boolean;
@@ -166,6 +167,7 @@ export interface PayPeriodPayrollFieldAssignment {
 export interface PayPeriodPayrollFieldInputs {
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
+  retained_manual_entries?: Array<{ employee_id: number; field_id: number | null; label: string; requested_amount: number; applied_amount: number; source: 'manual' | 'import' }>;
 }
 
 export interface PayrollItemFieldEntry {
@@ -184,6 +186,7 @@ export interface PayrollItemFieldEntry {
   active?: boolean;
   notes?: string | null;
   metadata?: Record<string, unknown>;
+  replace_request?: boolean;
 }
 
 export interface PayrollAdjustment {
@@ -328,6 +331,13 @@ export interface EmployeeRetirementElection {
   company_id: number;
   effective_on: string;
   plan_name: string;
+  plan_type?: 'standard_401k';
+  limitation_year_type?: 'calendar' | 'non_calendar' | 'short';
+  roth_available?: boolean;
+  employer_roth_available?: boolean;
+  plan_source_reference?: string;
+  regular_plan_deferral_limit?: number | null;
+  related_plan_review_required?: boolean;
   eligible: boolean;
   participating: boolean;
   traditional_contribution_type: RetirementContributionType;
@@ -356,6 +366,39 @@ export interface EmployeeRetirementElection {
 
 export type EmployeeRetirementElectionInput = Omit<EmployeeRetirementElection,
   'id' | 'employee_id' | 'company_id' | 'source' | 'created_by_name' | 'created_at'>;
+
+export interface AnnualRetirementLimit {
+  id: number;
+  tax_year: number;
+  elective_deferral_limit: number;
+  catch_up_limit: number;
+  enhanced_catch_up_limit: number;
+  roth_catch_up_wage_threshold: number;
+  annual_additions_limit: number;
+  compensation_limit: number;
+  source_name: string;
+  source_url: string;
+}
+export type AnnualRetirementLimitInput = Omit<AnnualRetirementLimit, 'id'> & { reason: string };
+
+export interface EmployeeRetirementYearInput {
+  id: number;
+  tax_year: number;
+  prior_year_wage_status: 'unknown' | 'verified' | 'no_prior_employer_wages';
+  prior_year_fica_wages: number | null;
+  prior_year_wage_source: string;
+  external_traditional_deferrals: number;
+  external_roth_deferrals: number;
+  eligible_compensation_before_system: number;
+  employer_additions_before_system: number;
+  non_roth_after_tax_before_system: number;
+  opening_balances_verified: boolean;
+  source_reference: string;
+  reason: string;
+  created_at?: string;
+  created_by_name?: string | null;
+}
+export type EmployeeRetirementYearInputDraft = Omit<EmployeeRetirementYearInput, 'id' | 'created_at' | 'created_by_name'>;
 
 export type EmployeeOvertimeStatus = 'exempt' | 'nonexempt' | 'needs_review';
 export type EmployeeTimekeepingMode = 'imported' | 'manual' | 'schedule_with_exceptions';

@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { AnnualRetirementLimitsPanel } from '@/components/settings/AnnualRetirementLimitsPanel';
 import {
   taxConfigsApi,
   type TaxConfig,
@@ -252,7 +253,7 @@ export default function TaxConfigs() {
     <div>
       <Header
         title="Tax Configuration"
-        description="Manage annual tax rates, brackets, and deductions"
+        description="Manage annual tax rates, brackets, deductions, and retirement limits"
         actions={
           <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-2" />
@@ -262,6 +263,7 @@ export default function TaxConfigs() {
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <AnnualRetirementLimitsPanel />
 
       {/* Tax Years List */}
       <div className="space-y-3 sm:hidden">

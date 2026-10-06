@@ -216,7 +216,7 @@ module Api
             payroll_field_entries: [
               :id, :payroll_field_definition_id, :label, :kind, :tax_treatment,
               :category, :reporting_group, :amount, :source, :employee_paid, :employer_paid,
-              :active, :notes
+              :active, :notes, :replace_request
             ]
           )
 
@@ -233,8 +233,11 @@ module Api
         end
 
         def normalize_payroll_field_entries(entries)
-          Array(entries).filter_map do |entry|
-            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+          rows = Array(entries).map { |entry| entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h }
+          # Reject invalid request flags before the legacy malformed-row rescue;
+          # an invalid explicit instruction must not silently disappear.
+          rows.each { |data| PayrollFieldRequestIntent.replace_request?(data) }
+          rows.filter_map do |data|
             amount = BigDecimal(data["amount"].to_s)
             label = data["label"].to_s.strip
             next if label.blank? || amount.negative? || !amount.finite?
@@ -272,7 +275,9 @@ module Api
             }
             payload = payload.compact.merge(notes: payload[:notes])
             if source == "manual" && existing_entry&.metadata.is_a?(Hash)
-              payload[:metadata] = amount == existing_entry.amount ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount")
+              replace_request = PayrollFieldRequestIntent.replace_request?(data)
+              preserve_request = !replace_request && PayrollFieldRequestIntent.unchanged_echo?(existing_entry, amount.round(2))
+              payload[:metadata] = preserve_request ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount", "loan_requested_amount")
             end
             payload
           rescue ArgumentError, FloatDomainError

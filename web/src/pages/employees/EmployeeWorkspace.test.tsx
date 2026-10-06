@@ -31,6 +31,7 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/components/employees/EmployeeRetirementElectionPanel', () => ({
   EmployeeRetirementElectionPanel: () => null,
 }));
+vi.mock('@/components/employees/EmployeeRetirementYearPanel', () => ({ EmployeeRetirementYearPanel: () => null }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
   PdfPreview: ({ artifact }: { artifact: { title: string } | null }) => artifact ? <div role="dialog">{artifact.title}</div> : null,
