@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -70,12 +71,10 @@ export function ClientChangeRequests() {
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {notice && (
-          <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            <span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="font-medium text-emerald-700 hover:text-emerald-900">Dismiss</button>
-          </div>
+          <ActionFeedback tone="success" message={notice}><span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="font-medium text-emerald-700 hover:text-emerald-900">Dismiss</button></ActionFeedback>
         )}
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
 
         <div className="flex flex-col gap-4 md:flex-row">
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="max-w-md" />

@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ReprintCheckModal
  * Confirms reissue: voids the old physical check number, assigns a new one in-place.
@@ -140,7 +141,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
         </div>
 
         {error && (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-600">{error}</p>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         <div className="flex justify-end gap-2 pt-1">

@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
@@ -734,10 +735,10 @@ export function CheckSettingsPage() {
 
         {/* Feedback */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>
+          <ActionFeedback tone="error" message={error} />
         )}
         {success && (
-          <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{success}</div>
+          <ActionFeedback tone="success" message={success} />
         )}
         {hasUnsavedCheckSettings && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
+import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
@@ -392,6 +393,13 @@ function AppWithClerk({ children }: { children: React.ReactNode }) {
   );
 }
 
+function AppFeedback({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const { activeCompanyId, activeOrganizationId } = useCompany();
+  const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${activeCompanyId ?? 'none'}`;
+  return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -400,7 +408,7 @@ function App() {
         <AuthProvider>
           <PostHogIdentify />
           <CompanyProvider>
-            <AppRoutes />
+            <AppFeedback><AppRoutes /></AppFeedback>
           </CompanyProvider>
         </AuthProvider>
       </AppWithClerk>

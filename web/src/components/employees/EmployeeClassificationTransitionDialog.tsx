@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Copy, History, LockKeyhole, ShieldCheck, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -219,9 +220,7 @@ export function EmployeeClassificationTransitionDialog({
           </div>
 
           {error && (
-            <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
-              {error}
-            </div>
+            <ActionFeedback tone="error" message={error} />
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

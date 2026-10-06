@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useLayoutEffect } from 'react';
 import {
   Dialog,
@@ -382,9 +383,7 @@ export function PayrollItemEditModal({
         </DialogHeader>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         <div className="space-y-4 mt-4">

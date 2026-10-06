@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -257,7 +258,7 @@ export function ClientReports() {
       <Header title="Reports" description="Read-only payroll reports for finalized payroll periods." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
 
         {loading ? (
           <div className="py-12 text-center text-sm text-gray-500">Loading reports...</div>

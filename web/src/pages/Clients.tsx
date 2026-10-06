@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Archive, RotateCcw, Clock3 } from 'lucide-react';
@@ -610,15 +611,11 @@ export function Clients() {
       <div className="space-y-6 p-4 sm:p-6">
         {/* Error */}
         {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
         {promotionNotice && (
-          <div role="status" className="flex items-start justify-between gap-4 rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
-            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
-            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button>
-          </div>
+          <ActionFeedback tone="success" message={promotionNotice}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
+            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button></ActionFeedback>
         )}
 
         {/* Primary actions */}
@@ -780,7 +777,7 @@ export function Clients() {
                   </div>
 
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
-                  {workspaceError && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{workspaceError}</div>}
+                  {workspaceError && <ActionFeedback tone="error" message={workspaceError} />}
 
                   <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
                     <button type="button" onClick={() => void handleOpenRehearsal(workspaceBuilderSource)} className="text-left text-sm font-semibold text-warning-800 hover:text-warning-900">Need an exact migration rehearsal and verified promotion instead?</button>
@@ -853,7 +850,7 @@ export function Clients() {
               </div>
             )}
 
-            {rehearsalError && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rehearsalError}</div>}
+            {rehearsalError && <ActionFeedback tone="error" message={rehearsalError} />}
             <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
               <Button variant="outline" onClick={handleCloseRehearsal}>Cancel</Button>
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
@@ -1025,7 +1022,7 @@ export function Clients() {
                 </div>
               )}
 
-              {promotionError && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{promotionError}</div>}
+              {promotionError && <ActionFeedback tone="error" message={promotionError} />}
               <div className="mt-6 flex flex-col-reverse gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:justify-between">
                 <Button variant="outline" onClick={handleClosePromotion}>Cancel</Button>
                 <div className="flex flex-col gap-3 sm:flex-row">
@@ -1056,9 +1053,7 @@ export function Clients() {
             </h3>
 
             {formError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {formError}
-              </div>
+              <ActionFeedback tone="error" message={formError} />
             )}
 
             {/* Basic Info */}

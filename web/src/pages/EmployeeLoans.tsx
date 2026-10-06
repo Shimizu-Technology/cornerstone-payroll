@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, CircleDollarSign, Link2, Plus, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -433,7 +434,7 @@ export default function EmployeeLoans() {
                 <button type="button" className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${formData.balance_setup_mode === 'new_loan' ? 'bg-neutral-100 text-primary-800' : 'text-neutral-600'}`} onClick={() => setFormData((previous) => ({ ...previous, balance_setup_mode: 'new_loan' }))}>Start a new loan</button>
               </div>
             )}
-            {formError && <p className="mb-4 rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700" role="alert">{formError}</p>}
+            {formError && <ActionFeedback tone="error" message={formError} />}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Employee <span className="text-danger-600">*</span>
@@ -572,9 +573,7 @@ export default function EmployeeLoans() {
                     ) : (
                     <>
                     {loanActionError && (
-                      <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {loanActionError}
-                      </div>
+                      <ActionFeedback tone="error" message={loanActionError} />
                     )}
 
                     <div className={`mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${expandedLoan.tracking_mode === 'balance_tracked' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-blue-200 bg-blue-50 text-blue-950'}`}>

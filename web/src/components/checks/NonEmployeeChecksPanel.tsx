@@ -1,3 +1,4 @@
+import { ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -86,6 +87,7 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
 };
 
 export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+  const { notify } = useFeedback();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -249,7 +251,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       setPreviewUrl(url);
       setPreviewCheck(check);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to load check PDF');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
     } finally {
       setPdfLoading(null);
     }
@@ -275,7 +277,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     if (printWindow) {
       printWindow.addEventListener('load', () => { printWindow.print(); });
     } else {
-      alert('Pop-up blocked. Please allow pop-ups to print checks.');
+      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print checks.' });
     }
   };
 
@@ -288,7 +290,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     } else {
       window.clearTimeout(revokeTimer);
       URL.revokeObjectURL(url);
-      alert('Pop-up blocked. Please allow pop-ups to print checks.');
+      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print checks.' });
     }
   };
 
@@ -301,7 +303,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       );
       openBlobForPrint(blob);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate PDF');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate PDF' });
     } finally {
       setPdfLoading(null);
     }
@@ -442,11 +444,11 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           </div>
         </div>
       )}
-      {checkNumberSaveError && <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
+      {checkNumberSaveError && <ActionFeedback tone="error" message={checkNumberSaveError} />}
 
       {showForm && (
         <div className="p-4 border-b bg-blue-50/30">
-          {formError && <p className="text-sm text-red-600 mb-2">{formError}</p>}
+          {formError && <ActionFeedback tone="error" message={formError} />}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
             <NumericInput
@@ -491,9 +493,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       )}
 
       {fitError && (
-        <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {fitError}
-        </div>
+        <ActionFeedback tone="error" message={fitError} />
       )}
 
       {/* Form 500 callout — anchored to auto_generated_type so renaming the

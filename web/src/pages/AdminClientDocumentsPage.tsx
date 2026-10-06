@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -204,6 +205,7 @@ export function AdminClientDocumentsPage() {
 
   const deleteDocument = async (document: ClientDocument) => {
     if (!window.confirm(`Delete "${document.title}"?`)) return;
+    setError(null);
 
     try {
       await adminClientDocumentsApi.delete(document.id);
@@ -218,8 +220,8 @@ export function AdminClientDocumentsPage() {
       <Header title="Client Documents" description="Review files uploaded through the client portal." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
-        {success && <div className="rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-sm text-success-600">{success}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="grid gap-4 md:grid-cols-4">
           <MiniStat title="Visible uploads" value={String(totalFiles)} detail="Current files in this company view" icon={<FolderOpen className="h-5 w-5" />} />

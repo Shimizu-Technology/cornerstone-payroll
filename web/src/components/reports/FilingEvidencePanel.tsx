@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -267,7 +268,7 @@ export function FilingEvidencePanel({
         </form>
       )}
 
-      {error && <p role="alert" className="mt-3 text-xs font-medium text-red-700">{error}</p>}
+      {error && <ActionFeedback tone="error" message={error} />}
 
       {filing && filing.events.length > 0 && (
         <ol className="mt-4 space-y-2 border-t border-neutral-200 pt-3">

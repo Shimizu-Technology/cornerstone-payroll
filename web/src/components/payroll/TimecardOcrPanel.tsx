@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
 import { timecardsApi, punchEntriesApi, employeesApi } from '@/services/api';
@@ -187,7 +188,7 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
           </Button>
         </>
       )}
-      {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+      {error && <ActionFeedback tone="error" message={error} />}
     </div>
   );
 }
@@ -417,7 +418,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
       {/* Inline action row — for complete/reviewed cards with a pay period */}
       {(isComplete || isReviewed) && payPeriodId && (
         <div className="px-3 pb-3 pt-1 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
-          {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
 
           <div className="flex items-center gap-3 flex-wrap">
             {/* Employee assignment dropdown */}
@@ -1065,7 +1066,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         <span className="text-xs text-gray-400 ml-auto">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</span>
       </div>
 
-      {error && <div className="bg-red-50 text-red-700 px-3 py-2 rounded text-sm">{error}</div>}
+      {error && <ActionFeedback tone="error" message={error} />}
 
       {/* Image + Table side by side */}
       <div className="flex gap-4">

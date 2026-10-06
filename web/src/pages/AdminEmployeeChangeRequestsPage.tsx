@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -97,7 +98,7 @@ export function AdminEmployeeChangeRequestsPage() {
       <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
 
         <div className="max-w-xs">
           <Select value={status} onChange={(e) => {

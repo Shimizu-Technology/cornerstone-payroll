@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarDays, Clock3, PencilLine, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -132,7 +133,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
             <Button type="button" onClick={beginNew}><Plus className="mr-2 h-4 w-4" />Add day</Button>
           </div>
 
-          {error && <div className="rounded-2xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">{error}</div>}
+          {error && <ActionFeedback tone="error" message={error} />}
 
           {editorVisible && (
             <div className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4">

@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: VoidCheckModal
  * Confirms void with required written reason (10+ chars).
@@ -75,7 +76,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</p>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         <div className="flex justify-end gap-2 pt-2">

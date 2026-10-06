@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -93,6 +94,7 @@ export function PayrollFields() {
   };
 
   const saveField = async () => {
+    setError(null);
     if (!draft.name?.trim()) {
       setError('Name is required');
       return;
@@ -127,6 +129,7 @@ export function PayrollFields() {
 
   const archiveField = async (field: PayrollFieldDefinition) => {
     if (!window.confirm(`Archive ${field.name}? Existing payroll history stays unchanged.`)) return;
+    setError(null);
     try {
       await payrollFieldsApi.archive(field.id);
       if (editingId === field.id) {
@@ -147,7 +150,7 @@ export function PayrollFields() {
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
 
         <Card>
           <CardContent className="space-y-4 py-5">

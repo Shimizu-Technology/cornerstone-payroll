@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarClock, RotateCcw, ShieldAlert, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -112,7 +113,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             </p>
           </div>
 
-          {error && <div className="rounded-2xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">{error}</div>}
+          {error && <ActionFeedback tone="error" message={error} />}
 
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>
             <div>

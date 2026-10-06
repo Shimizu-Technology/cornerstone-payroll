@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
@@ -287,9 +288,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
         </DialogHeader>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         {/* Upload Step */}

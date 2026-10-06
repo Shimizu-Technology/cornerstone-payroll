@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ExternalLink, Pencil, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -160,7 +161,7 @@ export function AnnualRetirementLimitsPanel() {
           <Plus aria-hidden="true" className="mr-2 h-4 w-4" />Add retirement year
         </Button>}
       </div>
-      {success && <p role="status" className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800">{success}</p>}
+      {success && <ActionFeedback tone="success" message={success} />}
       {loading && <p role="status" className="mt-4 text-sm text-neutral-600">Loading retirement limits…</p>}
       {loadError && <div role="alert" className="mt-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-800">
         <p>{loadError}</p><Button variant="outline" className="mt-3" onClick={() => void loadLimits()}>Retry retirement limits</Button>
@@ -205,7 +206,7 @@ export function AnnualRetirementLimitsPanel() {
       {editor && canManage && <form onSubmit={(event) => void save(event)} className="mt-6 border-t border-neutral-200 pt-5" aria-labelledby="retirement-limit-editor-title">
         <h3 ref={editorHeading} tabIndex={-1} id="retirement-limit-editor-title" className="text-lg font-semibold text-neutral-950">{editor.id === null ? 'Add verified retirement year' : `Edit ${editor.draft.tax_year} retirement limits`}</h3>
         <p className="mt-1 text-sm text-neutral-600">Use the IRS publication for this year. These values apply to every company.</p>
-        {saveError && <p role="alert" className="mt-3 rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{saveError}</p>}
+        {saveError && <ActionFeedback tone="error" message={saveError} />}
         <fieldset disabled={saving} className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <label htmlFor="retirement-limit-year" className="text-sm font-medium text-neutral-800">Tax year</label>
