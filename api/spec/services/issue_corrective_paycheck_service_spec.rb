@@ -220,6 +220,8 @@ RSpec.describe IssueCorrectivePaycheckService do
         additional_withholding: 7.5
       )
 
+      verify_synthetic_retirement_plan!(employee, original_period.pay_date)
+
       original_item.destroy!
       refreshed_original = original_period.payroll_items.build(
         employee: employee,

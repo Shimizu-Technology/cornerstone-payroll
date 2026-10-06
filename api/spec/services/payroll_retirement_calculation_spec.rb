@@ -69,6 +69,23 @@ RSpec.describe PayrollRetirementCalculation do
     }.merge(overrides))
   end
 
+  def employer_field(amount: 100, group: "401k_after_tax", percentage: false)
+    definition = PayrollFieldDefinition.create!(company: company, name: "Synthetic employer #{group}",
+      kind: "employer_contribution", tax_treatment: "employer_contribution", category: "retirement",
+      amount_type: percentage ? "percentage" : "fixed", default_percentage: percentage ? 5 : nil,
+      default_amount: percentage ? nil : amount, reporting_group: group)
+    payroll_item.payroll_item_field_entries.build(payroll_field_definition: definition, label: definition.name,
+      kind: definition.kind, tax_treatment: definition.tax_treatment, category: definition.category,
+      reporting_group: group, amount: amount, active: true, source: "employee_default")
+  end
+
+  def employer_deduction(group: "401k_after_tax", percentage: false)
+    type = company.deduction_types.create!(name: "Synthetic recurring employer #{group}",
+      category: "employer_contribution", sub_category: "retirement", reporting_group: group)
+    employee.employee_deductions.create!(deduction_type: type, amount: percentage ? 5 : 100,
+      is_percentage: percentage, active: true)
+  end
+
   def calculate(ytd: ytd_before, deductions: [])
     described_class.new(
       employee: employee,
@@ -332,6 +349,122 @@ RSpec.describe PayrollRetirementCalculation do
     year_evidence(wages: 150_001, external_roth_deferrals: 8_000)
     calculate(ytd: ytd_before.merge(retirement: 16_500))
     expect(payroll_item.retirement_payment).to eq(0)
+  end
+
+  it "requires verified plan availability for legacy employee Roth contributions" do
+    employee.update!(roth_retirement_rate: 0.05)
+    expect { calculate }.to raise_error(ArgumentError, /plan permits designated Roth employee/)
+  end
+
+  it "requires verified provider support for legacy Roth employer matching" do
+    employee.update!(employer_roth_match_rate: 0.05)
+    expect { calculate }.to raise_error(ArgumentError, /provider reporting in an effective retirement plan election/)
+  end
+
+  it "requires verified support for flexible Roth employer fields" do
+    employer_field
+    expect { calculate }.to raise_error(ArgumentError, /provider reporting in an effective retirement plan election/)
+  end
+
+  it "requires verified support for recurring Roth employer deductions" do
+    deduction = employer_deduction
+    expect { calculate(deductions: [deduction]) }.to raise_error(ArgumentError, /provider reporting in an effective retirement plan election/)
+  end
+
+  it "permits flexible Roth employer contributions only with explicit plan and provider evidence" do
+    create_election(traditional_amount: 0, roth_amount: 0)
+    employer_field
+    deduction = employer_deduction
+    calculate(deductions: [deduction])
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "current_employer")).to eq("200.0")
+  end
+
+  it "blocks flexible employer percentage fields when gross crosses the annual compensation ceiling" do
+    employer_field(group: "401k_pre_tax", percentage: true)
+    expect { calculate(ytd: ytd_before.merge(gross_pay: 359_000)) }.to raise_error(ArgumentError, /verified capped employer-match election/)
+  end
+
+  it "blocks recurring employer percentages above the compensation ceiling even when additions are below their limit" do
+    deduction = employer_deduction(group: "401k_pre_tax", percentage: true)
+    expect { calculate(ytd: ytd_before.merge(gross_pay: 360_000), deductions: [deduction]) }.to raise_error(ArgumentError, /annual compensation ceiling/)
+  end
+
+  it "does not assume gross percentage fields use a verified restricted matching basis" do
+    create_election(traditional_amount: 0, roth_amount: 0, eligible_compensation: "gross_excluding_tips")
+    payroll_item.update!(reported_tips: 500)
+    employer_field(group: "401k_pre_tax", percentage: true)
+    expect { calculate(ytd: ytd_before.merge(gross_pay: 0)) }.to raise_error(ArgumentError, /outside the permitted compensation basis/)
+  end
+
+  it "allows flexible employer percentages within the gross compensation ceiling" do
+    employer_field(group: "401k_pre_tax", percentage: true)
+    calculate(ytd: ytd_before.merge(gross_pay: 358_000))
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "current_employer")).to eq("100.0")
+  end
+
+  it "shows no catch-up capacity for a verified high earner whose plan offers no designated Roth" do
+    employee.update!(date_of_birth: Date.new(1970, 1, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, roth_available: false, catch_up_enabled: true)
+    year_evidence(wages: 150_001)
+    calculate(ytd: ytd_before.merge(retirement: 24_500))
+    expect(payroll_item.retirement_payment).to eq(0)
+    expect(payroll_item.retirement_rule_snapshot).to include("catch_up_permission_status" => "roth_unavailable",
+      "catch_up_limit" => "0.0", "annual_employee_cap" => "24500.0", "remaining_after" => "0.0")
+  end
+
+  it "separates potential age eligibility from unverified permitted catch-up capacity" do
+    employee.update!(date_of_birth: Date.new(1965, 1, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, catch_up_enabled: true)
+    calculate
+    expect(payroll_item.retirement_rule_snapshot).to include("catch_up_permission_status" => "prior_wages_pending",
+      "catch_up_limit" => "0.0", "potential_catch_up_limit" => "11250.0", "annual_employee_cap" => "24500.0")
+  end
+
+  it "does not carry an old election's opening employer additions into another year" do
+    create_election(effective_on: Date.new(2025, 1, 1), traditional_amount: 500, roth_amount: 0,
+      employer_match_ytd_before_system: 72_000)
+    calculate
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "prior_additions")).to eq("0.0")
+  end
+
+  it "preserves original version-one historical true-up compensation instead of defaulting to current pay" do
+    election = create_election(traditional_amount: 200, roth_amount: 0,
+      employer_match_mode: "compensation_percentage", employer_match_rate: 0.05, true_up_policy: "year_to_date")
+    snapshot = { "version" => 1, "employee_age_at_year_end" => 46, "employer_match" => { "prior_ytd" => "2000.0" } }
+    described_class.new(employee: employee, payroll_item: payroll_item, ytd_before: ytd_before,
+      employee_deductions: [], historical_mode: true, historical_evidence: snapshot,
+      historical_election: election.snapshot_attributes, historical_limit: { elective_deferral_limit: 24_500,
+        catch_up_limit: 8_000, enhanced_catch_up_limit: 11_250, roth_catch_up_wage_threshold: 150_000 }).apply!
+    expect(payroll_item.employer_retirement_match).to eq(100)
+  end
+
+  %i[regular_plan_deferral_limit plan_annual_employee_limit].each do |attribute|
+    it "honors an explicit zero #{attribute} while nil means no additional cap" do
+      create_election(traditional_amount: 500, roth_amount: 0, attribute => 0)
+      calculate
+      expect(payroll_item.retirement_payment).to eq(0)
+    end
+  end
+
+  %i[employer_match_deferral_cap_rate employer_match_period_cap employer_match_annual_cap].each do |attribute|
+    it "honors an explicit zero #{attribute} without paying an uncapped match" do
+      create_election(traditional_amount: 500, roth_amount: 0, employer_match_mode: "employee_deferral_percentage",
+        employer_match_rate: 1, attribute => 0)
+      calculate
+      expect(payroll_item.employer_retirement_match).to eq(0)
+    end
+  end
+
+  it "retains version-one saved zero-as-uncapped semantics while new payroll honors zero caps" do
+    election = create_election(traditional_amount: 200, roth_amount: 0, plan_annual_employee_limit: 0,
+      employer_match_mode: "employee_deferral_percentage", employer_match_rate: 1,
+      employer_match_period_cap: 0, employer_match_annual_cap: 0, employer_match_deferral_cap_rate: 0)
+    described_class.new(employee: employee, payroll_item: payroll_item, ytd_before: ytd_before,
+      employee_deductions: [], historical_mode: true, historical_evidence: { "version" => 1, "employee_age_at_year_end" => 46 },
+      historical_election: election.snapshot_attributes, historical_limit: { elective_deferral_limit: 24_500,
+        catch_up_limit: 8_000, enhanced_catch_up_limit: 11_250, roth_catch_up_wage_threshold: 150_000 }).apply!
+    expect(payroll_item.retirement_payment).to eq(200)
+    expect(payroll_item.employer_retirement_match).to eq(200)
   end
 
 end
