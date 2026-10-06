@@ -20,6 +20,8 @@ RSpec.describe PayrollRetirementCalculation do
 
   before do
     AnnualRetirementLimit.find_or_create_by!(tax_year: 2026) do |limit|
+      limit.annual_additions_limit = 72_000
+      limit.compensation_limit = 360_000
       limit.elective_deferral_limit = 24_500
       limit.catch_up_limit = 8_000
       limit.enhanced_catch_up_limit = 11_250
@@ -34,6 +36,9 @@ RSpec.describe PayrollRetirementCalculation do
       company: company,
       effective_on: Date.new(2026, 1, 1),
       plan_name: "MoSa 401(k)",
+      plan_source_reference: "Synthetic signed plan document",
+      roth_available: true,
+      employer_roth_available: true,
       eligible: true,
       participating: true,
       traditional_contribution_type: "fixed",
@@ -52,6 +57,15 @@ RSpec.describe PayrollRetirementCalculation do
       true_up_policy: "none",
       source: "staff",
       reason: "Signed election received"
+    }.merge(overrides))
+  end
+
+  def year_evidence(wages: 0, **overrides)
+    employee.employee_retirement_year_inputs.create!({
+      company: company, tax_year: 2026,
+      prior_year_wage_status: wages.zero? ? "no_prior_employer_wages" : "verified",
+      prior_year_fica_wages: wages, prior_year_wage_source: "Synthetic W-2 Box 3 evidence",
+      source_reference: "Synthetic year reconciliation", reason: "Verified synthetic test records"
     }.merge(overrides))
   end
 
@@ -75,7 +89,7 @@ RSpec.describe PayrollRetirementCalculation do
     expect(payroll_item.retirement_rule_snapshot).to include(
       "election" => include("election_id" => election.id, "plan_name" => "MoSa 401(k)"),
       "annual_limit" => include("elective_deferral_limit" => "24500.0"),
-      "applied" => { "traditional" => "500.0", "roth" => "250.0" }
+      "applied" => { "traditional" => "500.0", "roth" => "250.0", "non_roth_after_tax" => "0.0" }
     )
   end
 
@@ -114,6 +128,7 @@ RSpec.describe PayrollRetirementCalculation do
     payroll_item.update!(gross_pay: 12_000)
     create_election(catch_up_enabled: true, traditional_amount: 11_250, roth_amount: 0)
 
+    year_evidence
     calculate(ytd: ytd_before.merge(retirement: 24_500))
 
     expect(payroll_item.retirement_payment).to eq(11_250)
@@ -123,7 +138,7 @@ RSpec.describe PayrollRetirementCalculation do
   it "does not put a high-earner catch-up amount into traditional contributions" do
     employee.update!(date_of_birth: Date.new(1970, 6, 1))
     create_election(catch_up_enabled: true, traditional_amount: 500, roth_amount: 500, limit_priority: "traditional_first")
-    allow(employee).to receive(:ytd_totals_through).and_return(social_security_taxable_total: 175_000)
+    year_evidence(wages: 175_000)
 
     calculate(ytd: ytd_before.merge(retirement: 24_500))
 
@@ -149,14 +164,15 @@ RSpec.describe PayrollRetirementCalculation do
     expect(payroll_item.employer_roth_retirement_match).to eq(0)
   end
 
-  it "does not apply a future election before its first pay date" do
+  it "preserves legacy contributions before the first future election" do
+    employee.update!(retirement_rate: 0.1)
     create_election(effective_on: Date.new(2026, 10, 1))
 
     calculate
 
-    expect(payroll_item.retirement_payment).to eq(0)
+    expect(payroll_item.retirement_payment).to eq(200)
     expect(payroll_item.roth_retirement_payment).to eq(0)
-    expect(payroll_item.retirement_rule_snapshot.dig("election", "source")).to eq("before_first_dated_election")
+    expect(payroll_item.retirement_rule_snapshot.dig("election", "source")).to eq("legacy_employee_profile")
   end
 
   it "blocks an active dated election when the pay year's annual limits are missing" do
@@ -181,4 +197,141 @@ RSpec.describe PayrollRetirementCalculation do
     expect(payroll_item.employer_retirement_match).to eq(300)
     expect(payroll_item.retirement_rule_snapshot.dig("employer_match", "prior_ytd")).to eq("900.0")
   end
+  it "fails closed for legacy contributions without verified annual rules" do
+    AnnualRetirementLimit.where(tax_year: 2026).delete_all
+    employee.update!(retirement_rate: 0.1)
+    expect { calculate }.to raise_error(ArgumentError, /Retirement limits are not configured/)
+  end
+
+  it "leaves non-retirement payroll usable without annual retirement rules" do
+    AnnualRetirementLimit.where(tax_year: 2026).delete_all
+    expect { calculate }.not_to raise_error
+  end
+
+  it "blocks attempted catch-up when prior-year wage evidence is unknown" do
+    employee.update!(date_of_birth: Date.new(1976, 12, 31))
+    create_election(catch_up_enabled: true)
+    expect { calculate(ytd: ytd_before.merge(retirement: 24_500)) }.to raise_error(ArgumentError, /verified prior-year employer/)
+  end
+
+  it "credits earlier Roth deferrals before restricting Traditional catch-up" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(catch_up_enabled: true, traditional_amount: 500, roth_amount: 0)
+    year_evidence(wages: 150_001)
+    calculate(ytd: ytd_before.merge(retirement: 16_500, roth_retirement: 8_000))
+    expect(payroll_item.retirement_payment).to eq(500)
+  end
+
+  it "uses a strict greater-than prior-year wage threshold" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(catch_up_enabled: true, traditional_amount: 500, roth_amount: 0)
+    year_evidence(wages: 150_000)
+    calculate(ytd: ytd_before.merge(retirement: 24_500))
+    expect(payroll_item.retirement_payment).to eq(500)
+    expect(payroll_item.retirement_rule_snapshot["roth_catch_up_required"]).to be(false)
+  end
+
+  it "uses external deferrals for personal limits without using them for employer matching" do
+    create_election(traditional_amount: 5_000, roth_amount: 0, employer_match_mode: "employee_deferral_percentage", employer_match_rate: 1)
+    year_evidence(external_traditional_deferrals: 10_000)
+    calculate(ytd: ytd_before.merge(retirement: 14_000))
+    expect(payroll_item.retirement_payment).to eq(500)
+    expect(payroll_item.employer_retirement_match).to eq(500)
+  end
+
+  it "does not count outside-employer deferrals against a lower local plan limit" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, regular_plan_deferral_limit: 10_000, catch_up_enabled: true)
+    year_evidence(external_traditional_deferrals: 10_000)
+    calculate(ytd: ytd_before.merge(retirement: 5_000))
+    expect(payroll_item.retirement_payment).to eq(500)
+    expect(payroll_item.retirement_rule_snapshot["annual_additions"]["current_catch_up"]).to eq("0.0")
+  end
+
+  it "recognizes catch-up above a lower verified regular plan limit" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, regular_plan_deferral_limit: 10_000, catch_up_enabled: true)
+    year_evidence
+    calculate(ytd: ytd_before.merge(retirement: 10_000))
+    expect(payroll_item.retirement_rule_snapshot["annual_additions"]["current_catch_up"]).to eq("500.0")
+  end
+
+  it "caps employer match compensation without stopping later employee deferrals" do
+    create_election(traditional_amount: 500, roth_amount: 0, employer_match_mode: "compensation_percentage", employer_match_rate: 0.05)
+    calculate(ytd: ytd_before.merge(gross_pay: 360_000))
+    expect(payroll_item.retirement_payment).to eq(500)
+    expect(payroll_item.employer_retirement_match).to eq(0)
+  end
+
+  it "raises instead of silently cutting a promised match above the annual additions limit" do
+    create_election(traditional_amount: 500, roth_amount: 0, employer_match_mode: "employee_deferral_percentage", employer_match_rate: 1)
+    year_evidence(employer_additions_before_system: 71_500, opening_balances_verified: true)
+    expect { calculate(ytd: ytd_before.merge(gross_pay: 100_000)) }.to raise_error(ArgumentError, /promised employer contributions cannot be silently reduced/)
+  end
+
+  it "classifies additions-limit catch-up below the elective-deferral ceiling" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, catch_up_enabled: true)
+    year_evidence(employer_additions_before_system: 72_000, opening_balances_verified: true)
+    calculate(ytd: ytd_before.merge(gross_pay: 100_000))
+    expect(payroll_item.retirement_rule_snapshot["annual_additions"]["current_catch_up"]).to eq("500.0")
+  end
+
+  it "replays saved eligibility and wage evidence after current profile changes" do
+    employee.update!(date_of_birth: Date.new(1970, 6, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, catch_up_enabled: true)
+    year_evidence
+    calculate(ytd: ytd_before.merge(retirement: 24_500))
+    saved = payroll_item.retirement_rule_snapshot.deep_dup
+    employee.update!(date_of_birth: Date.new(1990, 1, 1))
+    year_evidence(wages: 200_000)
+    described_class.new(employee: employee, payroll_item: payroll_item, ytd_before: ytd_before,
+      employee_deductions: [], historical_mode: true, historical_evidence: saved.deep_symbolize_keys,
+      historical_election: saved["election"], historical_limit: saved["annual_limit"]).apply!
+    expect(payroll_item.retirement_payment).to eq(500)
+    expect(payroll_item.retirement_rule_snapshot["employee_age_at_year_end"]).to eq(56)
+    expect(payroll_item.retirement_rule_snapshot["prior_year_fica_wages"]).to eq("0.0")
+  end
+
+  [ [49, 0], [50, 8_000], [59, 8_000], [60, 11_250], [63, 11_250], [64, 8_000] ].each do |age, allowance|
+    it "uses the year-end age #{age} catch-up tier, including December birthdays" do
+      employee.update!(date_of_birth: Date.new(2026 - age, 12, 31))
+      payroll_item.update!(gross_pay: 12_000)
+      create_election(catch_up_enabled: true, traditional_amount: 12_000, roth_amount: 0)
+      year_evidence
+      calculate(ytd: ytd_before.merge(retirement: 24_500))
+      expect(payroll_item.retirement_payment).to eq(allowance)
+    end
+  end
+
+  it "includes non-Roth after-tax employee contributions in additions without consuming elective-deferral capacity" do
+    create_election(traditional_amount: 0, roth_amount: 0)
+    year_evidence(employer_additions_before_system: 45_000, eligible_compensation_before_system: 100_000, opening_balances_verified: true)
+    definition = PayrollFieldDefinition.create!(company: company, name: "Non-Roth 401(k) After Tax", kind: "deduction",
+      tax_treatment: "post_tax_deduction", category: "retirement", amount_type: "fixed", default_amount: 2_000,
+      reporting_group: "401k_non_roth_after_tax")
+    entry = payroll_item.payroll_item_field_entries.build(payroll_field_definition: definition, label: definition.name,
+      kind: definition.kind, tax_treatment: definition.tax_treatment, category: definition.category,
+      reporting_group: definition.reporting_group, amount: 2_000, active: true, employee_paid: true, employer_paid: false, source: "manual")
+    calculate(ytd: ytd_before.merge(retirement: 24_500))
+    expect(entry.amount).to eq(2_000)
+    expect(PayrollRetirementTotals.for_item(payroll_item)[:roth_retirement]).to eq(0)
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "regular_additions_after")).to eq("71500.0")
+  end
+
+  it "blocks unclassified outside-employer Traditional catch-up instead of assuming sponsor Roth treatment" do
+    employee.update!(date_of_birth: Date.new(1970, 1, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, catch_up_enabled: true)
+    year_evidence(external_traditional_deferrals: 10_000)
+    expect { calculate(ytd: ytd_before.merge(retirement: 15_000)) }.to raise_error(ArgumentError, /outside-employer Traditional/)
+  end
+
+  it "does not credit outside-employer Roth toward the current sponsor's Roth catch-up requirement" do
+    employee.update!(date_of_birth: Date.new(1970, 1, 1))
+    create_election(traditional_amount: 500, roth_amount: 0, catch_up_enabled: true)
+    year_evidence(wages: 150_001, external_roth_deferrals: 8_000)
+    calculate(ytd: ytd_before.merge(retirement: 16_500))
+    expect(payroll_item.retirement_payment).to eq(0)
+  end
+
 end
