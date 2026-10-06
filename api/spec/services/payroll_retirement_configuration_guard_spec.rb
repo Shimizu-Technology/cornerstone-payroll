@@ -224,5 +224,4 @@ RSpec.describe PayrollRetirementConfigurationGuard do
     field_assignment(reporting_group: "401k_non_roth_after_tax", treatment: "employer_contribution")
     expect { guard.validate! }.to raise_error(ArgumentError, /employee non-Roth after-tax type/)
   end
-
 end

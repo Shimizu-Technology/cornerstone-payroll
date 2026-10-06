@@ -310,7 +310,7 @@ RSpec.describe PayrollRetirementCalculation do
     expect(payroll_item.retirement_rule_snapshot["prior_year_fica_wages"]).to eq("0.0")
   end
 
-  [ [49, 0], [50, 8_000], [59, 8_000], [60, 11_250], [63, 11_250], [64, 8_000] ].each do |age, allowance|
+  [ [ 49, 0 ], [ 50, 8_000 ], [ 59, 8_000 ], [ 60, 11_250 ], [ 63, 11_250 ], [ 64, 8_000 ] ].each do |age, allowance|
     it "uses the year-end age #{age} catch-up tier, including December birthdays" do
       employee.update!(date_of_birth: Date.new(2026 - age, 12, 31))
       payroll_item.update!(gross_pay: 12_000)
@@ -368,14 +368,14 @@ RSpec.describe PayrollRetirementCalculation do
 
   it "requires verified support for recurring Roth employer deductions" do
     deduction = employer_deduction
-    expect { calculate(deductions: [deduction]) }.to raise_error(ArgumentError, /provider reporting in an effective retirement plan election/)
+    expect { calculate(deductions: [ deduction ]) }.to raise_error(ArgumentError, /provider reporting in an effective retirement plan election/)
   end
 
   it "permits flexible Roth employer contributions only with explicit plan and provider evidence" do
     create_election(traditional_amount: 0, roth_amount: 0)
     employer_field
     deduction = employer_deduction
-    calculate(deductions: [deduction])
+    calculate(deductions: [ deduction ])
     expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "current_employer")).to eq("200.0")
   end
 
@@ -386,7 +386,7 @@ RSpec.describe PayrollRetirementCalculation do
 
   it "blocks recurring employer percentages above the compensation ceiling even when additions are below their limit" do
     deduction = employer_deduction(group: "401k_pre_tax", percentage: true)
-    expect { calculate(ytd: ytd_before.merge(gross_pay: 360_000), deductions: [deduction]) }.to raise_error(ArgumentError, /annual compensation ceiling/)
+    expect { calculate(ytd: ytd_before.merge(gross_pay: 360_000), deductions: [ deduction ]) }.to raise_error(ArgumentError, /annual compensation ceiling/)
   end
 
   it "does not assume gross percentage fields use a verified restricted matching basis" do
@@ -466,5 +466,4 @@ RSpec.describe PayrollRetirementCalculation do
     expect(payroll_item.retirement_payment).to eq(200)
     expect(payroll_item.employer_retirement_match).to eq(200)
   end
-
 end
