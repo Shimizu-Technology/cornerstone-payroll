@@ -30,6 +30,19 @@ describe('AnnualRetirementLimitsPanel', () => {
   });
   afterEach(cleanup);
 
+  it('normalizes Rails decimal strings before saving an existing year', async () => {
+    const user = userEvent.setup();
+    const railsLimit = Object.fromEntries(Object.entries(limit).map(([key, value]) =>
+      [key, typeof value === 'number' && key !== 'id' && key !== 'tax_year' ? `${value}.0` : value]));
+    mocks.list.mockResolvedValue({ data: [railsLimit] });
+    mocks.update.mockResolvedValue({ data: railsLimit });
+    render(<AnnualRetirementLimitsPanel />);
+    await user.click(await screen.findByRole('button', { name: 'Edit 2026 retirement limits' }));
+    await user.type(screen.getByLabelText('Reason for change'), 'Verified published amounts');
+    await user.click(screen.getByRole('button', { name: 'Save retirement limits' }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(4, expect.objectContaining({ elective_deferral_limit: 24500, annual_additions_limit: 72000 })));
+  });
+
   it('shows the three age-based ceilings and separates additional plan limits for read-only staff', async () => {
     mocks.superAdmin = false;
     render(<AnnualRetirementLimitsPanel />);

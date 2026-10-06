@@ -54,4 +54,15 @@ describe('saved paycheck explanation', () => {
   it('does not substitute current setup when a historical snapshot is unavailable', () => {
     expect(renderToStaticMarkup(<PaycheckWithholdingContext item={{} as PayrollItem} />)).toContain('No W-4 snapshot was retained');
   });
+  it('distinguishes pending catch-up verification from permitted annual capacity', () => {
+    const item = { retirement_rule_snapshot: { election: { plan_name: 'Verified plan' },
+      catch_up_permission_status: 'prior_wages_pending', potential_catch_up_limit: '11250.0', catch_up_limit: '0.0', annual_employee_cap: '24500.0', remaining_after: '100.0',
+      annual_limit: { tax_year: 2026, elective_deferral_limit: '24500.0' }, applied: {}, requested: {}, employer_match: {},
+    } } as unknown as PayrollItem;
+    const html = renderToStaticMarkup(<PaycheckRetirementContext item={item} />);
+    expect(html).toContain('must be verified before it becomes available');
+    expect(html).toContain('$11,250.00');
+    expect(html).toContain('Employee capacity after this check');
+    expect(html).toContain('$100.00');
+  });
 });

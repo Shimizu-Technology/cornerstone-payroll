@@ -48,6 +48,8 @@ function errorMessage(error: unknown, fallback: string) {
 
 export function AnnualRetirementLimitsPanel() {
   const { isSuperAdmin } = useAuth();
+  const [serverCanManage, setServerCanManage] = useState(false);
+  const canManage = isSuperAdmin && serverCanManage;
   const [limits, setLimits] = useState<AnnualRetirementLimit[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export function AnnualRetirementLimitsPanel() {
     try {
       const response = await annualRetirementLimitsApi.list();
       setLimits(response.data);
+      setServerCanManage(response.can_manage ?? true);
     } catch (error) {
       setLoadError(errorMessage(error, 'Could not load retirement limits. Please try again.'));
     } finally {
@@ -83,16 +86,16 @@ export function AnnualRetirementLimitsPanel() {
     setEditor({
       id: record?.id ?? null,
       draft: record ? {
-        tax_year: record.tax_year,
-        elective_deferral_limit: record.elective_deferral_limit,
-        catch_up_limit: record.catch_up_limit,
-        enhanced_catch_up_limit: record.enhanced_catch_up_limit,
-        roth_catch_up_wage_threshold: record.roth_catch_up_wage_threshold,
-        annual_additions_limit: record.annual_additions_limit,
-        compensation_limit: record.compensation_limit,
+        tax_year: Number(record.tax_year),
+        elective_deferral_limit: record.elective_deferral_limit == null ? null : Number(record.elective_deferral_limit),
+        catch_up_limit: record.catch_up_limit == null ? null : Number(record.catch_up_limit),
+        enhanced_catch_up_limit: record.enhanced_catch_up_limit == null ? null : Number(record.enhanced_catch_up_limit),
+        roth_catch_up_wage_threshold: record.roth_catch_up_wage_threshold == null ? null : Number(record.roth_catch_up_wage_threshold),
+        annual_additions_limit: record.annual_additions_limit == null ? null : Number(record.annual_additions_limit),
+        compensation_limit: record.compensation_limit == null ? null : Number(record.compensation_limit),
         source_name: record.source_name, source_url: record.source_url, reason: '',
       } : {
-        tax_year: Math.max(new Date().getFullYear(), ...limits.map((limit) => limit.tax_year + 1)),
+        tax_year: Math.max(new Date().getFullYear(), ...limits.map((limit) => Number(limit.tax_year) + 1)),
         elective_deferral_limit: null,
         catch_up_limit: null,
         enhanced_catch_up_limit: null,
@@ -116,7 +119,7 @@ export function AnnualRetirementLimitsPanel() {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!editor || !isSuperAdmin || saving) return;
+    if (!editor || !canManage || saving) return;
     const { draft, id } = editor;
     const validYear = draft.tax_year !== null && Number.isInteger(draft.tax_year) && draft.tax_year >= 2020 && draft.tax_year <= 2100;
     if (!validYear || amountFields.some(({ key }) => draft[key] === null || !Number.isFinite(draft[key]) || Number(draft[key]) < 0)) {
@@ -153,7 +156,7 @@ export function AnnualRetirementLimitsPanel() {
           <h2 id="annual-retirement-limits-title" className="text-xl font-semibold text-neutral-950">Annual 401(k) limits</h2>
           <p className="mt-1 text-sm text-neutral-600">Standard 401(k) limits shared across companies. Employee plan settings determine whether catch-up is permitted.</p>
         </div>
-        {isSuperAdmin && <Button ref={addButton} variant="outline" onClick={() => startEditor()} disabled={loading || !!loadError || !!editor} className="self-start">
+        {canManage && <Button ref={addButton} variant="outline" onClick={() => startEditor()} disabled={loading || !!loadError || !!editor} className="self-start">
           <Plus aria-hidden="true" className="mr-2 h-4 w-4" />Add retirement year
         </Button>}
       </div>
@@ -170,7 +173,7 @@ export function AnnualRetirementLimitsPanel() {
           return <article key={limit.id} className="rounded-lg border border-neutral-200 p-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-lg font-semibold text-neutral-950">{limit.tax_year} employee contribution ceilings</h3>
-              {isSuperAdmin && <Button variant="ghost" size="sm" disabled={!!editor} onClick={() => startEditor(limit)} aria-label={`Edit ${limit.tax_year} retirement limits`}>
+              {canManage && <Button variant="ghost" size="sm" disabled={!!editor} onClick={() => startEditor(limit)} aria-label={`Edit ${limit.tax_year} retirement limits`}>
                 <Pencil aria-hidden="true" className="mr-1 h-4 w-4" />Edit
               </Button>}
             </div>
@@ -198,8 +201,8 @@ export function AnnualRetirementLimitsPanel() {
           </article>;
         })}
       </div>}
-      {!isSuperAdmin && <p className="mt-4 text-xs text-neutral-500">A super administrator maintains these global annual limits.</p>}
-      {editor && isSuperAdmin && <form onSubmit={(event) => void save(event)} className="mt-6 border-t border-neutral-200 pt-5" aria-labelledby="retirement-limit-editor-title">
+      {!canManage && <p className="mt-4 text-xs text-neutral-500">A super administrator maintains global annual limits outside test workspaces.</p>}
+      {editor && canManage && <form onSubmit={(event) => void save(event)} className="mt-6 border-t border-neutral-200 pt-5" aria-labelledby="retirement-limit-editor-title">
         <h3 ref={editorHeading} tabIndex={-1} id="retirement-limit-editor-title" className="text-lg font-semibold text-neutral-950">{editor.id === null ? 'Add verified retirement year' : `Edit ${editor.draft.tax_year} retirement limits`}</h3>
         <p className="mt-1 text-sm text-neutral-600">Use the IRS publication for this year. These values apply to every company.</p>
         {saveError && <p role="alert" className="mt-3 rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{saveError}</p>}

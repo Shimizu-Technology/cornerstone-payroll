@@ -60,6 +60,8 @@ export function PaycheckRetirementContext({ item }: { item: PayrollItem }): Reac
   const requested = snapshot?.requested && typeof snapshot.requested === 'object' && !Array.isArray(snapshot.requested) ? snapshot.requested as Record<string, unknown> : {};
   const applied = snapshot?.applied && typeof snapshot.applied === 'object' && !Array.isArray(snapshot.applied) ? snapshot.applied as Record<string, unknown> : {};
   const employerMatch = snapshot?.employer_match && typeof snapshot.employer_match === 'object' && !Array.isArray(snapshot.employer_match) ? snapshot.employer_match as Record<string, unknown> : {};
+  const additions = snapshot?.annual_additions && typeof snapshot.annual_additions === 'object' && !Array.isArray(snapshot.annual_additions) ? snapshot.annual_additions as Record<string, unknown> : null;
+  const yearInput = snapshot?.year_input && typeof snapshot.year_input === 'object' && !Array.isArray(snapshot.year_input) ? snapshot.year_input as Record<string, unknown> : null;
   const explanations = Array.isArray(snapshot?.explanations) ? snapshot.explanations.map(String) : [];
   if (!snapshot || !election) return <Card><CardHeader><CardTitle>Retirement rules used</CardTitle></CardHeader><CardContent><p className="text-sm leading-6 text-neutral-600">No retirement-rule snapshot was retained for this paycheck. The saved deduction amounts remain authoritative, but today’s plan settings may differ.</p></CardContent></Card>;
 
@@ -77,9 +79,18 @@ export function PaycheckRetirementContext({ item }: { item: PayrollItem }): Reac
         <RuleValue label="Employee applied" value={formatCurrency(appliedTotal)} />
         <RuleValue label="Employer match this check" value={formatCurrency(employerMatchTotal)} />
         <RuleValue label="Employer match YTD before" value={formatCurrency(Number(employerMatch.prior_ytd || 0))} />
+        {snapshot.annual_employee_cap != null && <RuleValue label="Annual employee ceiling" value={formatCurrency(Number(snapshot.annual_employee_cap))} />}
+        {snapshot.catch_up_limit != null && <RuleValue label="Permitted catch-up allowance" value={formatCurrency(Number(snapshot.catch_up_limit))} />}
+        {snapshot.remaining_after != null && <RuleValue label="Employee capacity after this check" value={formatCurrency(Number(snapshot.remaining_after))} />}
+        {snapshot.catch_up_amount != null && <RuleValue label="Catch-up used this year" value={formatCurrency(Number(snapshot.catch_up_amount))} />}
+        {additions && <RuleValue label="Remaining annual-additions capacity" value={formatCurrency(Number(additions.remaining || 0))} />}
+        {Number(applied.non_roth_after_tax || 0) > 0 && <RuleValue label="Non-Roth after-tax this check" value={formatCurrency(Number(applied.non_roth_after_tax))} />}
       </div>
       <p>Requested {formatCurrency(requestedTotal)}: {formatCurrency(Number(requested.traditional || 0))} Traditional and {formatCurrency(Number(requested.roth || 0))} Roth. Applied {formatCurrency(Number(applied.traditional || 0))} Traditional and {formatCurrency(Number(applied.roth || 0))} Roth.</p>
       <p>Employer match applied: {formatCurrency(Number(employerMatch.traditional || 0))} Traditional and {formatCurrency(Number(employerMatch.roth || 0))} Roth.</p>
+      {snapshot.catch_up_permission_status === 'prior_wages_pending' && <p className="rounded-xl bg-warning-50 p-4 font-medium text-warning-900">The age-based catch-up maximum is {formatCurrency(Number(snapshot.potential_catch_up_limit || 0))}. Prior-year employer wage evidence must be verified before it becomes available.</p>}
+      {snapshot.catch_up_permission_status === 'roth_unavailable' && <p className="rounded-xl bg-warning-50 p-4 font-medium text-warning-900">Catch-up is unavailable because this employee requires Roth treatment and the plan’s Roth support has not been verified.</p>}
+      {yearInput && <p className="break-words rounded-xl border border-neutral-200 bg-neutral-50 p-4">Prior-year sponsoring-employer wage evidence: <strong>{yearInput.prior_year_wage_status === 'verified' ? formatCurrency(Number(yearInput.prior_year_fica_wages || 0)) : yearInput.prior_year_wage_status === 'no_prior_employer_wages' ? 'Verified no prior-year covered employer wages' : 'Not verified'}</strong>. {String(yearInput.prior_year_wage_source || '')}{yearInput.source_reference ? ` Evidence reference: ${String(yearInput.source_reference)}.` : ''}</p>}
       {annualLimit ? <p>For pay date year {String(annualLimit.tax_year)}, the saved employee elective-deferral limit was <strong>{formatCurrency(Number(annualLimit.elective_deferral_limit || 0))}</strong>{snapshot.employee_age_at_year_end ? `; age at year end was ${String(snapshot.employee_age_at_year_end)}` : ''}. {snapshot.roth_catch_up_required === true ? 'Roth-only catch-up treatment applied.' : ''} {sourceUrl && <a className="font-semibold text-primary-700 underline decoration-primary-200 underline-offset-2 hover:text-primary-900" href={sourceUrl} target="_blank" rel="noreferrer">View the saved IRS source</a>}</p> : <p className="text-warning-800">No annual limit record was available for this historical paycheck.</p>}
       {explanations.length > 0 && <ul className="space-y-2 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-warning-900">{explanations.map((explanation) => <li key={explanation}>• {explanation}</li>)}</ul>}
     </CardContent>
