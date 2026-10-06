@@ -126,7 +126,7 @@ export function PayrollItemEditModal({
   const [error, setError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
-    if (item) {
+    if (item && open) {
       const initialWageRateHours = item.wage_rate_hours && item.wage_rate_hours.length > 0
         ? item.wage_rate_hours
         : wageRates.map((rate) => ({
@@ -184,7 +184,7 @@ export function PayrollItemEditModal({
       setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
-  }, [item, wageRates]);
+  }, [item, wageRates, open]);
 
   if (!item) return null;
 

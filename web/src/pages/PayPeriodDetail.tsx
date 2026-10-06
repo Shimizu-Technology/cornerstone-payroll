@@ -2657,6 +2657,7 @@ export function PayPeriodDetail({
                                     min={0}
                                     fixedDecimalsOnBlur={2}
                                     disabled={!editable}
+                                    aria-label={`${field.name} requested amount for ${emp.first_name} ${emp.last_name}`}
                                     aria-invalid={draft?.mode === 'override' && draft.amount == null}
                                   />
                                 </div>
