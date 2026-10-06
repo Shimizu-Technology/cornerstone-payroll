@@ -163,16 +163,19 @@ class PayrollCalculator
 
   def calculate_retirement_contributions
     historical_snapshot = payroll_item.retirement_rule_snapshot.to_h.deep_symbolize_keys
-    @retirement_calculation = PayrollRetirementCalculation.new(
+    @retirement_engine = PayrollRetirementCalculation.new(
       employee: employee,
       payroll_item: payroll_item,
       ytd_before: ytd_before_totals,
       employee_deductions: employee_deductions_for_calculation,
       historical_election: historical_calculation? ? retirement_election_snapshot_for_historical_calculation : nil,
       historical_limit: historical_calculation? ? historical_snapshot[:annual_limit] : nil,
+      historical_evidence: historical_calculation? ? historical_snapshot : nil,
+      defer_additions: true,
       historical_mode: historical_calculation?,
       recurring_items_enabled: recurring_items_enabled?
-    ).apply!
+    )
+    @retirement_calculation = @retirement_engine.apply!
   end
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
@@ -419,8 +422,9 @@ class PayrollCalculator
   end
 
   def calculate_net_pay
-    cap_deductions_to_available_pay!
-    finalize_retirement_snapshot!
+    reconcile_available_pay!
+    @retirement_engine&.reconcile_final!
+    sync_final_employer_match_rows!
 
     payroll_item.net_pay = (
       payroll_item.gross_pay -
@@ -430,22 +434,38 @@ class PayrollCalculator
     payroll_item.net_pay = 0.0 if payroll_item.net_pay.negative? && !payroll_item.correction_entry?
   end
 
-  def finalize_retirement_snapshot!
-    snapshot = payroll_item.retirement_rule_snapshot.to_h.deep_dup
-    return if snapshot.blank?
+  def reconcile_available_pay!
+    return if payroll_item.correction_entry?
 
-    actual = PayrollRetirementTotals.for_item(payroll_item)
-    prior_applied = snapshot.fetch("applied", {})
-    actual_values = {
-      "traditional" => actual[:retirement].to_d.to_s("F"),
-      "roth" => actual[:roth_retirement].to_d.to_s("F")
-    }
-    if prior_applied != actual_values
-      snapshot["applied"] = actual_values
-      snapshot["explanations"] = Array(snapshot["explanations"]) |
-        [ "Employee contributions were reduced because the paycheck did not have enough available pay." ]
+    32.times do
+      available = (payroll_item.gross_pay.to_d + non_taxable_additions_total.to_d).round(2)
+      break if payroll_item.total_deductions.to_d <= available
+
+      before = payroll_item.total_deductions.to_d
+      cap_deductions_to_available_pay!
+      if @retirement_engine
+        itemized_pre_tax = payroll_item.payroll_item_deductions.select(&:pre_tax?).sum { |row| row.amount.to_d }
+        withholding_gross = [ payroll_item.gross_pay.to_d - payroll_item.retirement_payment.to_d -
+          itemized_pre_tax - pre_tax_payroll_adjustments_total.to_d, 0.to_d ].max
+        calculate_taxes(withholding_gross: withholding_gross)
+      end
+      calculate_totals
+      if payroll_item.total_deductions.to_d >= before && payroll_item.total_deductions.to_d > available
+        raise ArgumentError, "Mandatory taxes and payments exceed the paycheck's available cash. Review the paycheck and any already-paid tips; taxes cannot be silently reduced."
+      end
     end
-    payroll_item.retirement_rule_snapshot = snapshot
+    available = (payroll_item.gross_pay.to_d + non_taxable_additions_total.to_d).round(2)
+    if payroll_item.total_deductions.to_d > available
+      raise ArgumentError, "This paycheck could not reconcile deductions and withholding to available cash. Review the contribution and payment amounts before processing."
+    end
+  end
+
+  def sync_final_employer_match_rows!
+    { "401(k) Employer Match" => payroll_item.employer_retirement_match,
+      "Roth 401(k) Employer Match" => payroll_item.employer_roth_retirement_match }.each do |label, amount|
+      rows = payroll_item.payroll_item_deductions.select { |row| row.employer_contribution? && row.label == label }
+      rows.each { |row| row.amount = amount }
+    end
   end
 
   def update_ytd_on_item
@@ -685,17 +705,13 @@ class PayrollCalculator
 
     numeric_fields = [
       :additional_withholding,
-      :withholding_tax,
       :roth_retirement_payment,
       :retirement_payment
     ]
     numeric_fields << :loan_deduction if had_direct_loan_deduction
     numeric_fields << :loan_payment if !had_direct_loan_deduction && !had_itemized_deductions
     numeric_fields.concat([
-      :insurance_payment,
-      :medicare_tax,
-      :social_security_tax,
-      :tips_paid_out
+      :insurance_payment
     ])
     numeric_fields.each do |field|
       remaining = reduce_numeric_deduction_field_by!(field, remaining)
@@ -703,7 +719,7 @@ class PayrollCalculator
     end
     sync_aggregate_deductions_from_itemized! if had_itemized_deductions || had_direct_loan_deduction
 
-    payroll_item.total_deductions = [ (payroll_item.total_deductions.to_f - (excess - remaining)).round(2), available_pay ].min
+    payroll_item.total_deductions = (payroll_item.total_deductions.to_f - (excess - remaining)).round(2)
   end
 
   def reduce_numeric_deduction_field_by!(field, amount)

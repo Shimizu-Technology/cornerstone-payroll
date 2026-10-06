@@ -659,15 +659,6 @@ RSpec.describe PayrollCalculator do
     end
 
     it "updates retirement evidence when insufficient pay reduces the calculated election" do
-      AnnualRetirementLimit.create!(
-        tax_year: pay_period.pay_date.year,
-        elective_deferral_limit: 23_000,
-        catch_up_limit: 7_500,
-        enhanced_catch_up_limit: 11_250,
-        roth_catch_up_wage_threshold: 145_000,
-        source_name: "Historical IRS limit",
-        source_url: "https://www.irs.gov/retirement-plans"
-      )
       employee.employee_retirement_elections.create!(
         company: company,
         effective_on: pay_period.pay_date,
@@ -684,6 +675,65 @@ RSpec.describe PayrollCalculator do
       expect(applied).to eq(payroll_item.retirement_payment)
       expect(applied).to be < 2_000
       expect(payroll_item.retirement_rule_snapshot.fetch("explanations")).to include(/enough available pay/)
+    end
+
+    it "reconciles final pre-tax wages, matching, itemizations and snapshots after an available-pay reduction" do
+      employee.update!(additional_withholding: 0, retirement_rate: 0)
+      employee.employee_retirement_elections.create!(company: company, effective_on: pay_period.pay_date,
+        participating: true, traditional_contribution_type: "fixed", traditional_amount: 1_000,
+        employer_match_mode: "employee_deferral_percentage", employer_match_rate: 1,
+        source: "staff", reason: "Synthetic signed election")
+      employee.employee_retirement_year_inputs.create!(company: company, tax_year: pay_period.pay_date.year,
+        eligible_compensation_before_system: 10_000, opening_balances_verified: true,
+        source_reference: "Synthetic certified opening compensation", reason: "Verified test evidence")
+      payroll_item.update!(withholding_tax_override: 47.50)
+      described_class.for(employee, payroll_item).calculate
+      expect(payroll_item.retirement_payment).to eq(876)
+      expect(payroll_item.fit_taxable_wages).to eq(124)
+      expect(payroll_item.employer_retirement_match).to eq(876)
+      row = payroll_item.payroll_item_deductions.find(&:employer_contribution?)
+      expect(row.amount).to eq(876)
+      expect(payroll_item.retirement_rule_snapshot.dig("employer_match", "traditional")).to eq("876.0")
+      expect(payroll_item.retirement_rule_snapshot["sources"].first["applied"]).to eq("876.0")
+      expect(payroll_item.social_security_tax).to eq(62)
+      expect(payroll_item.medicare_tax).to eq(14.50)
+      expect(payroll_item.total_deductions).to eq(1_000)
+      expect(payroll_item.net_pay).to eq(0)
+    end
+
+    it "recomputes actual withholding after pre-tax reductions while preserving already-paid tips" do
+      employee.update!(additional_withholding: 0)
+      employee.employee_retirement_elections.create!(company: company, effective_on: pay_period.pay_date,
+        participating: true, traditional_contribution_type: "fixed", traditional_amount: 2_000,
+        source: "staff", reason: "Synthetic signed election")
+      payroll_item.update!(hours_worked: 40, reported_tips: 1_600, tips_paid_out: 1_600)
+      calculator = described_class.for(employee, payroll_item)
+      calculator.calculate
+      expect(payroll_item.retirement_payment).to be_between(0, 247)
+      expect(payroll_item.fit_taxable_wages).to eq(2_000 - payroll_item.retirement_payment)
+      expected = calculator.send(:tax_calculator).calculate(gross_pay: 2_000, withholding_gross: payroll_item.fit_taxable_wages,
+        reported_tips: 1_600, ytd_gross: 0, ytd_ss_tax: 0, ytd_ss_taxable_wages: 0, ytd_medicare_wages: 0)
+      expect(payroll_item.withholding_tax).to eq(expected[:withholding])
+      expect(payroll_item.withholding_tax).to be > 0
+      expect(payroll_item.social_security_tax + payroll_item.medicare_tax).to eq(153)
+      expect(payroll_item.tips_paid_out).to eq(1_600)
+      expect(payroll_item.total_deductions).to eq(2_000)
+      expect(payroll_item.net_pay).to eq(0)
+    end
+
+    it "recalculates withholding from final itemized pre-tax deductions without counting the field twice" do
+      employee.update!(additional_withholding: 0)
+      field = PayrollFieldDefinition.create!(company: company, name: "Synthetic 401(k)", kind: "deduction",
+        tax_treatment: "pre_tax_deduction", category: "retirement", amount_type: "fixed", default_amount: 1_000,
+        reporting_group: "401k_pre_tax")
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 1_000, active: true)
+      payroll_item.update!(withholding_tax_override: 47.50)
+      described_class.for(employee, payroll_item).calculate
+      expect(PayrollRetirementTotals.for_item(payroll_item)[:retirement]).to eq(876)
+      expect(payroll_item.fit_taxable_wages).to eq(124)
+      expect(payroll_item.retirement_payment).to eq(0)
+      expect(payroll_item.payroll_item_deductions.select(&:pre_tax?).sum(&:amount)).to eq(876)
+      expect(payroll_item.total_deductions).to eq(1_000)
     end
 
     it "deducts a MoSa direct loan and an independently assigned loan field" do
@@ -882,7 +932,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to be >= 0.0
     end
 
-    it "caps remaining deductions so total deductions reconcile with zero net pay" do
+    it "blocks rather than reducing mandatory withholding when cash is insufficient" do
       payroll_item.update!(
         hours_worked: 1,
         overtime_hours: 0,
@@ -896,14 +946,10 @@ RSpec.describe PayrollCalculator do
         ]
       )
 
-      described_class.for(employee, payroll_item).calculate
+      expect { described_class.for(employee, payroll_item).calculate }.to raise_error(ArgumentError, /Mandatory taxes/)
+      expect(payroll_item.withholding_tax).to eq(250)
+      expect(payroll_item.custom_deductions_total).to eq(0)
 
-      available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
-      expect(payroll_item.total_deductions).to eq(available_pay)
-      expect(payroll_item.net_pay).to eq(0.0)
-      expect(payroll_item.gross_pay - payroll_item.total_deductions + payroll_item.non_taxable_pay.to_f).to eq(0.0)
-      expect(payroll_item.custom_deductions_total).to eq(0.0)
-      expect(payroll_item.withholding_tax).to be <= available_pay
     end
 
     it "removes itemized deduction rows that are capped to zero on recalculation" do
@@ -929,7 +975,7 @@ RSpec.describe PayrollCalculator do
         pto_hours: 0,
         bonus: 0,
         reported_tips: 0,
-        withholding_tax_override: 100.0,
+        withholding_tax_override: 9.23,
         custom_deductions: []
       )
 
@@ -981,7 +1027,7 @@ RSpec.describe PayrollCalculator do
         pto_hours: 0,
         bonus: 0,
         reported_tips: 0,
-        withholding_tax_override: 250.0,
+        withholding_tax_override: 9.23,
         custom_deductions: []
       )
 
@@ -1020,7 +1066,7 @@ RSpec.describe PayrollCalculator do
         pto_hours: 0,
         bonus: 0,
         reported_tips: 0,
-        withholding_tax_override: 150.0,
+        withholding_tax_override: 92.35,
         custom_deductions: []
       )
 
@@ -1043,7 +1089,7 @@ RSpec.describe PayrollCalculator do
         pto_hours: 0,
         bonus: 0,
         reported_tips: 0,
-        withholding_tax_override: 100.0,
+        withholding_tax_override: 62.35,
         loan_deduction: 30.0,
         loan_payment: 30.0,
         import_source: "mosa_revel",

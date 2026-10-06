@@ -24,6 +24,15 @@ class PayrollRetirementTotals
     totals.transform_values { |amount| amount.round(2) }
   end
 
+  def self.additions_for_item(item)
+    entries = QuickbooksPayrollReportData.new(item.pay_period).deduction_contribution_entries_for_item(item)
+    groups = GROUP_KEYS.keys + [ PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ]
+    {
+      employer: entries.sum { |entry| groups.include?(entry.reporting_group) ? entry.company_amount.to_d : 0.to_d },
+      non_roth_after_tax: entries.sum { |entry| entry.reporting_group == PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ? entry.employee_amount.to_d : 0.to_d }
+    }.transform_values { |value| value.round(2) }
+  end
+
   def self.retirement_field?(entry)
     group = PayrollReportingGroups.infer_retirement_group(
       explicit_group: entry.reporting_group.presence || entry.payroll_field_definition&.reporting_group,
