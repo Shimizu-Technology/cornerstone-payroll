@@ -20,11 +20,11 @@ it('loads saved hours before autofocus and explicitly clears a request previousl
   render(<PayrollItemEditModal open onOpenChange={vi.fn()} payPeriodId={12} item={item} onSaved={vi.fn()} />);
   const dialog = await screen.findByRole('dialog');
   expect(dialog.querySelector('input')?.value).toBe('80');
-  const amount = screen.getByRole('textbox', { name: 'Synthetic 401(k) requested amount', exact: true });
+  const amount = screen.getByRole('textbox', { name: 'Synthetic 401(k) requested amount' });
   expect((amount as HTMLInputElement).value).toBe('1070.00');
   await user.clear(amount);
   await user.type(amount, '0');
-  await user.click(screen.getByRole('button', { name: 'Save & Recalculate', exact: true }));
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
   await waitFor(() => expect(mocks.update).toHaveBeenCalled());
   expect(mocks.update.mock.calls[0][2]).toMatchObject({ hours_worked: 80, payroll_field_entries: [{ id: 9, amount: 0, replace_request: true }] });
 });
