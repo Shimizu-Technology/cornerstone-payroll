@@ -115,4 +115,18 @@ describe('AnnualRetirementLimitsPanel', () => {
     await screen.findByText('$35,750');
     expect(screen.queryByRole('link')).toBeNull();
   });
+
+  it('rejects an unsafe source URL before sending an edited annual limit', async () => {
+    const user = userEvent.setup();
+    render(<AnnualRetirementLimitsPanel />);
+    await screen.findByText('$35,750');
+    await user.click(screen.getByRole('button', { name: 'Edit 2026 retirement limits' }));
+    const source = screen.getByLabelText('Source URL');
+    await user.clear(source);
+    await user.type(source, 'javascript:alert(1)');
+    await user.type(screen.getByLabelText('Reason for change'), 'Verify published limits');
+    await user.click(screen.getByRole('button', { name: 'Save retirement limits' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Enter the source name, a complete http or https source URL, and the reason for this change.');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
 });
