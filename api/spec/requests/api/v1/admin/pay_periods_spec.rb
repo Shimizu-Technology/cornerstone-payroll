@@ -1364,6 +1364,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.gross_pay.to_f).to eq(190.0)
     end
 
+    it "accepts an explicit JSON request replacement when a manual deduction was capped to zero" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic request replacement", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "rent", default_amount: 500)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 500)
+      item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period, pay_rate: 15, hours_worked: 10)
+      entry = create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: field,
+        source: "manual", amount: 0, metadata: { "uncapped_amount" => "500" })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: { employee.id.to_s => { field.id.to_s => { mode: "override", amount: 0, replace_request: true } } }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      expect(entry.reload.amount).to eq(0)
+      expect(entry.metadata).not_to have_key("uncapped_amount")
+    end
+
+    it "rejects a string request-replacement flag and leaves the saved request intact" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic boolean check", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "rent", default_amount: 500)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 500)
+      item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period, pay_rate: 15, hours_worked: 10)
+      entry = create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: field,
+        source: "manual", amount: 0, metadata: { "uncapped_amount" => "500" })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: { employee.id.to_s => { field.id.to_s => { mode: "override", amount: 0, replace_request: "false" } } }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors").map { |error| error["error"] }.join(" ")).to match(/must be a JSON boolean/)
+      expect(entry.reload).to have_attributes(amount: 0.to_d, metadata: { "uncapped_amount" => "500" })
+    end
+
     it "calculates a default percentage payroll field from first-run base gross" do
       field = PayrollFieldDefinition.create!(
         company: company,

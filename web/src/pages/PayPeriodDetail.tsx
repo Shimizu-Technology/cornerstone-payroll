@@ -61,9 +61,15 @@ interface HoursEntry {
 interface PayrollFieldDraftEntry {
   mode: 'default' | 'override';
   amount: number | null;
+  replace_request?: boolean;
 }
 
 const TABLE_STICKY_TOP_CLASS = 'top-0';
+
+function PayrollFieldAppliedNotice({ assignment }: { assignment: PayPeriodPayrollFieldAssignment }): ReactElement | null {
+  if (assignment.requested_amount == null || assignment.current_amount == null || payrollFieldAmountsEqual(assignment.requested_amount, assignment.current_amount)) return null;
+  return <p className="mt-1 text-xs leading-5 text-warning-800">Last applied {formatCurrency(assignment.current_amount)} after limits. The input shows the requested amount.</p>;
+}
 
 const MAX_HOURS_PER_PERIOD = 200;
 const runPurposeLabels: Record<PayRunPurpose, string> = {
@@ -334,6 +340,7 @@ export function PayPeriodDetail({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [payrollFieldAssignments, setPayrollFieldAssignments] = useState<PayPeriodPayrollFieldAssignment[]>([]);
+  const [retainedRetirementEntries, setRetainedRetirementEntries] = useState<NonNullable<PayPeriodPayrollFieldInputs['retained_manual_entries']>>([]);
   const [payrollFieldDrafts, setPayrollFieldDrafts] = useState<Record<string, PayrollFieldDraftEntry>>({});
   // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
   // can detect when the FIT auto-deposit amount has been overridden away
@@ -415,12 +422,14 @@ export function PayPeriodDetail({
   const syncPayrollFieldInputs = useCallback((worksheet: PayPeriodPayrollFieldInputs) => {
     setPayrollFields(worksheet.fields);
     setPayrollFieldAssignments(worksheet.assignments);
+    setRetainedRetirementEntries(worksheet.retained_manual_entries || []);
     setShowPayrollFields(worksheet.assignments.length > 0);
     setPayrollFieldDrafts(Object.fromEntries(worksheet.assignments.map((assignment) => {
       const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
       return [key, {
         mode: assignment.overridden ? 'override' : 'default',
-        amount: assignment.current_amount ?? assignment.suggested_amount ?? null,
+        amount: assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null,
+        replace_request: false,
       } satisfies PayrollFieldDraftEntry];
     })));
   }, []);
@@ -665,7 +674,7 @@ export function PayPeriodDetail({
 
     const key = `${employeeId}:${fieldId}`;
     const normalizedAmount = amount == null ? null : Math.max(0, amount);
-    const defaultAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+    const defaultAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
 
     setPayrollFieldDrafts((previous) => {
       const current = previous[key];
@@ -678,7 +687,7 @@ export function PayPeriodDetail({
         ...previous,
         [key]: returnedToDefault
           ? { mode: 'default', amount: defaultAmount }
-          : { mode: 'override', amount: normalizedAmount },
+          : { mode: 'override', amount: normalizedAmount, replace_request: true },
       };
     });
   };
@@ -786,7 +795,7 @@ export function PayPeriodDetail({
         loan_deductions[empId] = Math.max(0, toNumber(amount));
       });
 
-      const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
+      const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number; replace_request?: boolean }>> = {};
       payrollFieldAssignments.forEach((assignment) => {
         const field = worksheetPayrollFields.find((candidate) => candidate.id === assignment.payroll_field_definition_id);
         const isLoanField = field?.category === 'loan' && field.tax_treatment === 'post_tax_deduction';
@@ -809,7 +818,7 @@ export function PayPeriodDetail({
 
         payroll_field_inputs[String(assignment.employee_id)] ||= {};
         payroll_field_inputs[String(assignment.employee_id)][String(assignment.payroll_field_definition_id)] = draft.mode === 'override'
-          ? { mode: 'override', amount: Math.max(0, toNumber(draft.amount)) }
+          ? { mode: 'override', amount: Math.max(0, toNumber(draft.amount)), ...(draft.replace_request ? { replace_request: true } : {}) }
           : { mode: 'default' };
       });
 
@@ -1189,7 +1198,7 @@ export function PayPeriodDetail({
     const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
     const currentDraft = payrollFieldDrafts[key];
     const calculatedMode = assignment.overridden ? 'override' : 'default';
-    const calculatedAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+    const calculatedAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
     return !currentDraft
       || currentDraft.mode !== calculatedMode
       || !payrollFieldAmountsEqual(currentDraft.amount, calculatedAmount);
@@ -2142,6 +2151,15 @@ export function PayPeriodDetail({
         })()}
 
         {/* Hours Input (Draft Mode) */}
+        {(isDraft || isCalculated) && retainedRetirementEntries.length > 0 && <section className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900" aria-label="Retained manual retirement entries">
+          <p className="font-semibold">Saved retirement entries still apply to this paycheck</p>
+          <p className="mt-1">Pausing or replacing a recurring assignment leaves saved manual amounts in place. Review these entries before adding another contribution; clear an obsolete request explicitly in the paycheck editor.</p>
+          <ul className="mt-3 space-y-2">{retainedRetirementEntries.map((entry, index) => {
+            const employee = employees.find((candidate) => candidate.id === entry.employee_id);
+            const item = payrollItems.find((candidate) => candidate.employee_id === entry.employee_id);
+            return <li key={`${entry.employee_id}:${entry.field_id}:${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2"><span>{employee ? `${employee.first_name} ${employee.last_name}` : `Employee #${entry.employee_id}`} · {entry.label}: requested {formatCurrency(Number(entry.requested_amount))}, applied {formatCurrency(Number(entry.applied_amount))}</span>{item && <Link className="font-semibold underline underline-offset-2" to={`/companies/${payPeriod.company_id}/pay-runs/${payPeriod.id}/payroll-items/${item.id}`}>Review paycheck</Link>}</li>;
+          })}</ul>
+        </section>}
         {(isDraft || isCalculated) && (
           <Card>
             <div
@@ -2293,7 +2311,7 @@ export function PayPeriodDetail({
                   {payrollItemByEmployeeId.get(emp.id)?.imported_bonus != null && <p className="text-xs text-neutral-500">Workbook bonus: {formatCurrency(toNumber(payrollItemByEmployeeId.get(emp.id)?.imported_bonus))}{bonusEdits[String(emp.id)] != null && ' · Manual amount retained'}</p>}
                   {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && <p className="text-xs text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>}
                   {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">One-time loan deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
-                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label>{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
+                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
               {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
@@ -2620,6 +2638,7 @@ export function PayPeriodDetail({
                           return (
                             <TableCell key={key} className={`min-w-[180px] align-top ${rowTone}`}>
                               <div className="flex flex-col items-center gap-1">
+                                <PayrollFieldAppliedNotice assignment={assignment} />
                                 <div className="flex items-center justify-center gap-1.5">
                                   <span className="text-xs text-gray-400">$</span>
                                   <NumericInput
@@ -2638,6 +2657,7 @@ export function PayPeriodDetail({
                                     min={0}
                                     fixedDecimalsOnBlur={2}
                                     disabled={!editable}
+                                    aria-label={`${field.name} requested amount for ${emp.first_name} ${emp.last_name}`}
                                     aria-invalid={draft?.mode === 'override' && draft.amount == null}
                                   />
                                 </div>

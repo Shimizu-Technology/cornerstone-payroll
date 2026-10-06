@@ -55,6 +55,41 @@ const initialPayPeriod = {
 
 afterEach(cleanup);
 
+async function renderCappedFieldWorksheet() {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 15, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const field = { id: 8, company_id: 7, name: '401(k) supplemental', kind: 'deduction', tax_treatment: 'pre_tax_deduction', category: 'retirement', amount_type: 'fixed', active: true, show_in_payroll_grid: true, sort_order: 0 };
+  const assignment = { employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', current_amount: 0, requested_amount: 1070, suggested_amount: 0, overridden: true, editable: true };
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [field], assignments: [assignment], retained_manual_entries: [{ employee_id: 30, field_id: 9, label: 'Previous manual retirement', requested_amount: 1070, applied_amount: 93.04, source: 'manual' }] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'draft' }} />} /></Routes></MemoryRouter>);
+  const input = await screen.findByLabelText('401(k) supplemental');
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '8' } });
+  return input;
+}
+
+it('keeps a capped request through an unrelated worksheet calculation and surfaces retained manual entries', async () => {
+  const input = await renderCappedFieldWorksheet();
+  expect((input as HTMLInputElement).value).toBe('1070.00');
+  expect(screen.getByRole('region', { name: 'Retained manual retirement entries' })).toHaveProperty('textContent', expect.stringContaining('Previous manual retirement'));
+  expect(screen.getAllByText(/Last applied \$0.00 after limits/).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 1070 });
+});
+
+it('marks an intentional zero request even when the prior applied amount was already zero', async () => {
+  const input = await renderCappedFieldWorksheet();
+  fireEvent.change(input, { target: { value: '0' } });
+  fireEvent.blur(input);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 0, replace_request: true });
+});
+
 it('reloads processing data and its check list when a sibling tab changes checks', async () => {
   vi.clearAllMocks();
   const refreshedPayPeriod = { ...initialPayPeriod, notes: 'Latest check status' };

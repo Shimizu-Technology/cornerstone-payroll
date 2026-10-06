@@ -179,7 +179,8 @@ const toCurrencyDraft = (value: number | null | undefined): string =>
 const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string }> = [
   { value: '', label: 'No special report group' },
   { value: '401k_pre_tax', label: '401(k) Pre-Tax' },
-  { value: '401k_after_tax', label: '401(k) After Tax / Roth' },
+  { value: '401k_after_tax', label: 'Roth 401(k)' },
+  { value: '401k_non_roth_after_tax', label: '401(k) non-Roth after-tax' },
   { value: 'retirement_other', label: 'Other Retirement' },
 ];
 
@@ -1863,6 +1864,7 @@ export function EmployeeForm() {
                           <option key={option.value || 'none'} value={option.value}>{option.label}</option>
                         ))}
                       </Select>
+                      <p className="mt-3 rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900">Enable catch-up in Pay setup → Retirement plan. Adding a field creates another contribution; it does not split or replace an existing deduction. Confirm existing manual paycheck entries before adding a replacement.</p>
                     </div>}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-gray-600">Default</label>

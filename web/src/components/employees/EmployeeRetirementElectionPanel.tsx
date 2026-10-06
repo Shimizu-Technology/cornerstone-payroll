@@ -8,6 +8,8 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { employeesApi } from '@/services/api';
 import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
+import { retirementErrorMessage } from '@/lib/retirement-error';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Employee, EmployeeRetirementElection, EmployeeRetirementElectionInput } from '@/types';
 
 interface Props {
@@ -23,6 +25,13 @@ function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
   return {
     effective_on: '',
     plan_name: current?.plan_name || '401(k)',
+    plan_type: current?.plan_type || 'standard_401k',
+    limitation_year_type: current?.limitation_year_type || 'calendar',
+    roth_available: current?.roth_available ?? false,
+    employer_roth_available: current?.employer_roth_available ?? false,
+    plan_source_reference: current?.plan_source_reference || '',
+    regular_plan_deferral_limit: current?.regular_plan_deferral_limit ?? null,
+    related_plan_review_required: current?.related_plan_review_required ?? false,
     eligible: current?.eligible ?? true,
     participating: current?.participating ?? (Number(employee.retirement_rate || 0) + Number(employee.roth_retirement_rate || 0) > 0),
     traditional_contribution_type: current?.traditional_contribution_type || 'percentage',
@@ -52,8 +61,10 @@ function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
 }
 
 export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): ReactElement {
+  const { hasCapability } = useAuth();
+  const canManage = hasCapability('manage_client_configuration');
   const hasDatedElection = Boolean(employee.current_retirement_election || employee.upcoming_retirement_election || employee.retirement_elections?.length);
-  const [editing, setEditing] = useState(!hasDatedElection);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EmployeeRetirementElectionInput>(() => initialDraft(employee));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +89,15 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
       setError('Add a short reason so the change is clear in payroll history.');
       return;
     }
+    if (draft.catch_up_enabled && !employee.date_of_birth) {
+      setError('Verify the employee’s date of birth in employee details before enabling catch-up.');
+      return;
+    }
+    const rothConfigured = Number(draft.roth_rate) > 0 || Number(draft.roth_amount) > 0;
+    if (draft.participating && (draft.catch_up_enabled || rothConfigured || draft.employer_match_destination === 'roth') && !draft.plan_source_reference?.trim()) {
+      setError('Add the verified plan document or administrator reference for catch-up and Roth features.');
+      return;
+    }
     try {
       setSaving(true);
       setError(null);
@@ -87,26 +107,26 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
       setEditing(false);
       setNotice('Retirement election saved. Payroll will select it by pay date.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save the retirement election.');
+      setError(retirementErrorMessage(caught, 'Could not save the retirement election.'));
     } finally {
       setSaving(false);
     }
   };
 
   return <Card className="overflow-hidden">
-    <CardHeader className="flex-row items-start justify-between gap-4 border-b border-neutral-100 bg-neutral-50/70">
+    <CardHeader className="flex-col items-start justify-between gap-4 border-b border-neutral-100 bg-neutral-50/70 sm:flex-row">
       <div>
         <CardTitle className="flex items-center gap-2"><Landmark className="h-5 w-5 text-primary-700" />Retirement plan</CardTitle>
         <p className="mt-2 text-sm leading-6 text-neutral-600">The effective election, annual limit, eligible pay, and employer match are calculated together and saved on every paycheck.</p>
       </div>
-      {!editing && <Button variant="outline" onClick={() => { setEditing(true); setNotice(null); }}><Pencil className="mr-2 h-4 w-4" />New election</Button>}
+      {!editing && canManage && <Button variant="outline" onClick={() => { setEditing(true); setNotice(null); }}><Pencil className="mr-2 h-4 w-4" />{hasDatedElection ? 'New election' : 'Set up retirement'}</Button>}
     </CardHeader>
     <CardContent className="space-y-5 p-5 sm:p-6">
       {notice && <p className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-800" role="status">{notice}</p>}
       {error && <p className="rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800" role="alert">{error}</p>}
       {upcoming && <p className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900"><strong>Scheduled:</strong> {upcoming.plan_name} becomes effective {formatDate(upcoming.effective_on)}.</p>}
 
-      {!editing ? <ElectionSummary election={current} upcoming={upcoming} employee={employee} /> : <div className="space-y-6">
+      {!editing ? <ElectionSummary election={current} upcoming={upcoming} employee={employee} /> : <fieldset disabled={saving} className="space-y-6">
         <section>
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">1 · Participation</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -117,6 +137,16 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
             <Toggle checked={draft.eligible} onChange={(checked) => { set('eligible', checked); if (!checked) set('participating', false); }} title="Eligible for the plan" helper="Turn off when the employee has not met the plan's eligibility rules." />
             <Toggle checked={draft.participating} disabled={!draft.eligible} onChange={(checked) => set('participating', checked)} title="Employee is participating" helper="When off, retirement deductions and employer match are $0." />
           </div>
+          <details className="mt-4 rounded-xl border border-neutral-200 p-4" open={draft.catch_up_enabled || Number(draft.roth_rate) > 0 || Number(draft.roth_amount) > 0}>
+            <summary className="cursor-pointer text-sm font-semibold text-neutral-800">Verified plan terms</summary>
+            <p className="mt-3 text-sm leading-6 text-neutral-600">Automatic calculations support a standard 401(k) with a calendar limitation year. Other plan types, short years, related-employer plans, and administrator-directed ADP corrections need a separate review.</p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Field label="Plan document or administrator reference"><Input value={draft.plan_source_reference || ''} onChange={(event) => set('plan_source_reference', event.target.value)} placeholder="Verified plan document reference" /></Field>
+              <Field label="Limitation year"><Select value={draft.limitation_year_type || 'calendar'} onChange={(event) => set('limitation_year_type', event.target.value as EmployeeRetirementElectionInput['limitation_year_type'])}><option value="calendar">Calendar year (January–December)</option><option value="non_calendar">Non-calendar year — administrator review</option><option value="short">Short year — administrator review</option></Select></Field>
+              <Toggle checked={draft.roth_available ?? false} onChange={(checked) => set('roth_available', checked)} title="Plan permits employee Roth deferrals" helper="Verify designated Roth availability with the plan administrator." />
+              <Toggle checked={draft.related_plan_review_required ?? false} onChange={(checked) => set('related_plan_review_required', checked)} title="Related-employer or special plan review needed" helper="Payroll blocks automatic retirement calculations until this is resolved." />
+            </div>
+          </details>
         </section>
 
         <section className="border-t border-neutral-200 pt-6">
@@ -129,14 +159,15 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
             <Field label="Eligible pay"><Select value={draft.eligible_compensation} onChange={(event) => {
               const value = event.target.value as EmployeeRetirementElectionInput['eligible_compensation'];
               set('eligible_compensation', value);
-              if (value !== 'gross_wages' && draft.employer_match_mode === 'compensation_percentage') set('true_up_policy', 'none');
+              if (value !== 'gross_wages') set('true_up_policy', 'none');
             }}><option value="gross_wages">All gross wages</option><option value="gross_excluding_tips">Gross wages, excluding tips</option><option value="base_pay">Base pay only</option></Select></Field>
             <Field label="When the annual cap is reached"><Select value={draft.limit_priority} onChange={(event) => set('limit_priority', event.target.value as EmployeeRetirementElectionInput['limit_priority'])}><option value="proportional">Reduce Traditional and Roth proportionally</option><option value="traditional_first">Fund Traditional first</option><option value="roth_first">Fund Roth first</option></Select></Field>
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Toggle checked={draft.catch_up_enabled} onChange={(checked) => set('catch_up_enabled', checked)} title="Plan permits catch-up contributions" helper="Payroll applies the age-appropriate annual catch-up limit." />
-            <Field label="Plan's annual employee limit (optional)" helper="Leave blank to use the IRS limit."><NumericInput value={draft.plan_annual_employee_limit ?? null} onValueChange={(value) => set('plan_annual_employee_limit', value)} min={0} fixedDecimalsOnBlur={2} /></Field>
+            <Toggle checked={draft.catch_up_enabled} onChange={(checked) => set('catch_up_enabled', checked)} title="Plan permits catch-up contributions" helper={employee.date_of_birth ? 'Uses age at year end. Verify annual employer wage evidence before catch-up payroll.' : 'Verify date of birth in employee details before saving catch-up.'} />
+            <Field label="Plan's total annual employee ceiling (optional)" helper="Includes catch-up. Leave blank to use the statutory ceiling."><NumericInput value={draft.plan_annual_employee_limit ?? null} onValueChange={(value) => set('plan_annual_employee_limit', value)} min={0} emptyValue={null} fixedDecimalsOnBlur={2} /></Field>
           </div>
+          <details className="mt-4 rounded-xl border border-neutral-200 p-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-800">Lower regular plan limit</summary><div className="mt-4"><Field label="Regular plan deferral limit before catch-up (optional)" helper="Use only a verified annual dollar limit. A percentage limit or ADP correction requires administrator review."><NumericInput value={draft.regular_plan_deferral_limit ?? null} onValueChange={(value) => set('regular_plan_deferral_limit', value)} min={0} emptyValue={null} fixedDecimalsOnBlur={2} /></Field></div></details>
         </section>
 
         <section className="border-t border-neutral-200 pt-6">
@@ -145,19 +176,20 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
             <Field label="Match formula"><Select value={draft.employer_match_mode} onChange={(event) => {
               const value = event.target.value as EmployeeRetirementElectionInput['employer_match_mode'];
               set('employer_match_mode', value);
-              if (value === 'compensation_percentage' && draft.eligible_compensation !== 'gross_wages') set('true_up_policy', 'none');
+              if (draft.eligible_compensation !== 'gross_wages') set('true_up_policy', 'none');
             }}><option value="none">No employer match</option><option value="employee_deferral_percentage">Percent of employee contribution</option><option value="compensation_percentage">Percent of eligible pay</option></Select></Field>
             {draft.employer_match_mode !== 'none' && <Field label="Employer match percentage"><NumericInput value={percent(draft.employer_match_rate)} onValueChange={(value) => set('employer_match_rate', rate(value))} min={0} max={100} fixedDecimalsOnBlur={2} /></Field>}
-            {draft.employer_match_mode === 'employee_deferral_percentage' && <Field label="Match employee contributions up to (% of pay)" helper="Example: 4% means only the first 4% of eligible pay is matchable."><NumericInput value={draft.employer_match_deferral_cap_rate == null ? null : percent(draft.employer_match_deferral_cap_rate)} onValueChange={(value) => set('employer_match_deferral_cap_rate', value == null ? null : rate(value))} min={0} max={100} fixedDecimalsOnBlur={2} /></Field>}
+            {draft.employer_match_mode === 'employee_deferral_percentage' && <Field label="Match employee contributions up to (% of pay)" helper="Example: 4% means only the first 4% of eligible pay is matchable. Blank means no extra cap; zero permits no match."><NumericInput value={draft.employer_match_deferral_cap_rate == null ? null : percent(draft.employer_match_deferral_cap_rate)} onValueChange={(value) => set('employer_match_deferral_cap_rate', value == null ? null : rate(value))} min={0} max={100} emptyValue={null} fixedDecimalsOnBlur={2} /></Field>}
             {draft.employer_match_mode !== 'none' && <Field label="Employer contribution destination"><Select value={draft.employer_match_destination} onChange={(event) => set('employer_match_destination', event.target.value as EmployeeRetirementElectionInput['employer_match_destination'])}><option value="traditional">Traditional</option><option value="roth">Roth</option></Select></Field>}
           </div>
+          {draft.employer_match_mode !== 'none' && draft.employer_match_destination === 'roth' && <div className="mt-4"><Toggle checked={draft.employer_roth_available ?? false} onChange={(checked) => set('employer_roth_available', checked)} title="Administrator confirmed employer Roth support" helper="Requires the plan’s vested-contribution rules and a provider handoff for allocation dates and Form 1099-R reporting." /></div>}
           {draft.employer_match_mode !== 'none' && <details className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
             <summary className="cursor-pointer text-sm font-semibold text-neutral-800">Match caps and QuickBooks cutover</summary>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field label="Per-payroll match cap"><NumericInput value={draft.employer_match_period_cap ?? null} onValueChange={(value) => set('employer_match_period_cap', value)} min={0} fixedDecimalsOnBlur={2} /></Field>
-              <Field label="Annual employer match cap"><NumericInput value={draft.employer_match_annual_cap ?? null} onValueChange={(value) => set('employer_match_annual_cap', value)} min={0} fixedDecimalsOnBlur={2} /></Field>
+              <Field label="Per-payroll match cap" helper="Blank means no extra cap; zero permits no match."><NumericInput value={draft.employer_match_period_cap ?? null} onValueChange={(value) => set('employer_match_period_cap', value)} min={0} emptyValue={null} fixedDecimalsOnBlur={2} /></Field>
+              <Field label="Annual employer match cap" helper="Blank means no extra cap; zero permits no match."><NumericInput value={draft.employer_match_annual_cap ?? null} onValueChange={(value) => set('employer_match_annual_cap', value)} min={0} emptyValue={null} fixedDecimalsOnBlur={2} /></Field>
               <Field label="Employer match already paid before cutover" helper="Enter once when QuickBooks already paid employer match this year."><NumericInput value={draft.employer_match_ytd_before_system} onValueChange={(value) => set('employer_match_ytd_before_system', value || 0)} min={0} fixedDecimalsOnBlur={2} /></Field>
-              <Field label="True-up" helper={draft.employer_match_mode === 'compensation_percentage' && draft.eligible_compensation !== 'gross_wages' ? 'A compensation match can reconcile YTD only when all gross wages are eligible.' : undefined}><Select value={draft.true_up_policy} onChange={(event) => set('true_up_policy', event.target.value as EmployeeRetirementElectionInput['true_up_policy'])}><option value="none">No true-up</option><option value="year_to_date" disabled={draft.employer_match_mode === 'compensation_percentage' && draft.eligible_compensation !== 'gross_wages'}>Reconcile year to date each payroll</option></Select></Field>
+              <Field label="True-up" helper={draft.eligible_compensation !== 'gross_wages' ? 'YTD true-up requires all gross wages to be eligible; restricted compensation needs administrator reconciliation.' : undefined}><Select value={draft.true_up_policy} onChange={(event) => set('true_up_policy', event.target.value as EmployeeRetirementElectionInput['true_up_policy'])}><option value="none">No true-up</option><option value="year_to_date" disabled={draft.eligible_compensation !== 'gross_wages'}>Reconcile year to date each payroll</option></Select></Field>
             </div>
           </details>}
         </section>
@@ -169,7 +201,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
             <Button disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save retirement election'}</Button>
           </div>
         </section>
-      </div>}
+      </fieldset>}
 
       {(employee.retirement_elections || []).length > 0 && !editing && <details className="border-t border-neutral-200 pt-5">
         <summary className="cursor-pointer text-sm font-semibold text-neutral-800">Election history ({employee.retirement_elections?.length})</summary>
@@ -181,7 +213,9 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
 
 function ElectionSummary({ election, upcoming, employee }: { election?: EmployeeRetirementElection | null; upcoming?: EmployeeRetirementElection | null; employee: Employee }): ReactElement {
   if (!election && upcoming) return <div className="rounded-2xl border border-primary-100 bg-primary-50/60 p-4 text-sm leading-6 text-neutral-700">Until {formatDate(upcoming.effective_on)}, payroll keeps the legacy setup ({percent(employee.retirement_rate).toFixed(2)}% Traditional and {percent(employee.roth_retirement_rate).toFixed(2)}% Roth). The scheduled <strong>{upcoming.plan_name}</strong> election takes over automatically on that pay date.</div>;
-  if (!election) return <div className="rounded-2xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">This employee still uses the basic legacy percentages ({percent(employee.retirement_rate).toFixed(2)}% Traditional and {percent(employee.roth_retirement_rate).toFixed(2)}% Roth). Record a dated election before the next payroll so limits and plan rules are explicit.</div>;
+  if (!election) return Number(employee.retirement_rate || 0) + Number(employee.roth_retirement_rate || 0) > 0
+    ? <div className="rounded-2xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">This employee still uses the basic legacy percentages ({percent(employee.retirement_rate).toFixed(2)}% Traditional and {percent(employee.roth_retirement_rate).toFixed(2)}% Roth). Record a dated election before the next payroll so limits and plan rules are explicit.</div>
+    : <p className="text-sm leading-6 text-neutral-600">No employee retirement contributions are configured. Set up an election when the employee joins the plan.</p>;
   const contribution = (type: EmployeeRetirementElection['traditional_contribution_type'], amount: number, electionRate: number): string => type === 'fixed' ? `${formatCurrency(Number(amount))} each payroll` : `${percent(electionRate).toFixed(2)}% of eligible pay`;
   return <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
     <div className="rounded-2xl border border-primary-100 bg-primary-50/60 p-5">

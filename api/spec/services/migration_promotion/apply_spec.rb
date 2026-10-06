@@ -288,6 +288,46 @@ RSpec.describe MigrationPromotion::Apply do
     }.to raise_error(ArgumentError, /Choose whether each rehearsal payroll/)
   end
 
+  it "appends approved retirement evidence while preserving existing history and copying fresh employees" do
+    evidence = { tax_year: 2026, prior_year_wage_status: "verified", prior_year_fica_wages: 160_000,
+      prior_year_wage_source: "Employer W-2GU Box 3", employer_additions_before_system: 1_000,
+      opening_balances_verified: true, source_reference: "Provider reconciliation", reason: "Initial annual review" }
+    old = target_employee.employee_retirement_year_inputs.create!(evidence.merge(company: target_company))
+    source_employee.employee_retirement_year_inputs.create!(evidence.merge(company: rehearsal))
+    source_employee.employee_retirement_year_inputs.create!(evidence.merge(company: rehearsal,
+      employer_additions_before_system: 900, reason: "Approved correction"))
+    new_source_employee.employee_retirement_year_inputs.create!(evidence.merge(company: rehearsal,
+      external_roth_deferrals: 2_000))
+    mapping = MigrationPromotion::EmployeeMapper.new(rehearsal: rehearsal).call
+
+    result = MigrationPromotion::SetupSynchronizer.new(rehearsal: rehearsal, target_company: target_company,
+      actor: actor, mapping: mapping).call
+
+    expect(old.reload.employer_additions_before_system).to eq(1_000.to_d)
+    expect(target_employee.employee_retirement_year_inputs.count).to eq(2)
+    expect(target_employee.retirement_year_input_for(2026)).to have_attributes(
+      company: target_company, created_by: actor, employer_additions_before_system: 900.to_d,
+      source_reference: "Provider reconciliation", reason: "Approved correction")
+    fresh = result.fetch(:employees).fetch(new_source_employee.id)
+    expect(fresh.employee_retirement_year_inputs.count).to eq(1)
+    expect(fresh.retirement_year_input_for(2026)).to have_attributes(company: target_company,
+      created_by: actor, external_roth_deferrals: 2_000.to_d)
+  end
+
+  it "retains matching live retirement evidence instead of duplicating its opening balances" do
+    values = { tax_year: 2026, employer_additions_before_system: 1_000, opening_balances_verified: true,
+      source_reference: "Provider reconciliation", reason: "Initial annual review" }
+    existing = target_employee.employee_retirement_year_inputs.create!(values.merge(company: target_company))
+    source_employee.employee_retirement_year_inputs.create!(values.merge(company: rehearsal))
+    mapping = MigrationPromotion::EmployeeMapper.new(rehearsal: rehearsal).call
+
+    MigrationPromotion::SetupSynchronizer.new(rehearsal: rehearsal, target_company: target_company,
+      actor: actor, mapping: mapping).call
+
+    expect(target_employee.retirement_year_input_for(2026)).to eq(existing)
+    expect(target_employee.employee_retirement_year_inputs.count).to eq(1)
+  end
+
   it "rolls back target changes and leaves the verified backup intact when setup synchronization fails" do
     allow(MigrationPromotion::SetupSynchronizer).to receive(:new).and_raise("copy failed")
 

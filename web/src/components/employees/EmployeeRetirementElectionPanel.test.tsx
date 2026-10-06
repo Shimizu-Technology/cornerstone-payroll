@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementElectionPanel } from './EmployeeRetirementElectionPanel';
 import type { Employee, EmployeeRetirementElection } from '@/types';
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
 
 vi.hoisted(() => {
   vi.stubGlobal('localStorage', {

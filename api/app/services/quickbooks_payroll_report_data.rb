@@ -297,7 +297,7 @@ class QuickbooksPayrollReportData
     }
 
     item.payroll_item_deductions.each do |deduction|
-      next if legacy_employer_retirement_deduction?(item, deduction)
+      next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if payroll_field_mirrored_deduction?(deduction, field_entries_by_treatment[deduction.category] || [])
 
       group = reporting_group_for_deduction(deduction)
@@ -529,14 +529,6 @@ class QuickbooksPayrollReportData
       PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
   end
 
-  def legacy_employer_retirement_deduction?(item, deduction)
-    return false unless deduction.employer_contribution?
-    return false unless deduction.deduction_type&.sub_category == "retirement"
-
-    label = deduction.label.to_s
-    (label == "401(k) Employer Match" && item.employer_retirement_match.to_f.positive?) ||
-      (label == "Roth 401(k) Employer Match" && item.employer_roth_retirement_match.to_f.positive?)
-  end
 
   def reporting_group_for_deduction(deduction)
     PayrollReportingGroups.infer_retirement_group(
