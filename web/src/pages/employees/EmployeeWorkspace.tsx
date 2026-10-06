@@ -53,6 +53,7 @@ import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
+import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
 type ConfigurationReviewItem = NonNullable<Employee['configuration_review_items']>[number];
@@ -525,6 +526,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
       </div>
 
       {employee.employment_type !== 'contractor' && <EmployeeRetirementElectionPanel employee={employee} onSaved={onEmployeeReload} />}
+      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel employee={employee} />}
 
       {employee.employment_type !== 'contractor' && (
         <Card>

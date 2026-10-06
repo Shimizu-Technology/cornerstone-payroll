@@ -382,7 +382,7 @@ export interface EmployeeRetirementYearInput {
   id: number;
   tax_year: number;
   prior_year_wage_status: 'unknown' | 'verified' | 'no_prior_employer_wages';
-  prior_year_fica_wages: number;
+  prior_year_fica_wages: number | null;
   prior_year_wage_source: string;
   external_traditional_deferrals: number;
   external_roth_deferrals: number;

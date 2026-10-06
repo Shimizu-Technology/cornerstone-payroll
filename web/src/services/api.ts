@@ -876,7 +876,7 @@ export interface TaxConfigAuditLog {
 }
 
 export const annualRetirementLimitsApi = {
-  list: () => api.get<{ data: import('@/types').AnnualRetirementLimit[] }>('/admin/annual_retirement_limits'),
+  list: () => api.get<{ data: import('@/types').AnnualRetirementLimit[]; can_manage?: boolean }>('/admin/annual_retirement_limits'),
   create: (annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
     api.post<{ data: import('@/types').AnnualRetirementLimit }>('/admin/annual_retirement_limits', { annual_retirement_limit }),
   update: (id: number, annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
