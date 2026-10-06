@@ -651,8 +651,8 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
         amount: 0, source: "manual", metadata: { "uncapped_amount" => "400", "loan_requested_amount" => "500", "audit" => "keep" })
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
-        payroll_item: { payroll_field_entries: [{ id: entry.id, payroll_field_definition_id: field.id, label: field.name,
-          amount: 0, source: "manual", replace_request: true }] }
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 0, source: "manual", replace_request: true } ] }
       }, as: :json
       expect(response).to have_http_status(:ok)
       expect(entry.reload).to have_attributes(amount: 0.to_d, metadata: { "audit" => "keep" })
@@ -664,8 +664,8 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
         amount: 40, source: "manual", metadata: { "uncapped_amount" => "400", "loan_requested_amount" => "500" })
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
-        payroll_item: { payroll_field_entries: [{ id: entry.id, payroll_field_definition_id: field.id, label: field.name,
-          amount: 500, source: "manual", replace_request: false }] }
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 500, source: "manual", replace_request: false } ] }
       }, as: :json
       expect(response).to have_http_status(:ok)
       expect(entry.reload.metadata).to include("uncapped_amount" => "400", "loan_requested_amount" => "500")
@@ -677,8 +677,8 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
         amount: 40, source: "manual", metadata: { "uncapped_amount" => "400" })
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
-        payroll_item: { payroll_field_entries: [{ id: entry.id, payroll_field_definition_id: field.id, label: field.name,
-          amount: 0, source: "manual", replace_request: "false" }] }
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 0, source: "manual", replace_request: "false" } ] }
       }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors").join(" ")).to match(/must be a JSON boolean/)

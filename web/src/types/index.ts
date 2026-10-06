@@ -157,6 +157,7 @@ export interface PayPeriodPayrollFieldAssignment {
   default_percentage?: number | null;
   suggested_amount?: number | null;
   current_amount?: number | null;
+  requested_amount?: number | null;
   current_source?: PayrollItemFieldEntry['source'] | null;
   overridden: boolean;
   editable: boolean;
@@ -166,6 +167,7 @@ export interface PayPeriodPayrollFieldAssignment {
 export interface PayPeriodPayrollFieldInputs {
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
+  retained_manual_entries?: Array<{ employee_id: number; field_id: number | null; label: string; requested_amount: number; applied_amount: number; source: 'manual' | 'import' }>;
 }
 
 export interface PayrollItemFieldEntry {
@@ -184,6 +186,7 @@ export interface PayrollItemFieldEntry {
   active?: boolean;
   notes?: string | null;
   metadata?: Record<string, unknown>;
+  replace_request?: boolean;
 }
 
 export interface PayrollAdjustment {

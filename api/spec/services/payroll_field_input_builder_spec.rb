@@ -74,7 +74,7 @@ RSpec.describe PayrollFieldInputBuilder do
       inactive = retirement_entry(name: "Synthetic inactive definition", definition_active: false)
       retirement_entry(name: "Synthetic active contribution")
       result = worksheet
-      expect(result[:retained_manual_entries]).to contain_exactly(*[paused, future, expired, inactive].map do |entry|
+      expect(result[:retained_manual_entries]).to contain_exactly(*[ paused, future, expired, inactive ].map do |entry|
         include(employee_id: employee.id, field_id: entry.payroll_field_definition_id, label: entry.label,
           requested_amount: 400.0, applied_amount: 40.0, source: entry.source)
       end)
@@ -86,6 +86,14 @@ RSpec.describe PayrollFieldInputBuilder do
       hidden.payroll_field_definition.update!(show_in_payroll_grid: false)
       inactive = retirement_entry(name: "Synthetic inactive row", active: false)
       inactive.update!(active: false)
+      expect(worksheet[:retained_manual_entries]).to be_empty
+    end
+
+    it "keeps capped-to-zero requests visible but removes a deliberately cleared request from the notice" do
+      entry = retirement_entry(name: "Synthetic paused request", active: false)
+      entry.update!(amount: 0)
+      expect(worksheet[:retained_manual_entries]).to contain_exactly(include(requested_amount: 400.0, applied_amount: 0.0))
+      entry.update!(metadata: {})
       expect(worksheet[:retained_manual_entries]).to be_empty
     end
 
@@ -105,5 +113,4 @@ RSpec.describe PayrollFieldInputBuilder do
         employee_id: employee.id, label: standalone.label, requested_amount: 500.0, applied_amount: 50.0, source: "import"))
     end
   end
-
 end

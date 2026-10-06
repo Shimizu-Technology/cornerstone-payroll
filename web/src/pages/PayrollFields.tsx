@@ -194,6 +194,7 @@ export function PayrollFields() {
                   {amountTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </Select>
               </div>
+              {draft.category === 'retirement' && <p className="rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900 sm:col-span-2">Enable catch-up in Employee → Pay setup → Retirement plan. A new field adds another contribution; it does not reclassify an existing deduction or increase the annual limit.</p>}
               {draft.amount_type === 'percentage' ? (
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default %</label>
