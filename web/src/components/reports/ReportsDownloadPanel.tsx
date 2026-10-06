@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
@@ -1428,9 +1429,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         </div>
         <div className="p-4">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-              {error}
-            </div>
+            <ActionFeedback tone="error" message={error} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {REPORTS.map(report => {

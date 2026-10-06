@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-71 / CPR-73: Payroll Correction Panel
  *
@@ -460,9 +461,7 @@ export function CorrectionPanel({
       </div>
 
       {historyError && (
-        <p role="alert" className="text-sm text-red-600 rounded-md bg-red-50 border border-red-200 px-3 py-2">
-          {historyError}
-        </p>
+        <ActionFeedback tone="error" message={historyError} />
       )}
 
       {/* ---- Correction History ---- */}
@@ -1088,14 +1087,8 @@ function CorrectionModal({
           <div id={descriptionId}>{description}</div>
 
           {errorMessage && (
-            <div
-              role="alert"
-              aria-live="assertive"
-              className="mt-4 text-sm text-red-700 rounded-md bg-red-50 border border-red-200 px-3 py-2"
-            >
-              <p className="font-medium mb-0.5">Action failed</p>
-              <p>{errorMessage}</p>
-            </div>
+            <ActionFeedback tone="error" message={errorMessage}><p className="font-medium mb-0.5">Action failed</p>
+              <p>{errorMessage}</p></ActionFeedback>
           )}
         </div>
 

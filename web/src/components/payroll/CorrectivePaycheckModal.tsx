@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Dialog,
@@ -306,7 +307,7 @@ export function CorrectivePaycheckModal({
             )}
 
             {previewError && (
-              <p className="text-sm text-red-600">{previewError}</p>
+              <ActionFeedback tone="error" message={previewError} />
             )}
 
             {preview?.meta.is_zero_change && (
@@ -375,7 +376,7 @@ export function CorrectivePaycheckModal({
         </div>
 
         {issueError && (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">{issueError}</p>
+          <ActionFeedback tone="error" message={issueError} />
         )}
 
         <DialogFooter>

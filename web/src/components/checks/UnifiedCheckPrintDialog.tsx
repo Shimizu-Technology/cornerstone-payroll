@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { CheckCircle2, Clock3, Download, FileLock2, Maximize2, Plus, Printer, Settings2, ShieldCheck, TriangleAlert } from 'lucide-react';
@@ -667,7 +668,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                     </section>
                   )}
 
-                  {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+                  {error && <ActionFeedback tone="error" message={error} />}
 
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">

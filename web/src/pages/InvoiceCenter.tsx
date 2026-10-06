@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
@@ -823,12 +824,7 @@ export function InvoiceCenter() {
       </div>
 
       {(error || success) && (
-        <div role="status" className={`invoice-toast fixed right-4 top-4 z-[80] w-[min(28rem,calc(100vw-2rem))] rounded-xl border px-4 py-3 text-sm shadow-xl ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
-          <div className="flex items-start justify-between gap-3">
-            <span>{error || success}</span>
-            <button onClick={() => { setError(null); setSuccess(null); }}><X className="h-4 w-4" /></button>
-          </div>
-        </div>
+        <ActionFeedback tone={error ? "error" : "success"} message={error || success || ""} />
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

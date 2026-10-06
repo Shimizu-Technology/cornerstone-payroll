@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Dialog,
@@ -502,7 +503,7 @@ export function ReplaceCheckModal({
               </p>
             )}
 
-            {previewError && <p className="text-sm text-red-600">{previewError}</p>}
+            {previewError && <ActionFeedback tone="error" message={previewError} />}
 
             {preview?.meta.is_zero_change && (
               <p className="text-sm text-gray-600">
@@ -566,9 +567,7 @@ export function ReplaceCheckModal({
         </div>
 
         {submitError && (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-            {submitError}
-          </p>
+          <ActionFeedback tone="error" message={submitError} />
         )}
 
         <DialogFooter>

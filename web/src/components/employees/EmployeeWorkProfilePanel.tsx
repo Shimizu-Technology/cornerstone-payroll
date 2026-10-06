@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarRange, CheckCircle2, Clock3, History, Scale, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -180,7 +181,7 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
           </div>
 
           <div className="space-y-5 px-6 py-6">
-            {error && <div className="rounded-2xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">{error}</div>}
+            {error && <ActionFeedback tone="error" message={error} />}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-neutral-800">Effective date <span className="text-danger-600">*</span></label>

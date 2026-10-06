@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
@@ -477,9 +478,7 @@ export function GeneralTransmittals() {
         </section>
 
         {(error || success) && (
-          <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
-            {error || success}
-          </div>
+          <ActionFeedback tone={error ? "error" : "success"} message={error || success || ""} />
         )}
 
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">

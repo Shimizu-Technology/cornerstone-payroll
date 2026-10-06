@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
@@ -1522,11 +1523,7 @@ export function InvoiceMaker() {
   );
 
   const alertBanner = (error || success) ? (
-    <div className={`rounded-xl border px-4 py-3 text-sm ${
-      error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
-    }`}>
-      {error || success}
-    </div>
+    <ActionFeedback tone={error ? "error" : "success"} message={error || success || ""} />
   ) : null;
   const activeChatMessages = useMemo(
     () => [
@@ -2065,7 +2062,7 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
-                {chatError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{chatError}</p>}
+                {chatError && <ActionFeedback tone="error" message={chatError} />}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />

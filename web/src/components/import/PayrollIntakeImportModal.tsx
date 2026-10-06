@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, FileText, RefreshCw, UploadCloud, UserPlus } from 'lucide-react';
 import {
@@ -498,9 +499,7 @@ export function PayrollIntakeImportModal({
         </DialogHeader>
 
         {error && (
-          <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         {step === 'upload' && (
@@ -875,9 +874,7 @@ export function PayrollIntakeImportModal({
           </DialogHeader>
 
           {createEmployeeError && (
-            <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-              {createEmployeeError}
-            </div>
+            <ActionFeedback tone="error" message={createEmployeeError} />
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">

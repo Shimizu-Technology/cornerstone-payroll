@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ArrowDownLeft, ArrowUpRight, Clock3, KeyRound, RefreshCw } from 'lucide-react';
@@ -57,7 +58,7 @@ export function FinanceOverview() {
         <Link to="/tools/expenses" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage bills & purchases <ArrowUpRight className="h-4 w-4" /></Link>
         <Link to="/tools/finance/agent-access" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Agent access <KeyRound className="h-4 w-4" /></Link>
       </div>
-      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
+      {error && <ActionFeedback tone="error" message={error} />}
       {loading || switchingBook ? <p role="status" className="text-sm text-neutral-600">Loading this book’s finances…</p>
         : error ? null
         : !overview?.currencies.length ? <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-600">No invoices or expenses are recorded in this book yet. Start with an invoice or vendor bill.</div>

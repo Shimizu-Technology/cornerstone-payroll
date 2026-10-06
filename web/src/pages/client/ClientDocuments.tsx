@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -193,8 +194,8 @@ export function ClientDocuments() {
       <Header title="Documents" description="Securely upload and manage client documents." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
-        {error && <Banner tone="error" message={error} />}
-        {success && <Banner tone="success" message={success} />}
+        {error && <ActionFeedback tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="grid gap-4 md:grid-cols-3">
           <MiniStat
@@ -494,15 +495,6 @@ export function ClientDocuments() {
       />
     </div>
   );
-}
-
-function Banner({ tone, message }: { tone: 'error' | 'success'; message: string }) {
-  const classes =
-    tone === 'error'
-      ? 'border-danger-200 bg-danger-50 text-danger-700'
-      : 'border-emerald-200 bg-emerald-50 text-emerald-700';
-
-  return <div className={`rounded-lg border px-4 py-3 text-sm ${classes}`}>{message}</div>;
 }
 
 function MiniStat({

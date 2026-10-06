@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
@@ -74,9 +75,7 @@ export function ClientDashboard(): ReactElement {
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && (
-          <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">

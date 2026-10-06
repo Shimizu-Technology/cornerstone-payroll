@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
@@ -363,7 +364,7 @@ export function PayrollRegisterPanel() {
               className="shrink-0"
             />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -583,7 +584,7 @@ function TaxSummaryPanel() {
               />
             </div>
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -896,7 +897,7 @@ function W2GuPanel() {
             />
           </div>
           {error && (
-            <p className="mt-3 text-sm text-red-600">{error}</p>
+            <ActionFeedback tone="error" message={error} />
           )}
         </CardContent>
       </Card>
@@ -910,22 +911,18 @@ function W2GuPanel() {
       )}
 
       {preflightError && (
-        <Card>
-          <CardContent className="pt-6">
+        <ActionFeedback tone="error" message={preflightError}><CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Preflight Error</p>
             <p className="text-sm text-red-600 mt-1">{preflightError}</p>
-          </CardContent>
-        </Card>
+          </CardContent></ActionFeedback>
       )}
 
       {markReadyError && (
-        <Card>
-          <CardContent className="pt-6">
+        <ActionFeedback tone="error" message={markReadyError}><CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
             <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
             <p className="text-xs text-gray-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
-          </CardContent>
-        </Card>
+          </CardContent></ActionFeedback>
       )}
 
       {filing && (
@@ -1286,7 +1283,7 @@ function EmployeePayHistoryPanel() {
               disabled={loading || exportingPdf || exportingXlsx || exportingCsv || !selectedEmployeeId}
             />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -1709,7 +1706,7 @@ export function YtdSummaryPanel() {
           <p className="mt-4 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm leading-6 text-primary-950" role="note">
             <span className="font-semibold">Date basis: pay date.</span> A work period such as April 1–15 appears on the date it was paid, such as April 30. Choose Single payroll run to avoid translating those dates yourself.
           </p>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -2032,7 +2029,7 @@ function AnnualPayrollSummaryPanel() {
             <ReportDownloadMenu formats={exportFormats} disabled={loading || !report || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
         </CardHeader>
-        {error && <CardContent><p className="text-sm text-red-600">{error}</p></CardContent>}
+        {error && <ActionFeedback tone="error" message={error}><p className="text-sm text-red-600">{error}</p></ActionFeedback>}
       </Card>
 
       {loading && !report && (
@@ -2272,7 +2269,7 @@ function EmployerLiabilityPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -2555,13 +2552,11 @@ export function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
-          {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            <p>{error}</p>
+          {error && <ActionFeedback tone="error" message={error}><p>{error}</p>
             {bridgeRecoveryPath && <div className="mt-2">
               <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
               <Link to={bridgeRecoveryPath} className="mt-2 inline-block font-semibold text-primary-700 underline underline-offset-2">Review historical YTD bridge</Link>
-            </div>}
-          </div>}
+            </div>}</ActionFeedback>}
         </CardContent>
       </Card>
 
@@ -3244,7 +3239,7 @@ function Form941GuPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -3640,7 +3635,7 @@ function Form1099NecPanel() {
       </Card>
 
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>
+        <ActionFeedback tone="error" message={error} />
       )}
 
       {report && (

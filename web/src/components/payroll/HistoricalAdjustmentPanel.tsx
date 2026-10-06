@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AlertTriangle, FileClock, Plus, RefreshCw, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -151,7 +152,7 @@ export function HistoricalAdjustmentPanel({ companyId, paycheck }: HistoricalAdj
         {canMutate && <Button size="sm" onClick={() => { setShowForm((value) => !value); setPreview(null); }}><Plus className="mr-2 h-4 w-4" />Record adjustment</Button>}
       </div>
 
-      {error && <p className="rounded-xl border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">{error}</p>}
+      {error && <ActionFeedback tone="error" message={error} />}
       {loading ? <p className="text-sm text-neutral-500">Loading adjustment ledger…</p> : rows.length === 0 ? <p className="text-sm text-neutral-500">No adjustments have been recorded for this source paycheck.</p> : (
         <ol className="space-y-3">
           {rows.map((row) => <li key={row.id} className="rounded-xl border border-neutral-200 bg-white p-4">

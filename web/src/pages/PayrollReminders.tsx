@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -167,14 +168,10 @@ export default function PayrollReminders() {
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         {/* Status messages */}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
         {success && (
-          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">
-            {success}
-          </div>
+          <ActionFeedback tone="success" message={success} />
         )}
 
         {/* Enable/Disable card */}

@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -322,8 +323,8 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
-        {success && <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">{success}</div>}
+        {error && <ActionFeedback tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           <div className="flex gap-2">

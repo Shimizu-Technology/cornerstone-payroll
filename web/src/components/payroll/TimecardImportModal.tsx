@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { payPeriodsApi } from '@/services/api';
@@ -126,7 +127,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+            <ActionFeedback tone="error" message={error} />
           )}
 
           {step === 'upload' && (

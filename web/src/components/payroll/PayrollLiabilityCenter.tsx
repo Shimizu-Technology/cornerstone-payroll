@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, Landmark, Loader2, ReceiptText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -114,7 +115,7 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
         </div>
       </div>
 
-      {actionError && <div role="alert" className="m-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800 sm:mx-6">{actionError}</div>}
+      {actionError && <ActionFeedback tone="error" message={actionError} />}
 
       {groups.length === 0 ? (
         <div className="p-6 text-center"><CheckCircle2 className="mx-auto h-8 w-8 text-success-600" /><p className="mt-2 font-semibold text-neutral-900">No committed payroll liabilities yet</p><p className="mt-2 text-sm text-neutral-500">Committed payrolls will appear here automatically.</p></div>

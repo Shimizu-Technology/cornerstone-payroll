@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -343,9 +344,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
+            <ActionFeedback tone="error" message={error} />
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

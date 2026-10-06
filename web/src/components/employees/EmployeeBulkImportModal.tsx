@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -263,10 +264,8 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
+            <ActionFeedback tone="error" message={error}><AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700">{error}</p></ActionFeedback>
           )}
 
           {step === 'upload' && (

@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';
@@ -119,9 +120,7 @@ export function Dashboard(): ReactElement {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {error && (
-          <div className="mb-6 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback tone="error" message={error} />
         )}
 
         <Card className="mb-8 overflow-hidden border-primary-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4f8ff_52%,#fff8eb_100%)]">
