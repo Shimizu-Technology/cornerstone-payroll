@@ -17,6 +17,7 @@ module MigrationPromotion
       EmployeeStatusEvent,
       EmployeeTippedOccupation,
       EmployeeRetirementElection,
+      EmployeeRetirementYearInput,
       EmployeeYtdTotal
     ].freeze
 
