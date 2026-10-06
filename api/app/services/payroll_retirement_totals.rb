@@ -10,6 +10,29 @@ class PayrollRetirementTotals
   }.freeze
   BUILT_IN_SOURCES = %w[legacy_retirement legacy_roth_retirement].freeze
 
+  BUILT_IN_EMPLOYER_MATCHES = {
+    "401(k) Employer Match" => [ :employer_retirement_match, PayrollReportingGroups::GROUP_401K_PRE_TAX ],
+    "Roth 401(k) Employer Match" => [ :employer_roth_retirement_match, PayrollReportingGroups::GROUP_401K_AFTER_TAX ]
+  }.freeze
+
+  # Persisted legacy rows have no source identity. Require a matching positive
+  # core amount, reporting bucket and amount before excluding its mirror.
+  def self.built_in_employer_match_deduction?(item, deduction)
+    return false unless deduction.employer_contribution? && deduction.deduction_type&.sub_category == "retirement"
+    configuration = BUILT_IN_EMPLOYER_MATCHES[deduction.label.to_s]
+    return false unless configuration
+
+    field, expected_group = configuration
+    core_amount = item.public_send(field).to_d.round(2)
+    return false unless core_amount.positive? && deduction.amount.to_d.round(2) == core_amount
+
+    group = PayrollReportingGroups.infer_retirement_group(
+      explicit_group: deduction.reporting_group.presence || deduction.deduction_type&.reporting_group,
+      label: deduction.label, category: deduction.deduction_type&.sub_category, deduction_category: deduction.category
+    )
+    group == expected_group
+  end
+
   def self.for_item(item)
     totals = {
       retirement: item.retirement_payment.to_d,

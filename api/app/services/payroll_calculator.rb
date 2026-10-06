@@ -233,6 +233,7 @@ class PayrollCalculator
   # Also updates the aggregate fields (loan_payment, insurance_payment) for backward compat.
   def apply_employee_deductions
     payroll_item.payroll_item_deductions.clear
+    @built_in_employer_match_rows = {}
 
     aggregate_loan = 0.0
     aggregate_insurance = 0.0
@@ -268,7 +269,7 @@ class PayrollCalculator
 
     # Record employer retirement match as employer_contribution deductions
     if payroll_item.employer_retirement_match.to_f > 0
-      record_employer_contribution(
+      @built_in_employer_match_rows[:employer_retirement_match] = record_employer_contribution(
         "401(k) Employer Match",
         payroll_item.employer_retirement_match,
         sub_category: "retirement",
@@ -276,7 +277,7 @@ class PayrollCalculator
       )
     end
     if payroll_item.employer_roth_retirement_match.to_f > 0
-      record_employer_contribution(
+      @built_in_employer_match_rows[:employer_roth_retirement_match] = record_employer_contribution(
         "Roth 401(k) Employer Match",
         payroll_item.employer_roth_retirement_match,
         sub_category: "retirement",
@@ -461,10 +462,10 @@ class PayrollCalculator
   end
 
   def sync_final_employer_match_rows!
-    { "401(k) Employer Match" => payroll_item.employer_retirement_match,
-      "Roth 401(k) Employer Match" => payroll_item.employer_roth_retirement_match }.each do |label, amount|
-      rows = payroll_item.payroll_item_deductions.select { |row| row.employer_contribution? && row.label == label }
-      rows.each { |row| row.amount = amount }
+    # Labels are reusable payroll configuration, not source identities. Update
+    # only the exact rows created for this calculator's built-in contributions.
+    @built_in_employer_match_rows.to_h.each do |field, row|
+      row.amount = payroll_item.public_send(field)
     end
   end
 
