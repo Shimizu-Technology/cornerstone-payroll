@@ -54,4 +54,23 @@ RSpec.describe "Api::V1::Admin::AnnualRetirementLimits", type: :request do
     post path, params: { annual_retirement_limit: values }
     expect(response).to have_http_status(:forbidden)
   end
+
+  it "prevents global create and update from test workspaces even for a platform administrator" do
+    post path, params: { annual_retirement_limit: values }
+    limit = AnnualRetirementLimit.find_by!(tax_year: 2099)
+    source = create(:company, organization: company.organization)
+    company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "training_replay",
+      migration_source_company: source, migration_rehearsal_status: "ready")
+    get path
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("can_manage")).to be(false)
+    expect do
+      post path, params: { annual_retirement_limit: values.merge(tax_year: 2098) }
+    end.not_to change(AnnualRetirementLimit, :count)
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to include("unavailable in a test workspace")
+    patch "#{path}/#{limit.id}", params: { annual_retirement_limit: values.merge(elective_deferral_limit: 24_600) }
+    expect(response).to have_http_status(:forbidden)
+    expect(limit.reload.elective_deferral_limit).to eq(24_500)
+  end
 end
