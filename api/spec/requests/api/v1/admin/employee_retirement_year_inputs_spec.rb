@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::EmployeeRetirementYearInputs", type: :request do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
   let(:user) { create(:user, company: company, organization: company.organization, role: :manager) }
@@ -29,6 +31,24 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementYearInputs", type: :request do
     get path, params: { tax_year: 2026 }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("data", 0, "created_by_name")).to eq(user.name)
+  end
+
+  it "exposes retained candidates and saves an actor-bound normalized classification review" do
+    balance = apply_historical_ytd_balance(company: company, employee: employee, through_pay_date: Date.new(2026, 8, 31),
+      source_breakdown: { "pretax_deduction_breakdown" => { "401(k) After Tax" => "100.00" } })
+    get path, params: { tax_year: 2026 }
+    expect(response).to have_http_status(:ok)
+    source = response.parsed_body.fetch("historical_retirement_sources").sole
+    expect(source).to include("historical_balance_id" => balance.id, "tax_year" => 2026)
+    classification = source.fetch("classifications").sole.merge("amount" => "100.00", "reporting_group" => "401k_after_tax")
+    post path, params: { retirement_year_input: values.merge(historical_retirement_review: {
+      balance_digest: source.fetch("balance_digest"), classifications: [ classification ] }) }
+    expect(response).to have_http_status(:created)
+    input = EmployeeRetirementYearInput.last
+    expect(input.historical_retirement_review.fetch("classifications").sole.fetch("amount")).to eq("100.0")
+    expect(input.created_by).to eq(user)
+    expect(AuditLog.find_by!(action: "employee_retirement_year_inputs#create", record_id: input.id)
+      .metadata.dig("after_values", "historical_retirement_review")).to eq(input.historical_retirement_review)
   end
 
   it "rejects incomplete wage evidence with actionable validation" do

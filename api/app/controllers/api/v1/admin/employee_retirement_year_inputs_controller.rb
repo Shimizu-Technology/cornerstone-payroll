@@ -10,7 +10,13 @@ module Api
         def index
           inputs = @employee.employee_retirement_year_inputs.includes(:created_by).recent_first
           inputs = inputs.where(tax_year: params[:tax_year]) if params[:tax_year].present?
-          render json: { data: inputs.map { |input| serialize(input) } }
+          balances = @employee.historical_employee_ytd_balances.joins(:historical_ytd_bridge)
+            .where(historical_ytd_bridges: { status: "applied" }).distinct.pluck(:tax_year)
+          balances &= [ params[:tax_year].to_i ] if params[:tax_year].present?
+          sources = balances.filter_map do |year|
+            HistoricalRetirementProjection.new(employee: @employee, tax_year: year).source
+          end
+          render json: { data: inputs.map { |input| serialize(input) }, historical_retirement_sources: sources }
         end
 
         def create
@@ -38,7 +44,8 @@ module Api
         end
 
         def input_params
-          params.require(:retirement_year_input).permit(*EmployeeRetirementYearInput::SNAPSHOT_ATTRIBUTES)
+          params.require(:retirement_year_input).permit(*EmployeeRetirementYearInput::SNAPSHOT_ATTRIBUTES - [ :historical_retirement_review ],
+            historical_retirement_review: [ :balance_digest, classifications: [ :source_bucket, :source_label, :amount, :reporting_group ] ])
         end
 
         def serialize(input)

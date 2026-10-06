@@ -50,6 +50,25 @@ RSpec.describe W2GuAggregator, "fixed and flexible retirement" do
     expect(source.fetch(:balance).reload.retirement).to eq(500.to_d)
   end
 
+  it "projects reviewed legacy Roth into Box 12 while preserving original wages, taxes and paid snapshots" do
+    source = create_historical_filing_source(company: company, employee: employee, pay_date: Date.new(2025, 3, 20),
+      gross_pay: 2000, retirement: 0, roth_retirement: 0, federal_income_tax: 100, social_security_tax: 124,
+      medicare_tax: 29, employer_social_security_tax: 124, employer_medicare_tax: 29)
+    balance = source.fetch(:balance)
+    balance.update_columns(source_breakdown: { "pretax_deduction_breakdown" => { "401(k) After Tax" => "200.00" } })
+    projection = HistoricalRetirementProjection.new(employee: employee, tax_year: 2025)
+    review_source = projection.source
+    employee.employee_retirement_year_inputs.create!(company: company, tax_year: 2025,
+      source_reference: "Historical signed Roth election", reason: "Retained contribution classification",
+      historical_retirement_review: { balance_digest: review_source[:balance_digest],
+        classifications: review_source[:classifications].map { |row| row.merge(reporting_group: "401k_after_tax") } })
+    snapshots = [ item, balance, source.fetch(:paycheck) ].map { |row| row.reload.attributes }
+    row = described_class.new(company, 2025, include_historical: true).generate.fetch(:employees).sole
+    expect(row).to include(box1_wages_tips_other_comp: 11_055, box5_medicare_wages_tips: 12_000)
+    expect(row.fetch(:box12)).to include(include(code: "D", amount: 945), include(code: "AA", amount: 310))
+    expect([ item, balance, source.fetch(:paycheck) ].map { |record| record.reload.attributes }).to eq(snapshots)
+  end
+
   it "keeps decimal cents internally and preserves numeric amounts in the JSON report" do
     item.update!(gross_pay: "10000.30", retirement_payment: "20.10")
     aggregator = described_class.new(company, 2025, include_historical: false)

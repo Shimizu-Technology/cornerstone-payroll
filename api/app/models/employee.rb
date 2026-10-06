@@ -477,7 +477,9 @@ class Employee < ApplicationRecord
     return live_totals unless balance
     raise ArgumentError, "historical balance tax year does not match" if balance.tax_year != year
 
-    historical = balance.ytd_aggregate_totals
+    historical = balance.ytd_aggregate_totals.merge(
+      HistoricalRetirementProjection.new(employee: self, tax_year: year, balance: balance).totals.slice(:retirement, :roth_retirement)
+    )
     live_totals.each_with_object({}) do |(key, value), totals|
       totals[key] = value.to_f + historical.fetch(key, 0).to_f
     end

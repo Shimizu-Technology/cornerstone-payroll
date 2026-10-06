@@ -155,8 +155,14 @@ class W2GuAggregator
     ss_tax = sums&.ss_tax.to_d + historical_sum(historical, :social_security_tax)
     medicare_tax = sums&.medicare_tax.to_d + historical_sum(historical, :medicare_tax)
     retirement = aggregated_retirement.fetch(employee.id, {})
-    retirement_total = retirement[:retirement].to_d + historical_sum(historical, :retirement)
-    roth_retirement_total = retirement[:roth_retirement].to_d + historical_sum(historical, :roth_retirement)
+    current_balance = employee.send(:applied_historical_ytd_balance, year) if include_historical
+    reviewed_historical = historical.each_with_object({ retirement: 0.to_d, roth_retirement: 0.to_d }) do |balance, totals|
+      review = balance.id == current_balance&.id ? nil : {}
+      projected = HistoricalRetirementProjection.new(employee: employee, tax_year: year, balance: balance, review: review).totals(strict: true)
+      totals.each_key { |key| totals[key] += projected.fetch(key) }
+    end
+    retirement_total = retirement[:retirement].to_d + reviewed_historical[:retirement]
+    roth_retirement_total = retirement[:roth_retirement].to_d + reviewed_historical[:roth_retirement]
     non_taxable_total = sums&.non_taxable_total.to_d + historical_sum(historical, :non_taxable_pay)
     ss_wages_base = sums&.ss_wages_base.to_d + historical_sum(historical, :social_security_taxable_wages)
     ss_tips_base = sums&.ss_tips_base.to_d + historical_sum(historical, :social_security_taxable_tips)
@@ -171,7 +177,8 @@ class W2GuAggregator
       )
     end
     # Box 1: Wages minus pre-tax retirement (401k) contributions
-    box1 = (gross_pay - retirement_total).round(2)
+    # Classification evidence does not authorize a historical wage/FIT rewrite.
+    box1 = (gross_pay - retirement[:retirement].to_d - historical_sum(historical, :retirement)).round(2)
 
     # W-2 convention: allocate SS wage base to Box 3 (wages) first,
     # then Box 7 (tips) gets any remaining SS wage-base room.
