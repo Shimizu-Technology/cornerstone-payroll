@@ -166,6 +166,7 @@ Rails.application.routes.draw do
             get :export
           end
         end
+        resources :annual_retirement_limits, only: [ :index, :create, :update ]
         get "record_activities/:record_type/:record_id", to: "record_activities#index"
         resources :historical_imports, only: %i[index show] do
           collection do
@@ -239,6 +240,7 @@ Rails.application.routes.draw do
           end
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
+          resources :retirement_year_inputs, only: [ :index, :create ], controller: :employee_retirement_year_inputs
           resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
