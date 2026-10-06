@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class EmployeeRetirementElectionsController < BaseController
+        before_action :require_manager_or_admin!, only: :create
         before_action :set_employee
 
         def index
