@@ -949,7 +949,6 @@ RSpec.describe PayrollCalculator do
       expect { described_class.for(employee, payroll_item).calculate }.to raise_error(ArgumentError, /Mandatory taxes/)
       expect(payroll_item.withholding_tax).to eq(250)
       expect(payroll_item.custom_deductions_total).to eq(0)
-
     end
 
     it "removes itemized deduction rows that are capped to zero on recalculation" do

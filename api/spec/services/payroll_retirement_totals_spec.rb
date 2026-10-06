@@ -97,5 +97,4 @@ RSpec.describe PayrollRetirementTotals do
     expect(PayrollReportingGroups.infer_retirement_group(label: "Non-Roth 401(k) After Tax", deduction_category: "post_tax"))
       .to eq("401k_non_roth_after_tax")
   end
-
 end
