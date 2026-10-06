@@ -93,6 +93,9 @@ export function EmployeeWorkspace(): ReactElement {
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const retirementYearParam = searchParams.get('retirement_year');
+  const retirementYear = retirementYearParam && /^\d{4}$/.test(retirementYearParam) && Number(retirementYearParam) >= 2000 && Number(retirementYearParam) <= 2200
+    ? Number(retirementYearParam) : undefined;
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [payHistory, setPayHistory] = useState<PayHistoryReport | null>(null);
   const [payHistoryError, setPayHistoryError] = useState<string | null>(null);
@@ -105,6 +108,15 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (loading || !employee || activeTab !== 'pay-setup') return;
+    const targetId = location.hash.slice(1);
+    if (!['retirement-plan', 'retirement-year-evidence'].includes(targetId)) return;
+    const target = document.getElementById(targetId);
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [loading, employee, activeTab, location.hash]);
+
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
@@ -326,6 +338,7 @@ export function EmployeeWorkspace(): ReactElement {
             onReviewEffectiveDateChange={(code, value) => setReviewEffectiveDates((current) => ({ ...current, [code]: value }))}
             onResolveReview={(item) => void resolveConfigurationReview(item)}
             onEmployeeReload={load}
+            retirementYear={retirementYear}
           />
         )}
         {activeTab === 'pay-history' && (
@@ -417,9 +430,10 @@ interface PaySetupProps {
   onReviewEffectiveDateChange: (code: string, value: string) => void;
   onResolveReview: (item: ConfigurationReviewItem) => void;
   onEmployeeReload: () => Promise<void>;
+  retirementYear?: number;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -525,8 +539,9 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
       </Card>
       </div>
 
+      {employee.employment_type !== 'contractor' && <nav aria-label="Retirement setup steps" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm leading-6"><p className="font-semibold text-neutral-900">401(k) setup has two parts</p><p className="mt-1 text-neutral-600">Contribution settings control each paycheck. Yearly checks confirm the records used for annual limits.</p><div className="mt-3 flex flex-wrap gap-x-6 gap-y-2"><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-plan">1 · Contribution settings</a><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-year-evidence">2 · Yearly checks</a></div></nav>}
       {employee.employment_type !== 'contractor' && <EmployeeRetirementElectionPanel employee={employee} onSaved={onEmployeeReload} />}
-      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel employee={employee} />}
+      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel key={`${employee.id}:${retirementYear || 'current'}`} employee={employee} initialYear={retirementYear} />}
 
       {employee.employment_type !== 'contractor' && (
         <Card>
