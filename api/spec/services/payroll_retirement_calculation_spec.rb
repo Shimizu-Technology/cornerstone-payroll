@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe PayrollRetirementCalculation do
+  include HistoricalYtdBridgeFixtureHelper
+
   let(:company) { create(:company) }
   let(:employee) do
     create(:employee, company: company, department: create(:department, company: company),
@@ -278,6 +280,33 @@ RSpec.describe PayrollRetirementCalculation do
     calculate(ytd: ytd_before.merge(gross_pay: 360_000))
     expect(payroll_item.retirement_payment).to eq(500)
     expect(payroll_item.employer_retirement_match).to eq(0)
+  end
+
+  it "counts historical nonelective additions without subtracting them from a matching true-up" do
+    apply_historical_ytd_balance(company: company, employee: employee,
+      through_pay_date: Date.new(2026, 8, 31), gross_pay: 40_000,
+      source_breakdown: { "employer_contribution_breakdown" => { "401(k) Contribution" => "1000.0" } })
+    create_election(traditional_amount: 500, roth_amount: 0, employer_match_mode: "compensation_percentage",
+      employer_match_rate: 0.03, true_up_policy: "year_to_date")
+
+    calculate
+
+    expect(payroll_item.employer_retirement_match).to eq(1_260)
+    expect(payroll_item.retirement_rule_snapshot.dig("employer_match", "prior_ytd")).to eq("0.0")
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "prior_additions")).to eq("1000.0")
+  end
+
+  it "does not use historical nonelective additions to consume an annual match cap" do
+    apply_historical_ytd_balance(company: company, employee: employee,
+      through_pay_date: Date.new(2026, 8, 31), gross_pay: 40_000,
+      source_breakdown: { "employer_contribution_breakdown" => { "401(k) Contribution" => "1000.0" } })
+    create_election(traditional_amount: 500, roth_amount: 0, employer_match_mode: "compensation_percentage",
+      employer_match_rate: 0.03, employer_match_annual_cap: 1_000)
+
+    calculate
+
+    expect(payroll_item.employer_retirement_match).to eq(60)
+    expect(payroll_item.retirement_rule_snapshot.dig("annual_additions", "prior_additions")).to eq("1000.0")
   end
 
   it "raises instead of silently cutting a promised match above the annual additions limit" do
