@@ -36,7 +36,11 @@ class PayrollFieldInputApplier
       else
         amount = decimal_amount!(input[:amount], field.name)
         if entry
-          entry.assign_attributes(attributes.merge(amount: amount, source: "manual", metadata: (entry.metadata || {}).except("uncapped_amount", "loan_requested_amount")))
+          metadata = entry.metadata.to_h
+          unless !input.fetch(:replace_request) && PayrollFieldRequestIntent.unchanged_echo?(entry, amount)
+            metadata = metadata.except("uncapped_amount", "loan_requested_amount")
+          end
+          entry.assign_attributes(attributes.merge(amount: amount, source: "manual", metadata: metadata))
         else
           payroll_item.payroll_item_field_entries.build(attributes.merge(amount: amount, source: "manual"))
         end
@@ -72,7 +76,8 @@ class PayrollFieldInputApplier
       mode = (data["mode"] || data[:mode]).to_s
       raise ArgumentError, "Payroll field input mode must be default or override" unless mode.in?(MODES)
 
-      result[parsed_field_id!(field_id)] = { mode: mode, amount: data["amount"] || data[:amount] }
+      result[parsed_field_id!(field_id)] = { mode: mode, amount: data["amount"] || data[:amount],
+        replace_request: PayrollFieldRequestIntent.replace_request?(data) }
     end
   end
 

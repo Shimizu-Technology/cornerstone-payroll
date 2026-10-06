@@ -45,13 +45,38 @@ class PayrollFieldInputBuilder
           assignment,
           entries[[ assignment.employee_id, assignment.payroll_field_definition_id ]]
         )
-      end
+      end,
+      retained_manual_entries: retained_manual_entries
     }
   end
 
   private
 
   attr_reader :pay_period, :company_id
+
+  def retained_manual_entries
+    # Coverage ignores worksheet visibility: an active hidden assignment is
+    # still effective setup. Inactive definitions cannot supply active setup.
+    assignment_keys = EmployeePayrollField.active.effective_on(pay_period.pay_date)
+      .joins(:employee, :payroll_field_definition)
+      .where(employees: { company_id: company_id }, payroll_field_definitions: { company_id: company_id, active: true })
+      .pluck(:employee_id, :payroll_field_definition_id)
+      .to_set
+    PayrollItemFieldEntry.active.joins(:payroll_item)
+      .where(payroll_items: { pay_period_id: pay_period.id, company_id: company_id })
+      .where(source: %w[manual import])
+      .includes(:payroll_item, :payroll_field_definition)
+      .order(:id).filter_map do |entry|
+        next if assignment_keys.include?([ entry.payroll_item.employee_id, entry.payroll_field_definition_id ])
+        group = PayrollReportingGroups.infer_retirement_group(explicit_group: entry.reporting_group,
+          label: entry.label, category: entry.category, tax_treatment: entry.tax_treatment)
+        next unless group || entry.category == "retirement"
+
+        { employee_id: entry.payroll_item.employee_id, field_id: entry.payroll_field_definition_id,
+          label: entry.label, requested_amount: decimal(PayrollFieldRequestIntent.requested_amount(entry)),
+          applied_amount: decimal(entry.amount), source: entry.source }
+      end
+  end
 
   def field_payload(field)
     {
@@ -94,6 +119,7 @@ class PayrollFieldInputBuilder
       default_percentage: decimal(field.default_percentage),
       suggested_amount: decimal(suggested_amount),
       current_amount: decimal(entry&.amount),
+      requested_amount: decimal(entry&.active? ? PayrollFieldRequestIntent.requested_amount(entry) : nil),
       current_source: entry&.source,
       overridden: entry&.source.in?(%w[manual import]),
       editable: true,
