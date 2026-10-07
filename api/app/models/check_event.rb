@@ -75,6 +75,11 @@ class CheckEvent < ApplicationRecord
   def aire_entry_lifecycle_status
     return "payment_prepared" if %w[prepared printed].include?(event_type)
     return "payment_issued" if event_type == "delivered"
+    if event_type == "voided" && details["payment_delivery_change"] == true && details["original_check_cancelled"] == true
+      # Cancel only this physical payment. The payroll item and the earlier
+      # committed-payroll acknowledgement remain valid and payable.
+      return "payment_voided"
+    end
     return "payment_voided" if event_type == "voided" && payroll_item.voided?
     return "payment_issued" if event_type == "voided" && payroll_item.check_status == "delivered"
     "payment_prepared" if event_type == "voided" && %w[prepared printed].include?(payroll_item.check_status)
