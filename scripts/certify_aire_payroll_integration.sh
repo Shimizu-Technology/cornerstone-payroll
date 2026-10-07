@@ -494,6 +494,8 @@ if [[ "${RUN_CONNECTED_BROWSER:-false}" == "true" ]]; then
     "$(git -C "$ROOT_DIR" rev-parse HEAD)" "$(git -C "$AIRE_REPO_PATH" rev-parse HEAD)"
 fi
 
+ruby "$ROOT_DIR/scripts/local_certification/payment_cancellation_http.rb"
+
 echo "LOCAL AIRE PAYROLL CERTIFICATION PASSED"
 echo "Cornerstone API: $CORNERSTONE_BASE_URL"
 echo "AIRE API: $AIRE_BASE_URL"
