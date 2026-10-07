@@ -176,8 +176,17 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            if deposit_only && selected_items.any? { |item| item.effective_payment_delivery_method != "direct_deposit" || !item.net_pay.to_d.positive? }
-              return render json: { error: "The direct-deposit stub selection may include only direct-deposit employees with a positive payment. Use all earnings statements for statement-only records." }, status: :unprocessable_entity
+            if deposit_only
+              invalid_deposit_items = selected_items.reject do |item|
+                item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?
+              end
+              if invalid_deposit_items.any?
+                names = invalid_deposit_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
+                return render json: {
+                  error: "Select only direct-deposit employees with a positive payment",
+                  details: "Remove #{names} from this selection and try again. To include paper checks or statement-only records, use all earnings statements."
+                }, status: :unprocessable_entity
+              end
             end
 
             items = selected_items

@@ -321,6 +321,19 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response.headers["X-Pay-Stubs-Generated"]).to eq("1")
     end
 
+    it "names each incompatible selection and explains how to print their statements" do
+      deposit_item.update!(net_pay: 0)
+
+      post "/api/v1/admin/pay_stubs/direct_deposit_stubs_pdf", params: {
+        pay_period_id: pay_period.id, payroll_item_ids: [ deposit_item.id, payroll_item.id ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Select only direct-deposit employees with a positive payment")
+      expect(response.parsed_body.fetch("details")).to include("Dina Deposit", "Pat Stub", "Remove", "use all earnings statements")
+      expect(response.parsed_body.fetch("details")).not_to include("Alex Ledger")
+    end
+
     it "rejects a paper-check item in an explicit stub selection" do
       post "/api/v1/admin/pay_stubs/direct_deposit_stubs_pdf", params: {
         pay_period_id: pay_period.id, payroll_item_ids: [ deposit_item.id, payroll_item.id ]

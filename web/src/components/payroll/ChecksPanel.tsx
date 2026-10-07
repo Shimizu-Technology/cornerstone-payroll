@@ -396,9 +396,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         ].some((value) => value?.toLowerCase().includes(normalizedSearch));
       })
     : checks;
-  const normalizedStatementSearch = (searchTerm || statementSearch).trim().toLowerCase();
+  const statementSearchTerms = [normalizedSearch, statementSearch.trim().toLowerCase()].filter(Boolean);
   const filteredStatements = statementItems.filter((item) =>
-    !normalizedStatementSearch || item.employee_name.toLowerCase().includes(normalizedStatementSearch));
+    statementSearchTerms.every((term) => item.employee_name.toLowerCase().includes(term)));
   const stubEligibleIds = filteredStatements.map((item) => item.id);
   const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
   const hasPrintableStub = statementItems.length > 0;
@@ -502,11 +502,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
       </div>}
 
-      <section aria-label="Earnings statements" className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <section aria-label="Earnings statements" className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h3 className="font-semibold text-neutral-950">Earnings statements</h3>
-            <p className="mt-1 max-w-2xl text-sm text-neutral-600">Includes paper checks, direct deposits, and earned pay reduced to $0 by deductions. Statements print on plain paper and do not issue a payment.</p>
+            <p className="mt-2 max-w-2xl text-sm text-neutral-600">Includes paper checks, direct deposits, and earned pay reduced to $0 by deductions. Statements print on plain paper and do not issue a payment.</p>
             <p className="mt-2 text-sm text-neutral-600">{statementItems.length} statement{statementItems.length === 1 ? '' : 's'} · {directDepositCount} direct deposit{directDepositCount === 1 ? '' : 's'} · {statementOnlyCount} statement only</p>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
@@ -519,17 +519,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           </div>
         </div>
         {directDepositCount > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print direct-deposit statements</Button>
             <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download direct-deposit statements</Button>
           </div>
         )}
         {statementItems.length > 0 ? (
           <>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <Input aria-label="Search earnings statements" placeholder="Search employees…" value={statementSearch} onChange={(event) => setStatementSearch(event.target.value)} className="sm:max-w-xs" />
-              <div className="flex flex-wrap items-center gap-3 text-sm">
-                <label className="flex min-h-11 items-center gap-2">
+              <div className="flex flex-wrap items-center gap-4 text-sm">
+                <label className="flex min-h-12 items-center gap-2">
                   <input type="checkbox" className="h-4 w-4" checked={allVisibleStubsSelected} onChange={toggleAllVisibleStubs} disabled={stubEligibleIds.length === 0} aria-label="Select all visible earnings statements" />
                   Select visible
                 </label>
@@ -545,19 +545,19 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                   <h4 className="text-sm font-semibold text-neutral-800">{statementOnly ? 'Statement only · no payment issued' : 'Paychecks and direct deposits'} ({groupItems.length})</h4>
                   <ul className="mt-2 space-y-2">
                     {groupItems.map((item) => (
-                      <li key={item.id} className="rounded-xl border border-neutral-200 p-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4" aria-label={`Earnings statement for ${item.employee_name}`}>
+                      <li key={item.id} className="rounded-xl border border-neutral-200 p-4 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4" aria-label={`Earnings statement for ${item.employee_name}`}>
                         <div>
-                          <label className="flex min-h-11 items-center gap-3">
+                          <label className="flex min-h-12 items-center gap-4">
                             <input type="checkbox" className="h-4 w-4 shrink-0" checked={selectedStubIdSet.has(item.id)} onChange={() => toggleStubSelection(item)} aria-label={`Select earnings statement for ${item.employee_name}`} />
                             <span className="min-w-0 break-words font-semibold text-neutral-950">{item.employee_name}</span>
                           </label>
-                          <p className="ml-7 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
+                          <p className="ml-8 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
-                        <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end">
+                        <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end">
                           {!item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
                           <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
                           <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Print</Button>
-                          <Button size="sm" variant="outline" onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
+                          <Button size="sm" variant="outline" className={item.statement_only || !onChangePaymentMethod ? 'col-span-2 sm:col-span-1' : undefined} onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
                         </div>
                       </li>
                     ))}
