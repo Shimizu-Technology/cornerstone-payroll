@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
@@ -135,7 +136,7 @@ function Spinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
 // ──── Upload Section ──────────────────────────────────
 function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUploaded: () => void }) {
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState('');
   const [dragOver, setDragOver] = useState(false);
 
   const handleFiles = async (files: FileList | null) => {
@@ -188,7 +189,7 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
           </Button>
         </>
       )}
-      {error && <ActionFeedback tone="error" message={error} />}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
     </div>
   );
 }
@@ -259,7 +260,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
   const [reviewing, setReviewing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState('');
   const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
   const wageRateChoices = activeHourlyWageRates(selectedEmployee);
   const needsWageRateChoice = employeeNeedsWageRateChoice(selectedEmployee);
@@ -418,7 +419,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
       {/* Inline action row — for complete/reviewed cards with a pay period */}
       {(isComplete || isReviewed) && payPeriodId && (
         <div className="px-3 pb-3 pt-1 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
-          {error && <ActionFeedback tone="error" message={error} />}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
           <div className="flex items-center gap-3 flex-wrap">
             {/* Employee assignment dropdown */}
@@ -861,7 +862,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [applying, setApplying] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
   const [selectedWageRateId, setSelectedWageRateId] = useState<number | ''>('');
-  const [error, setError] = useState('');
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState('');
   const [imageCollapsed, setImageCollapsed] = useState(false);
   const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
   const wageRateChoices = activeHourlyWageRates(selectedEmployee);
@@ -1066,7 +1067,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         <span className="text-xs text-gray-400 ml-auto">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</span>
       </div>
 
-      {error && <ActionFeedback tone="error" message={error} />}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
       {/* Image + Table side by side */}
       <div className="flex gap-4">

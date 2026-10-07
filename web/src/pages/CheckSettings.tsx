@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: Check Settings Page
@@ -112,7 +113,7 @@ export function CheckSettingsPage() {
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // Editable form state
@@ -287,7 +288,7 @@ export function CheckSettingsPage() {
       }
       loadProfiles();
     })();
-  }, [applySettingsToForm, loadProfiles]);
+  }, [applySettingsToForm, loadProfiles, setError]);
 
   useEffect(() => {
     if (!loading) {
@@ -327,13 +328,13 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(JSON.stringify(nextConfig, null, 2));
     setError(null);
     setSuccess(null);
-  }, [parsedLayoutOverrides]);
+  }, [parsedLayoutOverrides, setError]);
 
   const handleVisualLayoutChange = useCallback((config: Record<string, unknown>) => {
     setLayoutOverridesJson(JSON.stringify(config, null, 2));
     setError(null);
     setSuccess(null);
-  }, []);
+  }, [setError]);
 
   const handleVisualOffsetChange = useCallback((axis: 'x' | 'y', value: string) => {
     if (axis === 'x') {
@@ -735,7 +736,7 @@ export function CheckSettingsPage() {
 
         {/* Feedback */}
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {success && (
           <ActionFeedback tone="success" message={success} />

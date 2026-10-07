@@ -399,3 +399,27 @@ describe('ApiClient company identity', (): void => {
     });
   });
 });
+
+describe('API failure feedback across request types', () => {
+  afterEach(() => vi.restoreAllMocks());
+  it.each(['json', 'upload', 'download', 'post-download', 'parameter-download'])('retains field guidance for %s failures', async (kind) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ error: 'Validation failed', details: { effective_on: ['is required'] } }), { status: 422 }));
+    const request = kind === 'json' ? apiClient.post('/test', {})
+      : kind === 'upload' ? apiClient.postForm('/test', new FormData())
+      : kind === 'download' ? apiClient.getBlob('/test')
+      : kind === 'post-download' ? apiClient.postBlob('/test', {})
+      : apiClient.getBlobWithParams('/test');
+    await expect(request).rejects.toMatchObject({ status: 422, message: 'Validation failed; First pay date: is required', details: { effective_on: ['is required'] } });
+  });
+  it('handles a non-JSON server failure without exposing proxy HTML', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>Private proxy details</html>', { status: 503 }));
+    await expect(apiClient.get('/test')).rejects.toMatchObject({ status: 503, message: expect.stringContaining('Check whether your changes were saved') });
+  });
+  it('reports uncertain network outcomes and leaves intentional cancellation untouched', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(apiClient.post('/test', {})).rejects.toMatchObject({ status: 0, message: expect.stringContaining('whether your changes were saved') });
+    const aborted = new DOMException('Cancelled', 'AbortError');
+    vi.mocked(fetch).mockRejectedValueOnce(aborted);
+    await expect(apiClient.get('/test')).rejects.toBe(aborted);
+  });
+});

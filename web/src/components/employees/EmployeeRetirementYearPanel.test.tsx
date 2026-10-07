@@ -12,6 +12,7 @@ vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error { fieldErrors = {}; },
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => mocks.canManage }) }));
+afterEach(cleanup);
 const year = new Date().getFullYear();
 const employee = { id: 5, date_of_birth: `${year - 61}-12-31`, retirement_elections: [{ effective_on: `${year}-01-01`, catch_up_enabled: true }] } as unknown as Employee;
 const limit = { tax_year: year, elective_deferral_limit: 24500, catch_up_limit: 8000, enhanced_catch_up_limit: 11250, roth_catch_up_wage_threshold: 150000 };
@@ -136,7 +137,7 @@ describe('annual retirement evidence', () => {
     mocks.inputs.mockResolvedValue({ data: [{ id: 1, tax_year: year, prior_year_wage_status: 'unknown', historical_retirement_review: reviewed, source_reference: 'Prior review', reason: 'Confirmed' }], historical_retirement_sources: [historicalSource] });
     mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 12 } }));
     render(<EmployeeRetirementYearPanel employee={employee} />);
-    await user.click(await screen.findByRole('button', { name: 'Record updated yearly records' }));
+    await user.click(await screen.findByRole('button', { name: 'Record a new review' }));
     expect(screen.queryByLabelText(/I confirmed each retained historical contribution type/)).toBeNull();
     await user.type(screen.getByLabelText('Review note'), 'Wage review only');
     await user.click(screen.getByRole('button', { name: 'Save verified records' }));
@@ -189,4 +190,36 @@ describe('annual retirement evidence', () => {
     expect((screen.getByLabelText('Retirement evidence payroll year') as HTMLInputElement).value).toBe(String(year));
   });
 
+});
+
+it('does not apply the 2026 Roth catch-up requirement to a 2025 review', async () => {
+  mocks.list.mockResolvedValue({ data: [{ ...limit, tax_year: 2025, elective_deferral_limit: 23500, catch_up_limit: 7500 }] });
+  mocks.inputs.mockResolvedValue({ data: [{ tax_year: 2025, prior_year_wage_status: 'verified', prior_year_fica_wages: 200000, prior_year_wage_source: 'Synthetic prior-year wage record', external_traditional_deferrals: 0, external_roth_deferrals: 0, eligible_compensation_before_system: 0, employer_additions_before_system: 0, non_roth_after_tax_before_system: 0 }] });
+  render(<EmployeeRetirementYearPanel initialYear={2025} employee={{ ...employee, date_of_birth: '1960-01-01', retirement_elections: [{ effective_on: '2025-01-01', catch_up_enabled: true, roth_available: false }] } as unknown as Employee} />);
+  expect(await screen.findByText('$31,000.00')).toBeTruthy();
+  expect(screen.queryByText(/Roth catch-up is required for this employer/)).toBeNull();
+  expect(screen.queryByText(/Catch-up is unavailable until/)).toBeNull();
+});
+
+it('keeps cleared verified wages unknown and requires an explicit amount before saving', async () => {
+  vi.clearAllMocks(); mocks.canManage = true;
+  mocks.list.mockResolvedValue({ data: [limit] });
+  mocks.inputs.mockResolvedValue({ data: [{ id: 17, tax_year: year, prior_year_wage_status: 'verified', prior_year_fica_wages: 175000, prior_year_wage_source: 'Synthetic wage record', source_reference: 'Synthetic annual review', reason: 'Earlier review', external_traditional_deferrals: 0, external_roth_deferrals: 0, eligible_compensation_before_system: 0, employer_additions_before_system: 0, non_roth_after_tax_before_system: 0, historical_retirement_review: {} }] });
+  mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 18 } }));
+  const user = userEvent.setup();
+  render(<EmployeeRetirementYearPanel employee={employee} />);
+  await user.click(await screen.findByRole('button', { name: 'Record a new review' }));
+  await user.type(screen.getByLabelText('Review note'), 'Rechecked employer wages');
+  const amount = screen.getByLabelText(/^Verified prior-year employer Social Security wages/);
+  await user.clear(amount);
+  await user.tab();
+  expect((amount as HTMLInputElement).value).toBe('');
+  await user.click(screen.getByRole('button', { name: 'Save verified records' }));
+  expect(mocks.create).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toContain('A blank amount is unknown');
+  expect(document.activeElement).toBe(amount);
+  await user.type(amount, '0');
+  await user.click(screen.getByRole('button', { name: 'Save verified records' }));
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({ prior_year_wage_status: 'verified', prior_year_fica_wages: 0 })));
+  cleanup();
 });

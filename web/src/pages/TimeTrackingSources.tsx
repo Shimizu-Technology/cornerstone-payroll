@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
@@ -85,7 +86,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
   const [accountLink, setAccountLink] = useState<AireAccountLink | null>(null);
   const [accountLinkLoading, setAccountLinkLoading] = useState(false);
   const [accountLinkBusy, setAccountLinkBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const successTimerRef = useRef<number | null>(null);
 
@@ -109,7 +110,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     } finally {
       setLoading(false);
     }
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setError]);
 
   useEffect(() => {
     loadSources();
@@ -139,7 +140,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       });
 
     return () => { active = false; };
-  }, [form.id, form.source_type]);
+  }, [form.id, form.source_type, setError]);
 
   useEffect(() => {
     if (loading) return;
@@ -152,7 +153,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     if (result === 'cancelled') setError('AIRE account connection was cancelled. Nothing was changed.');
     url.searchParams.delete('aire_link');
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [loading]);
+  }, [loading, setError]);
 
   useEffect(() => {
     return () => {
@@ -323,7 +324,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">

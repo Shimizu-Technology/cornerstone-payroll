@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarRange, CheckCircle2, Clock3, History, Scale, Settings2 } from 'lucide-react';
@@ -75,14 +76,14 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
   const [timeRecordsOpen, setTimeRecordsOpen] = useState(false);
   const [form, setForm] = useState<EmployeeWorkProfileInput>(() => initialInput(employee));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const current = employee.current_work_profile;
 
   useEffect(() => {
     if (!open) return;
     setForm(initialInput(employee));
     setError(null);
-  }, [employee, open]);
+  }, [employee, open, setError]);
 
   const scheduledTotal = useMemo(
     () => Object.values(form.daily_schedule).reduce((sum, hours) => sum + Number(hours || 0), 0),
@@ -181,7 +182,7 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
           </div>
 
           <div className="space-y-5 px-6 py-6">
-            {error && <ActionFeedback tone="error" message={error} />}
+            {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-neutral-800">Effective date <span className="text-danger-600">*</span></label>

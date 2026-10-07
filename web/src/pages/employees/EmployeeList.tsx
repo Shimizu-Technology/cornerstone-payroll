@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
@@ -77,7 +78,7 @@ export function EmployeeList() {
   const [employeeCompanyId, setEmployeeCompanyId] = useState<number | null>(null);
   const [departmentCompanyId, setDepartmentCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
@@ -99,7 +100,7 @@ export function EmployeeList() {
     setShowBulkImport(false);
     setIsLoading(true);
     setError(null);
-  }, [companyId]);
+  }, [companyId, setError]);
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') ?? 'active';
@@ -163,7 +164,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
+  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -188,7 +189,7 @@ export function EmployeeList() {
       if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setError(`Could not load the department filter. Refresh to try again. ${err instanceof Error ? err.message : ''}`);
     }
-  }, [companyId, isClient]);
+  }, [companyId, isClient, setError]);
 
   useEffect(() => {
     fetchEmployees();
@@ -375,7 +376,7 @@ export function EmployeeList() {
 
         {/* Error State */}
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {switchNotice && (
           <ActionFeedback tone="success" message={switchNotice}><span>{switchNotice}</span>

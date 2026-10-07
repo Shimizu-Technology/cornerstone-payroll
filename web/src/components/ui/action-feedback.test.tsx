@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { ActionFeedback, FeedbackProvider, useFeedback } from './action-feedback';
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { Dialog, DialogContent, DialogTitle } from './dialog';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -13,6 +14,24 @@ function NotifyButton({ tone = 'error' }: { tone?: 'error' | 'success' }) {
 }
 
 describe('shared action feedback', () => {
+  it('reannounces an identical failed attempt without clearing the source validation state', () => {
+    function RepeatedValidation() {
+      const [error, setError, attempt] = useFeedbackState<string | null>(null);
+      return <><p data-testid="validation-state">{error ? 'blocked' : 'clear'}</p><button onClick={() => setError('Choose a pay date')}>Save</button><button onClick={() => setError(null)}>Resolve</button>{error && <ActionFeedback tone="error" message={error} retryKey={attempt}><p>{error}</p><a href="/settings">Review settings</a></ActionFeedback>}</>;
+    }
+    render(<FeedbackProvider><RepeatedValidation /></FeedbackProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification: Choose a pay date' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByTestId('validation-state').textContent).toBe('blocked');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Review settings' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByTestId('validation-state').textContent).toBe('clear');
+  });
+
   it('deduplicates simple sources without republishing dismissed errors on rerender', () => {
     const view = () => <FeedbackProvider><ActionFeedback tone="error" message="Could not save" /><ActionFeedback tone="error" message="Could not save" /></FeedbackProvider>;
     const { rerender } = render(view());

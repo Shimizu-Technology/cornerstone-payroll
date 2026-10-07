@@ -1,3 +1,6 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
@@ -351,7 +354,10 @@ export function PayPeriodDetail({
   const [bonusEdits, setBonusEdits] = useState<Record<string, number>>({});
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [calculationFailures, setCalculationFailures] = useState<PayrollCalculationFailure[]>([]);
+  const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
+  const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
@@ -504,13 +510,16 @@ export function PayPeriodDetail({
         setLoading(false);
       }
     }
-  }, [loadEligibleEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
+  }, [loadEligibleEmployees, setError, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect((): (() => void) => {
     // Reset cross-pay-period observer state so divergence indicators don't
     // momentarily render against the previous period's checks while the
     // new panel loads.
     setPayPeriod(null);
+    setCalculationFailures([]);
+    setCalculationNotice(null);
+    setWorksheetRefreshWarning(null);
     setTimeTrackingImportOpen(false);
     setAireRecordsOpen(false);
     setPayrollItems([]);
@@ -534,7 +543,7 @@ export function PayPeriodDetail({
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [loadPayPeriod, payRunId]);
+  }, [loadPayPeriod, payRunId, setError]);
 
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) return;
@@ -715,6 +724,9 @@ export function PayPeriodDetail({
     try {
       setProcessing(true);
       setError(null);
+      setCalculationFailures([]);
+      setCalculationNotice(null);
+      setWorksheetRefreshWarning(null);
 
       const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
         const rateEntryInvalid = (entry.wage_rates || []).some((rate) => (
@@ -854,12 +866,14 @@ export function PayPeriodDetail({
         })
         .catch((refreshError) => {
           console.warn('Payroll ran successfully, but the payroll field worksheet could not be refreshed.', refreshError);
+          setWorksheetRefreshWarning('The calculation returned, but payroll fields could not refresh. Reload the page before reviewing or editing the worksheet.');
         });
 
+      setCalculationFailures(response.results.errors);
       if (response.results.errors.length > 0) {
-        setError(
-          `Calculated ${response.results.success.length} employees. ${response.results.errors.length} errors: ${response.results.errors.map((e) => e.error).join(', ')}`
-        );
+        setError(`Calculated ${response.results.success.length} employees. ${response.results.errors.length} ${response.results.errors.length === 1 ? 'employee needs' : 'employees need'} attention before approval.`);
+      } else {
+        setCalculationNotice(`Payroll calculated for ${response.results.success.length} ${response.results.success.length === 1 ? 'employee' : 'employees'}${response.results.skipped.length ? `; ${response.results.skipped.length} skipped` : ''}. Review the results before approval.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
@@ -1440,7 +1454,7 @@ export function PayPeriodDetail({
       tone: 'default' as const,
     },
     {
-      label: 'Calculated',
+      label: isDraft ? 'Last calculation attempt' : 'Calculated',
       timestamp: lifecycle.calculated?.timestamp,
       actor: lifecycleActor(lifecycle.calculated?.actor_name),
       tone: isDraft ? 'default' as const : 'warning' as const,
@@ -1531,8 +1545,10 @@ export function PayPeriodDetail({
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={payrollItems.length === 0
+            disabled={processing || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={calculationFailures.length > 0
+              ? 'Resolve the employee calculation errors and calculate again before approval'
+              : payrollItems.length === 0
               ? 'Enter pay for at least one employee before approval'
               : hasPendingCalculationChanges
               ? 'Recalculate the staged payroll changes before approval'
@@ -1685,12 +1701,23 @@ export function PayPeriodDetail({
         </section>
       )}
 
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}>
+        <p>{error}</p>
+        {calculationFailures.length > 0 && <Button variant="outline" className="mt-3" onClick={() => {
+          const section = document.getElementById('payroll-calculation-issues');
+          section?.scrollIntoView({ block: 'start' });
+          section?.focus({ preventScroll: true });
+        }}>Review affected employees</Button>}
+      </ActionFeedback>}
+      {calculationNotice && <ActionFeedback tone="success" message={calculationNotice} />}
+      {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
+      {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
+        ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
+        ...employees.map((employee): [number, string] => [employee.id, `${employee.first_name} ${employee.last_name}`]),
+      ])} />}
+
       <div className="space-y-6">
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-            {error}
-          </div>
-        )}
+
 
         {hasPendingCalculationChanges && (
           <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">

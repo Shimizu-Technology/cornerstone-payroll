@@ -1,3 +1,5 @@
+import { apiErrorMessage } from '@/lib/api-error-message';
+
 // ========================================
 // API Client for Cornerstone Payroll
 // ========================================
@@ -25,6 +27,18 @@ function parseContentDispositionFilename(header: string | null): string | undefi
   const standard = header.match(/filename\s*=\s*"?([^";\n]+)"?/i);
   if (standard) return standard[1].trim();
   return undefined;
+}
+
+async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throw new ApiError(
+      'The connection was interrupted. Check your internet connection and whether your changes were saved before trying again.',
+      0,
+    );
+  }
 }
 
 class ApiClient {
@@ -127,7 +141,7 @@ class ApiClient {
       (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithFeedback(url, {
       cache: 'no-store',
       ...fetchOptions,
       headers,
@@ -136,7 +150,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -179,7 +193,7 @@ class ApiClient {
       (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
-    const response = await fetch(this.buildUrl(endpoint), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint), {
       method: 'POST',
       headers,
       body: formData,
@@ -188,7 +202,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -206,7 +220,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint, params), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint, params), {
       method: 'GET',
       headers,
     });
@@ -214,7 +228,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -232,7 +246,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint), {
       method: 'POST',
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -241,7 +255,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -271,7 +285,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint, params), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint, params), {
       method: 'GET',
       headers,
     });
@@ -279,7 +293,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -1129,7 +1143,7 @@ export interface RunPayrollResponse {
   results: {
     success: { employee_id: number; name: string }[];
     skipped: { employee_id: number; name: string; reason: string }[];
-    errors: { employee_id: number; error: string }[];
+    errors: { employee_id: number; name?: string; error: string }[];
   };
 }
 
@@ -1448,7 +1462,7 @@ export interface TimecardImportMapping {
 export interface TimecardImportApplyResponse {
   applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
   skipped: unknown[];
-  errors: { employee_id: number; error: string }[];
+  errors: { employee_id: number; name?: string; error: string }[];
 }
 
 // ──── Full Timecard OCR types ────────────────────────────────

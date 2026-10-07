@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
@@ -145,9 +146,9 @@ export function ReplaceCheckModal({
   const [form, setForm] = useState<FormState>(() => initialForm(payrollItem));
   const [preview, setPreview] = useState<ReplaceCheckPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewError, setPreviewError, previewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError, submitErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // Reset on open / item change so previous submissions don't leak in.
   useEffect(() => {
@@ -251,7 +252,7 @@ export function ReplaceCheckModal({
     } finally {
       setPreviewLoading(false);
     }
-  }, [inputsChanged, payrollItem.id, correctedInputs]);
+  }, [inputsChanged, setPreviewError, payrollItem.id, correctedInputs]);
 
   useEffect(() => {
     if (!open) return;
@@ -503,7 +504,7 @@ export function ReplaceCheckModal({
               </p>
             )}
 
-            {previewError && <ActionFeedback tone="error" message={previewError} />}
+            {previewError && <ActionFeedback retryKey={previewErrorFeedbackAttempt} tone="error" message={previewError} />}
 
             {preview?.meta.is_zero_change && (
               <p className="text-sm text-gray-600">
@@ -567,7 +568,7 @@ export function ReplaceCheckModal({
         </div>
 
         {submitError && (
-          <ActionFeedback tone="error" message={submitError} />
+          <ActionFeedback retryKey={submitErrorFeedbackAttempt} tone="error" message={submitError} />
         )}
 
         <DialogFooter>

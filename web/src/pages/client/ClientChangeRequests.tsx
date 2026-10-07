@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -18,7 +19,7 @@ export function ClientChangeRequests() {
   const routeState = location.state as { portalNotice?: string; selectedRequestId?: number | null } | null;
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
@@ -46,7 +47,7 @@ export function ClientChangeRequests() {
     } finally {
       setLoading(false);
     }
-  }, [requestedSelection, search, status]);
+  }, [requestedSelection, search, setError, status]);
 
   useEffect(() => {
     void load();
@@ -74,7 +75,7 @@ export function ClientChangeRequests() {
           <ActionFeedback tone="success" message={notice}><span>{notice}</span>
             <button type="button" onClick={() => setNotice(null)} className="font-medium text-emerald-700 hover:text-emerald-900">Dismiss</button></ActionFeedback>
         )}
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="flex flex-col gap-4 md:flex-row">
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="max-w-md" />

@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ChecksPanel
@@ -84,7 +85,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
   const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
   const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
-  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
+  const [checkNumberSaveError, setCheckNumberSaveError, checkNumberSaveErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -520,7 +521,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           </div>
         </div>
       )}
-      {checkNumberSaveError && <ActionFeedback tone="error" message={checkNumberSaveError} />}
+      {checkNumberSaveError && <ActionFeedback retryKey={checkNumberSaveErrorFeedbackAttempt} tone="error" message={checkNumberSaveError} />}
 
       {/* Checks table */}
       {filteredChecks.length === 0 ? (

@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
@@ -63,7 +64,7 @@ export function AdminClientDocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [category, setCategory] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<ClientDocument | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -98,7 +99,7 @@ export function AdminClientDocumentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [category]);
+  }, [category, setError]);
 
   useEffect(() => {
     void load();
@@ -117,7 +118,7 @@ export function AdminClientDocumentsPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [setError]);
 
   const totalFiles = useMemo(() => documents.length, [documents]);
   const employeeLinkedFiles = useMemo(
@@ -220,7 +221,7 @@ export function AdminClientDocumentsPage() {
       <Header title="Client Documents" description="Review files uploaded through the client portal." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="grid gap-4 md:grid-cols-4">

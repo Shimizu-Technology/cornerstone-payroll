@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -297,7 +298,7 @@ export function AirePayrollCockpit({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [commandError, setCommandError] = useState<string | null>(null);
+  const [commandError, setCommandError, commandErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [correction, setCorrection] = useState<Correction | null>(null);
   const [settlementRoute, setSettlementRoute] = useState<SettlementRoute | null>(null);
@@ -331,7 +332,7 @@ export function AirePayrollCockpit({
     setLeavePage(1);
     setEmployeePage(1);
     setSettlementPage(1);
-  }, [payPeriodId]);
+  }, [payPeriodId, setCommandError]);
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
@@ -888,7 +889,7 @@ export function AirePayrollCockpit({
                 {review.kind === 'overtime' && ' · Cornerstone will still calculate the legally required regular and overtime split.'}
               </DialogDescription>
             </DialogHeader>
-            {commandError && <ActionFeedback tone="error" message={commandError} />}
+            {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
@@ -909,7 +910,7 @@ export function AirePayrollCockpit({
                 {correction.entry.employee.name} · Changes are written to AIRE and will require a separate administrator approval.
               </DialogDescription>
             </DialogHeader>
-            {commandError && <ActionFeedback tone="error" message={commandError} />}
+            {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-semibold text-neutral-800">Work date<input aria-label="Work date" type="date" value={correction.workDate} onChange={(event) => setCorrection({ ...correction, workDate: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-2 font-normal" /></label>
               <label className="text-sm font-semibold text-neutral-800">Time category<select aria-label="Time category" value={correction.timeCategoryId} onChange={(event) => setCorrection({ ...correction, timeCategoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose category</option>{correctionCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
@@ -960,7 +961,7 @@ export function AirePayrollCockpit({
                 } · worked {formatDate(settlementRoute.settlementCase.time.original_work_date)}
               </DialogDescription>
             </DialogHeader>
-            {commandError && <ActionFeedback tone="error" message={commandError} />}
+            {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-5 grid gap-3">
               <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">The hours will be included automatically once they are approved and that payroll reaches cutoff.</span></span></span></label>
               <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in AIRE’s history.</span></span></span></label>
@@ -986,7 +987,7 @@ export function AirePayrollCockpit({
               <DialogTitle className="font-display font-bold text-neutral-950">Lock the AIRE cutoff</DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">AIRE will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
             </DialogHeader>
-            {commandError && <ActionFeedback tone="error" message={commandError} />}
+            {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in AIRE only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review note<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={finalizeReason} onChange={(event) => setFinalizeReason(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setShowFinalize(false)} disabled={busy} aria-label="Close cutoff confirmation" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>

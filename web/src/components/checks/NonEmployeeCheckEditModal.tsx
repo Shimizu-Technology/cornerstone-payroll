@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -147,7 +148,7 @@ function handlePeriodTypeChange(
 
 export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmployeeCheckEditModalProps) {
   const [form, setForm] = useState<FormState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Reset form whenever the modal is opened with a (possibly different) check.
@@ -158,7 +159,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
     } else {
       setForm(null);
     }
-  }, [check]);
+  }, [check, setError]);
 
   // ESC closes the modal — matches the rest of the panel's modal behaviour.
   useEffect(() => {
@@ -344,7 +345,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
           )}
 
           {error && (
-            <ActionFeedback tone="error" message={error} />
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

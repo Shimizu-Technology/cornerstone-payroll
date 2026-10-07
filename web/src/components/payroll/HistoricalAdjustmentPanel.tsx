@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AlertTriangle, FileClock, Plus, RefreshCw, RotateCcw } from 'lucide-react';
@@ -44,7 +45,7 @@ export function HistoricalAdjustmentPanel({ companyId, paycheck }: HistoricalAdj
   const [preview, setPreview] = useState<HistoricalAdjustmentPreview | null>(null);
   const [acknowledgement, setAcknowledgement] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reversingId, setReversingId] = useState<number | null>(null);
   const [reversalReason, setReversalReason] = useState('');
   const [reversalAcknowledgement, setReversalAcknowledgement] = useState('');
@@ -60,7 +61,7 @@ export function HistoricalAdjustmentPanel({ companyId, paycheck }: HistoricalAdj
     } finally {
       setLoading(false);
     }
-  }, [companyId, paycheck.id]);
+  }, [companyId, paycheck.id, setError]);
 
   useEffect((): void => { void load(); }, [load]);
 
@@ -152,7 +153,7 @@ export function HistoricalAdjustmentPanel({ companyId, paycheck }: HistoricalAdj
         {canMutate && <Button size="sm" onClick={() => { setShowForm((value) => !value); setPreview(null); }}><Plus className="mr-2 h-4 w-4" />Record adjustment</Button>}
       </div>
 
-      {error && <ActionFeedback tone="error" message={error} />}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       {loading ? <p className="text-sm text-neutral-500">Loading adjustment ledger…</p> : rows.length === 0 ? <p className="text-sm text-neutral-500">No adjustments have been recorded for this source paycheck.</p> : (
         <ol className="space-y-3">
           {rows.map((row) => <li key={row.id} className="rounded-xl border border-neutral-200 bg-white p-4">

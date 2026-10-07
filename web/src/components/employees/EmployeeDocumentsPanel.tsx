@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Eye, FileText, ShieldCheck, UploadCloud, Trash2, X } from 'lucide-react';
@@ -88,7 +89,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const [savingRequirementId, setSavingRequirementId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<ClientDocument | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -180,7 +181,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
       ) setLoading(false);
     }
-  }, [api, employeeId, isClient, onReadinessChange]);
+  }, [api, employeeId, isClient, onReadinessChange, setError]);
 
   useEffect(() => {
     void loadDocuments();
@@ -344,7 +345,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         </div>
       </CardHeader>
       <CardContent className="space-y-5 p-4 sm:p-5">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
 
         <section aria-labelledby="employee-document-readiness-heading" className="rounded-2xl border border-neutral-200 bg-white p-4">

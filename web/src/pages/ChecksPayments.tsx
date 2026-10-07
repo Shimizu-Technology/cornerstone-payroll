@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -145,7 +146,7 @@ export function ChecksPayments() {
   const [liabilityLoading, setLiabilityLoading] = useState(true);
   const [liabilityError, setLiabilityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<FormState>(() => initialFormState());
@@ -181,7 +182,7 @@ export function ChecksPayments() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, typeFilter]);
+  }, [setError, statusFilter, typeFilter]);
 
   const loadLiabilities = useCallback(async () => {
     setLiabilityLoading(true);
@@ -555,7 +556,7 @@ export function ChecksPayments() {
 
       <div className="space-y-4 p-4 sm:p-6 lg:p-8">
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         {showForm && (

@@ -432,6 +432,7 @@ module Api
                 end
                 results[:errors] << {
                   employee_id: employee.id,
+                  name: employee.full_name,
                   error: "Enter this employee's variable salary amount for the pay period before recalculating."
                 }
                 next
@@ -454,7 +455,7 @@ module Api
                 end
               end
             rescue StandardError => e
-              results[:errors] << { employee_id: employee.id, error: e.message }
+              results[:errors] << { employee_id: employee.id, name: employee.full_name, error: e.message }
             end
           end
 
@@ -479,6 +480,14 @@ module Api
             @pay_period.update!(calculation_attributes)
             @payroll_review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).issue!
             @pay_period.invalidate_later_rehearsal_calculations!
+          else
+            # A failed attempt must not retain approval eligibility from an
+            # earlier calculation. Discard unsaved association targets first;
+            # invalidating the parent must not autosave a failed new paycheck.
+            @pay_period.association(:payroll_items).reset
+            @pay_period.invalidate_calculation!(
+              reason: "Payroll calculation returned employee errors. Resolve them and calculate again before approval."
+            )
           end
 
           # Preserve the request outcome for the after-action audit hook. The

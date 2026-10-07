@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -28,7 +29,7 @@ export function FinanceOverview() {
   const { activeBook } = useFinanceBook();
   const [overview, setOverview] = useState<FinanceOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const switchingBook = overview !== null && overview.finance_book_id !== activeBook.id;
 
@@ -45,7 +46,7 @@ export function FinanceOverview() {
       if (current) setError(loadError instanceof Error ? loadError.message : 'Unable to load finance overview');
     }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [activeBook.id, refresh]);
+  }, [activeBook.id, refresh, setError]);
 
   return <div className="min-h-screen bg-[#f8f7f4]">
     <Header title="Finance Overview" description="Invoices owed to you and expenses you owe, together in one financial book."
@@ -58,7 +59,7 @@ export function FinanceOverview() {
         <Link to="/tools/expenses" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage bills & purchases <ArrowUpRight className="h-4 w-4" /></Link>
         <Link to="/tools/finance/agent-access" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Agent access <KeyRound className="h-4 w-4" /></Link>
       </div>
-      {error && <ActionFeedback tone="error" message={error} />}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       {loading || switchingBook ? <p role="status" className="text-sm text-neutral-600">Loading this book’s finances…</p>
         : error ? null
         : !overview?.currencies.length ? <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-600">No invoices or expenses are recorded in this book yet. Start with an invoice or vendor bill.</div>

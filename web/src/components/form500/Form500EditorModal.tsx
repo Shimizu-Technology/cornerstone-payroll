@@ -1,3 +1,5 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -26,7 +28,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
   const [form, setForm] = useState<Form500Fields | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<{
     open: boolean;
@@ -58,7 +60,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
     } finally {
       setLoading(false);
     }
-  }, [open, payPeriodId]);
+  }, [open, payPeriodId, setError]);
 
   useEffect(() => {
     if (!open) {
@@ -184,9 +186,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
 
           <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4 sm:px-6 sm:py-6">
             {error ? (
-              <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-                {error}
-              </div>
+              <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
             ) : null}
 
             {loading || !form ? (

@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -98,7 +99,7 @@ export function FilingEvidencePanel({
   const formId = useId();
   const [filing, setFiling] = useState<PayrollFilingRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [eventType, setEventType] = useState<PayrollFilingEventType | null>(null);
   const [saving, setSaving] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
@@ -113,7 +114,7 @@ export function FilingEvidencePanel({
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [filingType, quarter, taxYear]);
+  }, [filingType, quarter, setError, taxYear]);
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -268,7 +269,7 @@ export function FilingEvidencePanel({
         </form>
       )}
 
-      {error && <ActionFeedback tone="error" message={error} />}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
       {filing && filing.events.length > 0 && (
         <ol className="mt-4 space-y-2 border-t border-neutral-200 pt-3">
