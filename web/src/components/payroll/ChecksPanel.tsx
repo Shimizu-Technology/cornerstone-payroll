@@ -83,6 +83,9 @@ function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; on
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod }: ChecksPanelProps) {
   const { notify } = useFeedback();
   const loadRequest = useRef(0);
+  const runScope = `${payPeriod.company_id || 0}:${payPeriod.id}`;
+  const currentRunScope = useRef(runScope);
+  currentRunScope.current = runScope;
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [directDepositItems, setDirectDepositItems] = useState<DirectDepositItem[]>([]);
   const [statementItems, setStatementItems] = useState<EarningsStatementItem[]>([]);
@@ -131,6 +134,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   }, [payPeriod.id]);
 
   const depositsById = useMemo(() => new Map(directDepositItems.map(item => [item.id, item])), [directDepositItems]);
+
+  useEffect(() => {
+    setDepositTarget(null); setDeliveryTarget(null); setVoidTarget(null); setReprintTarget(null);
+  }, [runScope]);
 
   const invalidateLoad = useCallback(() => { loadRequest.current++; }, []);
 
@@ -360,12 +367,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
+    if (currentRunScope.current !== runScope) return;
     setVoidTarget(null);
     await Promise.all([load(), onChecksChanged?.()]);
   };
 
   // ---- Reprint complete callback ----
   const handleReprintComplete = async () => {
+    if (currentRunScope.current !== runScope) return;
     setReprintTarget(null);
     await Promise.all([load(), onChecksChanged?.()]);
   };
@@ -869,8 +878,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           item={depositTarget}
           onClose={() => setDepositTarget(null)}
           onComplete={async () => {
+            if (currentRunScope.current !== runScope) return;
             setDepositTarget(null);
-            await Promise.all([load(), onChecksChanged?.()]);
+            try { await Promise.all([load(), onChecksChanged?.()]); }
+            catch { notify({ tone: 'warning', message: 'Bank payment was recorded, but the payroll summary could not refresh. Refresh this run before another action.' }); }
           }}
         />
       )}
@@ -879,6 +890,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           item={deliveryTarget}
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {
+            if (currentRunScope.current !== runScope) return;
             setDeliveryTarget(null);
             await Promise.all([load(), onChecksChanged?.()]);
           }}
