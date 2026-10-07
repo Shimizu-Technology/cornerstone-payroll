@@ -1003,6 +1003,7 @@ export interface AireManualAllocation {
   regular_hours: number;
   overtime_hours: number;
   status: string;
+  payment_cancellation_pending?: boolean;
   payroll_item_check_status?: string;
   payment_method?: string;
   remote_allocation_id?: string;
