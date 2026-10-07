@@ -564,6 +564,7 @@ class PayrollItem < ApplicationRecord
         raise ActiveRecord::RecordInvalid, calculation_period
       end
       self.pay_period = calculation_period
+      self.payment_delivery_method ||= effective_payment_delivery_method
 
       if variable_salary_missing?
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."

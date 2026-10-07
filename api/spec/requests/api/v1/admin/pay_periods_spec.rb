@@ -333,6 +333,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]).to have_key("payroll_items")
     end
 
+    it "batches payment activity across the whole run while preserving cancellation guards" do
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      items = 4.times.map do |index|
+        create(:payroll_item, company: company, pay_period: pay_period,
+          employee: create(:employee, company: company), payment_delivery_method: "paper_check",
+          check_number: (8301 + index).to_s, gross_pay: 600, net_pay: 500)
+      end
+      items[0].check_events.create!(user: admin_user, event_type: "printed", check_number: "8301")
+      items[1].check_events.create!(user: admin_user, event_type: "printed", check_number: "old-8302")
+      pay_period.check_print_runs.create!(company: company, created_by: admin_user,
+        check_stock_type: "standard", storage_key: "synthetic-#{SecureRandom.uuid}",
+        filename: "synthetic-checks.pdf", sha256: "a" * 64, byte_size: 100,
+        selected_count: 2, generated_at: Time.current,
+        manifest: [
+          { "source_type" => "payroll_item", "source_id" => items[2].id },
+          { "source_type" => "payroll_item", "source_id" => items[3].id, "check_number" => "old-8304" }
+        ])
+      queries = []
+      callback = ->(_name, _start, _finish, _id, payload) { queries << payload[:sql] unless payload[:name] == "SCHEMA" }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+        get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      end
+      expect(response).to have_http_status(:ok)
+      modes = response.parsed_body.dig("pay_period", "payroll_items").to_h do |row|
+        [ row["id"], row.dig("payment_method_change", "mode") ]
+      end
+      expect(modes).to include(items[0].id => "retire_check", items[1].id => "simple",
+        items[2].id => "retire_check", items[3].id => "simple")
+      expect(queries.grep(/FROM "check_events"/).size).to eq(1)
+      expect(queries.grep(/FROM "check_print_runs"/).size).to eq(1)
+      expect(queries.grep(/FROM "check_reconciliation_events"/).size).to eq(1)
+    end
+
     it "returns audit-backed lifecycle events" do
       AuditLog.create!(
         user: admin_user,

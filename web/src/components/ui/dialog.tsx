@@ -141,6 +141,11 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
       return [...withinDialog, ...feedback].filter((element) => element.offsetParent !== null && !element.closest('[inert]'));
     };
     const focusFrame = window.requestAnimationFrame(() => {
+      const activeElement = document.activeElement;
+      const dialog = dialogElement();
+      // A fast click or keyboard entry may beat this frame. Keep the user's
+      // focus instead of interrupting input after asynchronously loaded fields.
+      if (activeElement instanceof HTMLElement && activeElement !== dialog && dialog?.contains(activeElement)) return;
       (focusableElements()[0] || dialogElement())?.focus();
     });
     const handleKeyDown = (event: KeyboardEvent): void => {

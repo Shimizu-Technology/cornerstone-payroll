@@ -53,6 +53,8 @@ import { employeesApi, payStubsApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
+import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
+import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
 
@@ -441,6 +443,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
   const upcomingW4 = employee.upcoming_w4_election;
   return (
     <div className="space-y-6">
+      <EmployeePaymentMethodPanel key={employee.id} employee={employee} onEmployeeReload={onEmployeeReload} />
       {employee.configuration_source === 'quickbooks_history' && (
         <Card className={employee.configuration_review_status === 'needs_review' ? 'border-warning-200 bg-warning-50/40' : 'border-success-200 bg-success-50/40'}>
           <CardHeader className="flex-row items-start justify-between gap-4">
@@ -534,7 +537,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
         <CardContent className="p-6">
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm"><Settings2 className="h-5 w-5" /></span>
           <h2 className="mt-4 font-display text-xl font-extrabold tracking-tight text-neutral-950">Edit source settings</h2>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">Changes happen on the existing validated employee form. Saving returns to this workspace.</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">Wage, tax, and other employee fields use the validated employee form. Payment method and retirement settings have their own controls here.</p>
           <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
         </CardContent>
       </Card>
@@ -683,7 +686,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums">{formatCurrency(item.gross_pay)}</p></div>
                   <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-emerald-700">{formatCurrency(item.net_pay)}</p></div>
                   <div><p className="text-xs text-neutral-500">Deductions</p><p className="tabular-nums">{formatCurrency(item.total_deductions)}</p></div>
-                  <div><p className="text-xs text-neutral-500">Payment</p><p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</p></div>
+                  <div><p className="text-xs text-neutral-500">Payment</p><p>{payrollPaymentLabel(item)}</p>{item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
@@ -715,7 +718,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
+                  <TableCell>{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
                   <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
                     <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
                   </div></TableCell>
