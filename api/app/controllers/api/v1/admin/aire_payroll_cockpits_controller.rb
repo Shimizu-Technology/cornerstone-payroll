@@ -375,6 +375,7 @@ module Api
             regular_hours: allocation.regular_hours.to_f,
             overtime_hours: allocation.overtime_hours.to_f,
             status: allocation.status,
+            payment_cancellation_pending: allocation.payment_cancellation_intent.present?,
             payroll_item_check_status: allocation.payroll_item.check_status,
             payment_method: allocation.payroll_item.effective_payment_delivery_method,
             remote_allocation_id: allocation.remote_allocation_id,
