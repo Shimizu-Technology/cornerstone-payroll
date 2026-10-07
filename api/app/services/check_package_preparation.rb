@@ -54,11 +54,8 @@ class CheckPackagePreparation
       check_layout_config: snapshot.fetch("check_layout_config"),
       printer_profile: nil
     ).apply_to(run.company)
-    CheckPrintRenderFingerprint.for_record(
-      source,
-      company: render_company,
-      check_stock_type: run.check_stock_type
-    ) == entry["render_input_digest"]
+    CheckPrintRenderFingerprint.matches_saved_record?(source, run: run,
+      company: render_company, stored_digest: entry["render_input_digest"])
   rescue KeyError, ArgumentError
     false
   end

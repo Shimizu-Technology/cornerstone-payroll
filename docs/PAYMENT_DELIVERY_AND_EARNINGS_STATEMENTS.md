@@ -24,7 +24,7 @@ Direct deposit is a recorded delivery preference here. Enrollment, transmission,
 
 **Employees → Pay setup → Payment method → Change future payment method** updates only the future default. The rest of the employee profile and existing run delivery choices remain intact. Saved changes and refresh failures are reported separately.
 
-Organization administrators can use **Client Management → Rename** to change the name displayed on newly generated reports and statements. This sends only the name, preserving EIN, bank configuration, and the check-number sequence. Use the employer’s confirmed business spelling; migration/test provenance remains in the existing workspace metadata. Existing downloaded files, retained source evidence, confirmed print packages, and saved filing fields are not rewritten. Review any prepared package made outdated by a rendered-name change before printing or issuing it.
+Organization administrators can use **Client Management → Rename** to change the name displayed on newly generated reports and statements. This sends only the name, preserving EIN, bank configuration, and the check-number sequence. Use the employer’s confirmed business spelling; migration/test provenance remains in the existing workspace metadata. Existing downloaded files, retained source evidence, confirmed print packages, and saved filing fields are not rewritten. After an audited name-only rename, a prepared package can retain its original issuer name only when its complete rendered input digest and all existing verification checks still match. Check, payroll, employee, or printer changes can still make it stale; mixed or unaudited name changes do not authorize historical-name fallback. New reports and packages use the current name.
 
 ## Validation
 
