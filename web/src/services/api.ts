@@ -501,8 +501,8 @@ export const employeesApi = {
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>) =>
-    api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
+  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
+    api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
@@ -1983,10 +1983,11 @@ export const payrollItemsApi = {
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
-  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean; update_employee_default?: boolean; retire_existing_check?: boolean; confirm_check_cancelled?: boolean; cancellation_evidence_reference?: string; expected_check_number?: string | null }) =>
+  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean; update_employee_default?: boolean; retire_existing_check?: boolean; confirm_check_cancelled?: boolean; cancellation_evidence_reference?: string; expected_check_number?: string | null }, companyId?: number) =>
     api.patch<{ payroll_item: PayrollItem; pay_period_status: string }>(
       `/admin/pay_periods/${payPeriodId}/payroll_items/${id}/payment_method`,
       { payment_delivery_method: method, ...options },
+      { companyId },
     ),
 };
 
